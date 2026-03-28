@@ -179,8 +179,9 @@ bool IsMLSCScript(const CScript& scriptPubKey)
     // 1 byte = compact MLSC from UTXO decompression (0xDF only, root recovered at spend time)
     // 33 bytes = full MLSC (0xDF + 32-byte root)
     // 34-73 bytes = MLSC with DATA_RETURN payload (max 40 bytes data)
-    return scriptPubKey.size() >= 1 && scriptPubKey.size() <= 73 &&
-           scriptPubKey[0] == RUNG_MLSC_PREFIX;
+    // Sizes 2-32 are invalid (not compact, not full)
+    if (scriptPubKey.empty() || scriptPubKey[0] != RUNG_MLSC_PREFIX) return false;
+    return scriptPubKey.size() == 1 || (scriptPubKey.size() >= 33 && scriptPubKey.size() <= 73);
 }
 
 bool IsLadderScript(const CScript& scriptPubKey)
