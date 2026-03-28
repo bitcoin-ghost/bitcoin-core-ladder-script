@@ -95,14 +95,19 @@ inline bool IsConditionFieldType(RungDataType type) { return IsConditionDataType
 // MLSC (Merkelized Ladder Script Conditions)
 // ============================================================================
 
-/** Check if scriptPubKey is an MLSC output (0xDF + 32-byte root + optional DATA_RETURN payload).
- *  Valid sizes: 33 bytes (standard) or 34-73 bytes (with DATA_RETURN, max 40 bytes data). */
+/** Check if scriptPubKey is an MLSC output (0xDF prefix).
+ *  Accepts both full (33+ bytes: 0xDF + root) and compact (1 byte: 0xDF only, from UTXO decompression). */
 bool IsMLSCScript(const CScript& scriptPubKey);
 
 /** Check if scriptPubKey is a Ladder Script output (MLSC 0xDF). */
 bool IsLadderScript(const CScript& scriptPubKey);
 
-/** Extract the 32-byte conditions root from an MLSC scriptPubKey. */
+/** Check if this is a compact MLSC scriptPubKey (1 byte, root not embedded).
+ *  The conditions_root must be recovered from the creating transaction. */
+bool IsCompactMLSC(const CScript& scriptPubKey);
+
+/** Extract the 32-byte conditions root from a full MLSC scriptPubKey.
+ *  Returns false for compact (1-byte) MLSC — use block database lookup instead. */
 bool GetMLSCRoot(const CScript& scriptPubKey, uint256& root_out);
 
 /** Extract the DATA_RETURN payload from an MLSC scriptPubKey (bytes after the root).

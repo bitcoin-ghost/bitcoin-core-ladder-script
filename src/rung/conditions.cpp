@@ -176,9 +176,10 @@ const uint256 MLSC_EMPTY_LEAF = ComputeEmptyLeaf();
 
 bool IsMLSCScript(const CScript& scriptPubKey)
 {
-    // 33 bytes = standard MLSC (0xDF + 32-byte root)
+    // 1 byte = compact MLSC from UTXO decompression (0xDF only, root recovered at spend time)
+    // 33 bytes = full MLSC (0xDF + 32-byte root)
     // 34-73 bytes = MLSC with DATA_RETURN payload (max 40 bytes data)
-    return scriptPubKey.size() >= 33 && scriptPubKey.size() <= 73 &&
+    return scriptPubKey.size() >= 1 && scriptPubKey.size() <= 73 &&
            scriptPubKey[0] == RUNG_MLSC_PREFIX;
 }
 
@@ -187,9 +188,16 @@ bool IsLadderScript(const CScript& scriptPubKey)
     return IsMLSCScript(scriptPubKey);
 }
 
+/** Check if this is a compact MLSC scriptPubKey (1-byte, root not embedded).
+ *  The conditions_root must be recovered from the creating transaction. */
+bool IsCompactMLSC(const CScript& scriptPubKey)
+{
+    return scriptPubKey.size() == 1 && scriptPubKey[0] == RUNG_MLSC_PREFIX;
+}
+
 bool GetMLSCRoot(const CScript& scriptPubKey, uint256& root_out)
 {
-    if (!IsMLSCScript(scriptPubKey)) return false;
+    if (scriptPubKey.size() < 33 || scriptPubKey[0] != RUNG_MLSC_PREFIX) return false;
     memcpy(root_out.data(), scriptPubKey.data() + 1, 32);
     return true;
 }

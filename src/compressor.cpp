@@ -63,12 +63,15 @@ static bool IsToMLSC(const CScript& script, uint256& root)
 
 bool CompressScript(const CScript& script, CompressedScript& out)
 {
-    // MLSC (0xDF + 32-byte conditions root) — compressed as type 0x06
+    // MLSC (0xDF + conditions_root) — compressed as type 0x06 with ZERO bytes.
+    // The 32-byte conditions_root is NOT stored per-coin. It's recovered from
+    // the creating transaction (block database) at spend time. This deduplicates
+    // the root across all outputs of the same TX_MLSC transaction, reducing
+    // per-output UTXO cost from ~48 bytes to ~8 bytes.
     uint256 mlsc_root;
     if (IsToMLSC(script, mlsc_root)) {
-        out.resize(33);
+        out.resize(1);
         out[0] = 0x06;
-        memcpy(&out[1], mlsc_root.data(), 32);
         return true;
     }
     CKeyID keyID;
@@ -107,7 +110,7 @@ unsigned int GetSpecialScriptSize(unsigned int nSize)
     if (nSize == 2 || nSize == 3 || nSize == 4 || nSize == 5)
         return 32;
     if (nSize == 6)
-        return 32; // MLSC conditions root
+        return 0; // MLSC: root recovered from block database at spend time
     return 0;
 }
 
@@ -154,10 +157,10 @@ bool DecompressScript(CScript& script, unsigned int nSize, const CompressedScrip
         return true;
     }
     case 0x06: {
-        // MLSC: 0xDF + 32-byte conditions root
-        script.resize(33);
+        // MLSC: compact form — just the 0xDF marker, no root.
+        // Root is recovered from the creating tx at spend time.
+        script.resize(1);
         script[0] = 0xDF;
-        memcpy(&script[1], in.data(), 32);
         return true;
     }
     }
