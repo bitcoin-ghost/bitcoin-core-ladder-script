@@ -1092,7 +1092,11 @@ EvalResult EvalAnchorChannelBlock(const RungBlock& block)
     return EvalResult::SATISFIED;
 }
 
-EvalResult EvalAnchorFeeBlock(const RungBlock& block, const RungEvalContext& ctx)
+EvalResult EvalAnchorFeeBlock(const RungBlock& block,
+                              const BaseSignatureChecker& checker,
+                              SigVersion sigversion,
+                              ScriptExecutionData& execdata,
+                              const RungEvalContext& ctx)
 {
     // ANCHOR_FEE: compound anti-pinning block for L2 channels.
     // Combines: 2-of-2 signature check + fee rate band + weight limit + commitment number.
@@ -1120,13 +1124,47 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block, const RungEvalContext& ctx
         return EvalResult::UNSATISFIED;
     }
 
-    // 3. Verify signatures (find 2 SIGNATURE fields)
+    // 3. Verify 2-of-2 signatures cryptographically
+    auto pubkeys = FindAllFields(block, RungDataType::PUBKEY);
     auto sigs = FindAllFields(block, RungDataType::SIGNATURE);
-    if (sigs.size() < 2) {
+    if (pubkeys.size() < 2 || sigs.size() < 2) {
         return EvalResult::UNSATISFIED;
     }
-    // Signature verification is handled by the batch verifier at the rung level
-    // (same as ANCHOR_CHANNEL — structural check only here, crypto in outer loop)
+
+    std::vector<bool> pubkey_used(pubkeys.size(), false);
+    uint32_t valid_count = 0;
+    for (const auto* sig_field : sigs) {
+        for (size_t k = 0; k < pubkeys.size(); ++k) {
+            if (pubkey_used[k]) continue;
+            const auto* pk = pubkeys[k];
+            std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
+            bool verified = false;
+            if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
+                // Schnorr
+                std::vector<unsigned char> xonly;
+                std::span<const unsigned char> pk_span{pk->data.data(), pk->data.size()};
+                if (pk->data.size() == 33) {
+                    xonly.assign(pk->data.begin() + 1, pk->data.end());
+                    pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
+                }
+                verified = checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr);
+            } else if (sig_field->data.size() >= 8 && sig_field->data.size() <= 72) {
+                // ECDSA
+                std::vector<unsigned char> sig_vec(sig_field->data.begin(), sig_field->data.end());
+                std::vector<unsigned char> pk_vec(pk->data.begin(), pk->data.end());
+                CScript empty_script;
+                verified = checker.CheckECDSASignature(sig_vec, pk_vec, empty_script, sigversion);
+            }
+            if (verified) {
+                pubkey_used[k] = true;
+                valid_count++;
+                break;
+            }
+        }
+    }
+    if (valid_count < 2) {
+        return EvalResult::UNSATISFIED;
+    }
 
     // 4. Fee rate check (consensus-enforced anti-pinning)
     if (ctx.tx && ctx.spent_outputs) {
@@ -1157,10 +1195,6 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block, const RungEvalContext& ctx
             return EvalResult::UNSATISFIED;
         }
     }
-
-    // 6. Commitment number (structural — L2 validates semantics)
-    // The commitment_num is available for L2 state tracking.
-    // L1 validates it is present and non-negative (already checked above).
 
     return EvalResult::SATISFIED;
 }
@@ -3052,7 +3086,7 @@ EvalResult EvalBlock(const RungBlock& block,
         raw = EvalAnchorChannelBlock(block);
         break;
     case RungBlockType::ANCHOR_FEE:
-        raw = EvalAnchorFeeBlock(block, ctx);
+        raw = EvalAnchorFeeBlock(block, checker, sigversion, execdata, ctx);
         break;
     case RungBlockType::ANCHOR_POOL:
         raw = EvalAnchorPoolBlock(block);
@@ -3643,14 +3677,24 @@ bool VerifyRungTx(const CTransaction& tx,
         return false;
     }
 
-    // Hybrid creation proof: required for 3+ spendable outputs.
-    // Proves conditions_root was built from real leaf hashes, preventing UTXO spam.
-    // For 1-2 outputs: no proof required (harmless — max 56 bytes UTXO bloat).
-    {
+    // Per-transaction checks: only run on first input (same result for all inputs).
+    if (nIn == 0) {
+        // Consensus: validate all outputs are valid Ladder Script format.
+        // Ensures only MLSC (0xDF) outputs, max 1 DATA_RETURN, dust threshold.
+        std::string output_error;
+        if (!ValidateRungOutputs(tx, flags, output_error)) {
+            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+            return false;
+        }
+
+        // Count spendable outputs (non-DATA_RETURN = scriptPubKey without data payload)
         size_t n_spendable = 0;
         for (const auto& out : tx.vout) {
-            if (out.nValue > 0) n_spendable++;
+            if (!HasMLSCData(out.scriptPubKey) && out.nValue > 0) n_spendable++;
         }
+
+        // Hybrid creation proof: required for 3+ spendable outputs.
+        // Proves conditions_root was built from real leaf hashes, preventing UTXO spam.
         if (n_spendable > 2) {
             if (tx.creation_proof.empty()) {
                 LogPrintf("TX_MLSC: missing creation proof for %zu outputs\n", n_spendable);
@@ -3680,24 +3724,13 @@ bool VerifyRungTx(const CTransaction& tx,
                 return false;
             }
         }
-    }
 
-    // Dust threshold: every spendable output must carry minimum value (unconditional)
-    for (size_t i = 0; i < tx.vout.size(); ++i) {
-        if (tx.vout[i].nValue > 0 && tx.vout[i].nValue < MIN_RUNG_OUTPUT_VALUE) {
-            LogPrintf("TX_MLSC output %zu: value %lld below minimum %lld\n",
-                      i, (long long)tx.vout[i].nValue, (long long)MIN_RUNG_OUTPUT_VALUE);
+        // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
+        if (CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
             if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
             return false;
         }
-    }
-
-    // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
-    // Only computed on first input (result is tx-wide, same for all inputs).
-    if (nIn == 0 && CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
-        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-        return false;
-    }
+    } // end nIn == 0
 
     const auto& witness = tx.vin[nIn].scriptWitness;
 

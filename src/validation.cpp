@@ -22,6 +22,7 @@
 #include <hash.h>
 #include <kernel/chain.h>
 #include <kernel/chainparams.h>
+#include <coins.h>
 #include <kernel/coinstats.h>
 #include <kernel/disconnected_transactions.h>
 #include <kernel/mempool_entry.h>
@@ -2357,6 +2358,11 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
                     }
                 }
             }
+        }
+
+        // TX_MLSC: remove synthetic root entry on disconnect
+        if (tx.version == CTransaction::RUNG_TX_VERSION && !tx.conditions_root.IsNull()) {
+            view.SpendCoin(COutPoint(hash, MLSC_ROOT_VOUT));
         }
 
         // restore inputs

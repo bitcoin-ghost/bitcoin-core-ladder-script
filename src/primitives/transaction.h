@@ -289,14 +289,18 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness.stack;
         }
-        /* Read creation proof (leaf hashes, required for 3+ outputs) */
+        /* Read creation proof (leaf hashes, required for 3+ outputs).
+         * Max: 252 leaves * 32 bytes + 1 byte n_leaves = 8,065 bytes. */
         uint64_t cp_len = ReadCompactSize(s);
+        if (cp_len > 8065) throw std::ios_base::failure("creation_proof too large");
         tx.creation_proof.resize(cp_len);
         if (cp_len > 0) {
             s.read(MakeWritableByteSpan(tx.creation_proof));
         }
-        /* Read aggregated signature (half-aggregation) */
+        /* Read aggregated signature (half-aggregation).
+         * Max: 32 bytes (single aggregated s value). */
         uint64_t agg_len = ReadCompactSize(s);
+        if (agg_len > 32) throw std::ios_base::failure("aggregated_sig too large");
         tx.aggregated_sig.resize(agg_len);
         if (agg_len > 0) {
             s.read(MakeWritableByteSpan(tx.aggregated_sig));
