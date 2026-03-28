@@ -1092,6 +1092,79 @@ EvalResult EvalAnchorChannelBlock(const RungBlock& block)
     return EvalResult::SATISFIED;
 }
 
+EvalResult EvalAnchorFeeBlock(const RungBlock& block, const RungEvalContext& ctx)
+{
+    // ANCHOR_FEE: compound anti-pinning block for L2 channels.
+    // Combines: 2-of-2 signature check + fee rate band + weight limit + commitment number.
+    // Conditions: [SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment)]
+    // Witness: [PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]
+
+    // 1. Verify 2 valid pubkeys present (merkle_pub_key)
+    if (!HasRequiredPubkeys(block, 2)) {
+        return EvalResult::ERROR;
+    }
+
+    // 2. Read condition parameters
+    auto numerics = FindAllFields(block, RungDataType::NUMERIC);
+    if (numerics.size() < 4) return EvalResult::ERROR;
+
+    int64_t min_fee_rate = ReadNumeric(*numerics[0]);
+    int64_t max_fee_rate = ReadNumeric(*numerics[1]);
+    int64_t max_weight = ReadNumeric(*numerics[2]);
+    int64_t commitment_num = ReadNumeric(*numerics[3]);
+
+    if (min_fee_rate < 0 || max_fee_rate < 0 || max_weight <= 0 || commitment_num < 0) {
+        return EvalResult::ERROR;
+    }
+    if (min_fee_rate > max_fee_rate) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // 3. Verify signatures (find 2 SIGNATURE fields)
+    auto sigs = FindAllFields(block, RungDataType::SIGNATURE);
+    if (sigs.size() < 2) {
+        return EvalResult::UNSATISFIED;
+    }
+    // Signature verification is handled by the batch verifier at the rung level
+    // (same as ANCHOR_CHANNEL — structural check only here, crypto in outer loop)
+
+    // 4. Fee rate check (consensus-enforced anti-pinning)
+    if (ctx.tx && ctx.spent_outputs) {
+        int64_t total_in = 0;
+        for (const auto& spent : *ctx.spent_outputs) {
+            total_in += spent.nValue;
+        }
+        int64_t total_out = 0;
+        for (const auto& out : ctx.tx->vout) {
+            total_out += out.nValue;
+        }
+        int64_t fee = total_in - total_out;
+        if (fee < 0) return EvalResult::UNSATISFIED;
+
+        int64_t vsize = GetVirtualTransactionSize(*ctx.tx);
+        if (vsize <= 0) return EvalResult::ERROR;
+
+        int64_t fee_rate = fee / vsize;
+        if (fee_rate < min_fee_rate || fee_rate > max_fee_rate) {
+            return EvalResult::UNSATISFIED;
+        }
+    }
+
+    // 5. Weight limit check
+    if (ctx.tx) {
+        int64_t tx_weight = GetTransactionWeight(*ctx.tx);
+        if (tx_weight > max_weight) {
+            return EvalResult::UNSATISFIED;
+        }
+    }
+
+    // 6. Commitment number (structural — L2 validates semantics)
+    // The commitment_num is available for L2 state tracking.
+    // L1 validates it is present and non-negative (already checked above).
+
+    return EvalResult::SATISFIED;
+}
+
 EvalResult EvalAnchorPoolBlock(const RungBlock& block)
 {
     // Verify vtxo_tree_root present and hash-bound to witness preimage
@@ -2977,6 +3050,9 @@ EvalResult EvalBlock(const RungBlock& block,
         break;
     case RungBlockType::ANCHOR_CHANNEL:
         raw = EvalAnchorChannelBlock(block);
+        break;
+    case RungBlockType::ANCHOR_FEE:
+        raw = EvalAnchorFeeBlock(block, ctx);
         break;
     case RungBlockType::ANCHOR_POOL:
         raw = EvalAnchorPoolBlock(block);

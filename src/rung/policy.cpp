@@ -55,6 +55,7 @@ bool IsCovenantBlockType(uint16_t block_type)
     case RungBlockType::AMOUNT_LOCK:
     case RungBlockType::ANCHOR:
     case RungBlockType::ANCHOR_CHANNEL:
+    case RungBlockType::ANCHOR_FEE:
     case RungBlockType::ANCHOR_POOL:
     case RungBlockType::ANCHOR_RESERVE:
     case RungBlockType::ANCHOR_SEAL:

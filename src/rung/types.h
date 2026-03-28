@@ -16,7 +16,7 @@ namespace rung {
  *  Each block evaluates a single spending condition within a rung.
  *  Encoded as uint16_t in the wire format (little-endian 2 bytes).
  *
- *  Ranges (10 families, 61 block types):
+ *  Ranges (10 families, 62 block types):
  *    0x0001-0x00FF  Signature family (SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG)
  *    0x0100-0x01FF  Timelock family (CSV, CSV_TIME, CLTV, CLTV_TIME)
  *    0x0200-0x02FF  Hash family (TAGGED_HASH, HASH_GUARDED)
@@ -77,6 +77,7 @@ enum class RungBlockType : uint16_t {
     PTLC             = 0x0704, //!< ADAPTOR_SIG + CSV combined: point-locked payment channel
     CLTV_SIG         = 0x0705, //!< SIG + CLTV combined: absolute-time locked payment
     TIMELOCKED_MULTISIG = 0x0706, //!< MULTISIG + CSV combined: time-delayed M-of-N
+    ANCHOR_FEE       = 0x0707, //!< ANCHOR_CHANNEL + HYSTERESIS_FEE + WEIGHT_LIMIT: anti-pinning L2 anchor
 
     // Governance family (transaction-level constraints)
     EPOCH_GATE       = 0x0801, //!< Periodic spending window: spendable only in specific block epochs
@@ -193,6 +194,7 @@ inline bool IsKnownBlockType(uint16_t b)
     case RungBlockType::PTLC:
     case RungBlockType::CLTV_SIG:
     case RungBlockType::TIMELOCKED_MULTISIG:
+    case RungBlockType::ANCHOR_FEE:
     // Governance family
     case RungBlockType::EPOCH_GATE:
     case RungBlockType::WEIGHT_LIMIT:
@@ -332,6 +334,7 @@ inline std::string BlockTypeName(RungBlockType type)
     case RungBlockType::PTLC:             return "PTLC";
     case RungBlockType::CLTV_SIG:         return "CLTV_SIG";
     case RungBlockType::TIMELOCKED_MULTISIG: return "TIMELOCKED_MULTISIG";
+    case RungBlockType::ANCHOR_FEE: return "ANCHOR_FEE";
     case RungBlockType::EPOCH_GATE:       return "EPOCH_GATE";
     case RungBlockType::WEIGHT_LIMIT:     return "WEIGHT_LIMIT";
     case RungBlockType::INPUT_COUNT:      return "INPUT_COUNT";
@@ -387,6 +390,7 @@ inline bool IsKeyConsumingBlockType(RungBlockType type)
     case RungBlockType::CLTV_SIG:
     case RungBlockType::PTLC:
     case RungBlockType::TIMELOCKED_MULTISIG:
+    case RungBlockType::ANCHOR_FEE:
     case RungBlockType::KEY_REF_SIG:
     case RungBlockType::ADAPTOR_SIG:
     case RungBlockType::MUSIG_THRESHOLD:
@@ -599,6 +603,7 @@ inline size_t PubkeyCountForBlock(RungBlockType type, const RungBlock& block)
     // Two pubkey blocks
     case RungBlockType::HTLC:
     case RungBlockType::ANCHOR_CHANNEL:
+    case RungBlockType::ANCHOR_FEE:
     case RungBlockType::VAULT_LOCK:
     case RungBlockType::ADAPTOR_SIG:
     case RungBlockType::PTLC:
@@ -1026,6 +1031,15 @@ inline constexpr ImplicitFieldLayout TIMELOCKED_MULTISIG_CONDITIONS = {3, {
     {RungDataType::SCHEME, 1},
 }};
 
+/** ANCHOR_FEE conditions: [SCHEME(1), NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment)] — pubkeys in Merkle leaf */
+inline constexpr ImplicitFieldLayout ANCHOR_FEE_CONDITIONS = {5, {
+    {RungDataType::SCHEME, 1},
+    {RungDataType::NUMERIC, 0},  // min_fee_rate (sat/vB)
+    {RungDataType::NUMERIC, 0},  // max_fee_rate (sat/vB)
+    {RungDataType::NUMERIC, 0},  // max_weight (WU)
+    {RungDataType::NUMERIC, 0},  // commitment_number
+}};
+
 /** WEIGHT_LIMIT conditions: [NUMERIC(max_weight)] */
 inline constexpr ImplicitFieldLayout WEIGHT_LIMIT_CONDITIONS = {1, {
     {RungDataType::NUMERIC, 0},
@@ -1191,6 +1205,7 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         // Compound family
         case RungBlockType::PTLC:             return PTLC_CONDITIONS;
         case RungBlockType::TIMELOCKED_MULTISIG: return TIMELOCKED_MULTISIG_CONDITIONS;
+        case RungBlockType::ANCHOR_FEE:  return ANCHOR_FEE_CONDITIONS;
         // Governance family
         case RungBlockType::WEIGHT_LIMIT:     return WEIGHT_LIMIT_CONDITIONS;
         case RungBlockType::INPUT_COUNT:      return INPUT_COUNT_CONDITIONS;
@@ -1327,6 +1342,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::PTLC, "PTLC", true, false, true, 2, &PTLC_CONDITIONS, nullptr, true},
         {RungBlockType::CLTV_SIG, "CLTV_SIG", true, false, true, 1, &CLTV_SIG_CONDITIONS, &CLTV_SIG_WITNESS, false},
         {RungBlockType::TIMELOCKED_MULTISIG, "TIMELOCKED_MULTISIG", true, false, true, 255, &TIMELOCKED_MULTISIG_CONDITIONS, nullptr, true},
+        {RungBlockType::ANCHOR_FEE, "ANCHOR_FEE", true, false, true, 2, &ANCHOR_FEE_CONDITIONS, nullptr, true},
         // Governance family
         {RungBlockType::EPOCH_GATE, "EPOCH_GATE", true, false, false, 0, &EPOCH_GATE_CONDITIONS, nullptr, true},
         {RungBlockType::WEIGHT_LIMIT, "WEIGHT_LIMIT", true, true, false, 0, &WEIGHT_LIMIT_CONDITIONS, nullptr, true},
