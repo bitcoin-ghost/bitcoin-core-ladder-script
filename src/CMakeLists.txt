@@ -143,6 +143,7 @@ target_link_libraries(bitcoin_common
     core_interface
     bitcoin_consensus
     bitcoin_util
+    bitcoin_rung
     univalue
     secp256k1
     Boost::headers
@@ -309,6 +310,7 @@ if(BUILD_DAEMON)
   target_link_libraries(bitcoind
     core_interface
     bitcoin_node
+    bitcoin_rung
     $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )
   install_binary_component(bitcoind HAS_MANPAGE)
@@ -321,6 +323,7 @@ if(ENABLE_IPC AND BUILD_DAEMON)
   target_link_libraries(bitcoin-node
     core_interface
     bitcoin_node
+    bitcoin_rung
     bitcoin_ipc
     $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )

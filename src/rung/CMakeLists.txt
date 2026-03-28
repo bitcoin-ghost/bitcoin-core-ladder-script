@@ -28,7 +28,6 @@ target_include_directories(bitcoin_rung
 target_link_libraries(bitcoin_rung
   PRIVATE
     core_interface
-    bitcoin_common
     bitcoin_consensus
     bitcoin_util
     secp256k1
