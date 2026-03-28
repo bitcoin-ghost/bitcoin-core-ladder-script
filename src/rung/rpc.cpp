@@ -2803,7 +2803,72 @@ static RPCHelpMan signladder()
             conditions.conditions_root = root;
         }
 
-        // 5. Precompute transaction data
+        // Auto key-path: if single-SIG rung and the root is a tweaked key, use key-path
+        if (is_mlsc && conditions.rungs.size() == 1 &&
+            conditions.rungs[0].blocks.size() == 1 &&
+            conditions.rungs[0].blocks[0].type == rung::RungBlockType::SIG &&
+            target_rung < rung_pubkeys.size() && rung_pubkeys[target_rung].size() == 1) {
+            // Check if conditions_root is a tweaked version of the pubkey
+            auto& pk = rung_pubkeys[target_rung][0];
+            std::vector<uint8_t> xonly_pk;
+            if (pk.size() == 33) xonly_pk.assign(pk.begin() + 1, pk.end());
+            else xonly_pk = pk;
+
+            if (conditions.conditions_root.has_value()) {
+                XOnlyPubKey output_key;
+                std::memcpy(output_key.begin(), conditions.conditions_root->data(), 32);
+                XOnlyPubKey internal_key;
+                std::memcpy(internal_key.begin(), xonly_pk.data(), 32);
+
+                // Compute the Merkle root from the conditions for tweak verification
+                // For single-rung: leaf == merkle_root
+                rung::CreationProofRung cp_rung;
+                for (const auto& block : conditions.rungs[0].blocks) {
+                    cp_rung.blocks.push_back({
+                        static_cast<uint16_t>(block.type),
+                        static_cast<uint8_t>(block.inverted ? 1 : 0)
+                    });
+                }
+                cp_rung.coil = conditions.coil;
+                cp_rung.coil.output_index = mtx.vin[input_idx].prevout.n;
+                cp_rung.value_commitment = rung::ComputeValueCommitment(
+                    conditions.rungs[0], rung_pubkeys[target_rung]);
+                uint256 leaf = rung::ComputeTxMLSCLeaf(cp_rung);
+
+                // Check tweak both parities
+                if (output_key.CheckLadderTweak(internal_key, leaf, false) ||
+                    output_key.CheckLadderTweak(internal_key, leaf, true)) {
+                    // Key-path viable! Find the privkey
+                    for (const auto& [alias, key] : privkey_map) {
+                        CPubKey pub = key.GetPubKey();
+                        std::vector<uint8_t> pub_bytes(pub.begin(), pub.end());
+                        if (pub_bytes == pk) {
+                            // Compute key-path sighash
+                            PrecomputedTransactionData kp_txdata;
+                            kp_txdata.Init(mtx, std::vector<CTxOut>(spent_outputs), true);
+                            uint256 kp_sighash;
+                            if (rung::SignatureHashLadderKeyPath(kp_txdata, mtx, input_idx, SIGHASH_DEFAULT, kp_sighash)) {
+                                std::vector<unsigned char> sig(64);
+                                uint256 aux = GetRandHash();
+                                if (key.SignSchnorrLadder(kp_sighash, sig, &leaf, aux)) {
+                                    mtx.vin[input_idx].scriptWitness.stack.clear();
+                                    mtx.vin[input_idx].scriptWitness.stack.push_back(sig);
+                                    LogPrintf("signladder: auto key-path spend\n");
+
+                                    UniValue result(UniValue::VOBJ);
+                                    result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
+                                    result.pushKV("complete", true);
+                                    result.pushKV("spend_type", "key-path");
+                                    return result;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Precompute transaction data (script-path fallback)
         PrecomputedTransactionData txdata;
         txdata.Init(mtx, std::vector<CTxOut>(spent_outputs));
 
@@ -3185,19 +3250,58 @@ static RPCHelpMan createtxmlsc()
     // Compute raw Merkle root from rung leaves
     uint256 merkle_root = rung::ComputeTxMLSCRoot(cp_rungs);
 
-    // Apply key-path tweak if internal_pubkey is provided
-    bool has_internal_pubkey = !request.params[4].isNull() && !request.params[4].get_str().empty();
-    if (has_internal_pubkey) {
-        auto pk_hex = request.params[4].get_str();
-        auto pk_bytes = ParseHex(pk_hex);
-        if (pk_bytes.size() != 32) {
+    // Key-path tweak: auto-detect or use explicit internal_pubkey.
+    // If all rungs are single-SIG with the same pubkey, auto-tweak for key-path spending.
+    bool has_explicit_pubkey = !request.params[4].isNull() && !request.params[4].get_str().empty();
+    bool auto_tweaked = false;
+    std::vector<uint8_t> internal_pubkey_bytes;
+
+    if (has_explicit_pubkey) {
+        internal_pubkey_bytes = ParseHex(request.params[4].get_str());
+        if (internal_pubkey_bytes.size() != 32) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "internal_pubkey must be 32 bytes (x-only)");
         }
-        auto tweaked = rung::ComputeTweakedConditionsRoot(pk_bytes, merkle_root);
-        if (!tweaked) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "Failed to compute tweaked key from internal_pubkey");
+    } else if (all_rung_pubkeys.size() > 0) {
+        // Auto-detect: all rungs are single-block SIG with the same pubkey
+        bool all_single_sig = true;
+        std::vector<uint8_t> first_pk;
+        for (size_t r = 0; r < all_rungs.size(); ++r) {
+            if (all_rungs[r].blocks.size() != 1 ||
+                all_rungs[r].blocks[0].type != rung::RungBlockType::SIG) {
+                all_single_sig = false;
+                break;
+            }
+            if (r < all_rung_pubkeys.size() && all_rung_pubkeys[r].size() == 1) {
+                if (first_pk.empty()) {
+                    first_pk = all_rung_pubkeys[r][0];
+                } else if (first_pk != all_rung_pubkeys[r][0]) {
+                    all_single_sig = false;
+                    break;
+                }
+            }
         }
-        mtx.conditions_root = tweaked->first;
+        if (all_single_sig && !first_pk.empty()) {
+            // Strip 0x02/0x03 prefix if compressed (33 bytes → 32 x-only)
+            if (first_pk.size() == 33) {
+                internal_pubkey_bytes.assign(first_pk.begin() + 1, first_pk.end());
+            } else {
+                internal_pubkey_bytes = first_pk;
+            }
+            auto_tweaked = true;
+        }
+    }
+
+    if (!internal_pubkey_bytes.empty()) {
+        auto tweaked = rung::ComputeTweakedConditionsRoot(internal_pubkey_bytes, merkle_root);
+        if (!tweaked) {
+            if (has_explicit_pubkey) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Failed to compute tweaked key from internal_pubkey");
+            }
+            // Auto-tweak failed — fall back to plain root
+            mtx.conditions_root = merkle_root;
+        } else {
+            mtx.conditions_root = tweaked->first;
+        }
     } else {
         mtx.conditions_root = merkle_root;
     }
@@ -3227,6 +3331,12 @@ static RPCHelpMan createtxmlsc()
     result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
     result.pushKV("conditions_root", mtx.conditions_root.GetHex());
     result.pushKV("merkle_root", merkle_root.GetHex());
+    if (!internal_pubkey_bytes.empty()) {
+        result.pushKV("internal_pubkey", HexStr(internal_pubkey_bytes));
+        result.pushKV("key_path", true);
+    } else {
+        result.pushKV("key_path", false);
+    }
     // Output the scriptPubKey hex for use in signladder spent_outputs.
     // This is the raw bytes (0xDF + root in wire order), NOT GetHex() which reverses.
     CScript mlsc_spk_out = rung::CreateMLSCScript(mtx.conditions_root);
