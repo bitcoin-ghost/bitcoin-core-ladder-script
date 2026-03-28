@@ -1168,7 +1168,10 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     }
 
     // 4. Fee rate check (consensus-enforced anti-pinning)
-    if (ctx.tx && ctx.spent_outputs) {
+    if (!ctx.tx || !ctx.spent_outputs) {
+        return EvalResult::ERROR; // fail-closed: tx context required for fee/weight checks
+    }
+    {
         int64_t total_in = 0;
         for (const auto& spent : *ctx.spent_outputs) {
             total_in += spent.nValue;
@@ -1190,7 +1193,7 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     }
 
     // 5. Weight limit check
-    if (ctx.tx) {
+    {
         int64_t tx_weight = GetTransactionWeight(*ctx.tx);
         if (tx_weight > max_weight) {
             return EvalResult::UNSATISFIED;
@@ -3652,7 +3655,7 @@ static size_t CountTxPreimageFields(const CTransaction& tx)
     size_t total = 0;
     for (size_t i = 0; i < tx.vin.size(); ++i) {
         const auto& witness = tx.vin[i].scriptWitness;
-        if (witness.stack.size() != 2) continue;
+        if (witness.stack.size() < 2 || witness.stack.size() > 3) continue;
 
         LadderWitness lw;
         std::string err;
