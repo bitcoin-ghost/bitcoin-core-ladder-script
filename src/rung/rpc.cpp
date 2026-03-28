@@ -1834,6 +1834,7 @@ static RPCHelpMan signrungtx()
         }
 
         LadderWitness ladder;
+        unsigned int target_rung = 0; // declared here for visibility across all signing paths
 
         if (signer_obj.exists("privkey") && !signer_obj.exists("blocks")) {
             // Legacy format: single SIG block
@@ -1868,11 +1869,11 @@ static RPCHelpMan signrungtx()
         } else if (signer_obj.exists("blocks")) {
             const UniValue& blocks_arr = signer_obj["blocks"].get_array();
 
+            if (signer_obj.exists("rung")) {
+                target_rung = signer_obj["rung"].getInt<unsigned int>();
+            }
+
             if (has_conditions) {
-                unsigned int target_rung = 0;
-                if (signer_obj.exists("rung")) {
-                    target_rung = signer_obj["rung"].getInt<unsigned int>();
-                }
 
                 if (is_mlsc) {
                     // MLSC: build witness for only the target rung (1 rung in witness)

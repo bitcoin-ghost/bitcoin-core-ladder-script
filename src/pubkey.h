@@ -282,6 +282,15 @@ public:
     /** Construct a Taproot tweaked output point with this point as internal key. */
     std::optional<std::pair<XOnlyPubKey, bool>> CreateTapTweak(const uint256* merkle_root) const;
 
+    /** Ladder Script: compute the tweak hash for Ladder conditions. Uses "LadderTweak" tag. */
+    uint256 ComputeLadderTweakHash(const uint256* merkle_root) const;
+
+    /** Ladder Script: verify that this is a Ladder tweaked output point. */
+    bool CheckLadderTweak(const XOnlyPubKey& internal, const uint256& merkle_root, bool parity) const;
+
+    /** Ladder Script: construct a Ladder tweaked output point with this point as internal key. */
+    std::optional<std::pair<XOnlyPubKey, bool>> CreateLadderTweak(const uint256* merkle_root) const;
+
     /** Returns a list of CKeyIDs for the CPubKeys that could have been used to create this XOnlyPubKey.
      * As the CKeyID is the Hash160(full pubkey), the produced CKeyIDs are for the versions of this
      * XOnlyPubKey with 0x02 and 0x03 prefixes.

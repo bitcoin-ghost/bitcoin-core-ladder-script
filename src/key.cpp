@@ -275,6 +275,23 @@ bool CKey::SignSchnorr(const uint256& hash, std::span<unsigned char> sig, const 
     return kp.SignSchnorr(hash, sig, aux);
 }
 
+bool CKey::SignSchnorrLadder(const uint256& hash, std::span<unsigned char> sig, const uint256* merkle_root, const uint256& aux) const
+{
+    if (!IsValid()) return false;
+    assert(sig.size() == 64);
+    secp256k1_keypair keypair;
+    if (!secp256k1_keypair_create(secp256k1_context_sign, &keypair, UCharCast(data()))) return false;
+    if (merkle_root) {
+        secp256k1_xonly_pubkey pubkey;
+        unsigned char pubkey_bytes[32];
+        if (!secp256k1_keypair_xonly_pub(secp256k1_context_sign, &pubkey, nullptr, &keypair)) return false;
+        if (!secp256k1_xonly_pubkey_serialize(secp256k1_context_sign, pubkey_bytes, &pubkey)) return false;
+        uint256 tweak = XOnlyPubKey(pubkey_bytes).ComputeLadderTweakHash(merkle_root->IsNull() ? nullptr : merkle_root);
+        if (!secp256k1_keypair_xonly_tweak_add(secp256k1_context_static, &keypair, tweak.data())) return false;
+    }
+    return secp256k1_schnorrsig_sign32(secp256k1_context_sign, sig.data(), hash.data(), &keypair, aux.data());
+}
+
 bool CKey::Load(const CPrivKey &seckey, const CPubKey &vchPubKey, bool fSkipCheck=false) {
     MakeKeyData();
     if (!ec_seckey_import_der(secp256k1_context_sign, (unsigned char*)begin(), seckey.data(), seckey.size())) {

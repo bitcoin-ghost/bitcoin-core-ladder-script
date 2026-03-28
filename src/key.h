@@ -172,6 +172,9 @@ public:
      */
     bool SignSchnorr(const uint256& hash, std::span<unsigned char> sig, const uint256* merkle_root, const uint256& aux) const;
 
+    /** Ladder Script: create a Schnorr signature with optional LadderTweak. */
+    bool SignSchnorrLadder(const uint256& hash, std::span<unsigned char> sig, const uint256* merkle_root, const uint256& aux) const;
+
     //! Derive BIP32 child key.
     [[nodiscard]] bool Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const;
 
