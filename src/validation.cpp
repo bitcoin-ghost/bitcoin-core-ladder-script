@@ -2108,7 +2108,26 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
     // P2TR, etc.) in v4 txs fall through to VerifyScript for bootstrap funding.
     if (ptxTo->version == CTransaction::RUNG_TX_VERSION && rung::IsMLSCScript(m_tx_out.scriptPubKey)) {
         CachingTransactionSignatureChecker checker(ptxTo, nIn, m_tx_out.nValue, cacheStore, *m_signature_cache, *txdata);
-        if (rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height)) {
+        // Adapter: bridge thread-safe cache to VerifyRungTx's SharedTreeCache*
+        rung::SharedTreeCache local_cache;
+        rung::SharedTreeCache* cache_ptr = nullptr;
+        if (m_shared_tree_cache) {
+            // Copy current cache state (lock held briefly)
+            {
+                LOCK(m_shared_tree_cache->mutex);
+                local_cache = m_shared_tree_cache->cache;
+            }
+            cache_ptr = &local_cache;
+        }
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr);
+        // Write back any new cache entries
+        if (m_shared_tree_cache && cache_ptr) {
+            LOCK(m_shared_tree_cache->mutex);
+            for (const auto& [k, v] : local_cache) {
+                m_shared_tree_cache->cache.emplace(k, v);
+            }
+        }
+        if (ok) {
             return std::nullopt;
         } else {
             auto debug_str = strprintf("input %i of %s (wtxid %s), spending %s:%i", nIn, ptxTo->GetHash().ToString(), ptxTo->GetWitnessHash().ToString(), ptxTo->vin[nIn].prevout.hash.ToString(), ptxTo->vin[nIn].prevout.n);
@@ -2234,6 +2253,13 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
     }
     assert(txdata.m_spent_outputs.size() == tx.vin.size());
 
+    // Ladder Script: create shared tree cache for same-source proof sharing.
+    // Thread-safe — shared across parallel CScriptCheck evaluations.
+    std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache;
+    if (tx.version == CTransaction::RUNG_TX_VERSION) {
+        shared_tree_cache = std::make_shared<ThreadSafeSharedTreeCache>();
+    }
+
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
 
         // We very carefully only pass in things to CScriptCheck which
@@ -2243,7 +2269,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // spent being checked as a part of CScriptCheck.
 
         // Verify signature
-        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height);
+        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height, shared_tree_cache);
         if (pvChecks) {
             pvChecks->emplace_back(std::move(check));
         } else if (auto result = check(); result.has_value()) {

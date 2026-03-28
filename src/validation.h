@@ -8,6 +8,7 @@
 
 #include <arith_uint256.h>
 #include <attributes.h>
+#include <rung/evaluator.h>
 #include <chain.h>
 #include <checkqueue.h>
 #include <consensus/amount.h>
@@ -330,6 +331,24 @@ bool CheckSequenceLocksAtTip(CBlockIndex* tip,
  * Closure representing one script verification
  * Note that this stores references to the spending transaction
  */
+/** Thread-safe wrapper for SharedTreeCache (Ladder Script same-source proof sharing). */
+struct ThreadSafeSharedTreeCache {
+    mutable Mutex mutex;
+    rung::SharedTreeCache cache GUARDED_BY(mutex);
+
+    void Insert(const Txid& txid, rung::SharedTreeEntry&& entry) {
+        LOCK(mutex);
+        cache[txid] = std::move(entry);
+    }
+
+    std::optional<rung::SharedTreeEntry> Lookup(const Txid& txid) const {
+        LOCK(mutex);
+        auto it = cache.find(txid);
+        if (it != cache.end()) return it->second;
+        return std::nullopt;
+    }
+};
+
 class CScriptCheck
 {
 private:
@@ -341,10 +360,11 @@ private:
     PrecomputedTransactionData *txdata;
     SignatureCache* m_signature_cache;
     int32_t m_block_height{0}; //!< Ladder Script: block height for timelock evaluation
+    std::shared_ptr<ThreadSafeSharedTreeCache> m_shared_tree_cache; //!< Ladder Script: same-source proof sharing
 
 public:
-    CScriptCheck(const CTxOut& outIn, const CTransaction& txToIn, SignatureCache& signature_cache, unsigned int nInIn, unsigned int nFlagsIn, bool cacheIn, PrecomputedTransactionData* txdataIn, int32_t block_height = 0) :
-        m_tx_out(outIn), ptxTo(&txToIn), nIn(nInIn), nFlags(nFlagsIn), cacheStore(cacheIn), txdata(txdataIn), m_signature_cache(&signature_cache), m_block_height(block_height) { }
+    CScriptCheck(const CTxOut& outIn, const CTransaction& txToIn, SignatureCache& signature_cache, unsigned int nInIn, unsigned int nFlagsIn, bool cacheIn, PrecomputedTransactionData* txdataIn, int32_t block_height = 0, std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache = nullptr) :
+        m_tx_out(outIn), ptxTo(&txToIn), nIn(nInIn), nFlags(nFlagsIn), cacheStore(cacheIn), txdata(txdataIn), m_signature_cache(&signature_cache), m_block_height(block_height), m_shared_tree_cache(std::move(shared_tree_cache)) { }
 
     CScriptCheck(const CScriptCheck&) = delete;
     CScriptCheck& operator=(const CScriptCheck&) = delete;
