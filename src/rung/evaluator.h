@@ -254,10 +254,16 @@ static constexpr unsigned int RUNG_VERIFY_MLSC_ONLY = (1U << 28); //!< Reject 0x
  *  RECURSE_DECAY) which verify output conditions match expected roots. */
 bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string& error);
 
-/** Cache for same-source proof sharing: maps source txid to verified conditions_root.
+/** Cache entry for same-source proof sharing. */
+struct SharedTreeEntry {
+    uint256 root;                   //!< Verified conditions_root
+    std::vector<uint256> leaves;    //!< All leaf hashes in the tree (for leaf membership check)
+};
+
+/** Cache for same-source proof sharing: maps source txid to verified tree data.
  *  When multiple inputs reference the same source tx, subsequent inputs can use
- *  SHARED proof mode to skip redundant Merkle path verification. */
-using SharedTreeCache = std::map<Txid, uint256>;
+ *  SHARED proof mode — but must still prove their leaf is in the cached tree. */
+using SharedTreeCache = std::map<Txid, SharedTreeEntry>;
 
 /** Top-level verification entry point for v4 RUNG_TX transactions.
  *  TX_MLSC: validates creation proof, verifies spend proof against shared tree,

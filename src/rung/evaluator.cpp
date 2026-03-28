@@ -3729,13 +3729,15 @@ bool VerifyRungTx(const CTransaction& tx,
                 if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
                 return false;
             }
-            if (it->second != conditions_root) {
+            if (it->second.root != conditions_root) {
                 LogPrintf("MLSC shared proof: cached root mismatch\n");
                 if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
                 return false;
             }
-            // Shared proof verified — the root is valid. Continue to rung evaluation below.
-            // (The revealed rung + coil still need to be evaluated for the spending conditions.)
+            // Root matches. Now verify the revealed leaf is actually in the cached tree.
+            // Without this check, an attacker could fabricate conditions that were never
+            // committed in the original Merkle tree.
+            // (my_leaf is computed below after pubkey extraction — defer check to after line 3786)
         }
 
         // Single rung rule: standard spends reveal exactly 1 rung
@@ -3785,18 +3787,27 @@ bool VerifyRungTx(const CTransaction& tx,
         // Compute leaf (needed for rung evaluation even in SHARED mode)
         uint256 my_leaf = ComputeTxMLSCLeaf(cp_rung);
 
-        // SHARED proofs: root validated via cache, but leaf must still be verified.
-        // The spender must prove their rung is in the tree by providing a Merkle path
-        // in the revealed_rung's proof_hashes (piggyback on the SHARED proof structure).
-        // Since SHARED mode has empty proof_hashes by definition, we rely on the
-        // source input's cached verified_leaves to confirm the leaf.
+        // SHARED proofs: root was validated via cache. Now verify leaf membership —
+        // the revealed rung's leaf must exist in the cached tree's leaf set.
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
-            // Root was verified by cache. The revealed rung + witness coil + pubkeys
-            // produce my_leaf, which was committed by the source input's Merkle proof.
-            // We accept this because the source input's full proof already validated
-            // the entire tree against conditions_root. Any rung that produces a leaf
-            // in that tree is authentic. (The coil.output_index check below ensures
-            // the rung governs the correct output.)
+            auto cache_it = shared_cache->find(tx.vin[nIn].prevout.hash);
+            if (cache_it == shared_cache->end()) {
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
+            const auto& cached_leaves = cache_it->second.leaves;
+            bool leaf_found = false;
+            for (const auto& cached_leaf : cached_leaves) {
+                if (cached_leaf == my_leaf) {
+                    leaf_found = true;
+                    break;
+                }
+            }
+            if (!leaf_found) {
+                LogPrintf("MLSC shared proof: leaf not found in cached tree\n");
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
         } else if (witness.stack.size() == 3) {
             // Compute raw Merkle root from proof, then verify tweak
             uint256 computed_merkle_root;
@@ -3909,9 +3920,13 @@ bool VerifyRungTx(const CTransaction& tx,
             }
         }
 
-        // Populate shared tree cache for same-source proof sharing
+        // Populate shared tree cache for same-source proof sharing.
+        // Store root + all leaf hashes so SHARED proofs can verify leaf membership.
         if (shared_cache && mlsc_proof.proof_mode != MLSCProofMode::SHARED) {
-            (*shared_cache)[tx.vin[nIn].prevout.hash] = conditions_root;
+            SharedTreeEntry entry;
+            entry.root = conditions_root;
+            entry.leaves = verified_leaves_data.leaves;
+            (*shared_cache)[tx.vin[nIn].prevout.hash] = std::move(entry);
         }
 
         // Build RungConditions from MLSC proof (1 rung + relays + coil)
