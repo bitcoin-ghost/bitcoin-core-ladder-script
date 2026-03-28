@@ -1847,18 +1847,23 @@ EvalResult EvalOneShotBlock(const RungBlock& block, const RungEvalContext& /*ctx
 
 EvalResult EvalRateLimitBlock(const RungBlock& block, const RungEvalContext& ctx)
 {
-    // Rate limiter: check single-tx limit against output amount
+    // Rate limiter: enforces a per-transaction spending cap.
+    // NOTE: accumulation_cap and refill_blocks are condition parameters reserved
+    // for L2 protocols that track UTXO chain state. L1 consensus can only enforce
+    // the single-transaction limit (max_per_block). A UTXO holder can drain
+    // max_per_block per transaction, potentially multiple transactions per block.
+    // For full rate-limiting, combine with RECURSE_SAME (covenant re-encumberance)
+    // which ensures only one spend path per output.
     auto numerics = FindAllFields(block, RungDataType::NUMERIC);
     if (numerics.size() < 3) return EvalResult::ERROR; // max_per_block, accumulation_cap, refill_blocks
 
     int64_t max_per_block = ReadNumeric(*numerics[0]);
     if (max_per_block < 0) return EvalResult::ERROR;
 
-    // Single-tx limit check: output_amount must not exceed max_per_block
+    // Single-tx limit: output amount must not exceed max_per_block
     if (ctx.output_amount > max_per_block) {
         return EvalResult::UNSATISFIED;
     }
-    // Accumulation tracking needs UTXO chain state
     return EvalResult::SATISFIED;
 }
 
