@@ -125,6 +125,19 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
         // deal with the pre-BIP30 occurrences of duplicate coinbase transactions.
         cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase), overwrite);
     }
+
+    // TX_MLSC: write a synthetic root entry at (txid, MLSC_ROOT_VOUT).
+    // This stores the conditions_root once, enabling UTXO deduplication.
+    // Individual MLSC coins store a 1-byte scriptPubKey (0xDF) via compression;
+    // the root is recovered from this synthetic entry at spend time.
+    if (tx.version == CTransaction::RUNG_TX_VERSION && !tx.conditions_root.IsNull()) {
+        CTxOut root_out;
+        root_out.nValue = 0; // sentinel: not a real output, not spendable
+        root_out.scriptPubKey.resize(33);
+        root_out.scriptPubKey[0] = 0xDF;
+        memcpy(&root_out.scriptPubKey[1], tx.conditions_root.data(), 32);
+        cache.AddCoin(COutPoint(txid, MLSC_ROOT_VOUT), Coin(std::move(root_out), nHeight, false), false);
+    }
 }
 
 bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, Coin* moveout) {

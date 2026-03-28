@@ -238,11 +238,16 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vin.clear();
     tx.vout.clear();
     tx.conditions_root.SetNull();
+    tx.aggregated_sig.clear();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
     s >> tx.vin;
     if (tx.vin.size() == 0 && fAllowWitness) {
         /* We read a dummy or an empty vin. */
         s >> flags;
+        if (flags == 0x03) {
+            /* Invalid: SegWit (0x01) + TX_MLSC (0x02) combined is not allowed */
+            throw std::ios_base::failure("Invalid transaction flag combination 0x03");
+        }
         if (flags != 0) {
             s >> tx.vin;
             if (flags == 0x02 && tx.version == 4 /* RUNG_TX_VERSION */) {

@@ -487,6 +487,10 @@ private:
     CCoinsMap::iterator FetchCoin(const COutPoint &outpoint) const;
 };
 
+//! Sentinel vout index for TX_MLSC root entry. Stores the shared conditions_root
+//! once per transaction, enabling UTXO deduplication (~8 bytes/output vs ~48 bytes).
+static constexpr uint32_t MLSC_ROOT_VOUT = 0xFFFFFFFF;
+
 //! Utility function to add all of a transaction's outputs to a cache.
 //! When check is false, this assumes that overwrites are only possible for coinbase transactions.
 //! When check is true, the underlying view may be queried to determine whether an addition is

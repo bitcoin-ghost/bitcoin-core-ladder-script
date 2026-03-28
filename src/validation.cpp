@@ -39,8 +39,6 @@
 #include <policy/truc_policy.h>
 #include <pow.h>
 #include <primitives/block.h>
-#include <node/blockstorage.h>
-#include <node/transaction.h>
 #include <rung/evaluator.h>
 #include <rung/conditions.h>
 #include <primitives/transaction.h>
@@ -146,8 +144,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        const CCoinsViewCache& inputs, unsigned int flags, bool cacheSigStore,
                        bool cacheFullScriptStore, PrecomputedTransactionData& txdata,
                        ValidationCache& validation_cache,
-                       std::vector<CScriptCheck>* pvChecks = nullptr,
-                       const node::BlockManager* blockman = nullptr)
+                       std::vector<CScriptCheck>* pvChecks = nullptr)
                        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 bool CheckFinalTxAtTip(const CBlockIndex& active_chain_tip, const CTransaction& tx)
@@ -2164,8 +2161,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        const CCoinsViewCache& inputs, unsigned int flags, bool cacheSigStore,
                        bool cacheFullScriptStore, PrecomputedTransactionData& txdata,
                        ValidationCache& validation_cache,
-                       std::vector<CScriptCheck>* pvChecks,
-                       const node::BlockManager* blockman)
+                       std::vector<CScriptCheck>* pvChecks)
 {
     if (tx.IsCoinBase()) return true;
 
@@ -2199,10 +2195,9 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
 
         // TX_MLSC UTXO deduplication: compact MLSC coins (1-byte scriptPubKey
         // = 0xDF only) need inflation to full form (0xDF + 32-byte root).
-        // The root is recovered from the creating transaction via block database.
-        // In-memory cache coins retain the full scriptPubKey (compression only
-        // happens at LevelDB flush), so this only triggers for cold UTXO reads.
-        if (blockman && tx.version == CTransaction::RUNG_TX_VERSION) {
+        // The root is recovered from the synthetic entry at (txid, MLSC_ROOT_VOUT)
+        // in the UTXO cache. No block database dependency.
+        if (tx.version == CTransaction::RUNG_TX_VERSION) {
             std::map<Txid, uint256> root_cache; // cache per source txid
             for (size_t i = 0; i < spent_outputs.size(); ++i) {
                 if (rung::IsCompactMLSC(spent_outputs[i].scriptPubKey)) {
@@ -2212,13 +2207,11 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     if (cached != root_cache.end()) {
                         root = cached->second;
                     } else {
-                        // Look up the creating transaction from block storage
-                        uint256 hashBlock;
-                        const CTransactionRef creating_tx = node::GetTransaction(
-                            /*block_index=*/nullptr, /*mempool=*/nullptr,
-                            source_txid, hashBlock, *blockman);
-                        if (creating_tx && !creating_tx->conditions_root.IsNull()) {
-                            root = creating_tx->conditions_root;
+                        // Look up the synthetic root entry from the UTXO cache
+                        const Coin& root_coin = inputs.AccessCoin(COutPoint(source_txid, MLSC_ROOT_VOUT));
+                        if (!root_coin.IsSpent() && root_coin.out.scriptPubKey.size() == 33 &&
+                            root_coin.out.scriptPubKey[0] == 0xDF) {
+                            memcpy(root.data(), &root_coin.out.scriptPubKey[1], 32);
                             root_cache[source_txid] = root;
                         }
                     }
@@ -2704,10 +2697,10 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
             // they need to be added to control which runs them asynchronously. Otherwise, CheckInputScripts runs the checks before returning.
             if (control) {
                 std::vector<CScriptCheck> vChecks;
-                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, txsdata[i], m_chainman.m_validation_cache, &vChecks, &m_blockman);
+                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, txsdata[i], m_chainman.m_validation_cache, &vChecks);
                 if (tx_ok) control->Add(std::move(vChecks));
             } else {
-                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, txsdata[i], m_chainman.m_validation_cache, /*pvChecks=*/nullptr, &m_blockman);
+                tx_ok = CheckInputScripts(tx, tx_state, view, flags, fCacheResults, fCacheResults, txsdata[i], m_chainman.m_validation_cache);
             }
             if (!tx_ok) {
                 // Any transaction validation failure in ConnectBlock is a block consensus failure
