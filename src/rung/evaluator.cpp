@@ -74,6 +74,24 @@ bool LadderSignatureChecker::CheckSchnorrSignature(std::span<const unsigned char
         return false;
     }
 
+    // DEBUG: trace sighash and verification inputs
+    {
+        std::string spent_spk = "none";
+        CAmount spent_amt = 0;
+        if (m_txdata.m_spent_outputs_ready && m_nIn < m_txdata.m_spent_outputs.size()) {
+            spent_spk = HexStr(m_txdata.m_spent_outputs[m_nIn].scriptPubKey);
+            spent_amt = m_txdata.m_spent_outputs[m_nIn].nValue;
+        }
+        LogPrintf("EVAL SIGHASH DEBUG: sighash=%s pubkey=%s hashtype=%u nIn=%u "
+                  "conditions_root=%s ladder_ready=%d spent_ready=%d "
+                  "spent_spk=%s spent_amt=%lld tx_version=%d n_vout=%zu\n",
+                  sighash.GetHex(), HexStr(pubkey_in),
+                  hashtype, m_nIn,
+                  m_conditions.conditions_root.has_value() ? m_conditions.conditions_root->GetHex() : "none",
+                  m_txdata.m_ladder_ready, m_txdata.m_spent_outputs_ready,
+                  spent_spk, (long long)spent_amt, m_tx.version, m_tx.vout.size());
+    }
+
     // Batch mode: defer verification
     if (m_batch && m_batch->active) {
         m_batch->Add(sighash, pubkey, std::span<const unsigned char>{sig_data.data(), sig_data.size()});

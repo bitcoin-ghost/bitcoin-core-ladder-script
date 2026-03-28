@@ -2813,6 +2813,17 @@ static RPCHelpMan signladder()
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Failed to compute sighash");
         }
 
+        // DEBUG: trace sighash
+        LogPrintf("SIGN SIGHASH DEBUG: sighash=%s nIn=%u conditions_root=%s "
+                  "ladder_ready=%d spent_ready=%d spent_spk=%s spent_amt=%lld "
+                  "tx_version=%d n_vout=%zu\n",
+                  sighash.GetHex(), input_idx,
+                  conditions.conditions_root.has_value() ? conditions.conditions_root->GetHex() : "none",
+                  txdata.m_ladder_ready, txdata.m_spent_outputs_ready,
+                  HexStr(spent_outputs[input_idx].scriptPubKey),
+                  (long long)spent_outputs[input_idx].nValue,
+                  mtx.version, mtx.vout.size());
+
         // 7. Build witness for the target rung via BuildWitnessBlock
         // Convert descriptor keys to JSON block specs and use the existing
         // BuildWitnessBlock code path (same as signrungtx).
@@ -3216,6 +3227,10 @@ static RPCHelpMan createtxmlsc()
     result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
     result.pushKV("conditions_root", mtx.conditions_root.GetHex());
     result.pushKV("merkle_root", merkle_root.GetHex());
+    // Output the scriptPubKey hex for use in signladder spent_outputs.
+    // This is the raw bytes (0xDF + root in wire order), NOT GetHex() which reverses.
+    CScript mlsc_spk_out = rung::CreateMLSCScript(mtx.conditions_root);
+    result.pushKV("scriptPubKey", HexStr(mlsc_spk_out));
     result.pushKV("n_rungs", (int)cp_rungs.size());
     return result;
 },

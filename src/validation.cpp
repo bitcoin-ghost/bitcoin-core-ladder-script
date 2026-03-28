@@ -2232,7 +2232,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                         // Look up the synthetic root entry from the UTXO cache
                         const Coin& root_coin = inputs.AccessCoin(COutPoint(source_txid, MLSC_ROOT_VOUT));
                         if (!root_coin.IsSpent() && root_coin.out.scriptPubKey.size() == 33 &&
-                            root_coin.out.scriptPubKey[0] == 0xDF) {
+                            root_coin.out.scriptPubKey[0] == 0xDE) { // synthetic root marker
                             memcpy(root.data(), &root_coin.out.scriptPubKey[1], 32);
                             root_cache[source_txid] = root;
                         }
