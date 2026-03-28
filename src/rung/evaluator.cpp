@@ -3937,6 +3937,27 @@ bool VerifyRungTx(const CTransaction& tx,
         // Compute leaf (needed for rung evaluation even in SHARED mode)
         uint256 my_leaf = ComputeTxMLSCLeaf(cp_rung);
 
+        // DEBUG: trace leaf computation
+        {
+            auto tmpl = SerializeStructuralTemplate(cp_rung);
+            // Trace the value commitment inputs
+            std::string fields_hex;
+            for (const auto& b : mlsc_proof.revealed_rung.blocks) {
+                for (const auto& f : b.fields) {
+                    fields_hex += HexStr(f.data) + "(" + std::to_string((int)f.type) + ") ";
+                }
+            }
+            std::string pks_hex;
+            for (const auto& pk : rung_pks) {
+                pks_hex += HexStr(pk) + " ";
+            }
+            LogPrintf("TX_MLSC DEBUG: template=%s vc=%s leaf=%s root=%s coil_type=%u att=%u scheme=%u outidx=%u fields=[%s] pks=[%s] n_pks=%zu\n",
+                      HexStr(tmpl), cp_rung.value_commitment.GetHex(), my_leaf.GetHex(), conditions_root.GetHex(),
+                      (unsigned)cp_rung.coil.coil_type, (unsigned)cp_rung.coil.attestation,
+                      (unsigned)cp_rung.coil.scheme, (unsigned)cp_rung.coil.output_index,
+                      fields_hex, pks_hex, rung_pks.size());
+        }
+
         // SHARED proofs: root was validated via cache. Now verify leaf membership —
         // the revealed rung's leaf must exist in the cached tree's leaf set.
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {

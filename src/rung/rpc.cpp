@@ -3118,10 +3118,16 @@ static RPCHelpMan createtxmlsc()
 
         // TX_MLSC: pubkeys for merkle_pub_key binding (folded into value_commitment).
         // Provided separately since they're witness-side, not in conditions fields.
+        // If x-only (32 bytes), prepend 0x02 to match the compressed format used
+        // in the witness (merkle_pub_key binds compressed pubkeys, not x-only).
         if (rung_obj.exists("pubkeys")) {
             const UniValue& pks_arr = rung_obj["pubkeys"].get_array();
             for (size_t p = 0; p < pks_arr.size(); ++p) {
-                rung_pks.push_back(ParseHex(pks_arr[p].get_str()));
+                auto pk = ParseHex(pks_arr[p].get_str());
+                if (pk.size() == 32) {
+                    pk.insert(pk.begin(), 0x02); // x-only → compressed (even Y)
+                }
+                rung_pks.push_back(std::move(pk));
             }
         }
 
@@ -3150,6 +3156,17 @@ static RPCHelpMan createtxmlsc()
 
         // Compute value_commitment = SHA256(field_values || pubkeys)
         cp_rung.value_commitment = rung::ComputeValueCommitment(rung, rung_pks);
+
+        // DEBUG: trace creation leaf
+        {
+            auto tmpl = rung::SerializeStructuralTemplate(cp_rung);
+            auto leaf = rung::ComputeTxMLSCLeaf(cp_rung);
+            LogPrintf("createtxmlsc DEBUG: template=%s vc=%s leaf=%s coil_type=%u att=%u scheme=%u outidx=%u n_pks=%zu\n",
+                      HexStr(tmpl), cp_rung.value_commitment.GetHex(), leaf.GetHex(),
+                      (unsigned)cp_rung.coil.coil_type, (unsigned)cp_rung.coil.attestation,
+                      (unsigned)cp_rung.coil.scheme, (unsigned)cp_rung.coil.output_index,
+                      rung_pks.size());
+        }
 
         cp_rungs.push_back(std::move(cp_rung));
     }
