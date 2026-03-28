@@ -3174,7 +3174,18 @@ static RPCHelpMan createtxmlsc()
         mtx.conditions_root = merkle_root;
     }
 
-    // No creation proof — conditions_root is an opaque commitment
+    // Hybrid creation proof: include leaf hashes for 3+ spendable outputs
+    size_t n_spendable_out = 0;
+    for (const auto& out : mtx.vout) {
+        if (out.nValue > 0) n_spendable_out++;
+    }
+    if (n_spendable_out > 2) {
+        std::vector<uint256> leaves;
+        for (const auto& rung : cp_rungs) {
+            leaves.push_back(rung::ComputeTxMLSCLeaf(rung));
+        }
+        mtx.creation_proof = rung::SerializeCreationProofLeaves(leaves);
+    }
 
     // Inflate outputs with shared scriptPubKey (for UTXO compatibility)
     CScript mlsc_spk;

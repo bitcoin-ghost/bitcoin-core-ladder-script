@@ -238,6 +238,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vin.clear();
     tx.vout.clear();
     tx.conditions_root.SetNull();
+    tx.creation_proof.clear();
     tx.aggregated_sig.clear();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
     s >> tx.vin;
@@ -283,10 +284,16 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         }
     }
     if (flags == 0x02) {
-        /* TX_MLSC: read per-input witnesses + aggregated signature */
+        /* TX_MLSC: read per-input witnesses + creation proof + aggregated signature */
         flags = 0;
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness.stack;
+        }
+        /* Read creation proof (leaf hashes, required for 3+ outputs) */
+        uint64_t cp_len = ReadCompactSize(s);
+        tx.creation_proof.resize(cp_len);
+        if (cp_len > 0) {
+            s.read(MakeWritableByteSpan(tx.creation_proof));
         }
         /* Read aggregated signature (half-aggregation) */
         uint64_t agg_len = ReadCompactSize(s);
@@ -339,9 +346,13 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
         s << tx.vout;
     }
     if (flags == 0x02) {
-        /* TX_MLSC: per-input witnesses + aggregated sig */
+        /* TX_MLSC: per-input witnesses + creation proof + aggregated sig */
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s << tx.vin[i].scriptWitness.stack;
+        }
+        WriteCompactSize(s, tx.creation_proof.size());
+        if (!tx.creation_proof.empty()) {
+            s.write(MakeByteSpan(tx.creation_proof));
         }
         WriteCompactSize(s, tx.aggregated_sig.size());
         if (!tx.aggregated_sig.empty()) {
@@ -386,9 +397,10 @@ public:
     const uint32_t version;
     const uint32_t nLockTime;
 
-    // Ladder Script: shared conditions root (opaque commitment, validated at spend time).
+    // Ladder Script: shared conditions root and witness-carried proofs.
     const uint256 conditions_root;
-    const std::vector<uint8_t> aggregated_sig; //!< Half-aggregated s value (32 bytes if present)
+    const std::vector<uint8_t> creation_proof;  //!< Leaf hashes proving conditions_root (required for 3+ outputs)
+    const std::vector<uint8_t> aggregated_sig;  //!< Half-aggregated s value (32 bytes if present)
 
 private:
     /** Memory only. */
@@ -467,6 +479,7 @@ struct CMutableTransaction
     // On wire: conditions_root between inputs and outputs, aggregated_sig after witnesses.
     // In memory: vout inflated to CTxOut(value, 0xDF + conditions_root) for compatibility.
     uint256 conditions_root;
+    std::vector<uint8_t> creation_proof;
     std::vector<uint8_t> aggregated_sig;
 
     explicit CMutableTransaction();

@@ -278,6 +278,25 @@ uint256 ComputeTxMLSCRoot(const std::vector<CreationProofRung>& rungs);
 uint256 ComputeValueCommitment(const Rung& rung,
                                 const std::vector<std::vector<uint8_t>>& pubkeys);
 
+// ============================================================================
+// Hybrid Creation Proof (leaf hashes, required for 3+ outputs)
+// ============================================================================
+
+/** Serialize creation proof: n_leaves + leaf hashes. */
+std::vector<uint8_t> SerializeCreationProofLeaves(const std::vector<uint256>& leaves);
+
+/** Deserialize creation proof: extract leaf hashes. */
+bool DeserializeCreationProofLeaves(const std::vector<uint8_t>& data,
+                                     std::vector<uint256>& leaves,
+                                     std::string& error);
+
+/** Validate creation proof: rebuild tree from leaves, verify root matches.
+ *  @param n_spendable  Number of non-DATA_RETURN outputs (leaves >= n_spendable). */
+bool ValidateCreationProofLeaves(const std::vector<uint256>& leaves,
+                                  const uint256& expected_root,
+                                  size_t n_spendable,
+                                  std::string& error);
+
 } // namespace rung
 
 #endif // BITCOIN_RUNG_CONDITIONS_H

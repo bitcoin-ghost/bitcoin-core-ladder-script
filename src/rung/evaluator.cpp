@@ -3567,8 +3567,38 @@ bool VerifyRungTx(const CTransaction& tx,
         return false;
     }
 
-    // No creation proof validation — conditions_root is an opaque commitment.
-    // Validation happens at spend time via Merkle proof against the revealed rung.
+    // Hybrid creation proof: required for 3+ spendable outputs.
+    // Proves conditions_root was built from real leaf hashes, preventing UTXO spam.
+    // For 1-2 outputs: no proof required (harmless — max 56 bytes UTXO bloat).
+    {
+        size_t n_spendable = 0;
+        for (const auto& out : tx.vout) {
+            if (out.nValue > 0) n_spendable++;
+        }
+        if (n_spendable > 2) {
+            if (tx.creation_proof.empty()) {
+                LogPrintf("TX_MLSC: missing creation proof for %zu outputs\n", n_spendable);
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
+            std::vector<uint256> leaves;
+            std::string cp_error;
+            if (!DeserializeCreationProofLeaves(tx.creation_proof, leaves, cp_error)) {
+                LogPrintf("TX_MLSC creation proof deserialization failed: %s\n", cp_error);
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
+            if (!ValidateCreationProofLeaves(leaves, tx.conditions_root, n_spendable, cp_error)) {
+                LogPrintf("TX_MLSC creation proof validation failed: %s\n", cp_error);
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
+        } else if (!tx.creation_proof.empty()) {
+            LogPrintf("TX_MLSC: creation proof not allowed for %zu outputs\n", n_spendable);
+            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+            return false;
+        }
+    }
 
     // Dust threshold: every spendable output must carry minimum value (unconditional)
     for (size_t i = 0; i < tx.vout.size(); ++i) {

@@ -974,5 +974,72 @@ uint256 ComputeValueCommitment(const Rung& rung,
     return result;
 }
 
+// ============================================================================
+// Hybrid Creation Proof (leaf hashes, required for 3+ outputs)
+// ============================================================================
+
+std::vector<uint8_t> SerializeCreationProofLeaves(const std::vector<uint256>& leaves)
+{
+    std::vector<uint8_t> out;
+    // n_leaves as CompactSize
+    out.push_back(static_cast<uint8_t>(leaves.size())); // safe for < 253
+    for (const auto& leaf : leaves) {
+        out.insert(out.end(), leaf.begin(), leaf.end());
+    }
+    return out;
+}
+
+bool DeserializeCreationProofLeaves(const std::vector<uint8_t>& data,
+                                     std::vector<uint256>& leaves,
+                                     std::string& error)
+{
+    if (data.empty()) {
+        error = "empty creation proof";
+        return false;
+    }
+    size_t pos = 0;
+    uint64_t n_leaves = data[pos++];
+    if (n_leaves == 0) {
+        error = "creation proof: zero leaves";
+        return false;
+    }
+    if (n_leaves >= 253) {
+        error = "creation proof: too many leaves";
+        return false;
+    }
+    size_t expected = pos + n_leaves * 32;
+    if (data.size() < expected) {
+        error = "creation proof: truncated (need " + std::to_string(expected) + " bytes, have " + std::to_string(data.size()) + ")";
+        return false;
+    }
+    if (data.size() > expected) {
+        error = "creation proof: trailing bytes";
+        return false;
+    }
+    leaves.resize(n_leaves);
+    for (uint64_t i = 0; i < n_leaves; ++i) {
+        memcpy(leaves[i].data(), &data[pos], 32);
+        pos += 32;
+    }
+    return true;
+}
+
+bool ValidateCreationProofLeaves(const std::vector<uint256>& leaves,
+                                  const uint256& expected_root,
+                                  size_t n_spendable,
+                                  std::string& error)
+{
+    if (leaves.size() < n_spendable) {
+        error = "creation proof: " + std::to_string(leaves.size()) + " leaves < " +
+                std::to_string(n_spendable) + " spendable outputs";
+        return false;
+    }
+    uint256 computed_root = BuildMerkleTree(std::vector<uint256>(leaves));
+    if (computed_root != expected_root) {
+        error = "creation proof: root mismatch";
+        return false;
+    }
+    return true;
+}
 
 } // namespace rung
