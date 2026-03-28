@@ -3670,9 +3670,15 @@ bool VerifyRungTx(const CTransaction& tx,
                 return false;
             }
         } else if (!tx.creation_proof.empty()) {
-            LogPrintf("TX_MLSC: creation proof not allowed for %zu outputs\n", n_spendable);
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            // Optional proof for ≤2 outputs — validate if present
+            std::vector<uint256> leaves;
+            std::string cp_error;
+            if (!DeserializeCreationProofLeaves(tx.creation_proof, leaves, cp_error) ||
+                !ValidateCreationProofLeaves(leaves, tx.conditions_root, n_spendable, cp_error)) {
+                LogPrintf("TX_MLSC optional creation proof invalid: %s\n", cp_error);
+                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
+                return false;
+            }
         }
     }
 
