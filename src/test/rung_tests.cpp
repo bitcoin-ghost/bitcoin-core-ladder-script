@@ -11,6 +11,7 @@
 #include <rung/sighash.h>
 #include <rung/types.h>
 
+#include <compressor.h>
 #include <crypto/sha256.h>
 #include <hash.h>
 #include <key.h>
@@ -11629,3 +11630,214 @@ BOOST_AUTO_TEST_CASE(tx_mlsc_descriptor_multi_rung)
 
 BOOST_AUTO_TEST_SUITE_END()
 
+
+// ============================================================================
+// Hybrid creation proof tests
+// ============================================================================
+
+BOOST_FIXTURE_TEST_SUITE(creation_proof_tests, BasicTestingSetup)
+
+namespace {
+CreationProofRung MakeCPRung(RungBlockType type, uint8_t oi) {
+    CreationProofRung r;
+    r.blocks.push_back({static_cast<uint16_t>(type), 0});
+    r.coil.coil_type = RungCoilType::UNLOCK;
+    r.coil.attestation = RungAttestationMode::INLINE;
+    r.coil.scheme = RungScheme::SCHNORR;
+    r.coil.output_index = oi;
+    CSHA256().Write(reinterpret_cast<const uint8_t*>(&oi), 1).Finalize(r.value_commitment.data());
+    return r;
+}
+} // anon
+
+BOOST_AUTO_TEST_CASE(proof_serialize_roundtrip)
+{
+    std::vector<uint256> leaves;
+    for (int i = 0; i < 3; ++i) leaves.push_back(ComputeTxMLSCLeaf(MakeCPRung(RungBlockType::SIG, i)));
+    auto bytes = SerializeCreationProofLeaves(leaves);
+    BOOST_CHECK_EQUAL(bytes.size(), 1u + 3u * 32u);
+
+    std::vector<uint256> parsed;
+    std::string err;
+    BOOST_CHECK(DeserializeCreationProofLeaves(bytes, parsed, err));
+    BOOST_CHECK_EQUAL(parsed.size(), 3u);
+    for (size_t i = 0; i < 3; ++i) BOOST_CHECK_EQUAL(parsed[i], leaves[i]);
+}
+
+BOOST_AUTO_TEST_CASE(proof_validates_correct_root)
+{
+    std::vector<CreationProofRung> rungs;
+    std::vector<uint256> leaves;
+    for (int i = 0; i < 3; ++i) {
+        auto r = MakeCPRung(RungBlockType::SIG, i);
+        leaves.push_back(ComputeTxMLSCLeaf(r));
+        rungs.push_back(r);
+    }
+    uint256 root = ComputeTxMLSCRoot(rungs);
+    std::string err;
+    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, 3, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_rejects_wrong_root)
+{
+    auto r = MakeCPRung(RungBlockType::SIG, 0);
+    std::vector<uint256> leaves = {ComputeTxMLSCLeaf(r)};
+    uint256 bad; bad.SetNull();
+    std::string err;
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, bad, 1, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_rejects_too_few_leaves)
+{
+    auto r = MakeCPRung(RungBlockType::SIG, 0);
+    std::vector<uint256> leaves = {ComputeTxMLSCLeaf(r)};
+    uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));
+    std::string err;
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, 3, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_rejects_empty)
+{
+    std::vector<uint256> leaves;
+    std::string err;
+    BOOST_CHECK(!DeserializeCreationProofLeaves({}, leaves, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_rejects_trailing)
+{
+    auto r = MakeCPRung(RungBlockType::SIG, 0);
+    auto bytes = SerializeCreationProofLeaves({ComputeTxMLSCLeaf(r)});
+    bytes.push_back(0xFF);
+    std::vector<uint256> parsed;
+    std::string err;
+    BOOST_CHECK(!DeserializeCreationProofLeaves(bytes, parsed, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_rejects_truncated)
+{
+    auto r = MakeCPRung(RungBlockType::SIG, 0);
+    auto bytes = SerializeCreationProofLeaves({ComputeTxMLSCLeaf(r)});
+    bytes.pop_back();
+    std::vector<uint256> parsed;
+    std::string err;
+    BOOST_CHECK(!DeserializeCreationProofLeaves(bytes, parsed, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_allows_extra_leaves)
+{
+    std::vector<uint256> leaves;
+    for (int i = 0; i < 3; ++i) leaves.push_back(ComputeTxMLSCLeaf(MakeCPRung(RungBlockType::SIG, i)));
+    uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));
+    std::string err;
+    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, 2, err)); // 3 leaves, 2 outputs
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+// ============================================================================
+// UTXO dedup + compression tests
+// ============================================================================
+
+BOOST_FIXTURE_TEST_SUITE(utxo_dedup_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(mlsc_compression)
+{
+    uint256 root;
+    CSHA256().Write(reinterpret_cast<const unsigned char*>("root"), 4).Finalize(root.data());
+    CScript spk = CreateMLSCScript(root);
+    BOOST_CHECK_EQUAL(spk.size(), 33u);
+
+    CompressedScript c;
+    BOOST_CHECK(CompressScript(spk, c));
+    BOOST_CHECK_EQUAL(c[0], 0x06);
+    BOOST_CHECK_EQUAL(c.size(), 1u);
+
+    CScript out;
+    BOOST_CHECK(DecompressScript(out, 0x06, c));
+    BOOST_CHECK_EQUAL(out.size(), 1u);
+    BOOST_CHECK_EQUAL(out[0], 0xDF);
+    BOOST_CHECK(IsCompactMLSC(out));
+}
+
+BOOST_AUTO_TEST_CASE(mlsc_sizes)
+{
+    BOOST_CHECK(!IsMLSCScript(CScript()));
+    CScript one; one.push_back(0xDF);
+    BOOST_CHECK(IsMLSCScript(one));
+    CScript two; two.push_back(0xDF); two.push_back(0);
+    BOOST_CHECK(!IsMLSCScript(two));
+    CScript full; full.resize(33); full[0] = 0xDF;
+    BOOST_CHECK(IsMLSCScript(full));
+}
+
+BOOST_AUTO_TEST_CASE(synthetic_not_compressed)
+{
+    CScript syn; syn.resize(33); syn[0] = 0xDE;
+    CompressedScript c;
+    BOOST_CHECK(!CompressScript(syn, c));
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+// ============================================================================
+// ANCHOR_FEE type tests
+// ============================================================================
+
+BOOST_FIXTURE_TEST_SUITE(anchor_fee_type_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(anchor_fee_known)
+{
+    BOOST_CHECK(IsKnownBlockType(static_cast<uint16_t>(RungBlockType::ANCHOR_FEE)));
+    BOOST_CHECK(IsKeyConsumingBlockType(RungBlockType::ANCHOR_FEE));
+    BOOST_CHECK(!IsInvertibleBlockType(RungBlockType::ANCHOR_FEE));
+    BOOST_CHECK_EQUAL(BlockTypeName(RungBlockType::ANCHOR_FEE), "ANCHOR_FEE");
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+// ============================================================================
+// Key-path tweak domain separation tests
+// ============================================================================
+
+BOOST_FIXTURE_TEST_SUITE(keypath_domain_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(ladder_tweak_valid)
+{
+    unsigned char pk_raw[32];
+    CSHA256().Write(reinterpret_cast<const unsigned char*>("key"), 3).Finalize(pk_raw);
+    std::vector<uint8_t> xonly(pk_raw, pk_raw + 32);
+    uint256 mr;
+    CSHA256().Write(reinterpret_cast<const unsigned char*>("mr"), 2).Finalize(mr.data());
+    auto tw = ComputeTweakedConditionsRoot(xonly, mr);
+    // May fail if pk_raw is not a valid x coordinate — that's OK, skip
+    if (tw) {
+        BOOST_CHECK(!tw->first.IsNull());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(ladder_tap_different_tags)
+{
+    // Use a known-valid pubkey from secp256k1 generator point x-coordinate
+    // G.x = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+    std::vector<uint8_t> gx = {
+        0x79, 0xBE, 0x66, 0x7E, 0xF9, 0xDC, 0xBB, 0xAC,
+        0x55, 0xA0, 0x62, 0x95, 0xCE, 0x87, 0x0B, 0x07,
+        0x02, 0x9B, 0xFC, 0xDB, 0x2D, 0xCE, 0x28, 0xD9,
+        0x59, 0xF2, 0x81, 0x5B, 0x16, 0xF8, 0x17, 0x98
+    };
+    uint256 mr;
+    CSHA256().Write(reinterpret_cast<const unsigned char*>("test"), 4).Finalize(mr.data());
+
+    auto ladder = ComputeTweakedConditionsRoot(gx, mr);
+    BOOST_REQUIRE(ladder.has_value());
+
+    XOnlyPubKey xpk;
+    std::memcpy(xpk.begin(), gx.data(), 32);
+    auto tap = xpk.CreateTapTweak(&mr);
+    BOOST_REQUIRE(tap.has_value());
+
+    // Different tags produce different tweaked keys
+    BOOST_CHECK(memcmp(ladder->first.data(), tap->first.begin(), 32) != 0);
+}
+
+BOOST_AUTO_TEST_SUITE_END()
