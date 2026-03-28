@@ -2853,7 +2853,6 @@ static RPCHelpMan signladder()
                                 if (key.SignSchnorrLadder(kp_sighash, sig, &leaf, aux)) {
                                     mtx.vin[input_idx].scriptWitness.stack.clear();
                                     mtx.vin[input_idx].scriptWitness.stack.push_back(sig);
-                                    LogPrintf("signladder: auto key-path spend\n");
 
                                     UniValue result(UniValue::VOBJ);
                                     result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
@@ -2877,17 +2876,6 @@ static RPCHelpMan signladder()
         if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Failed to compute sighash");
         }
-
-        // DEBUG: trace sighash
-        LogPrintf("SIGN SIGHASH DEBUG: sighash=%s nIn=%u conditions_root=%s "
-                  "ladder_ready=%d spent_ready=%d spent_spk=%s spent_amt=%lld "
-                  "tx_version=%d n_vout=%zu\n",
-                  sighash.GetHex(), input_idx,
-                  conditions.conditions_root.has_value() ? conditions.conditions_root->GetHex() : "none",
-                  txdata.m_ladder_ready, txdata.m_spent_outputs_ready,
-                  HexStr(spent_outputs[input_idx].scriptPubKey),
-                  (long long)spent_outputs[input_idx].nValue,
-                  mtx.version, mtx.vout.size());
 
         // 7. Build witness for the target rung via BuildWitnessBlock
         // Convert descriptor keys to JSON block specs and use the existing
@@ -3233,16 +3221,6 @@ static RPCHelpMan createtxmlsc()
         // Compute value_commitment = SHA256(field_values || pubkeys)
         cp_rung.value_commitment = rung::ComputeValueCommitment(rung, rung_pks);
 
-        // DEBUG: trace creation leaf
-        {
-            auto tmpl = rung::SerializeStructuralTemplate(cp_rung);
-            auto leaf = rung::ComputeTxMLSCLeaf(cp_rung);
-            LogPrintf("createtxmlsc DEBUG: template=%s vc=%s leaf=%s coil_type=%u att=%u scheme=%u outidx=%u n_pks=%zu\n",
-                      HexStr(tmpl), cp_rung.value_commitment.GetHex(), leaf.GetHex(),
-                      (unsigned)cp_rung.coil.coil_type, (unsigned)cp_rung.coil.attestation,
-                      (unsigned)cp_rung.coil.scheme, (unsigned)cp_rung.coil.output_index,
-                      rung_pks.size());
-        }
 
         cp_rungs.push_back(std::move(cp_rung));
     }

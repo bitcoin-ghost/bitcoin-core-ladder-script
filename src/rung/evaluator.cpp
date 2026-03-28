@@ -74,23 +74,6 @@ bool LadderSignatureChecker::CheckSchnorrSignature(std::span<const unsigned char
         return false;
     }
 
-    // DEBUG: trace sighash and verification inputs
-    {
-        std::string spent_spk = "none";
-        CAmount spent_amt = 0;
-        if (m_txdata.m_spent_outputs_ready && m_nIn < m_txdata.m_spent_outputs.size()) {
-            spent_spk = HexStr(m_txdata.m_spent_outputs[m_nIn].scriptPubKey);
-            spent_amt = m_txdata.m_spent_outputs[m_nIn].nValue;
-        }
-        LogPrintf("EVAL SIGHASH DEBUG: sighash=%s pubkey=%s hashtype=%u nIn=%u "
-                  "conditions_root=%s ladder_ready=%d spent_ready=%d "
-                  "spent_spk=%s spent_amt=%lld tx_version=%d n_vout=%zu\n",
-                  sighash.GetHex(), HexStr(pubkey_in),
-                  hashtype, m_nIn,
-                  m_conditions.conditions_root.has_value() ? m_conditions.conditions_root->GetHex() : "none",
-                  m_txdata.m_ladder_ready, m_txdata.m_spent_outputs_ready,
-                  spent_spk, (long long)spent_amt, m_tx.version, m_tx.vout.size());
-    }
 
     // Batch mode: defer verification
     if (m_batch && m_batch->active) {
@@ -3954,27 +3937,6 @@ bool VerifyRungTx(const CTransaction& tx,
 
         // Compute leaf (needed for rung evaluation even in SHARED mode)
         uint256 my_leaf = ComputeTxMLSCLeaf(cp_rung);
-
-        // DEBUG: trace leaf computation
-        {
-            auto tmpl = SerializeStructuralTemplate(cp_rung);
-            // Trace the value commitment inputs
-            std::string fields_hex;
-            for (const auto& b : mlsc_proof.revealed_rung.blocks) {
-                for (const auto& f : b.fields) {
-                    fields_hex += HexStr(f.data) + "(" + std::to_string((int)f.type) + ") ";
-                }
-            }
-            std::string pks_hex;
-            for (const auto& pk : rung_pks) {
-                pks_hex += HexStr(pk) + " ";
-            }
-            LogPrintf("TX_MLSC DEBUG: template=%s vc=%s leaf=%s root=%s coil_type=%u att=%u scheme=%u outidx=%u fields=[%s] pks=[%s] n_pks=%zu\n",
-                      HexStr(tmpl), cp_rung.value_commitment.GetHex(), my_leaf.GetHex(), conditions_root.GetHex(),
-                      (unsigned)cp_rung.coil.coil_type, (unsigned)cp_rung.coil.attestation,
-                      (unsigned)cp_rung.coil.scheme, (unsigned)cp_rung.coil.output_index,
-                      fields_hex, pks_hex, rung_pks.size());
-        }
 
         // SHARED proofs: root was validated via cache. Now verify leaf membership —
         // the revealed rung's leaf must exist in the cached tree's leaf set.
