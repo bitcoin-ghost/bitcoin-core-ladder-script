@@ -306,7 +306,10 @@ template<typename Stream, typename TxType>
 void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParams& params)
 {
     const bool fAllowWitness = params.allow_witness;
-    const bool is_tx_mlsc = (tx.version == 4 /* RUNG_TX_VERSION */ && !tx.conditions_root.IsNull());
+    // TX_MLSC format only used when witnesses are allowed (full serialization).
+    // Without witnesses (txid computation), use standard vout format so the
+    // stripped tx is parseable by all tools.
+    const bool is_tx_mlsc = fAllowWitness && (tx.version == 4 /* RUNG_TX_VERSION */ && !tx.conditions_root.IsNull());
 
     s << tx.version;
     unsigned char flags = 0;
