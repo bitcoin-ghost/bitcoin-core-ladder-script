@@ -202,7 +202,7 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - std::vector<CTxOut> vout
  * - uint32_t nLockTime
  *
- * Extended transaction serialization format:
+ * Extended transaction serialization format (SegWit, flags & 1):
  * - uint32_t version
  * - unsigned char dummy = 0x00
  * - unsigned char flags (!= 0)
@@ -211,6 +211,22 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - if (flags & 1):
  *   - CScriptWitness scriptWitness; (deserialized into CTxIn)
  * - uint32_t nLockTime
+ *
+ * TX_MLSC format (Ladder Script, flags == 0x02):
+ * - uint32_t version (= 4, RUNG_TX_VERSION)
+ * - unsigned char dummy = 0x00
+ * - unsigned char flags = 0x02
+ * - std::vector<CTxIn> vin
+ * - uint256 conditions_root (32 bytes — shared across all outputs)
+ * - CompactSize n_outputs
+ * - int64_t nValue[] (8 bytes per output — value only, no scriptPubKey)
+ * - per-input witness stacks
+ * - CompactSize aggregated_sig_len
+ * - unsigned char aggregated_sig[]
+ * - uint32_t nLockTime
+ *
+ * On deserialization, TX_MLSC outputs are inflated to CTxOut(value, 0xDF + root)
+ * for compatibility with all existing code that accesses tx.vout[i].scriptPubKey.
  */
 template<typename Stream, typename TxType>
 void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& params)
@@ -221,6 +237,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     unsigned char flags = 0;
     tx.vin.clear();
     tx.vout.clear();
+    tx.conditions_root.SetNull();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
     s >> tx.vin;
     if (tx.vin.size() == 0 && fAllowWitness) {
@@ -228,14 +245,29 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         s >> flags;
         if (flags != 0) {
             s >> tx.vin;
-            s >> tx.vout;
+            if (flags == 0x02 && tx.version == 4 /* RUNG_TX_VERSION */) {
+                /* TX_MLSC format: conditions_root + value-only outputs */
+                s >> tx.conditions_root;
+                uint64_t n_outputs = ReadCompactSize(s);
+                tx.vout.resize(n_outputs);
+                /* Build MLSC scriptPubKey for UTXO inflation */
+                CScript mlsc_spk;
+                mlsc_spk.push_back(0xDF);
+                mlsc_spk.insert(mlsc_spk.end(), tx.conditions_root.begin(), tx.conditions_root.end());
+                for (size_t i = 0; i < n_outputs; ++i) {
+                    s >> tx.vout[i].nValue;
+                    tx.vout[i].scriptPubKey = mlsc_spk;
+                }
+            } else {
+                s >> tx.vout;
+            }
         }
     } else {
         /* We read a non-empty vin. Assume a normal vout follows. */
         s >> tx.vout;
     }
     if ((flags & 1) && fAllowWitness) {
-        /* The witness flag is present, and we support witnesses. */
+        /* The witness flag is present (0x01), and we support witnesses. */
         flags ^= 1;
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness.stack;
@@ -243,6 +275,19 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         if (!tx.HasWitness()) {
             /* It's illegal to encode witnesses when all witness stacks are empty. */
             throw std::ios_base::failure("Superfluous witness record");
+        }
+    }
+    if (flags == 0x02) {
+        /* TX_MLSC: read per-input witnesses + aggregated signature */
+        flags = 0;
+        for (size_t i = 0; i < tx.vin.size(); i++) {
+            s >> tx.vin[i].scriptWitness.stack;
+        }
+        /* Read aggregated signature (half-aggregation) */
+        uint64_t agg_len = ReadCompactSize(s);
+        tx.aggregated_sig.resize(agg_len);
+        if (agg_len > 0) {
+            s.read(MakeWritableByteSpan(tx.aggregated_sig));
         }
     }
     if (flags) {
@@ -256,13 +301,15 @@ template<typename Stream, typename TxType>
 void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParams& params)
 {
     const bool fAllowWitness = params.allow_witness;
+    const bool is_tx_mlsc = (tx.version == 4 /* RUNG_TX_VERSION */ && !tx.conditions_root.IsNull());
 
     s << tx.version;
     unsigned char flags = 0;
     // Consistency check
     if (fAllowWitness) {
-        /* Check whether witnesses need to be serialized. */
-        if (tx.HasWitness()) {
+        if (is_tx_mlsc) {
+            flags = 0x02;
+        } else if (tx.HasWitness()) {
             flags |= 1;
         }
     }
@@ -273,8 +320,26 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
         s << flags;
     }
     s << tx.vin;
-    s << tx.vout;
-    if (flags & 1) {
+    if (is_tx_mlsc) {
+        /* TX_MLSC: write conditions_root + value-only outputs */
+        s << tx.conditions_root;
+        WriteCompactSize(s, tx.vout.size());
+        for (const auto& out : tx.vout) {
+            s << out.nValue;
+        }
+    } else {
+        s << tx.vout;
+    }
+    if (flags == 0x02) {
+        /* TX_MLSC: per-input witnesses + aggregated sig */
+        for (size_t i = 0; i < tx.vin.size(); i++) {
+            s << tx.vin[i].scriptWitness.stack;
+        }
+        WriteCompactSize(s, tx.aggregated_sig.size());
+        if (!tx.aggregated_sig.empty()) {
+            s.write(MakeByteSpan(tx.aggregated_sig));
+        }
+    } else if (flags & 1) {
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s << tx.vin[i].scriptWitness.stack;
         }
@@ -298,6 +363,11 @@ public:
     // Default transaction version.
     static const uint32_t CURRENT_VERSION{2};
 
+    // Ladder Script: Version 4 transactions use typed ladder witnesses
+    // instead of raw script. Every witness byte must conform to a typed field.
+    // (v4, not v3 — BIP 431 claims v3 for TRUC)
+    static const uint32_t RUNG_TX_VERSION{4};
+
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
     // actually immutable; deserialization and assignment are implemented,
@@ -307,6 +377,10 @@ public:
     const std::vector<CTxOut> vout;
     const uint32_t version;
     const uint32_t nLockTime;
+
+    // Ladder Script: shared conditions root (opaque commitment, validated at spend time).
+    const uint256 conditions_root;
+    const std::vector<uint8_t> aggregated_sig; //!< Half-aggregated s value (32 bytes if present)
 
 private:
     /** Memory only. */
@@ -380,6 +454,12 @@ struct CMutableTransaction
     std::vector<CTxOut> vout;
     uint32_t version;
     uint32_t nLockTime;
+
+    // Ladder Script: shared conditions root and aggregated signature.
+    // On wire: conditions_root between inputs and outputs, aggregated_sig after witnesses.
+    // In memory: vout inflated to CTxOut(value, 0xDF + conditions_root) for compatibility.
+    uint256 conditions_root;
+    std::vector<uint8_t> aggregated_sig;
 
     explicit CMutableTransaction();
     explicit CMutableTransaction(const CTransaction& tx);

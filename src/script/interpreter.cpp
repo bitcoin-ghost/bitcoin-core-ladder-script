@@ -1444,6 +1444,20 @@ void PrecomputedTransactionData::Init(const T& txTo, std::vector<CTxOut>&& spent
         m_spent_scripts_single_hash = GetSpentScriptsSHA256(m_spent_outputs);
         m_bip341_taproot_ready = true;
     }
+
+    // Ladder Script: v4 RUNG_TX transactions reuse the same precomputed hashes
+    // (prevouts, sequences, outputs, spent amounts) but with a different tagged
+    // hash (LadderSighash). Precompute if this is a v4 tx with spent outputs.
+    if (txTo.version == CTransaction::RUNG_TX_VERSION && m_spent_outputs_ready) {
+        if (!uses_bip143_segwit && !uses_bip341_taproot) {
+            // Hashes not yet computed — compute them now for ladder
+            m_prevouts_single_hash = GetPrevoutsSHA256(txTo);
+            m_sequences_single_hash = GetSequencesSHA256(txTo);
+            m_outputs_single_hash = GetOutputsSHA256(txTo);
+        }
+        m_spent_amounts_single_hash = GetSpentAmountsSHA256(m_spent_outputs);
+        m_ladder_ready = true;
+    }
 }
 
 template <class T>

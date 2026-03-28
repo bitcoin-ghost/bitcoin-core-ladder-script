@@ -54,6 +54,7 @@ add_dependencies(bitcoin_clientversion generate_build_info)
 
 add_subdirectory(crypto)
 add_subdirectory(util)
+add_subdirectory(rung)
 if(ENABLE_IPC)
   add_subdirectory(ipc)
 endif()
@@ -276,6 +277,7 @@ target_link_libraries(bitcoin_node
     core_interface
     bitcoin_common
     bitcoin_util
+    bitcoin_rung
     $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
     leveldb
     minisketch

@@ -39,6 +39,8 @@
 #include <policy/truc_policy.h>
 #include <pow.h>
 #include <primitives/block.h>
+#include <rung/evaluator.h>
+#include <rung/conditions.h>
 #include <primitives/transaction.h>
 #include <random.h>
 #include <script/script.h>
@@ -2098,6 +2100,20 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
     const CScript &scriptSig = ptxTo->vin[nIn].scriptSig;
     const CScriptWitness *witness = &ptxTo->vin[nIn].scriptWitness;
     ScriptError error{SCRIPT_ERR_UNKNOWN_ERROR};
+
+    // Ladder Script: Route v4 RUNG_TX transactions to ladder witness evaluator.
+    // Only MLSC (0xDF) outputs use the ladder evaluator. Standard inputs (P2WPKH,
+    // P2TR, etc.) in v4 txs fall through to VerifyScript for bootstrap funding.
+    if (ptxTo->version == CTransaction::RUNG_TX_VERSION && rung::IsMLSCScript(m_tx_out.scriptPubKey)) {
+        CachingTransactionSignatureChecker checker(ptxTo, nIn, m_tx_out.nValue, cacheStore, *m_signature_cache, *txdata);
+        if (rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height)) {
+            return std::nullopt;
+        } else {
+            auto debug_str = strprintf("input %i of %s (wtxid %s), spending %s:%i", nIn, ptxTo->GetHash().ToString(), ptxTo->GetWitnessHash().ToString(), ptxTo->vin[nIn].prevout.hash.ToString(), ptxTo->vin[nIn].prevout.n);
+            return std::make_pair(error, std::move(debug_str));
+        }
+    }
+
     if (VerifyScript(scriptSig, m_tx_out.scriptPubKey, witness, nFlags, CachingTransactionSignatureChecker(ptxTo, nIn, m_tx_out.nValue, cacheStore, *m_signature_cache, *txdata), &error)) {
         return std::nullopt;
     } else {
