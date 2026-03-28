@@ -52,8 +52,25 @@ static bool IsToPubKey(const CScript& script, CPubKey &pubkey)
     return false;
 }
 
+static bool IsToMLSC(const CScript& script, uint256& root)
+{
+    if (script.size() == 33 && script[0] == 0xDF) {
+        memcpy(root.data(), &script[1], 32);
+        return true;
+    }
+    return false;
+}
+
 bool CompressScript(const CScript& script, CompressedScript& out)
 {
+    // MLSC (0xDF + 32-byte conditions root) — compressed as type 0x06
+    uint256 mlsc_root;
+    if (IsToMLSC(script, mlsc_root)) {
+        out.resize(33);
+        out[0] = 0x06;
+        memcpy(&out[1], mlsc_root.data(), 32);
+        return true;
+    }
     CKeyID keyID;
     if (IsToKeyID(script, keyID)) {
         out.resize(21);
@@ -89,6 +106,8 @@ unsigned int GetSpecialScriptSize(unsigned int nSize)
         return 20;
     if (nSize == 2 || nSize == 3 || nSize == 4 || nSize == 5)
         return 32;
+    if (nSize == 6)
+        return 32; // MLSC conditions root
     return 0;
 }
 
@@ -120,7 +139,7 @@ bool DecompressScript(CScript& script, unsigned int nSize, const CompressedScrip
         script[34] = OP_CHECKSIG;
         return true;
     case 0x04:
-    case 0x05:
+    case 0x05: {
         unsigned char vch[33] = {};
         vch[0] = nSize - 2;
         memcpy(&vch[1], in.data(), 32);
@@ -133,6 +152,14 @@ bool DecompressScript(CScript& script, unsigned int nSize, const CompressedScrip
         memcpy(&script[1], pubkey.begin(), 65);
         script[66] = OP_CHECKSIG;
         return true;
+    }
+    case 0x06: {
+        // MLSC: 0xDF + 32-byte conditions root
+        script.resize(33);
+        script[0] = 0xDF;
+        memcpy(&script[1], in.data(), 32);
+        return true;
+    }
     }
     return false;
 }
