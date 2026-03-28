@@ -9,6 +9,7 @@
 
 #include <chainparams.h>
 #include <consensus/validation.h>
+#include <rung/conditions.h>
 #include <core_io.h>
 #include <kernel/mempool_entry.h>
 #include <net_processing.h>
@@ -82,6 +83,8 @@ static RPCHelpMan sendrawtransaction()
             }
 
             for (const auto& out : mtx.vout) {
+                // Ladder Script: MLSC outputs (0xDF prefix) use non-standard opcodes but are spendable
+                if (rung::IsLadderScript(out.scriptPubKey)) continue;
                 if((out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) && out.nValue > max_burn_amount) {
                     throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
                 }
@@ -1010,6 +1013,7 @@ static RPCHelpMan submitpackage()
                 }
 
                 for (const auto& out : mtx.vout) {
+                    if (rung::IsLadderScript(out.scriptPubKey)) continue;
                     if((out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) && out.nValue > max_burn_amount) {
                         throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
                     }

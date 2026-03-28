@@ -230,6 +230,9 @@ bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
         const CTxOut& prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
 
+        // Ladder Script: MLSC inputs are validated by the ladder evaluator, not standard script policy
+        if (rung::IsLadderScript(prev.scriptPubKey)) continue;
+
         std::vector<std::vector<unsigned char> > vSolutions;
         TxoutType whichType = Solver(prev.scriptPubKey, vSolutions);
         if (whichType == TxoutType::NONSTANDARD || whichType == TxoutType::WITNESS_UNKNOWN) {
@@ -268,6 +271,9 @@ bool IsWitnessStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
             continue;
 
         const CTxOut &prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
+
+        // Ladder Script: MLSC witness validated by the ladder evaluator
+        if (rung::IsLadderScript(prev.scriptPubKey)) continue;
 
         // get the scriptPubKey corresponding to this input:
         CScript prevScript = prev.scriptPubKey;
