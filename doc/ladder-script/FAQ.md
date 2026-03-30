@@ -47,7 +47,7 @@ The transaction version for Ladder Script transactions is **4** (`RUNG_TX_VERSIO
 
 ## Q3: What are the block type families?
 
-There are **10 families** containing **61 block types**.
+There are **10 families** containing **62 block types**.
 
 | # | Family | Range | Block types | Count |
 |---|--------|-------|-------------|-------|
@@ -58,7 +58,7 @@ There are **10 families** containing **61 block types**.
 | 5 | **Recursion** | `0x0400`-`0x04FF` | RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT, RECURSE_SPLIT, RECURSE_DECAY | 6 |
 | 6 | **Anchor/L2** | `0x0500`-`0x05FF` | ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE, ANCHOR_SEAL, ANCHOR_ORACLE, DATA_RETURN | 7 |
 | 7 | **PLC** | `0x0600`-`0x06FF` | HYSTERESIS_FEE, HYSTERESIS_VALUE, TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET, COUNTER_UP, COMPARE, SEQUENCER, ONE_SHOT, RATE_LIMIT, COSIGN | 14 |
-| 8 | **Compound** | `0x0700`-`0x07FF` | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG | 6 |
+| 8 | **Compound** | `0x0700`-`0x07FF` | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG, ANCHOR_FEE | 7 |
 | 9 | **Governance** | `0x0800`-`0x08FF` | EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, RELATIVE_VALUE, ACCUMULATOR, OUTPUT_CHECK | 7 |
 | 10 | **Legacy** | `0x0900`-`0x09FF` | P2PK_LEGACY, P2PKH_LEGACY, P2SH_LEGACY, P2WPKH_LEGACY, P2WSH_LEGACY, P2TR_LEGACY, P2TR_SCRIPT_LEGACY | 7 |
 
@@ -177,7 +177,7 @@ Interior nodes use `TaggedHash("LadderInternal", min(a,b) || max(a,b))` with
 sorted children (lexicographic order). The tree is padded to the next power of 2
 with `MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "")`.
 
-The transaction serialization uses flag byte `0x02` to signal the TX_MLSC format.
+The RUNG_TX wire format uses flag byte `0x02`; TX_MLSC defines the conditions commitment scheme.
 
 At spend time, the witness carries an `MLSCProof` containing:
 - `total_rungs`, `total_relays`, `rung_index`
@@ -247,7 +247,7 @@ via a 128-entry lookup table (`MICRO_HEADER_TABLE`):
 - `0x80`: Escape byte, followed by `uint16_t LE` block type (3 bytes total, not inverted)
 - `0x81`: Escape byte, followed by `uint16_t LE` block type (3 bytes total, inverted)
 
-All 61 block types have assigned micro-header slots (slots 0x00 through
+All 62 block types have assigned micro-header slots (slots 0x00 through
 0x3E). Slots 0x07 and 0x08 are reserved.
 
 ### Implicit field layouts
@@ -783,14 +783,14 @@ slot assignment:
 - Slots 0x0D-0x12: Recursion (6 types)
 - Slots 0x13-0x18: Anchor (6 types, excluding DATA_RETURN)
 - Slots 0x19-0x26: PLC (14 types)
-- Slots 0x27-0x2C: Compound (6 types)
-- Slots 0x2D-0x32: Governance (6 types, excluding OUTPUT_CHECK)
-- Slots 0x33-0x34: Late-added Signature (MUSIG_THRESHOLD, KEY_REF_SIG)
-- Slots 0x35-0x3B: Legacy (7 types)
-- Slot 0x3C: DATA_RETURN
-- Slot 0x3D: HASH_GUARDED
-- Slot 0x3E: OUTPUT_CHECK
-- Slots 0x3F-0x7F: Unused (65 slots reserved for future block types)
+- Slots 0x27-0x2D: Compound (7 types)
+- Slots 0x2E-0x33: Governance (6 types, excluding OUTPUT_CHECK)
+- Slots 0x34-0x35: Late-added Signature (MUSIG_THRESHOLD, KEY_REF_SIG)
+- Slots 0x36-0x3C: Legacy (7 types)
+- Slot 0x3D: DATA_RETURN
+- Slot 0x3E: HASH_GUARDED
+- Slot 0x3F: OUTPUT_CHECK
+- Slots 0x40-0x7F: Unused (64 slots reserved for future block types)
 
 ### Implicit field layouts
 

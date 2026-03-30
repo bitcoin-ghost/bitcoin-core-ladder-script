@@ -1,6 +1,6 @@
 # Block Library
 
-Ladder Script defines 61 block types across 10 families. Each block type has a
+Ladder Script defines 62 block types across 10 families. Each block type has a
 uint16_t type code encoded little-endian on the wire.
 
 ## Legend
@@ -44,7 +44,7 @@ uint16_t type code encoded little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0301 | CTV | yes | no | 0 | HASH256(32) | OP_CHECKTEMPLATEVERIFY covenant |
-| 0x0302 | VAULT_LOCK | yes | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys |
+| 0x0302 | VAULT_LOCK | no | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys |
 | 0x0303 | AMOUNT_LOCK | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Output amount range constraint |
 
 ## Recursion Family (0x0400 - 0x04FF)
@@ -99,6 +99,7 @@ uint16_t type code encoded little-endian on the wire.
 | 0x0704 | PTLC | no | yes | 2 | NUMERIC(csv) | Adaptor sig + CSV (point-locked channel) |
 | 0x0705 | CLTV_SIG | no | yes | 1 | SCHEME(1), NUMERIC(cltv) | SIG + CLTV in one block |
 | 0x0706 | TIMELOCKED_MULTISIG | no | yes | var | NUMERIC(M), NUMERIC(csv) | MULTISIG + CSV in one block |
+| 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning) |
 
 ## Governance Family (0x0800 - 0x08FF)
 
@@ -130,10 +131,10 @@ uint16_t type code encoded little-endian on the wire.
   (0x81 escape header). Key-consuming blocks are never invertible to prevent garbage-pubkey
   data embedding. The invertible set is an explicit allowlist; new block types default to
   non-invertible (fail-closed).
-- **Key-consuming** blocks have their pubkeys folded into the TX_MLSC Merkle leaf via
+- **Key-consuming** blocks have their pubkeys folded into the MLSC Merkle leaf via
   `merkle_pub_key`. Pubkeys appear in the witness but not in the conditions fields.
-  In the TX_MLSC format, each output is 8 bytes (value only) with one shared
-  conditions_root (0xDF prefix) per transaction.
+  In a RUNG_TX, each output is 8 bytes (value only) with one shared
+  conditions_root (MLSC `0xDF` prefix) per transaction.
 - **PK#** = `var` means the pubkey count is determined at runtime by counting PUBKEY fields
   (MULTISIG, TIMELOCKED_MULTISIG). `0` for key-consuming blocks like P2PKH_LEGACY means the
   pubkey is in the witness but hashed to HASH160 in conditions (not intercepted to Merkle leaf).

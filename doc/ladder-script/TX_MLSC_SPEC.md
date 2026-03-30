@@ -7,19 +7,23 @@
 
 ## Overview
 
-TX_MLSC is a transaction format for Bitcoin that uses a single shared
-`conditions_root` per transaction instead of per-output scriptPubKeys.
-Each output is just a value (8 bytes on the wire). Each rung's coil
-declares which output it governs — the output-to-rung binding is
-cryptographic (committed in the Merkle tree).
+TX_MLSC (Transaction-Level Merkelised Ladder Script Conditions) is a
+conditions commitment scheme where a single shared `conditions_root`
+covers all outputs in a transaction, replacing per-output scriptPubKeys.
+Each rung's coil declares which output it governs — the output-to-rung
+binding is cryptographic (committed in the Merkle tree).
 
 Conditions are revealed only at spend time via Merkle proofs. The
 `conditions_root` is an opaque 32-byte commitment — validation happens
 exclusively at spend time.
 
+TX_MLSC is carried inside a RUNG_TX (version 4) transaction.
+
 ---
 
-## Transaction format (v4 RUNG_TX with TX_MLSC)
+## RUNG_TX wire format (v4)
+
+The RUNG_TX transaction format carries TX_MLSC conditions:
 
 ```
 nVersion:           int32 (= 4, RUNG_TX_VERSION)
@@ -36,10 +40,10 @@ aggregated_sig:     half-aggregated Schnorr s value (32 bytes if present)
 nLockTime:          uint32
 ```
 
-Flag byte 0x02 signals TX_MLSC format. Flag 0x01 is SegWit. Flag 0x03
+Flag byte 0x02 signals RUNG_TX format. Flag 0x01 is SegWit. Flag 0x03
 (combined) is rejected.
 
-### Output format
+### Output format (TX_MLSC)
 
 ```
 nValue:    int64    (8 bytes, little-endian satoshi amount)
@@ -49,8 +53,10 @@ nValue:    int64    (8 bytes, little-endian satoshi amount)
 
 Consensus: nValue >= MIN_RUNG_OUTPUT_VALUE (546 sats) for non-DATA_RETURN.
 
-On deserialization, outputs are inflated to CTxOut(value, 0xDF + root)
-for compatibility with all existing code that accesses tx.vout[i].scriptPubKey.
+On deserialization, outputs are inflated to CTxOut(value, MLSC scriptPubKey)
+where the MLSC scriptPubKey is `0xDF + conditions_root` (33 bytes). This
+provides compatibility with all existing code that accesses
+tx.vout[i].scriptPubKey.
 
 ### DATA_RETURN outputs
 
@@ -70,17 +76,17 @@ Maximum 1 DATA_RETURN output per transaction.
 
 ### Deduplication via synthetic root entry
 
-TX_MLSC outputs share the same conditions_root. To avoid storing 33 bytes
-of identical scriptPubKey per output, a synthetic UTXO entry stores the
-root once per transaction:
+RUNG_TX outputs share the same conditions_root. To avoid storing the full
+33-byte MLSC scriptPubKey (`0xDF + root`) per output, a synthetic UTXO
+entry stores the root once per transaction:
 
 ```
 Synthetic entry: (txid, 0xFFFFFFFF) → Coin(value=0, scriptPubKey=0xDF+root)
 Real outputs:    (txid, 0..N)       → Coin(value, scriptPubKey=0xDF) [1 byte, compact]
 ```
 
-At spend time, compact MLSC coins (1-byte scriptPubKey) are inflated by
-looking up the synthetic root entry from the UTXO cache.
+At spend time, compact MLSC coins (1-byte `0xDF` scriptPubKey) are
+inflated by looking up the synthetic root entry from the UTXO cache.
 
 ### UTXO cost comparison
 
@@ -95,7 +101,7 @@ looking up the synthetic root entry from the UTXO cache.
 
 ## Spending
 
-When spending output i from a TX_MLSC transaction:
+When spending output i from a RUNG_TX transaction:
 
 ### Spending paths
 

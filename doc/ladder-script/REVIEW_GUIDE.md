@@ -1,7 +1,7 @@
 # Ladder Script Review Guide
 
 This guide walks code reviewers through the Ladder Script implementation. The system
-comprises 61 block types across 10 families, implemented in
+comprises 62 block types across 10 families, implemented in
 22 source files under `src/rung/`.
 
 ## File-by-File Walkthrough
@@ -10,12 +10,12 @@ comprises 61 block types across 10 families, implemented in
 The largest header. Defines all block types (`RungBlockType` enum), all data types
 (`RungDataType` enum), structural types (`RungCoil`, `RungField`, `RungBlock`, `Rung`,
 `Relay`, `LadderWitness`, `WitnessReference`), and metadata functions:
-- `IsKnownBlockType()` — allowlist of 61 types (codes 0x0201/0x0202 reserved, not known)
+- `IsKnownBlockType()` — allowlist of 62 types (codes 0x0201/0x0202 reserved, not known)
 - `IsInvertibleBlockType()` — explicit allowlist; key-consuming blocks excluded
 - `IsKeyConsumingBlockType()` — blocks whose pubkeys fold into Merkle leaves
 - `PubkeyCountForBlock()` — fixed or variable pubkey count per block type
 - `IsDataEmbeddingType()` — high-bandwidth types blocked in layout-less blocks
-- Micro-header table (128 slots, 61 assigned, 2 reserved as 0xFFFF)
+- Micro-header table (128 slots, 63 assigned, 2 reserved as 0xFFFF)
 - Implicit field layouts (per block type, per context)
 - `BlockDescriptor` table and `LookupBlockDescriptor()`
 - `VerifyImplicitLayoutPairing()` — runtime init check for layout consistency
@@ -33,7 +33,7 @@ Core evaluation engine. Key review points:
 - `ValidateRungOutputs()`: consensus rule that every output must be TX_MLSC (0xDF); rejects raw OP_RETURN, legacy scriptPubKey types, and old per-output MLSC (0xC2). Validates creation proof in witness at block acceptance.
 - `BatchVerifier`: collects Schnorr entries during evaluation; `Verify()` batch-checks all at once
 - `LadderSignatureChecker`: wraps `BaseSignatureChecker`; dispatches to `SignatureHashLadder` for `SigVersion::LADDER`
-- `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes SATISFIED
+- `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes ERROR
 
 **What to look for:** Fail-closed behavior for unknown types. Correct relay evaluation
 order (index 0 first, forward-only). Batch verifier fallback on failure.
@@ -46,7 +46,7 @@ conditions hash (unless ANYPREVOUTANYSCRIPT).
 - ANYPREVOUTANYSCRIPT (0xC0): skips prevout and conditions
 
 **What to look for:** MLSC outputs use `conditions_root` directly as the conditions hash
-(no re-serialization). Legacy 0xC1 falls back to SHA256 of serialized conditions.
+(no re-serialization). Legacy 0xC1 falls back to SHA256 of serialized conditions. (removed — all outputs use MLSC 0xDF)
 
 ### serialize.h / serialize.cpp
 Wire format. Key constants: MAX_RUNGS=16, MAX_BLOCKS_PER_RUNG=8, MAX_FIELDS_PER_BLOCK=16,
@@ -63,7 +63,7 @@ layout when layout exists). DATA type restricted to DATA_RETURN. ACCUMULATOR whi
 from IsDataEmbeddingType check.
 
 ### conditions.h / conditions.cpp
-TX_MLSC system. TX_MLSC prefix 0xDF (replaces per-output 0xC2). Inline conditions 0xC1 removed (stubs return false). Creation proof validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. Each rung's coil has `output_index` declaring which output it governs.
+MLSC conditions system. MLSC prefix `0xDF` (replaces per-output `0xC2`). Inline conditions 0xC1 removed (stubs return false). Creation proof validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. Each rung's coil has `output_index` declaring which output it governs.
 - `IsConditionDataType()`: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA allowed; PUBKEY_COMMIT removed
 - Merkle tree: sorted interior hashing, `MLSC_EMPTY_LEAF` padding
 - Leaf order: rungs, then relays, then coil
@@ -88,7 +88,7 @@ validation, then checks all outputs are MLSC. Classification functions: `IsBaseB
 Post-quantum signature verification for FALCON-512, FALCON-1024, Dilithium3, SPHINCS+.
 
 ### rpc.cpp
-12 RPC commands: decoderung, createrung, validateladder, createtxmlsc (replaces
+15 RPC commands: decoderung, createrung, validateladder, createtxmlsc (replaces
 createrungtx), signladder (replaces signrungtx, with funding tx auto-lookup),
 computectvhash, generatepqkeypair, pqpubkeycommit, extractadaptorsecret,
 verifyadaptorpresig, parseladder, formatladder.
@@ -112,7 +112,7 @@ whitelist (CTV, TAGGED_HASH, ACCUMULATOR, COSIGN, OUTPUT_CHECK).
 
 ## TLA+ Formal Specifications
 
-10 specs in `spec/` with 80+ checked properties (6.14M states verified, zero errors):
+21 specs in `spec/` with 80+ checked properties (6.14M states verified, zero errors):
 
 | Spec | Focus |
 |------|-------|
