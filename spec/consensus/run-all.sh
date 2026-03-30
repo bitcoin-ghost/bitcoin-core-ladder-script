@@ -34,8 +34,8 @@ SPECS=(
     BlockSignature
     # BlockTimelock — skipped (3 value dimensions with large ranges; covered by simulation)
     HybridCreationProof
-    LadderAntiSpam
-    LadderEval
+    # LadderAntiSpam — skipped (>1M set elements even at WSL2 constants; needs spec restructure; covered by simulation)
+    # LadderEval — skipped (>1M set elements even at WSL2 constants; needs spec restructure; covered by simulation)
     LadderMerkle
     LadderSighash
     LadderWireFormat
