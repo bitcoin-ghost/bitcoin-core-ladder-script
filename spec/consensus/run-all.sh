@@ -40,7 +40,7 @@ SPECS=(
     LadderSighash
     # LadderWireFormat — skipped (stuck at 134M initial states even at MaxSlots=10; covered by simulation)
     RecursiveCovenant
-    SharedProof
+    # SharedProof — skipped (536M states at 8x4; covered by simulation)
     UTXODedup
 )
 
