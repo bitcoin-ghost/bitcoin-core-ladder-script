@@ -239,7 +239,7 @@ Inv_LayoutBlockAccepted ==
      /\ tx.block1.block_type = "HAS_LAYOUT"
      /\ tx.block1.context = "CONDITIONS"
      /\ \A i \in DOMAIN tx.block1.fields : tx.block1.fields[i] \in ConditionTypes
-     /\ \A i \in DOMAIN tx.block1.fields : tx.block1.fields[i] /= "DATA")
+     /\ \A j \in DOMAIN tx.block1.fields : tx.block1.fields[j] /= "DATA")
     => blockResult1 = "ACCEPTED"
 
 \* I5: Block NOT matching layout with HASH256 -> rejected (data embedding blocked)
@@ -258,8 +258,8 @@ Inv_AccumulatorAccepted ==
      /\ tx.block1.block_type = "ACCUMULATOR"
      /\ Cardinality(DOMAIN tx.block1.fields) <= MaxAccumulatorFields
      /\ ~(tx.block1.context = "CONDITIONS"
-          /\ \E i \in DOMAIN tx.block1.fields : tx.block1.fields[i] \in WitnessOnlyTypes)
-     /\ \A i \in DOMAIN tx.block1.fields : tx.block1.fields[i] /= "DATA")
+          /\ \E k \in DOMAIN tx.block1.fields : tx.block1.fields[k] \in WitnessOnlyTypes)
+     /\ \A m \in DOMAIN tx.block1.fields : tx.block1.fields[m] /= "DATA")
     => blockResult1 = "ACCEPTED"
 
 \* I7: Valid implicit layout block always accepted
@@ -267,9 +267,9 @@ Inv_ValidLayoutAlwaysAccepted ==
     (phase = "done"
      /\ tx.block1.block_type \in { "HAS_LAYOUT", "DATA_RETURN" }
      /\ ~(tx.block1.context = "CONDITIONS"
-          /\ \E i \in DOMAIN tx.block1.fields : tx.block1.fields[i] \in WitnessOnlyTypes)
+          /\ \E n \in DOMAIN tx.block1.fields : tx.block1.fields[n] \in WitnessOnlyTypes)
      /\ ~(tx.block1.block_type /= "DATA_RETURN"
-          /\ \E i \in DOMAIN tx.block1.fields : tx.block1.fields[i] = "DATA"))
+          /\ \E p \in DOMAIN tx.block1.fields : tx.block1.fields[p] = "DATA"))
     => blockResult1 = "ACCEPTED"
 
 \* I8: Embeddable surface bounded (total embeddable bytes limited)
