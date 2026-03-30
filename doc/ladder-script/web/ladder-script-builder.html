@@ -1708,7 +1708,7 @@ async function rpcCall(method, params = []) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Basic ' + btoa(user + ':' + pass),
+      'Authorisation': 'Basic ' + btoa(user + ':' + pass),
     },
     body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
   });

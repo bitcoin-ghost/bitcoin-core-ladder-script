@@ -198,7 +198,7 @@ RUNG_TX wire format with TX_MLSC conditions:
 | Max blocks per rung | 8 |
 | Max fields per block | 16 |
 | Max ladder witness size | 100,000 bytes |
-| Max coil address size | 42 bytes |
+| Max coil address size | 32 bytes |
 
 ---
 
@@ -218,9 +218,9 @@ RUNG_TX wire format with TX_MLSC conditions:
 | `verifyadaptorpresig` | Verify an adaptor pre-signature |
 | `parseladder` | Parse descriptor string to conditions |
 | `formatladder` | Format conditions as descriptor string |
-| `decodetxmlsc` | Decode a TX_MLSC transaction |
-| `validaterungtx` | Validate a rung transaction |
-| `getladdertxinfo` | Get ladder transaction info |
+| `createrungtx` | Create unsigned v4 transaction (legacy, superseded by `createtxmlsc`) |
+| `signrungtx` | Sign v4 tx inputs (legacy, superseded by `signladder`) |
+| `computemutation` | Compute mutated conditions root for recursive covenants |
 
 ---
 

@@ -7244,7 +7244,7 @@ const EXAMPLES = [
   },
   {
     title: 'ONE-SHOT TRIGGER + LATCH',
-    desc: 'Single-use authorization: ONE_SHOT fires once, latching the output. The latch can only be reset by a separate key.\n\nFIRE: Key signs + ONE_SHOT triggers (can only fire once).\nEXEC: Second key executes the latched action.\nRESET: Admin key resets the latch after a 6-block delay.',
+    desc: 'Single-use authorisation: ONE_SHOT fires once, latching the output. The latch can only be reset by a separate key.\n\nFIRE: Key signs + ONE_SHOT triggers (can only fire once).\nEXEC: Second key executes the latched action.\nRESET: Admin key resets the latch after a 6-block delay.',
     tags: [['ONE_SHOT', 'plc'], ['LATCH_S', 'plc'], ['LATCH_R', 'plc'], ['SIG', 'sig']],
     rungs: [
       { label: 'FIRE', blocks: [
@@ -7517,7 +7517,7 @@ const EXAMPLES = [
 
   {
     title: 'HASH_SIG ATOMIC CLAIM',
-    desc: 'Preimage reveal + signature in one compound block. Ideal for atomic swap claim paths where you need hash verification and authorization together.\n\nCLAIM: HASH_SIG compound --reveal preimage matching hash commitment and sign in one block.\nREFUND: CSV enforces 432-block delay, then sender SIG can reclaim funds.',
+    desc: 'Preimage reveal + signature in one compound block. Ideal for atomic swap claim paths where you need hash verification and authorisation together.\n\nCLAIM: HASH_SIG compound --reveal preimage matching hash commitment and sign in one block.\nREFUND: CSV enforces 432-block delay, then sender SIG can reclaim funds.',
     tags: [['HASH_SIG', 'compound'], ['CSV', 'time'], ['SIG', 'sig']],
     rungs: [
       { label: 'CLAIM', blocks: [
@@ -7607,7 +7607,7 @@ const EXAMPLES = [
 
   {
     title: 'TIMER WATCHDOG',
-    desc: 'Continuous timer requires N consecutive blocks of activity. Off-delay timer holds authorization after trigger expires. Tagged hash proves domain-separated attestation.\n\nACTIVE: TIMER_CONTINUOUS (inverted --must NOT have reached 144 blocks yet) + SIG + RECURSE_MODIFIED increments the counter each spend, keeping the watchdog alive.\nHELD: TIMER_OFF_DELAY holds authorization for 72 blocks after the trigger expires --grace period.\nEMERG: CSV 1008-block timeout + SIG --if watchdog is never fed, emergency key sweeps.',
+    desc: 'Continuous timer requires N consecutive blocks of activity. Off-delay timer holds authorisation after trigger expires. Tagged hash proves domain-separated attestation.\n\nACTIVE: TIMER_CONTINUOUS (inverted --must NOT have reached 144 blocks yet) + SIG + RECURSE_MODIFIED increments the counter each spend, keeping the watchdog alive.\nHELD: TIMER_OFF_DELAY holds authorisation for 72 blocks after the trigger expires --grace period.\nEMERG: CSV 1008-block timeout + SIG --if watchdog is never fed, emergency key sweeps.',
     tags: [['TMR_CONT', 'plc'], ['TMR_OFF', 'plc'], ['TAGGED', 'hash'], ['SIG', 'sig']],
     rungs: [
       { label: 'ACTIVE', blocks: [
@@ -12081,7 +12081,7 @@ function App() {
   // Alias for rung label click
   const startScanFrom = handleStartRungSim;
 
-  // Click a block during step-through --always advances (click = authorize this block)
+  // Click a block during step-through --always advances (click = authorise this block)
   const handleStepBlock = useCallback((blockId) => {
     if (!simActiveRungId) return;
     const rung = rungs.find(r => r.id === simActiveRungId);

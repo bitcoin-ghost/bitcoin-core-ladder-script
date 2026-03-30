@@ -109,7 +109,7 @@ an entry to view, copy, or compare the raw JSON.
 
 ## 3. Block Palette
 
-The left sidebar organizes **62 block types** into
+The left sidebar organises **62 block types** into
 **10 families**. Each family has a colour-coded dot. Groups are collapsible.
 Hovering a palette item shows a tooltip with the block description and hex
 type code.
@@ -333,7 +333,7 @@ when hosted.
 | `/api/ladder/sendrawtransaction`        | POST   | Broadcast transaction |
 | `/api/ladder/tx/{txid}`                 | GET    | Look up transaction |
 | `/api/ladder/decoderawtransaction`      | POST   | Decode raw hex |
-| `/api/ladder/validaterungtx`            | POST   | Validate rung TX |
+| `/api/ladder/validate`                  | POST   | Validate ladder witness |
 | `/api/ladder/mempool`                   | GET    | Mempool info |
 | `/api/ladder/blocks/recent`             | GET    | Recent blocks |
 | `/api/ladder/mine`                      | POST   | Mine a block (regtest) |

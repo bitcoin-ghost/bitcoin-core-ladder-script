@@ -23,7 +23,7 @@ A wallet that limits spending to N satoshis per block period, with a refill mech
 
 **Block types:** RATE_LIMIT (0x0671), SIG (0x0001), RECURSE_SAME (0x0401)
 
-A rung combines `SIG` (authorization), `RATE_LIMIT` (spending cap), and `RECURSE_SAME`
+A rung combines `SIG` (authorisation), `RATE_LIMIT` (spending cap), and `RECURSE_SAME`
 (re-encumber the change output with the same conditions). The RATE_LIMIT block tracks
 accumulated spending and enforces the cap. RECURSE_SAME ensures the rate limit persists
 across transactions.
@@ -57,7 +57,7 @@ DAO-style spending rules where outputs must meet specific value and script const
 **Block types:** OUTPUT_CHECK (0x0807), MULTISIG (0x0002), EPOCH_GATE (0x0801)
 
 OUTPUT_CHECK enforces that a specific output index has a value within bounds and a script
-matching a committed hash. Combined with MULTISIG for authorization and EPOCH_GATE for
+matching a committed hash. Combined with MULTISIG for authorisation and EPOCH_GATE for
 periodic voting windows, this creates on-chain governance where funds can only move to
 approved destinations in approved amounts during approved periods.
 

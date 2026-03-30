@@ -699,7 +699,7 @@ and enables tighter implicit field layouts.
 The relay contains a SIG block; rungs declare a relay_ref. The key is committed
 once in the Merkle tree (via relay leaf), reducing conditions size.
 
-**Tiered authorization**: Relay 0 requires an admin signature. Relay 1 requires
+**Tiered authorisation**: Relay 0 requires an admin signature. Relay 1 requires
 Relay 0 + a department signature. Rungs reference Relay 1 for department-level
 actions. Maximum chain depth is 4.
 

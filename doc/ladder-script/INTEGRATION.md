@@ -120,7 +120,7 @@ hash, sequences hash, outputs hash, spend_type (0), input-specific data, and con
 
 ### Sighash Types
 
-| Value | Name | Behavior |
+| Value | Name | Behaviour |
 |-------|------|----------|
 | 0x00 | SIGHASH_DEFAULT | Same as ALL |
 | 0x01 | SIGHASH_ALL | Commit to all outputs |
@@ -196,7 +196,7 @@ Scheme names: `schnorr`, `ecdsa`, `falcon512`, `falcon1024`, `dilithium3`, `sphi
 
 The coil determines what happens when a rung is satisfied:
 
-| Type | Code | Behavior |
+| Type | Code | Behaviour |
 |------|------|----------|
 | UNLOCK | 0x01 | Standard spend. No destination constraint. |
 | UNLOCK_TO | 0x02 | Spend to the address in `address_hash`. The hash is `SHA256(raw_address)`; raw address never goes on-chain. |
@@ -206,7 +206,7 @@ Coil conditions (the `conditions` field in RungCoil) are reserved and must be em
 
 ## Attestation Modes
 
-| Mode | Code | Behavior |
+| Mode | Code | Behaviour |
 |------|------|----------|
 | INLINE | 0x01 | Signatures are inline in the witness. Standard mode. |
 | AGGREGATE | 0x02 | Half-aggregated Schnorr: R per input in witness, aggregated s-value at tx level. |
@@ -267,6 +267,6 @@ The full validation pipeline for a v4 RUNG_TX:
 | `verifyadaptorpresig` | Verify an adaptor pre-signature |
 | `parseladder` | Parse descriptor string to conditions |
 | `formatladder` | Format conditions as descriptor string |
-| `decodetxmlsc` | Decode a TX_MLSC transaction |
-| `validaterungtx` | Validate a rung transaction |
-| `getladdertxinfo` | Get ladder transaction info |
+| `createrungtx` | Build a raw v4 transaction (legacy, superseded by `createtxmlsc`) |
+| `signrungtx` | Sign a v4 transaction input (legacy, superseded by `signladder`) |
+| `computemutation` | Compute mutated conditions root for recursive covenants |

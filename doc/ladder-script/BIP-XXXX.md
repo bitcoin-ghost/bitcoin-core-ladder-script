@@ -381,7 +381,7 @@ Common multi-block patterns collapsed into single blocks.
 
 #### 9. Governance Family (0x0801-0x0807)
 
-Transaction-level constraints beyond individual input authorization.
+Transaction-level constraints beyond individual input authorisation.
 
 | Code | Name | Description |
 |------|------|-------------|

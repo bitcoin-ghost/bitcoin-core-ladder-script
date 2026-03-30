@@ -132,7 +132,7 @@ tr:nth-child(even) td { background: #f8f8f8; }
     <div class="stat"><span class="stat-val">21</span><span class="stat-key">New Files</span></div>
   </div>
 
-  <div class="note">Ladder Script adds a self-contained library (src/rung/) to Bitcoin Core. The patch to existing code is minimal: ~448 lines across 15 files. The bulk of the implementation (14,663 lines) lives in new files that do not touch existing code.</div>
+  <div class="note">Ladder Script adds a self-contained library (src/rung/) to Bitcoin Core. The patch to existing code is minimal: ~448 lines across 16 files. The bulk of the implementation (14,663 lines) lives in new files that do not touch existing code.</div>
 
   <!-- -- PATCH TO EXISTING CODE -- -->
   <div class="section">
@@ -199,7 +199,7 @@ tr:nth-child(even) td { background: #f8f8f8; }
     <table>
       <thead><tr><th>Layer</th><th style="text-align:right;">Count</th><th>What</th></tr></thead>
       <tbody>
-        <tr><td class="col-file">Unit tests</td><td class="col-lines">508</td><td class="col-desc">Block evaluation, serialisation, sighash, conditions, policy, MLSC proofs, field validation</td></tr>
+        <tr><td class="col-file">Unit tests</td><td class="col-lines">528</td><td class="col-desc">Block evaluation, serialisation, sighash, conditions, policy, MLSC proofs, field validation</td></tr>
         <tr><td class="col-file">Regtest functional</td><td class="col-lines">60</td><td class="col-desc">Every block type: create, sign, broadcast, mine, spend on live regtest node</td></tr>
         <tr><td class="col-file">TLA+ formal specs</td><td class="col-lines">80</td><td class="col-desc">21 specifications, 3.3M states checked: evaluation semantics, anti-spam, wire format, Merkle proofs, sighash, covenants, cross-input</td></tr>
       </tbody>
@@ -209,11 +209,11 @@ tr:nth-child(even) td { background: #f8f8f8; }
   <!-- -- PATCH FILES -- -->
   <div class="section">
     <div class="section-head">Patch Files</div>
-    <p>Two patch files apply to Bitcoin Core v30.1:</p>
+    <p>Two patch files apply to Bitcoin Core v30.0:</p>
 
     <div class="diff-block">
       <div class="diff-file">patches/bitcoin-core-v30-ladder-script.patch</div>
-      <div class="diff-add">+~448 lines across 15 files</div>
+      <div class="diff-add">+~448 lines across 16 files</div>
       <div class="diff-desc">Core integration: routing, sighash, script solver, policy, address encoding, RPC, build system</div>
     </div>
 
@@ -223,7 +223,7 @@ tr:nth-child(even) td { background: #f8f8f8; }
       <div class="diff-desc">Block height plumbing for EPOCH_GATE and height-dependent governance blocks</div>
     </div>
 
-    <div class="note">Total change to existing Bitcoin Core: ~448 lines across 15 files. The remaining 14,663 lines are new, self-contained code in src/rung/ that does not modify any existing function.</div>
+    <div class="note">Total change to existing Bitcoin Core: ~448 lines across 16 files. The remaining 14,663 lines are new, self-contained code in src/rung/ that does not modify any existing function.</div>
   </div>
 
 </div>

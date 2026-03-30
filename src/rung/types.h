@@ -126,7 +126,7 @@ enum class RungDataType : uint8_t {
     PREIMAGE      = 0x05, //!< Hash preimage: exactly 32 bytes (SHA256 payment hash preimage)
     SIGNATURE     = 0x06, //!< Signature: 1-50000 bytes (Schnorr 64-65, ECDSA 8-72, PQ up to 49216)
     SPEND_INDEX   = 0x07, //!< Spend index reference: 4 bytes
-    NUMERIC       = 0x08, //!< Numeric value (threshold, locktime, etc.): 1-4 bytes
+    NUMERIC       = 0x08, //!< Numeric value (threshold, locktime, etc.): 1-8 bytes
     SCHEME        = 0x09, //!< Signature scheme selector: 1 byte
     SCRIPT_BODY   = 0x0A, //!< Serialized inner conditions: 1-80 bytes (witness-only; node computes hash for conditions)
     DATA          = 0x0B, //!< Opaque data: 1-40 bytes (DATA_RETURN block only; hash + protocol metadata)

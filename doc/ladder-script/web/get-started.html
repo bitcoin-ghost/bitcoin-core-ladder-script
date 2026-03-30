@@ -150,7 +150,7 @@ a:hover { text-decoration: underline; }
 
     <div class="download">
       <div class="download-title">Ghost Core + Ladder Script</div>
-      <div class="download-meta">Linux x86_64 -- 7.4 MB -- Based on Bitcoin Core v30.1</div>
+      <div class="download-meta">Linux x86_64 -- 7.4 MB -- Based on Bitcoin Core v30.0</div>
       <div class="download-stats">
         <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">62</span></span>
         <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">528</span></span>
@@ -160,7 +160,7 @@ a:hover { text-decoration: underline; }
       <a href="download/ghost-ladder-signet-linux-x86_64.tar.gz" class="download-btn">Download .tar.gz</a>
     </div>
 
-    <div class="note">Bitcoin Core v30.1 with ~448 lines of integration code and the 14,663-line Ladder Script library. Connects to the Ghost Labs signet where you can create and spend rung transactions.</div>
+    <div class="note">Bitcoin Core v30.0 with ~448 lines of integration code and the 14,663-line Ladder Script library. Connects to the Ghost Labs signet where you can create and spend rung transactions.</div>
   </div>
 
   <!-- -- QUICK START -- -->
@@ -230,7 +230,7 @@ a:hover { text-decoration: underline; }
     <div class="section-head">Build from Source</div>
     <p>Apply the patch to your own Bitcoin Core checkout:</p>
     <div class="code-block"><span class="cmd">git clone https://github.com/bitcoin/bitcoin.git</span>
-<span class="cmd">cd bitcoin && git checkout v30.1</span>
+<span class="cmd">cd bitcoin && git checkout v30.0</span>
 
 <span class="comment"># download the rung library</span>
 <span class="cmd">git clone https://github.com/bitcoin-ghost/ghost-labs-ladder-script.git /tmp/ladder</span>
@@ -242,7 +242,7 @@ a:hover { text-decoration: underline; }
 
 <span class="comment"># build</span>
 <span class="cmd">cmake -B build && cmake --build build -j$(nproc)</span></div>
-    <div class="note">Tested against Bitcoin Core v30.1. Applying to Knots or other forks that track Core closely should work with minimal or no conflicts.</div>
+    <div class="note">Tested against Bitcoin Core v30.0. Applying to Knots or other forks that track Core closely should work with minimal or no conflicts.</div>
   </div>
 
   <!-- -- RPC COMMANDS -- -->
@@ -261,7 +261,7 @@ formatladder       <span class="comment">format conditions hex as descriptor str
 <span class="comment"># inspection</span>
 decoderung         <span class="comment">decode a ladder witness from hex</span>
 computectvhash     <span class="comment">compute BIP-119 CTV template hash</span>
-decodetxmlsc       <span class="comment">decode a TX_MLSC transaction</span>
+computemutation    <span class="comment">compute mutated conditions root for recursive covenants</span>
 validateladder     <span class="comment">validate a ladder witness without broadcasting</span>
 getladderstats     <span class="comment">return block-type usage stats for the chain</span>
 
