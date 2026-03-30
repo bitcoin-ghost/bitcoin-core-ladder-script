@@ -13,7 +13,7 @@ Post-History: https://groups.google.com/g/bitcoindev/c/0jEHXaQaeZw
 ## Abstract
 
 Ladder Script is a typed transaction condition format for Bitcoin. It replaces
-raw opcodes with 62 typed function blocks organized into 10 families. Every
+raw opcodes with 62 typed function blocks organised into 10 families. Every
 witness byte belongs to a typed field with enforced size constraints; no
 arbitrary data pushes are possible. Spending conditions are structured as a
 ladder of rungs (OR logic), where each rung contains one or more blocks (AND
@@ -714,7 +714,7 @@ treat v4 transactions as anyone-can-spend.
 `0xDF` is not a valid opcode in any existing Script interpretation. It falls
 in the "OP_SUCCESS" range for Tapscript but is outside the P2SH, P2WSH,
 and P2WPKH template patterns. Old nodes see `0xDF + 32 bytes` as an
-unrecognized script pattern and treat it as anyone-can-spend.
+unrecognised script pattern and treat it as anyone-can-spend.
 
 ### Why sorted interior Merkle nodes?
 
@@ -736,7 +736,7 @@ intended. The creation proof binds the tree to the transaction at fund time.
 ### Soft Fork Deployment
 
 Version 4 transactions are currently non-standard and invalid. Existing
-nodes treat v4 transactions as anyone-can-spend (`0xDF` is not a recognized
+nodes treat v4 transactions as anyone-can-spend (`0xDF` is not a recognised
 script pattern). Old nodes accept blocks containing v4 transactions;
 upgraded nodes enforce full Ladder Script rules.
 
@@ -754,7 +754,7 @@ conditions without re-keying. A P2PKH address holder migrates via
 ### Wallet Compatibility
 
 Outputs with `0xDF` scriptPubKeys are unknown to non-upgraded wallets. Such
-wallets will not display them. This is standard behavior for new output
+wallets will not display them. This is standard behaviour for new output
 types.
 
 ### Removed Features

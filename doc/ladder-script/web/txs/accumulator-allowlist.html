@@ -69,7 +69,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TRANSACTION EXAMPLE &middot; ACCUMULATOR + SIGNATURE</div>
   <h1 class="block-title">ACCUMULATOR ALLOWLIST</h1>
-  <p class="block-subtitle">Merkle accumulator allowlist. The spend requires proving membership in a Merkle tree of authorized keys. Enables large allowlists with compact on-chain footprint &amp;mdash; only the 32-byte root is stored in conditions.</p>
+  <p class="block-subtitle">Merkle accumulator allowlist. The spend requires proving membership in a Merkle tree of authorised keys. Enables large allowlists with compact on-chain footprint &amp;mdash; only the 32-byte root is stored in conditions.</p>
   <div style="display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
     <span class="scheme-badge" style="background: rgba(255, 23, 68, 0.08); color: #ff1744; border: 1px solid rgba(255, 23, 68, 0.2);">SIG</span>
     <span class="scheme-badge" style="background: rgba(158, 158, 158, 0.08); color: #9e9e9e; border: 1px solid rgba(158, 158, 158, 0.2);">ACCUMULATOR</span>
@@ -252,7 +252,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <div class="eval-step-num">1.</div>
-      <div class="eval-step-text">The ACCUMULATOR block stores a 32-byte Merkle root computed from the set of authorized key hashes. The on-chain footprint is constant regardless of allowlist size.</div>
+      <div class="eval-step-text">The ACCUMULATOR block stores a 32-byte Merkle root computed from the set of authorised key hashes. The on-chain footprint is constant regardless of allowlist size.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">2.</div>
@@ -264,7 +264,7 @@
     </div>
     <div class="eval-step">
       <div class="eval-step-num">4.</div>
-      <div class="eval-step-text">This pattern scales to thousands of authorized keys with O(log N) proof size. Adding or removing keys requires updating the root in a new covenant output.</div>
+      <div class="eval-step-text">This pattern scales to thousands of authorised keys with O(log N) proof size. Adding or removing keys requires updating the root in a new covenant output.</div>
     </div>
   </div>
 </div>

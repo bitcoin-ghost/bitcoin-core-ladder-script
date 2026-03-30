@@ -20,7 +20,7 @@ are batched) verifies all Schnorr signatures in a single batch.
 ### Step 1: Define Conditions
 
 Use the `createrung` RPC or the descriptor language to define your spending conditions.
-Conditions are organized as rungs (OR paths), each containing blocks (AND conditions).
+Conditions are organised as rungs (OR paths), each containing blocks (AND conditions).
 
 **RPC approach** (`createrung`):
 

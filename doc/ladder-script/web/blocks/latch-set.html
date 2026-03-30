@@ -151,7 +151,7 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">0</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">This latch is in the unset state (0). A spend authorized by the setter key with RECURSE_MODIFIED will flip state to 1, after which the block becomes UNSATISFIED until a LATCH_RESET flips it back.</p>
+  <p class="section-text" style="margin-top:12px">This latch is in the unset state (0). A spend authorised by the setter key with RECURSE_MODIFIED will flip state to 1, after which the block becomes UNSATISFIED until a LATCH_RESET flips it back.</p>
 </div>
 
 <!-- Use Cases -->
@@ -163,7 +163,7 @@
   </div>
   <div class="use-case">
     <div class="use-case-title">Feature Activation</div>
-    <div class="use-case-desc">Enable a covenant feature by setting the latch. Other blocks on the same or subsequent rungs can check the latch state to gate behavior on whether the feature has been activated.</div>
+    <div class="use-case-desc">Enable a covenant feature by setting the latch. Other blocks on the same or subsequent rungs can check the latch state to gate behaviour on whether the feature has been activated.</div>
   </div>
   <div class="use-case">
     <div class="use-case-title">Irreversible State Transitions</div>

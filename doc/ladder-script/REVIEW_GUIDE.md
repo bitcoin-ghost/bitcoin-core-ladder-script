@@ -35,7 +35,7 @@ Core evaluation engine. Key review points:
 - `LadderSignatureChecker`: wraps `BaseSignatureChecker`; dispatches to `SignatureHashLadder` for `SigVersion::LADDER`
 - `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes ERROR
 
-**What to look for:** Fail-closed behavior for unknown types. Correct relay evaluation
+**What to look for:** Fail-closed behaviour for unknown types. Correct relay evaluation
 order (index 0 first, forward-only). Batch verifier fallback on failure.
 
 ### sighash.h / sighash.cpp

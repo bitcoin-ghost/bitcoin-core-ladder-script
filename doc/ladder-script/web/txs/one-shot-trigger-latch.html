@@ -68,7 +68,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TRANSACTION EXAMPLE &middot; PLC + STATE MACHINE</div>
   <h1 class="block-title">ONE-SHOT TRIGGER + LATCH</h1>
-  <p class="block-subtitle">State machine with one-shot trigger and latch. The one-shot fires once to set the latch, which then enables a second spend path. The latch can be reset by an authorized key after a delay. Demonstrates programmable state transitions.</p>
+  <p class="block-subtitle">State machine with one-shot trigger and latch. The one-shot fires once to set the latch, which then enables a second spend path. The latch can be reset by an authorised key after a delay. Demonstrates programmable state transitions.</p>
   <div style="display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
     <span class="scheme-badge" style="background: rgba(255, 23, 68, 0.08); color: #ff1744; border: 1px solid rgba(255, 23, 68, 0.2);">SIG</span>
     <span class="scheme-badge" style="background: rgba(255, 64, 129, 0.08); color: #ff4081; border: 1px solid rgba(255, 64, 129, 0.2);">1SHOT</span>
@@ -271,11 +271,11 @@
     </div>
     <div class="eval-step">
       <div class="eval-step-num">3.</div>
-      <div class="eval-step-text">LATCH_SET checks <code>state == 0</code> as a precondition, then transitions state. Once the latch is set, the ARMED rung becomes spendable for the authorized key.</div>
+      <div class="eval-step-text">LATCH_SET checks <code>state == 0</code> as a precondition, then transitions state. Once the latch is set, the ARMED rung becomes spendable for the authorised key.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">4.</div>
-      <div class="eval-step-text">LATCH_RESET provides a recovery path: after a CSV delay, an authorized key can reset the latch back to state 0, re-enabling the trigger. This creates a reusable state machine.</div>
+      <div class="eval-step-text">LATCH_RESET provides a recovery path: after a CSV delay, an authorised key can reset the latch back to state 0, re-enabling the trigger. This creates a reusable state machine.</div>
     </div>
   </div>
 </div>

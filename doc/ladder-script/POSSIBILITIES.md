@@ -136,5 +136,5 @@ Dynamically managed allowlists and blocklists using Merkle accumulators.
 
 ACCUMULATOR verifies set membership via a Merkle proof against a committed root. Combined
 with inversion (`!ACCUMULATOR`), it becomes a blocklist. The Merkle root can be updated
-via RECURSE_MODIFIED, enabling dynamic addition and removal of authorized parties without
+via RECURSE_MODIFIED, enabling dynamic addition and removal of authorised parties without
 recreating the output. Capped at 10 HASH256 fields (root + 8 proof nodes + leaf).

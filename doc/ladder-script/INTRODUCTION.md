@@ -2,7 +2,7 @@
 
 Ladder Script is a typed, structured replacement for Bitcoin Script designed for
 version 4 (`RUNG_TX_VERSION = 4`) transactions. It eliminates the untyped stack machine
-in favor of declarative function blocks organized into rungs and ladders.
+in favour of declarative function blocks organised into rungs and ladders.
 
 ## Core Concepts
 

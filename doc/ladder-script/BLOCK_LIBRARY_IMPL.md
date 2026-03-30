@@ -30,11 +30,13 @@ Every parameter in every block must be one of the following enumerated types. No
 | `PUBKEY_COMMIT` | `0x02` | 32B exact | *(Reserved)* | Removed by merkle_pub_key. Rejected in both conditions and witness. |
 | `HASH256` | `0x03` | 32B exact | SHA-256 hash | State commitments, contract roots, anchors |
 | `HASH160` | `0x04` | 20B exact | HASH160 | Legacy compatibility |
-| `PREIMAGE` | `0x05` | 1–32B | Raw preimage, max 32 bytes | Hash preimage reveal. Max 2 preimage blocks per witness (policy). |
+| `PREIMAGE` | `0x05` | 32B exact | SHA-256 preimage | Hash preimage reveal. Max 2 per witness and per transaction. |
 | `SIGNATURE` | `0x06` | 1–50,000B | Schnorr=64B, ECDSA/DER≈73B, PQ up to 49,216B | INLINE attestation signatures only |
 | `SPEND_INDEX` | `0x07` | 4B exact | uint32 spend index | Cross-input spend reference |
-| `NUMERIC` | `0x08` | 1–4B | uint32 value | Timelocks, thresholds, counts, rates |
+| `NUMERIC` | `0x08` | 1–8B | uint64 value | Timelocks, thresholds, counts, rates |
 | `SCHEME` | `0x09` | 1B exact | Enum value from RungScheme | Signature algorithm selector |
+| `SCRIPT_BODY` | `0x0A` | 1–80B | Serialised inner conditions | Legacy inner script delivery (P2SH/P2WSH/P2TR_SCRIPT). Witness-only. Shares PREIMAGE cap. |
+| `DATA` | `0x0B` | 1–40B | Opaque data | DATA_RETURN blocks only. Rejected in all other block types. |
 
 **Key principle:** Type enforcement happens at the deserializer — before any cryptographic operation, before mempool admission, before everything. PUBKEY is witness-only; conditions use merkle_pub_key (keys folded into the Merkle leaf hash — no key field in conditions at all). PUBKEY_COMMIT is reserved and rejected in both contexts. The condition data types are: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA. Conditions contain zero user-chosen bytes. A maximum of 2 preimage-bearing fields are permitted per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`, fast reject) and per transaction (`MAX_PREIMAGE_FIELDS_PER_TX = 2`, binding constraint across all inputs). The preimage-bearing blocks are TAGGED_HASH and HASH_GUARDED. Compound blocks HTLC and HASH_SIG also consume PREIMAGE fields. Enum values `0x0201` and `0x0202` are reserved and rejected at deserialization. This is what makes spam structurally impossible.
 
@@ -44,7 +46,7 @@ Every parameter in every block must be one of the following enumerated types. No
 
 ## 2. Signature Blocks
 
-Signature blocks verify cryptographic proofs of authorisation. All signature blocks accept an `inverted` flag — inverted means the condition must NOT be satisfied for the contact to pass.
+Signature blocks verify cryptographic proofs of authorisation. Signature blocks are key-consuming and therefore **not invertible** — inverting them would allow garbage-pubkey data embedding.
 
 ---
 
@@ -59,8 +61,6 @@ Verifies a single signature from a specified key under a specified scheme.
 
 **Use case:** Single-key payment, hot wallet spend, daily limit key
 
-**Inverted semantics:** Passes when key does NOT sign — exclusion condition or veto.
-
 ---
 
 ### `MULTISIG` · `0x0002`
@@ -73,8 +73,6 @@ Verifies n-of-m threshold signatures. Keys folded into Merkle leaf, signatures i
 **Invertible:** No
 
 **Use case:** Corporate custody, cold storage, DAO multisig
-
-**Inverted semantics:** Passes when n-of-m do NOT sign — governance veto, board override prevention.
 
 ---
 
