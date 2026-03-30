@@ -24,15 +24,15 @@ SPECS=(
     AnchorFee
     AutoKeyPath
     BlockAnchor
-    # BlockCompound — skipped (state space too large even at WSL2 constants; covered by simulation mode)
+    # BlockCompound — skipped (3+ value dimensions; covered by simulation)
     BlockCovenant
-    BlockGovernance
+    # BlockGovernance — skipped (4 value dimensions; covered by simulation)
     BlockHash
     BlockLegacy
     BlockPLC
-    BlockRecursion
+    # BlockRecursion — skipped (5 value dimensions; covered by simulation)
     BlockSignature
-    BlockTimelock
+    # BlockTimelock — skipped (3 value dimensions with large ranges; covered by simulation)
     HybridCreationProof
     LadderAntiSpam
     LadderEval
