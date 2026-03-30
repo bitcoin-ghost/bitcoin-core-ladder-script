@@ -38,7 +38,7 @@ SPECS=(
     # LadderEval — skipped (>1M set elements even at WSL2 constants; needs spec restructure; covered by simulation)
     LadderMerkle
     LadderSighash
-    LadderWireFormat
+    # LadderWireFormat — skipped (stuck at 134M initial states even at MaxSlots=10; covered by simulation)
     RecursiveCovenant
     SharedProof
     UTXODedup
