@@ -19,11 +19,18 @@ namespace rung {
 
 namespace {
 
+/** Parser resource limits — prevents DoS via malicious descriptors. */
+static constexpr int MAX_PARSE_DEPTH = 32;
+static constexpr size_t MAX_PARSE_ITEMS = 1000;
+static constexpr size_t MAX_OUTPUT_INDEX = 4096;
+
 struct ParseContext {
     const std::string& desc;
     const std::map<std::string, std::vector<uint8_t>>& keys;
     size_t pos{0};
     std::string error;
+    int depth{0};           //!< Current nesting depth (and/or wrappers)
+    size_t item_count{0};   //!< Total items parsed (blocks + rungs + outputs)
 };
 
 void SkipWhitespace(ParseContext& ctx)
@@ -216,6 +223,10 @@ bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<
     block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(threshold)});
 
     while (true) {
+        if (++ctx.item_count > MAX_PARSE_ITEMS) {
+            ctx.error = "descriptor exceeds maximum item count";
+            return false;
+        }
         SkipWhitespace(ctx);
         if (ctx.pos >= ctx.desc.size()) break;
         if (ctx.desc[ctx.pos] == ')') break;
@@ -537,8 +548,8 @@ bool ParseDataReturn(ParseContext& ctx, RungBlock& block)
     // data_return(hex)
     if (!Expect(ctx, '(')) return false;
     auto bytes = ParseHex(ReadHex(ctx));
-    if (bytes.empty() || bytes.size() > 32) {
-        ctx.error = "data_return requires 1-32 byte payload";
+    if (bytes.empty() || bytes.size() > 40) {
+        ctx.error = "data_return requires 1-40 byte payload";
         return false;
     }
     block.type = RungBlockType::DATA_RETURN;
@@ -894,6 +905,11 @@ bool ParseLegacyScript(ParseContext& ctx, RungBlock& block, RungBlockType type)
 
 bool ParseBlock(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
+    if (++ctx.item_count > MAX_PARSE_ITEMS) {
+        ctx.error = "descriptor exceeds maximum item count (" + std::to_string(MAX_PARSE_ITEMS) + ")";
+        return false;
+    }
+
     SkipWhitespace(ctx);
 
     // Check for inversion prefix
@@ -1024,11 +1040,20 @@ bool ParseBlock(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uin
 
 bool ParseRung(ParseContext& ctx, Rung& rung, std::vector<std::vector<uint8_t>>& rung_pks)
 {
+    if (++ctx.depth > MAX_PARSE_DEPTH) {
+        ctx.error = "descriptor nesting exceeds maximum depth (" + std::to_string(MAX_PARSE_DEPTH) + ")";
+        return false;
+    }
+    if (++ctx.item_count > MAX_PARSE_ITEMS) {
+        ctx.error = "descriptor exceeds maximum item count (" + std::to_string(MAX_PARSE_ITEMS) + ")";
+        return false;
+    }
+
     SkipWhitespace(ctx);
 
     if (Peek(ctx, "and")) {
         Match(ctx, "and");
-        if (!Expect(ctx, '(')) return false;
+        if (!Expect(ctx, '(')) { --ctx.depth; return false; }
 
         RungBlock block;
         if (!ParseBlock(ctx, block, rung_pks)) return false;
@@ -1052,6 +1077,7 @@ bool ParseRung(ParseContext& ctx, Rung& rung, std::vector<std::vector<uint8_t>>&
         rung.blocks.push_back(std::move(block));
     }
 
+    --ctx.depth;
     return true;
 }
 
@@ -1584,6 +1610,10 @@ bool ParseTxMLSCDescriptor(const std::string& desc,
             return false;
         }
         size_t output_index = std::stoul(ctx.desc.substr(idx_start, ctx.pos - idx_start));
+        if (output_index > MAX_OUTPUT_INDEX) {
+            error = "output index " + std::to_string(output_index) + " exceeds maximum (" + std::to_string(MAX_OUTPUT_INDEX) + ")";
+            return false;
+        }
 
         if (!Expect(ctx, ',')) { error = ctx.error; return false; }
 

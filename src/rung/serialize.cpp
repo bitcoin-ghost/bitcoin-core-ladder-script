@@ -307,12 +307,18 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
                 return false;
             }
 
+            // ACCUMULATOR: all fields must be HASH256 (root + proof nodes + leaf)
+            if (block_out.type == RungBlockType::ACCUMULATOR && dtype != RungDataType::HASH256) {
+                error = "ACCUMULATOR fields must be HASH256, got " + DataTypeName(dtype);
+                return false;
+            }
+
             // Consensus: for blocks with NO implicit layout (any context), reject
             // high-bandwidth data types that could carry unvalidated payload.
             // This closes the ANCHOR/RECURSE_MODIFIED/RECURSE_DECAY/COMPARE gap
             // where layout-less blocks could carry 16 x DATA(80) = 1280 bytes.
             // ACCUMULATOR: HASH256 fields carry Merkle proof (variable count).
-            // Whitelisted from the data-embedding check.
+            // Whitelisted from the data-embedding check (all fields validated above).
             if (expected.count == 0 && IsDataEmbeddingType(dtype) &&
                 block_out.type != RungBlockType::ACCUMULATOR) {
                 error = "data-embedding type " + DataTypeName(dtype) +
@@ -396,7 +402,7 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                 uint64_t ri = ReadCompactSize(ss);
                 uint64_t bi = ReadCompactSize(ss);
                 uint64_t fi = ReadCompactSize(ss);
-                if (ri > MAX_RUNGS || bi > MAX_BLOCKS_PER_RUNG || fi > MAX_FIELDS_PER_BLOCK) {
+                if (ri >= MAX_RUNGS || bi >= MAX_BLOCKS_PER_RUNG || fi >= MAX_FIELDS_PER_BLOCK) {
                     error = "diff witness index out of range at diff " + std::to_string(d);
                     return false;
                 }

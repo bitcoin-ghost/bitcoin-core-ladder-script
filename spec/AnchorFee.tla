@@ -25,11 +25,13 @@ Weights == 1..MaxWeight
 (***************************************************************************)
 
 \* Parameters set at fund time (in conditions)
+Commitments == 0..3
+
 AnchorFeeParams == [
     min_fee: FeeRates,
     max_fee: FeeRates,
     max_weight: Weights,
-    commitment: Nat
+    commitment: Commitments
 ]
 
 \* Spending transaction properties

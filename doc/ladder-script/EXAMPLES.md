@@ -674,7 +674,7 @@ witness = ~406 bytes total.
 ### Compound block advantages
 
 Compound blocks (TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG,
-TIMELOCKED_MULTISIG) save wire format overhead by combining multiple condition
+TIMELOCKED_MULTISIG, ANCHOR_FEE) save wire format overhead by combining multiple condition
 checks into a single block. Instead of:
 
 ```

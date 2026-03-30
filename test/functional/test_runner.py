@@ -293,6 +293,7 @@ BASE_SCRIPTS = [
     'feature_dersig.py',
     'feature_reindex_init.py',
     'feature_cltv.py',
+    'feature_rung_tx.py',
     'rpc_uptime.py',
     'feature_discover.py',
     'wallet_resendwallettransactions.py',

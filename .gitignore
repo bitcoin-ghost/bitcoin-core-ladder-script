@@ -27,3 +27,6 @@ target/
 
 /ci/scratch/
 regtest-data/
+
+# TLC model-checking state dumps
+spec/states/

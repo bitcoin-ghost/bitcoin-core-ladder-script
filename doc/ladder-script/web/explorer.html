@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explorer — Ladder Script Signet</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg-alt: #f5f5f5; --bg-code: #f0f0f0;
+  --text: #1a1a1a; --text-body: #333333; --text-dim: #666666; --text-light: #999999;
+  --accent: #e67e22; --accent-dark: #d35400; --green: #27ae60; --red: #c0392b; --blue: #2980b9;
+  --border: #e0e0e0; --border-light: #eeeeee;
+}
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
+::selection { background: var(--accent); color: #fff; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.site-header { background: #fff; border-bottom: 1px solid var(--border); }
+.site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { text-decoration: none; color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
+.header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding: 10px 0; }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 32px; }
+
+/* Status bar */
+.status-bar { display: flex; gap: 32px; flex-wrap: wrap; padding: 16px 20px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 32px; font-size: 14px; }
+.status-item { display: flex; align-items: center; gap: 8px; }
+.status-label { color: var(--text-light); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.status-value { font-weight: 600; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.status-dot.offline { background: var(--red); }
+
+/* Search */
+.search-bar { display: flex; gap: 8px; margin-bottom: 32px; }
+.search-input { flex: 1; padding: 10px 16px; border: 1px solid var(--border); border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 13px; outline: none; }
+.search-input:focus { border-color: var(--accent); }
+.search-btn { padding: 10px 20px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; }
+.search-btn:hover { background: var(--accent-dark); }
+
+/* Blocks list */
+.blocks-header { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
+.block-row { display: grid; grid-template-columns: 80px 1fr 120px 80px 80px; gap: 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border-light); font-size: 14px; }
+.block-row:hover { background: var(--bg-alt); }
+.block-row.header { font-size: 12px; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; border-bottom: 2px solid var(--border); }
+.block-height { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--accent); cursor: pointer; }
+.block-hash { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.block-time { color: var(--text-dim); font-size: 13px; }
+.block-txcount { font-family: 'JetBrains Mono', monospace; text-align: center; }
+.block-rung { font-family: 'JetBrains Mono', monospace; text-align: center; }
+.rung-badge { display: inline-block; padding: 2px 8px; background: #fef5e7; border: 1px solid #f5cba7; border-radius: 3px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+.no-rung { color: var(--text-light); }
+
+/* TX detail panel */
+.tx-panel { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 20px 24px; margin: 16px 0; display: none; }
+.tx-panel.visible { display: block; }
+.tx-panel-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.tx-row { display: grid; grid-template-columns: 1fr 80px 80px 80px; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; }
+.tx-row.header { font-size: 11px; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.tx-id { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-version { font-family: 'JetBrains Mono', monospace; text-align: center; }
+.tx-version.v4 { color: var(--accent-dark); font-weight: 600; }
+.tx-size { font-family: 'JetBrains Mono', monospace; text-align: center; color: var(--text-dim); }
+.tx-value { font-family: 'JetBrains Mono', monospace; text-align: right; }
+
+.loading { color: var(--text-light); font-style: italic; padding: 20px; text-align: center; }
+.error { color: var(--red); padding: 12px 16px; background: #fdecea; border: 1px solid #f5b7b1; border-radius: 6px; margin: 16px 0; font-size: 14px; }
+
+/* Goggles */
+.goggles-container { margin-bottom: 32px; }
+.goggles-legend { display: flex; gap: 20px; margin-bottom: 12px; font-size: 12px; color: var(--text-dim); }
+.goggles-legend-item { display: flex; align-items: center; gap: 6px; }
+.goggles-swatch { width: 14px; height: 14px; border-radius: 2px; }
+.goggles-block { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 8px; }
+.goggles-block-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.goggles-block-height { font-weight: 700; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+.goggles-block-meta { color: var(--text-light); }
+.goggles-mosaic { display: flex; flex-wrap: wrap; gap: 2px; min-height: 20px; }
+.goggles-tx { border-radius: 2px; cursor: pointer; transition: opacity 0.15s; position: relative; min-width: 8px; min-height: 20px; }
+.goggles-tx:hover { opacity: 0.8; }
+.goggles-tx[title]:hover::after { content: attr(title); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-family: 'JetBrains Mono', monospace; white-space: nowrap; pointer-events: none; z-index: 10; margin-bottom: 4px; }
+
+.auto-refresh { font-size: 12px; color: var(--text-light); margin-top: 16px; }
+
+.site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
+.site-footer a { color: var(--text-light); }
+.site-footer a:hover { color: var(--accent); }
+
+@media (max-width: 700px) {
+  .block-row { grid-template-columns: 60px 1fr 80px 60px; font-size: 13px; }
+  .block-row .block-rung { display: none; }
+  .main { padding: 32px 16px 60px; }
+  .site-header-inner { padding: 0 16px; }
+  .header-top { flex-direction: column; align-items: flex-start; gap: 8px; height: auto; padding: 12px 0; }
+  .header-nav { flex-wrap: wrap; }
+  .status-bar { gap: 16px; }
+  .search-bar { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="../ghost-labs.html" class="header-title">Ghost Labs</a>
+      <div class="header-right">
+        <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
+        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" class="gh-icon">
+          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="ladder-script.html">Ladder Script</a>
+      <a href="rung-tx-anatomy.html">Anatomy</a>
+      <a href="block-docs/">Blocks</a>
+      <a href="docs/">Docs</a>
+      <a href="patch-overview.html">Patch</a>
+      <a href="get-started.html">Get Started</a>
+      <a href="ladder-engine.html">Engine</a>
+      <a href="explorer.html" class="active">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+<div class="main">
+
+  <h1 class="page-title">Signet Explorer</h1>
+  <p class="page-sub">Live blocks and transactions on the Ladder Script signet</p>
+
+  <!-- Status -->
+  <div class="status-bar" id="status-bar">
+    <div class="status-item">
+      <div class="status-dot" id="status-dot"></div>
+      <span class="status-label">Status</span>
+      <span class="status-value" id="status-text">connecting...</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Height</span>
+      <span class="status-value" id="status-height">-</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Mempool</span>
+      <span class="status-value" id="status-mempool">-</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Chain</span>
+      <span class="status-value" id="status-chain">signet</span>
+    </div>
+  </div>
+
+  <!-- Block Goggles -->
+  <div class="blocks-header">Block Goggles</div>
+  <div class="goggles-legend">
+    <span class="goggles-legend-item"><span class="goggles-swatch" style="background:#3498db"></span> Standard tx</span>
+    <span class="goggles-legend-item"><span class="goggles-swatch" style="background:var(--accent)"></span> RUNG_TX (v4)</span>
+    <span class="goggles-legend-item"><span class="goggles-swatch" style="background:#95a5a6"></span> Coinbase</span>
+  </div>
+  <div id="goggles-container" class="goggles-container">
+    <div class="loading">Loading blocks...</div>
+  </div>
+
+  <!-- Search -->
+  <div class="search-bar" style="margin-top:32px">
+    <input type="text" class="search-input" id="search-input" placeholder="Search by txid (64 hex characters)">
+    <button class="search-btn" onclick="searchTx()">Search</button>
+  </div>
+
+  <!-- TX detail panel (shown after search) -->
+  <div class="tx-panel" id="tx-detail"></div>
+
+  <!-- Blocks table -->
+  <div class="blocks-header" style="margin-top:32px">Latest Blocks</div>
+  <div class="block-row header">
+    <div>Height</div>
+    <div>Hash</div>
+    <div>Time</div>
+    <div style="text-align:center">Txs</div>
+    <div style="text-align:center">Rung Txs</div>
+  </div>
+  <div id="blocks-list">
+    <div class="loading">Loading blocks...</div>
+  </div>
+
+  <div class="auto-refresh">Auto-refreshes every 30 seconds</div>
+
+</div>
+
+<footer class="site-footer">
+  <a href="../ghost-labs.html">Ghost Labs</a> &middot; <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
+</footer>
+
+<script>
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8340'
+  : 'https://bitcoinghost.org';
+
+async function fetchJSON(endpoint) {
+  const r = await fetch(API + endpoint);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function timeAgo(ts) {
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function truncHash(hash) {
+  return hash.substring(0, 12) + '...' + hash.substring(hash.length - 8);
+}
+
+async function loadStatus() {
+  try {
+    const [status, mempool] = await Promise.all([
+      fetchJSON('/api/ladder/status'),
+      fetchJSON('/api/ladder/mempool')
+    ]);
+    document.getElementById('status-dot').className = 'status-dot';
+    document.getElementById('status-text').textContent = 'online';
+    document.getElementById('status-height').textContent = status.blocks;
+    document.getElementById('status-chain').textContent = status.chain;
+    document.getElementById('status-mempool').textContent = mempool.size + ' txs';
+  } catch (e) {
+    document.getElementById('status-dot').className = 'status-dot offline';
+    document.getElementById('status-text').textContent = 'offline';
+  }
+}
+
+async function loadBlocks() {
+  const container = document.getElementById('blocks-list');
+  try {
+    const blocks = await fetchJSON('/api/ladder/blocks/recent');
+    if (!blocks.length) {
+      container.innerHTML = '<div class="loading">No blocks yet</div>';
+      return;
+    }
+
+    let html = '';
+    for (const block of blocks) {
+      // Count v4 rung txs by checking each tx
+      let rungCount = 0;
+      for (const txid of block.txids) {
+        try {
+          const tx = await fetchJSON('/api/ladder/tx/' + txid);
+          if (tx.version === 4) rungCount++;
+        } catch (e) { /* skip */ }
+      }
+
+      const rungHtml = rungCount > 0
+        ? `<span class="rung-badge">${rungCount}</span>`
+        : '<span class="no-rung">0</span>';
+
+      html += `
+        <div class="block-row" onclick="toggleBlock(this, '${block.hash}', ${JSON.stringify(block.txids).replace(/"/g, '&quot;')})">
+          <div class="block-height">${block.height}</div>
+          <div class="block-hash">${truncHash(block.hash)}</div>
+          <div class="block-time">${timeAgo(block.time)}</div>
+          <div class="block-txcount">${block.tx_count}</div>
+          <div class="block-rung">${rungHtml}</div>
+        </div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load blocks: ${e.message}</div>`;
+  }
+}
+
+async function toggleBlock(row, hash, txids) {
+  // Check if detail panel already exists after this row
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('block-detail')) {
+    next.remove();
+    return;
+  }
+
+  // Remove any existing detail panels
+  document.querySelectorAll('.block-detail').forEach(el => el.remove());
+
+  const panel = document.createElement('div');
+  panel.className = 'block-detail';
+  panel.style.cssText = 'padding: 12px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border);';
+
+  let txHtml = '<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;">Transactions</div>';
+  txHtml += '<div class="tx-row header"><div>TxID</div><div style="text-align:center">Version</div><div style="text-align:center">Size</div><div style="text-align:right">Value</div></div>';
+
+  for (const txid of txids) {
+    try {
+      const tx = await fetchJSON('/api/ladder/tx/' + txid);
+      const totalValue = tx.vout.reduce((sum, o) => sum + o.value, 0).toFixed(8);
+      const versionClass = tx.version === 4 ? 'tx-version v4' : 'tx-version';
+      const versionLabel = tx.version === 4 ? 'v4 RUNG' : 'v' + tx.version;
+      txHtml += `
+        <div class="tx-row" style="cursor:pointer" onclick="searchTxDirect('${txid}')">
+          <div class="tx-id">${truncHash(txid)}</div>
+          <div class="${versionClass}">${versionLabel}</div>
+          <div class="tx-size">${tx.vsize} vB</div>
+          <div class="tx-value">${totalValue}</div>
+        </div>`;
+    } catch (e) {
+      txHtml += `<div class="tx-row"><div class="tx-id">${truncHash(txid)}</div><div colspan="3" style="color:var(--text-light)">failed to load</div></div>`;
+    }
+  }
+
+  panel.innerHTML = txHtml;
+  row.after(panel);
+}
+
+async function searchTx() {
+  const input = document.getElementById('search-input').value.trim();
+  if (input.length !== 64) {
+    document.getElementById('tx-detail').innerHTML = '<div class="error">TxID must be 64 hex characters</div>';
+    document.getElementById('tx-detail').classList.add('visible');
+    return;
+  }
+  await searchTxDirect(input);
+}
+
+async function searchTxDirect(txid) {
+  const panel = document.getElementById('tx-detail');
+  panel.innerHTML = '<div class="loading">Loading transaction...</div>';
+  panel.classList.add('visible');
+
+  try {
+    const tx = await fetchJSON('/api/ladder/tx/' + txid);
+    const isRung = tx.version === 4;
+    const totalIn = tx.vin.length;
+    const totalOut = tx.vout.length;
+    const totalValue = tx.vout.reduce((sum, o) => sum + o.value, 0).toFixed(8);
+
+    let html = `<div class="tx-panel-title">Transaction ${isRung ? '<span style="color:var(--accent)">[RUNG_TX v4]</span>' : '[v' + tx.version + ']'}</div>`;
+    html += `<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:var(--blue);margin-bottom:16px;word-break:break-all">${tx.txid}</div>`;
+
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;font-size:14px">';
+    html += `<div><span style="color:var(--text-light)">Size:</span> ${tx.size} B (${tx.vsize} vB)</div>`;
+    html += `<div><span style="color:var(--text-light)">Weight:</span> ${tx.weight} WU</div>`;
+    html += `<div><span style="color:var(--text-light)">Inputs:</span> ${totalIn}</div>`;
+    html += `<div><span style="color:var(--text-light)">Outputs:</span> ${totalOut}</div>`;
+    html += `<div><span style="color:var(--text-light)">Locktime:</span> ${tx.locktime}</div>`;
+    html += `<div><span style="color:var(--text-light)">Total value:</span> ${totalValue} tBTC</div>`;
+    html += '</div>';
+
+    // Outputs
+    html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">Outputs</div>';
+    for (let i = 0; i < tx.vout.length; i++) {
+      const out = tx.vout[i];
+      const spk = out.scriptPubKey;
+      const isMLSC = spk.hex && spk.hex.startsWith('c2') && spk.hex.length === 66;
+      const typeLabel = isMLSC ? '<span style="color:var(--accent);font-weight:600">MLSC</span>' : spk.type;
+      html += `<div style="padding:6px 0;border-bottom:1px solid var(--border-light);font-size:13px">`;
+      html += `<span style="color:var(--text-light)">#${i}</span> ${out.value.toFixed(8)} tBTC &mdash; ${typeLabel}`;
+      if (isMLSC) {
+        html += `<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--text-dim);margin-top:2px">root: ${spk.hex.substring(2)}</div>`;
+      }
+      html += '</div>';
+    }
+
+    panel.innerHTML = html;
+  } catch (e) {
+    panel.innerHTML = `<div class="error">Transaction not found: ${e.message}</div>`;
+  }
+}
+
+async function loadGoggles() {
+  const container = document.getElementById('goggles-container');
+  try {
+    const blocks = await fetchJSON('/api/ladder/blocks/recent');
+    if (!blocks.length) {
+      container.innerHTML = '<div class="loading">No blocks yet</div>';
+      return;
+    }
+
+    let html = '';
+    // Show up to 8 most recent blocks
+    const showBlocks = blocks.slice(0, 8);
+
+    for (const block of showBlocks) {
+      html += `<div class="goggles-block">`;
+      html += `<div class="goggles-block-header">`;
+      html += `<span class="goggles-block-height">#${block.height}</span>`;
+      html += `<span class="goggles-block-meta">${block.tx_count} tx &middot; ${block.size} bytes &middot; ${timeAgo(block.time)}</span>`;
+      html += `</div>`;
+      html += `<div class="goggles-mosaic">`;
+
+      // Fetch each tx to get version and size
+      for (const txid of block.txids) {
+        try {
+          const tx = await fetchJSON('/api/ladder/tx/' + txid);
+          const isRung = tx.version === 4;
+          const isCoinbase = tx.vin.length === 1 && tx.vin[0].coinbase;
+
+          // Width proportional to vsize (min 8px, max 200px)
+          const width = Math.max(8, Math.min(200, Math.round(tx.vsize / 5)));
+
+          let colour;
+          if (isRung) colour = 'var(--accent)';
+          else if (isCoinbase) colour = '#95a5a6';
+          else colour = '#3498db';
+
+          const label = isRung ? 'RUNG v4' : isCoinbase ? 'coinbase' : 'v' + tx.version;
+          const tip = truncHash(txid) + ' (' + label + ', ' + tx.vsize + ' vB)';
+
+          html += `<div class="goggles-tx" style="width:${width}px;background:${colour}" title="${tip}" onclick="searchTxDirect('${txid}')"></div>`;
+        } catch (e) {
+          html += `<div class="goggles-tx" style="width:8px;background:#ddd" title="failed to load"></div>`;
+        }
+      }
+
+      html += `</div></div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load blocks: ${e.message}</div>`;
+  }
+}
+
+// Initial load
+loadStatus();
+loadGoggles();
+loadBlocks();
+
+// Auto-refresh every 30s
+setInterval(() => {
+  loadStatus();
+  loadGoggles();
+  loadBlocks();
+}, 30000);
+
+// Enter key in search
+document.getElementById('search-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchTx();
+});
+</script>
+
+</body>
+</html>

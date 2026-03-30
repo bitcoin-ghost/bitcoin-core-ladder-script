@@ -129,7 +129,7 @@ enum class RungDataType : uint8_t {
     NUMERIC       = 0x08, //!< Numeric value (threshold, locktime, etc.): 1-4 bytes
     SCHEME        = 0x09, //!< Signature scheme selector: 1 byte
     SCRIPT_BODY   = 0x0A, //!< Serialized inner conditions: 1-80 bytes (witness-only; node computes hash for conditions)
-    DATA          = 0x0B, //!< Opaque data: 1-32 bytes (DATA_RETURN block only)
+    DATA          = 0x0B, //!< Opaque data: 1-40 bytes (DATA_RETURN block only; hash + protocol metadata)
 };
 
 // Backward-compatible alias

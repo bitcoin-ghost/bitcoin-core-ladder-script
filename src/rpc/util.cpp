@@ -1242,9 +1242,15 @@ std::string RPCArg::ToStringObj(const bool oneline) const
         return res + "...]";
     case Type::OBJ:
     case Type::OBJ_NAMED_PARAMS:
-    case Type::OBJ_USER_KEYS:
-        // Currently unused, so avoid writing dead code
-        NONFATAL_UNREACHABLE();
+    case Type::OBJ_USER_KEYS: {
+        // Recursively serialize nested object arguments (used by RPCs with complex nested arg schemas)
+        const std::string obj_res = Join(m_inner, ",", [&](const RPCArg& i) { return i.ToStringObj(oneline); });
+        if (m_type == Type::OBJ) {
+            return res + "{" + obj_res + "}";
+        } else {
+            return res + "{" + obj_res + ",...}";
+        }
+    }
     } // no default case, so the compiler can warn about missing cases
     NONFATAL_UNREACHABLE();
 }

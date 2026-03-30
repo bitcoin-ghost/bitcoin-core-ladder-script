@@ -44,7 +44,7 @@ belong to a known type with enforced size constraints.
 
 ## Further Reading
 
-- [Block Library](BLOCK_LIBRARY.md) for all 61 block types
+- [Block Library](BLOCK_LIBRARY.md) for all 62 block types
 - [Glossary](GLOSSARY.md) for term definitions
 - [Integration Guide](INTEGRATION.md) for wallet developers
 - [Soft Fork Guide](SOFT_FORK_GUIDE.md) for activation mechanics

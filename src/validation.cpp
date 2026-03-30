@@ -2244,6 +2244,12 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                         spent_outputs[i].scriptPubKey.insert(
                             spent_outputs[i].scriptPubKey.end(),
                             root.begin(), root.end());
+                    } else {
+                        // Synthetic root missing — cannot inflate. Leave as compact
+                        // 1-byte [0xDF] which will fail MLSC proof verification in
+                        // VerifyRungTx (conditions_root will be null). Log for debugging.
+                        LogPrintf("WARNING: MLSC root entry missing for input %u (source %s)\n",
+                                  (unsigned)i, source_txid.ToString());
                     }
                 }
             }

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMPARE — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../ghost-labs.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ghost Labs</a>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <a href="https://bitcoinghost.org" style="color:#666;font-size:12px;text-decoration:none;">Bitcoin Ghost</a>
+        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">COMPARE</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">PLC Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0641 &middot; PLC FAMILY</div>
+  <h1 class="block-title">COMPARE</h1>
+  <p class="block-subtitle">Flexible comparator block. Compares the transaction input_amount against one or two reference values using a specified comparison operator. Supports equality, inequality, ordering, and range checks. No Tapscript equivalent exists.</p>
+  <span class="block-family-badge badge-plc">PLC</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="190" viewBox="0 0 620 190">
+      <line x1="20" y1="10" x2="20" y2="180" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="180" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="60" x2="160" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="440" y1="60" x2="600" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <rect x="160" y="20" width="280" height="100" rx="2" fill="#f5f5f5" stroke="#27ae60" stroke-width="1.5"/>
+      <text x="300" y="38" text-anchor="middle" fill="#27ae60" font-family="Share Tech Mono" font-size="13" letter-spacing="2">COMPARE</text>
+      <!-- Operator visualization -->
+      <rect x="185" y="50" width="80" height="24" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="225" y="66" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="9" font-weight="600">input_amt</text>
+      <text x="282" y="66" text-anchor="middle" fill="#27ae60" font-family="Share Tech Mono" font-size="14">OP</text>
+      <rect x="300" y="50" width="60" height="24" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="330" y="66" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="9" font-weight="600">value_b</text>
+      <!-- Operators row -->
+      <text x="195" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">EQ</text>
+      <text x="225" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">NEQ</text>
+      <text x="255" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">GT</text>
+      <text x="285" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">LT</text>
+      <text x="315" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">GTE</text>
+      <text x="345" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">LTE</text>
+      <text x="385" y="96" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">IN_RANGE</text>
+      <text x="300" y="155" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">operator(input_amount, value_b [, value_c]) &rarr; SATISFIED / UNSATISFIED</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">operator</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Comparison operator code (NUMERIC[0])</td></tr>
+      <tr><td class="field-name">value_b</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Primary comparison value (NUMERIC[1])</td></tr>
+      <tr><td class="field-name">value_c</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Upper bound for IN_RANGE operator (NUMERIC[2], optional)</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:12px">value_c is only required when operator is IN_RANGE (0x07). The input_amount comes from the evaluation context.</p>
+
+  <div class="section-label" style="margin-top:24px">Operator Codes</div>
+  <table class="field-table">
+    <thead><tr><th>Code</th><th>Name</th><th>Operation</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">0x01</td><td class="field-type">EQ</td><td class="field-desc">input_amount == value_b</td></tr>
+      <tr><td class="field-name">0x02</td><td class="field-type">NEQ</td><td class="field-desc">input_amount != value_b</td></tr>
+      <tr><td class="field-name">0x03</td><td class="field-type">GT</td><td class="field-desc">input_amount &gt; value_b</td></tr>
+      <tr><td class="field-name">0x04</td><td class="field-type">LT</td><td class="field-desc">input_amount &lt; value_b</td></tr>
+      <tr><td class="field-name">0x05</td><td class="field-type">GTE</td><td class="field-desc">input_amount &ge; value_b</td></tr>
+      <tr><td class="field-name">0x06</td><td class="field-type">LTE</td><td class="field-desc">input_amount &le; value_b</td></tr>
+      <tr><td class="field-name">0x07</td><td class="field-type">IN_RANGE</td><td class="field-desc">value_b &le; input_amount &le; value_c</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <p class="section-text" style="margin-bottom:12px">Example with IN_RANGE operator (3 NUMERIC fields):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0641</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 8B</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 8B</span>
+      <span class="wire-bytes">Conditions = 27 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0641</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">0</span>
+      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total (IN_RANGE)</span>
+      <span class="wire-total-bytes">31 bytes</span>
+    </div>
+  </div>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">operator</span> (NUMERIC[0]) and <span class="eval-keyword">value_b</span> (NUMERIC[1]). If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If operator is unknown (not 0x01-0x07) &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If operator is <span class="eval-keyword">IN_RANGE</span> (0x07): read <span class="eval-keyword">value_c</span> (NUMERIC[2]). If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Apply operator to <span class="eval-keyword">input_amount</span> vs <span class="eval-keyword">value_b</span> (and value_c for IN_RANGE)</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If comparison is true &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">If comparison is false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Unknown operator code</td><td class="r-err">ERROR</td></tr>
+      <tr><td>IN_RANGE operator with missing value_c</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Comparison evaluates to false</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Comparison evaluates to true</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-label">Conditions (IN_RANGE: 1000 &le; amount &le; 50000)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"COMPARE"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">7</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">1000</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">50000</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">This creates a range check ensuring the input amount is between 1,000 and 50,000 satoshis inclusive. Operator 7 = IN_RANGE.</p>
+</div>
+
+<!-- Example -->
+<div class="doc-section">
+  <div class="section-label">Worked Example</div>
+  <div class="eval-box">
+    <p class="section-text" style="margin-bottom:12px"><strong>operator=GTE (0x05), value_b=10000</strong></p>
+    <div class="eval-step"><span class="eval-step-text">input_amount=5000: 5000 &ge; 10000 = false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">input_amount=10000: 10000 &ge; 10000 = true &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">input_amount=50000: 50000 &ge; 10000 = true &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <p class="section-text" style="margin-top:16px; margin-bottom:12px"><strong>operator=IN_RANGE (0x07), value_b=1000, value_c=5000</strong></p>
+    <div class="eval-step"><span class="eval-step-text">input_amount=500: 1000 &le; 500 &le; 5000 = false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">input_amount=3000: 1000 &le; 3000 &le; 5000 = true &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">input_amount=6000: 1000 &le; 6000 &le; 5000 = false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Amount-Gated Spending</div>
+    <div class="use-case-desc">Enforce minimum or maximum transaction amounts at the covenant level. A UTXO can require that spends exceed a minimum value (GT/GTE) or stay below a ceiling (LT/LTE), creating on-chain spending policies.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Conditional Path Selection</div>
+    <div class="use-case-desc">Different covenant paths can use different COMPARE operators to create amount-based routing. Small amounts take one path (LT), large amounts take another (GTE), enabling tiered processing.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Range Validation</div>
+    <div class="use-case-desc">IN_RANGE ensures transaction amounts fall within acceptable bounds. Useful for fee enforcement, deposit limits, or ensuring outputs stay within protocol-defined value ranges.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="counter-up.html">&larr; COUNTER_UP</a>
+  <a href="sequencer.html">SEQUENCER &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

@@ -1003,8 +1003,25 @@ static RPCHelpMan createrungtx()
         CTxOut txout;
         txout.nValue = amount;
 
-        // Always MLSC: compute Merkle root and create 0xDF output
-        uint256 root = rung::ComputeConditionsRoot(conditions, rung_pubkeys, relay_pubkeys);
+        // Always MLSC: compute TX_MLSC Merkle root via CreationProofRung leaves.
+        // This must match what VerifyRungTx expects (ComputeTxMLSCLeaf, not ComputeRungLeaf).
+        std::vector<rung::CreationProofRung> cp_rungs;
+        for (size_t r = 0; r < conditions.rungs.size(); ++r) {
+            rung::CreationProofRung cp_rung;
+            for (const auto& block : conditions.rungs[r].blocks) {
+                cp_rung.blocks.push_back({
+                    static_cast<uint16_t>(block.type),
+                    static_cast<uint8_t>(block.inverted ? 1 : 0)
+                });
+            }
+            cp_rung.coil = conditions.coil;
+            cp_rung.coil.output_index = static_cast<uint32_t>(i);
+            std::vector<std::vector<uint8_t>> rpks;
+            if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
+            cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
+            cp_rungs.push_back(std::move(cp_rung));
+        }
+        uint256 root = rung::ComputeTxMLSCRoot(cp_rungs);
 
         // DATA_RETURN: append data payload to MLSC scriptPubKey
         if (conditions.rungs.size() == 1 &&
@@ -2439,8 +2456,24 @@ static RPCHelpMan parseladder()
         ladder.rungs = conditions.rungs;
         auto bytes = rung::SerializeLadderWitness(ladder, rung::SerializationContext::CONDITIONS);
 
-        // Compute MLSC root
-        uint256 root = rung::ComputeConditionsRoot(conditions, pubkeys, {});
+        // Compute MLSC root via TX_MLSC leaf computation (must match VerifyRungTx)
+        std::vector<rung::CreationProofRung> cp_rungs;
+        for (size_t r = 0; r < conditions.rungs.size(); ++r) {
+            rung::CreationProofRung cp_rung;
+            for (const auto& block : conditions.rungs[r].blocks) {
+                cp_rung.blocks.push_back({
+                    static_cast<uint16_t>(block.type),
+                    static_cast<uint8_t>(block.inverted ? 1 : 0)
+                });
+            }
+            cp_rung.coil = conditions.coil;
+            cp_rung.coil.output_index = static_cast<uint32_t>(r);
+            std::vector<std::vector<uint8_t>> rpks;
+            if (r < pubkeys.size()) rpks = pubkeys[r];
+            cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
+            cp_rungs.push_back(std::move(cp_rung));
+        }
+        uint256 root = rung::ComputeTxMLSCRoot(cp_rungs);
 
         UniValue result(UniValue::VOBJ);
         result.pushKV("conditions_hex", HexStr(bytes));
@@ -2589,8 +2622,24 @@ static RPCHelpMan computemutation()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "no RECURSE_MODIFIED or RECURSE_DECAY block found");
         done:
 
-        // Compute mutated root
-        uint256 root = rung::ComputeConditionsRoot(conditions, rung_pubkeys, {});
+        // Compute mutated root via TX_MLSC leaf computation (must match VerifyRungTx)
+        std::vector<rung::CreationProofRung> cp_rungs;
+        for (size_t r = 0; r < conditions.rungs.size(); ++r) {
+            rung::CreationProofRung cp_rung;
+            for (const auto& block : conditions.rungs[r].blocks) {
+                cp_rung.blocks.push_back({
+                    static_cast<uint16_t>(block.type),
+                    static_cast<uint8_t>(block.inverted ? 1 : 0)
+                });
+            }
+            cp_rung.coil = conditions.coil;
+            cp_rung.coil.output_index = static_cast<uint32_t>(r);
+            std::vector<std::vector<uint8_t>> rpks;
+            if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
+            cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
+            cp_rungs.push_back(std::move(cp_rung));
+        }
+        uint256 root = rung::ComputeTxMLSCRoot(cp_rungs);
 
         // Serialize mutated conditions
         rung::LadderWitness ladder;
@@ -3110,6 +3159,9 @@ static RPCHelpMan createtxmlsc()
             {RPCResult::Type::STR_HEX, "conditions_root", "The shared conditions root (tweaked if internal_pubkey provided)"},
             {RPCResult::Type::STR_HEX, "merkle_root", "The raw Merkle root (before tweaking)"},
             {RPCResult::Type::NUM, "n_rungs", "Total rungs in the shared tree"},
+            {RPCResult::Type::BOOL, "key_path", "Whether key-path spending is enabled (auto-detected or explicit)"},
+            {RPCResult::Type::STR_HEX, "internal_pubkey", /*optional=*/ true, "Internal pubkey used for tweak (if key_path is true)"},
+            {RPCResult::Type::STR_HEX, "scriptPubKey", /*optional=*/ true, "The shared MLSC scriptPubKey hex (0xDF + root)"},
         }},
         RPCExamples{
             HelpExampleCli("createtxmlsc",

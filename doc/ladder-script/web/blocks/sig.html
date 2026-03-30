@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIG — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../ghost-labs.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ghost Labs</a>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <a href="https://bitcoinghost.org" style="color:#666;font-size:12px;text-decoration:none;">Bitcoin Ghost</a>
+        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">SIG</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Signature Family</span>
+</div>
+
+<div class="doc-content">
+
+<!-- Title -->
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0001 &middot; SIGNATURE FAMILY</div>
+  <h1 class="block-title">SIG</h1>
+  <p class="block-subtitle">Single signature verification. Supports Schnorr (BIP-340), ECDSA, and post-quantum schemes via the SCHEME field. The fundamental spending primitive.</p>
+  <span class="block-family-badge" style="color: #ff1744; border-color: #ff174440;">Signature</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
+</div>
+
+<!-- Ladder Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="150" viewBox="0 0 620 150">
+      <!-- Power rails -->
+      <line x1="20" y1="10" x2="20" y2="140" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="140" stroke="#cccccc" stroke-width="3"/>
+      <!-- Wire -->
+      <line x1="20" y1="60" x2="180" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="440" y1="60" x2="600" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <!-- Block body -->
+      <rect x="180" y="20" width="260" height="80" rx="2" fill="#f5f5f5" stroke="#e74c3c" stroke-width="1.5"/>
+      <!-- Block label -->
+      <text x="310" y="38" text-anchor="middle" fill="#e74c3c" font-family="Share Tech Mono" font-size="13" letter-spacing="2">SIG</text>
+      <!-- Internal component -->
+      <rect x="210" y="48" width="200" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="310" y="66" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="10" font-weight="600">SIG VERIFY</text>
+      <!-- Annotation -->
+      <text x="310" y="125" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">Schnorr / ECDSA / PQ via SCHEME routing</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead>
+      <tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="field-name">pubkey</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32-33 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Public key (x-only 32B or compressed 33B)</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64-65 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Schnorr signature (64B) or with sighash byte (65B). ECDSA signatures are 8-72B.</td>
+      </tr>
+      <tr>
+        <td class="field-name">scheme</td>
+        <td class="field-type">SCHEME</td>
+        <td class="field-size">1 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Signature scheme identifier (0x01 = Schnorr, 0x02 = ECDSA). Routes to post-quantum verifier when PQ scheme set.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public key folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). No key field in conditions.</p>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+
+  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type" style="min-width:60px">0x0001</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-sig" style="min-width:80px">SCHEME &middot; 1B</span>
+      <span class="wire-bytes">= 7 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text" style="margin-bottom:16px">Witness side (in input witness):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type" style="min-width:60px">0x0001</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">PUBKEY &middot; 32B</span>
+      <span class="wire-segment wire-field-sig" style="min-width:140px">SIGNATURE &middot; 64B</span>
+      <span class="wire-bytes">= 104 bytes</span>
+    </div>
+
+    <div class="wire-total">
+      <span class="wire-total-label">Total (conditions + witness)</span>
+      <span class="wire-total-bytes">145 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text">With rung overhead included. Minimal Schnorr case (x-only pubkey, no sighash byte).</p>
+</div>
+
+<!-- Evaluation Logic -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step">
+      <span class="eval-step-num">1.</span>
+      <span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2.</span>
+      <span class="eval-step-text">Check for <span class="eval-keyword">SCHEME</span> field. If PQ scheme identifier present, route to post-quantum verifier.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">3.</span>
+      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. Schnorr if 64-65B, ECDSA if 8-72B. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">4.</span>
+      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Result Table -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing PUBKEY or SIGNATURE</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Signature size out of range</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature valid</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON Output -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+
+  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"SIG"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"SIG"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> }
+  ]
+}</pre></div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+
+  <div class="use-case">
+    <div class="use-case-title">Single-Key Spending</div>
+    <div class="use-case-desc">The most common spending condition. A single public key controls a UTXO. The owner provides a signature to spend. Equivalent to P2PKH or P2WPKH but with pubkey commitment privacy.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Hot Wallet Authorization</div>
+    <div class="use-case-desc">Hot wallet key signs outgoing transactions immediately. The SIG block is the innermost authorization primitive used in more complex ladder constructions like TIMELOCKED_SIG or HTLC.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Key Delegation</div>
+    <div class="use-case-desc">Delegate spending authority to a specific key. Combined with other blocks on different rungs, enables flexible authorization policies where one rung requires only a single signature.</div>
+  </div>
+</div>
+
+<!-- Nav -->
+<div class="doc-nav">
+  <a href="index.html">&larr; All Blocks</a>
+  <a href="multisig.html">MULTISIG &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

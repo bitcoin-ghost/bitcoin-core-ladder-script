@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin Script vs Ladder Script — Side by Side</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg-alt: #f5f5f5; --bg-code: #f0f0f0;
+  --text: #1a1a1a; --text-body: #333333; --text-dim: #666666; --text-light: #999999;
+  --accent: #e67e22; --accent-dark: #d35400; --green: #27ae60; --red: #c0392b; --blue: #2980b9;
+  --border: #e0e0e0; --border-light: #eeeeee;
+}
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.site-header { background: #fff; border-bottom: 1px solid var(--border); }
+.site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { color: var(--accent); text-decoration: none; }
+.header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding: 10px 0; }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-nav a:hover { color: var(--accent); }
+
+.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 48px; }
+
+.comparison { margin-bottom: 56px; }
+.comp-title { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.comp-desc { color: var(--text-dim); font-size: 14px; margin-bottom: 16px; }
+.comp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.comp-side { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.comp-label { padding: 8px 16px; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.comp-label.old { background: #fef0e7; color: var(--accent-dark); }
+.comp-label.new { background: #e8f5e9; color: var(--green); }
+.comp-code { padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; white-space: pre-wrap; background: var(--bg-code); min-height: 120px; }
+.comp-note { padding: 12px 16px; font-size: 13px; color: var(--text-dim); border-top: 1px solid var(--border-light); background: #fff; }
+.comp-verdict { margin-top: 12px; padding: 12px 16px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 4px; font-size: 14px; }
+.comp-verdict strong { color: var(--text); }
+.tag-impossible { background: #ffebee; color: var(--red); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+.tag-hacky { background: #fff3e0; color: var(--accent-dark); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+.tag-native { background: #e8f5e9; color: var(--green); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+
+@media (max-width: 700px) {
+  .comp-grid { grid-template-columns: 1fr; }
+  .main { padding: 32px 16px 60px; }
+}
+
+.site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
+.site-footer a { color: var(--text-light); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="../ghost-labs.html" class="header-title">Ghost Labs</a>
+    </div>
+    <nav class="header-nav">
+      <a href="ladder-script.html">Ladder Script</a>
+      <a href="rung-tx-anatomy.html">Anatomy</a>
+      <a href="block-docs/">Blocks</a>
+      <a href="docs/">Docs</a>
+      <a href="descriptor-notation.html">Descriptors</a>
+      <a href="ladder-engine.html">Engine</a>
+    </nav>
+  </div>
+</header>
+
+<div class="main">
+
+  <h1 class="page-title">Bitcoin Script vs Ladder Script</h1>
+  <p class="page-sub">Side-by-side comparisons for common spending patterns. Same goal, different approach.</p>
+
+  <!-- 1. SIMPLE VAULT -->
+  <div class="comparison">
+    <div class="comp-title">1. Vault with Clawback</div>
+    <div class="comp-desc">Hot key spends after a delay. Cold key sweeps immediately.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (OP_VAULT proposal)</div>
+        <div class="comp-code">OP_VAULT &lt;recovery-spk&gt; &lt;delay&gt; &lt;target-hash&gt;
+
+Requires: BIP-345 soft fork (not activated)
+Recovery: OP_VAULT_RECOVER
+Unvault: separate tx to OP_UNVAULT output
+Trigger: reveal target outputs, wait delay
+4 opcodes, 2 transactions minimum</div>
+        <div class="comp-note"><span class="tag-impossible">Not available</span> BIP-345 is proposed but not activated on mainnet.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(vault_lock(@recovery, @hot, 144))
+
+Recovery key: sweeps immediately (no delay)
+Hot key: signs + waits 144 blocks
+1 block type, 1 transaction
+Descriptor: vault_lock(@recovery, @hot, 144)</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Single block type. Works on signet today.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Built-in vault primitive. No multi-transaction ceremony. Recovery is one signature, not a separate recovery transaction.</div>
+  </div>
+
+  <!-- 2. HTLC -->
+  <div class="comparison">
+    <div class="comp-title">2. Hash Time-Locked Contract (Atomic Swap)</div>
+    <div class="comp-desc">Claim with preimage + signature, or refund after timeout.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">OP_IF
+  OP_SHA256 &lt;hash&gt; OP_EQUALVERIFY
+  &lt;receiver-pubkey&gt; OP_CHECKSIG
+OP_ELSE
+  &lt;timeout&gt; OP_CHECKLOCKTIMEVERIFY OP_DROP
+  &lt;sender-pubkey&gt; OP_CHECKSIG
+OP_ENDIF
+
+11 opcodes, stack manipulation, branching
+Witness: choose IF or ELSE path + data</div>
+        <div class="comp-note"><span class="tag-hacky">Works but fragile</span> Script execution is path-dependent. Both branches visible on-chain.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(or(
+  htlc(@sender, @receiver, &lt;preimage&gt;, 144),
+  and(sig(@sender), cltv(900000))
+))
+
+1 compound block + 1 fallback rung
+Merkelised: only spending rung revealed
+Descriptor: htlc(@alice, @bob, hex, 144)</div>
+        <div class="comp-note"><span class="tag-native">Native</span> HTLC is a single compound block. Unrevealed rung stays private (MLSC).</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> HTLC as one typed block. No IF/ELSE branching. Only the spending path is revealed on-chain &mdash; the refund path stays private.</div>
+  </div>
+
+  <!-- 3. RATE-LIMITED WALLET -->
+  <div class="comparison">
+    <div class="comp-title">3. Rate-Limited Wallet</div>
+    <div class="comp-desc">Cap how much can be spent per block, even if the key is compromised.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">Not possible with Bitcoin Script.
+
+No opcode inspects spending rate across blocks.
+OP_CHECKTEMPLATEVERIFY can constrain a single
+  spending transaction but cannot enforce
+  per-block rate limits over time.
+
+Workaround: pre-signed transaction chains
+  (requires trust + key management)</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> No mechanism for cross-block spending rate enforcement.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(and(
+  sig(@owner),
+  rate_limit(200000, 1000000, 10)
+))
+
+Max 200k sats per block
+Accumulation cap: 1M sats
+Refill: 10 blocks
+Descriptor: rate_limit(200000, 1000000, 10)</div>
+        <div class="comp-note"><span class="tag-native">Native</span> RATE_LIMIT is a single block type. Enforced at consensus.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Native rate limiting. If your key is compromised, the attacker can only drain at the rate you set. Bitcoin Script has no equivalent.</div>
+  </div>
+
+  <!-- 4. DCA COVENANT -->
+  <div class="comparison">
+    <div class="comp-title">4. Dollar-Cost Averaging Covenant</div>
+    <div class="comp-desc">A UTXO that can be spent exactly 12 times, splitting off a fixed amount each time.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">Not possible without OP_CAT + CTV.
+
+Recursive covenants require introspecting
+  the spending transaction's outputs.
+OP_CTV alone can pre-commit one template.
+OP_CAT (not activated) could enable
+  generalized covenants but with
+  unconstrained recursion depth.
+
+No bounded recursion primitive exists.</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> Requires covenant opcodes not available on mainnet.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(and(
+  sig(@owner),
+  amount_lock(50000, 100000),
+  recurse_count(12)
+))
+
+Count decrements each spend
+Terminates at 0 (free spend)
+Output must carry same conditions
+Descriptor: recurse_count(12)</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Bounded recursion with automatic termination. No unbounded loops possible.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Recursive covenants are first-class. Bounded by max_depth or countdown. No OP_CAT needed. The evaluator enforces that outputs carry the correct mutated conditions.</div>
+  </div>
+
+  <!-- 5. DEAD MAN'S SWITCH -->
+  <div class="comparison">
+    <div class="comp-title">5. Dead Man's Switch (Inheritance)</div>
+    <div class="comp-desc">Owner spends normally. If inactive for ~6 months, heir can claim.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">OP_IF
+  &lt;owner-pubkey&gt; OP_CHECKSIG
+OP_ELSE
+  &lt;26000&gt; OP_CHECKSEQUENCEVERIFY OP_DROP
+  &lt;heir-pubkey&gt; OP_CHECKSIG
+OP_ENDIF
+
+Works but reveals both branches.
+No way to "reset" the timer without
+  moving funds to a new UTXO.</div>
+        <div class="comp-note"><span class="tag-hacky">Works</span> Functional but both paths visible. No built-in timer reset.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(or(
+  sig(@owner),
+  and(csv(26000), sig(@heir))
+))
+
+Owner path: immediate, private
+Heir path: 26,000 blocks (~6 months)
+Only spending path revealed (MLSC)
+Timer resets on each owner spend</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Same logic, but only the used path is revealed. Unrevealed rung stays private.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Same inheritance logic, but with MLSC privacy. The heir path is never revealed unless used. With RECURSE_SAME, each owner spend resets the timer and re-encumbers with identical conditions.</div>
+  </div>
+
+  <!-- 6. POST-QUANTUM MIGRATION -->
+  <div class="comparison">
+    <div class="comp-title">6. Post-Quantum Key Migration</div>
+    <div class="comp-desc">Use a classical key daily, with a post-quantum fallback for long-term security.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">Not possible.
+
+Bitcoin Script has no post-quantum
+  signature verification opcodes.
+No soft fork proposal adds PQ support.
+Migration requires a hard fork or
+  a new address type + opcode.</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> No PQ signature verification in Bitcoin Script.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(or(
+  sig(@daily),
+  sig(@pq_backup, falcon512)
+))
+
+Daily spending: Schnorr (32-byte key)
+Recovery: FALCON-512 (897-byte key)
+Also: falcon1024, dilithium3, sphincs_sha
+Same descriptor notation, same RPC</div>
+        <div class="comp-note"><span class="tag-native">Native</span> PQ schemes are a 1-byte SCHEME field change. No new opcodes needed.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Post-quantum support is built into the signature verification. Change one byte (the SCHEME field) to switch from Schnorr to FALCON-512, DILITHIUM3, or SPHINCS+. No new opcodes, no hard fork.</div>
+  </div>
+
+  <!-- 7. GOVERNANCE TREASURY -->
+  <div class="comparison">
+    <div class="comp-title">7. Governance-Gated Treasury</div>
+    <div class="comp-desc">2-of-3 multisig + output must go to a specific address + max tx weight.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">OP_2 &lt;pk1&gt; &lt;pk2&gt; &lt;pk3&gt; OP_3
+  OP_CHECKMULTISIG
+
+Multisig: yes.
+Output constraints: not possible.
+Weight limits: not possible.
+Epoch gates: not possible.
+
+Bitcoin Script cannot inspect the
+  spending transaction's outputs,
+  weight, or block height modulo.</div>
+        <div class="comp-note"><span class="tag-hacky">Partial</span> Multisig works. Output/weight/epoch constraints don't exist.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script</div>
+        <div class="comp-code">ladder(and(
+  multisig(2, @dir_a, @dir_b, @dir_c),
+  output_check(0, 1000000, 4294967295, &lt;hash&gt;),
+  weight_limit(65536),
+  epoch_gate(100, 100)
+))
+
+Multisig + output constraint
++ weight limit + epoch window
+All in one rung, all enforced at consensus</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Transaction-level constraints are first-class block types.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> OUTPUT_CHECK, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, EPOCH_GATE, and RELATIVE_VALUE are all native block types. Bitcoin Script has no transaction introspection beyond signature verification.</div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="comparison" style="border-top: 2px solid var(--accent); padding-top: 32px;">
+    <div class="comp-title">Summary</div>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
+      <thead>
+        <tr style="background:var(--bg-alt);">
+          <th style="padding:10px 14px;text-align:left;border-bottom:2px solid var(--border);">Pattern</th>
+          <th style="padding:10px 14px;text-align:center;border-bottom:2px solid var(--border);">Bitcoin Script</th>
+          <th style="padding:10px 14px;text-align:center;border-bottom:2px solid var(--border);">Ladder Script</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Vault with clawback</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not available</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">vault_lock</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">HTLC (atomic swap)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">11 opcodes</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">htlc (1 block)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Rate-limited wallet</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">rate_limit</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Recursive covenant (DCA)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">recurse_count</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Dead man's switch</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">IF/ELSE + CSV</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">or(sig, csv+sig)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Post-quantum signatures</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">sig(@pk, falcon512)</span></td></tr>
+        <tr><td style="padding:8px 14px;">Governance treasury</td><td style="text-align:center;padding:8px;"><span class="tag-hacky">Multisig only</span></td><td style="text-align:center;padding:8px;"><span class="tag-native">multisig + output_check + weight_limit</span></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:16px;font-size:14px;color:var(--text-dim);">Bitcoin Script works for simple signatures, timelocks, and hash locks. For everything else &mdash; vaults, rate limiting, covenants, PQ signatures, transaction introspection &mdash; it either can't do it or requires proposed opcodes that aren't activated. Ladder Script provides all of these as native, typed block types with bounded execution and deterministic evaluation.</p>
+  </div>
+
+</div>
+
+<footer class="site-footer">
+  <a href="../ghost-labs.html">Ghost Labs</a> &middot; <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
+</footer>
+
+</body>
+</html>

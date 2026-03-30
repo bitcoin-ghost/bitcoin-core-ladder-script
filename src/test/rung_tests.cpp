@@ -1871,8 +1871,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::OUTPUT_COUNT, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
         // RELATIVE_VALUE: explicit — NUMERIC, NUMERIC
         {RungBlockType::RELATIVE_VALUE, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num2}}},
-        // ACCUMULATOR: conditions-only, no witness fields
-        {RungBlockType::ACCUMULATOR, {{RungDataType::NUMERIC, num1}}},
+        // ACCUMULATOR: all fields must be HASH256 (root + proof nodes + leaf)
+        {RungBlockType::ACCUMULATOR, {{RungDataType::HASH256, h256}}},
 
         // === Legacy family ===
         // P2PK_LEGACY witness: [PUBKEY, SIGNATURE] (= SIG_WITNESS)
@@ -11450,6 +11450,918 @@ BOOST_AUTO_TEST_CASE(batch_verifier_find_failure_empty)
     rung::BatchVerifier bv;
     // No entries, no failure
     BOOST_CHECK_EQUAL(bv.FindFailure(), -1);
+}
+
+// ============================================================================
+// ANCHOR_FEE evaluation tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_satisfied)
+{
+    // ANCHOR_FEE: 2-of-2 sigs valid, fee in band, weight ok → SATISFIED
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    // 2 pubkeys + 2 signatures (witness)
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // Condition parameters: min_fee=1, max_fee=10000, max_weight=4000, commitment=1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(4000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+
+    // Build mock tx: input 100000, output 90000 → fee=10000, vsize ~60, fee_rate ~166
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.push_back(CTxIn(COutPoint(Txid::FromUint256(uint256::ONE), 0)));
+    mtx.vout.push_back(CTxOut(90000, CScript() << OP_RETURN));
+    CTransaction tx(mtx);
+
+    std::vector<CTxOut> spent_outputs;
+    spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
+
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.spent_outputs = &spent_outputs;
+
+    auto result = EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx);
+    BOOST_CHECK_MESSAGE(result == EvalResult::SATISFIED,
+        "Expected SATISFIED, got " + std::to_string(static_cast<int>(result)));
+}
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_missing_fields)
+{
+    // ANCHOR_FEE with fewer than 4 NUMERIC fields → ERROR
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // Only 2 numerics instead of 4
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)});
+
+    RungEvalContext ctx;
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_sig1_invalid)
+{
+    // ANCHOR_FEE: one signature fails → UNSATISFIED
+    MockSignatureChecker checker;
+    checker.schnorr_result = false;  // all sigs fail
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(4000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+
+    RungEvalContext ctx;
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_below_min)
+{
+    // ANCHOR_FEE: fee_rate < min_fee_rate → UNSATISFIED (anti-pinning)
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // min_fee=1000 (very high), max_fee=2000, weight limit=4000, commitment=1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(4000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+
+    // fee = 50 sats, vsize ~= some small value → fee_rate << 1000
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.push_back(CTxIn(COutPoint(Txid::FromUint256(uint256::ONE), 0)));
+    mtx.vout.push_back(CTxOut(99950, CScript() << OP_RETURN));
+    CTransaction tx(mtx);
+
+    std::vector<CTxOut> spent_outputs;
+    spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
+
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.spent_outputs = &spent_outputs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_above_max)
+{
+    // ANCHOR_FEE: fee_rate > max_fee_rate → UNSATISFIED
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // min_fee=1, max_fee=2 (very low ceiling), weight limit=100000, commitment=1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100000)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+
+    // fee = 50000 sats, small tx → fee_rate >> 2
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.push_back(CTxIn(COutPoint(Txid::FromUint256(uint256::ONE), 0)));
+    mtx.vout.push_back(CTxOut(50000, CScript() << OP_RETURN));
+    CTransaction tx(mtx);
+
+    std::vector<CTxOut> spent_outputs;
+    spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
+
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.spent_outputs = &spent_outputs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_anchor_fee_weight_over_limit)
+{
+    // ANCHOR_FEE: tx weight > max_weight → UNSATISFIED
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR_FEE;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // min_fee=0, max_fee=999999, max_weight=1 (impossibly low), commitment=1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(999999)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});  // max_weight = 1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.push_back(CTxIn(COutPoint(Txid::FromUint256(uint256::ONE), 0)));
+    mtx.vout.push_back(CTxOut(99999, CScript() << OP_RETURN));
+    CTransaction tx(mtx);
+
+    std::vector<CTxOut> spent_outputs;
+    spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
+
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.spent_outputs = &spent_outputs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+}
+
+// ============================================================================
+// ReadNumeric edge cases (tested indirectly through block evaluation)
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(read_numeric_empty_returns_nullopt)
+{
+    // CSV block with empty NUMERIC data → ReadNumeric returns nullopt → ERROR
+    MockSignatureChecker checker;
+    checker.sequence_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::CSV;
+    block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>{}});
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(read_numeric_oversized_returns_nullopt)
+{
+    // CSV block with 9-byte NUMERIC → ReadNumeric returns nullopt → ERROR
+    MockSignatureChecker checker;
+    checker.sequence_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::CSV;
+    block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>(9, 0x01)});
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(read_numeric_one_byte)
+{
+    // CSV block with single-byte NUMERIC (value 42) → should parse correctly
+    MockSignatureChecker checker;
+    checker.sequence_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::CSV;
+    block.fields.push_back({RungDataType::NUMERIC, {42}});
+
+    // The value 42 should be read correctly and used as the sequence check
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(read_numeric_max_8_bytes)
+{
+    // AMOUNT_LOCK with 8-byte NUMERIC values → should parse correctly
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    // Build an 8-byte LE numeric (value = 0x0000000000000001 = 1)
+    std::vector<uint8_t> eight_byte_one = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    // 8-byte max value that fits: a large but valid number
+    std::vector<uint8_t> eight_byte_large = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+
+    RungBlock block;
+    block.type = RungBlockType::AMOUNT_LOCK;
+    block.fields.push_back({RungDataType::NUMERIC, eight_byte_one});    // min_sats = 1
+    block.fields.push_back({RungDataType::NUMERIC, eight_byte_large});  // max_sats = large
+
+    RungEvalContext ctx;
+    ctx.output_amount = 5000;
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+}
+
+// ============================================================================
+// VerifySigWithScheme via block evaluation
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(verify_sig_scheme_schnorr_explicit)
+{
+    // SIG with explicit SCHNORR scheme → uses Schnorr path
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    checker.ecdsa_result = false;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(verify_sig_scheme_ecdsa_explicit)
+{
+    // SIG with explicit ECDSA scheme → uses ECDSA path
+    MockSignatureChecker checker;
+    checker.schnorr_result = false;
+    checker.ecdsa_result = true;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    // ECDSA signature: 8-72 bytes (use 40 to avoid overlap with Schnorr range)
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(40)});
+    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::ECDSA)}});
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(verify_sig_scheme_fallback_size)
+{
+    // SIG without SCHEME field → size-based routing (64 bytes → Schnorr)
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    checker.ecdsa_result = false;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    // No SCHEME field — falls back to size-based routing
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+
+    // Now with ECDSA-range signature (40 bytes) and only ecdsa_result = true
+    MockSignatureChecker checker2;
+    checker2.schnorr_result = false;
+    checker2.ecdsa_result = true;
+
+    RungBlock block2;
+    block2.type = RungBlockType::SIG;
+    block2.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block2.fields.push_back({RungDataType::SIGNATURE, MakeSignature(40)});
+
+    BOOST_CHECK(EvalBlock(block2, checker2, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+}
+
+// ============================================================================
+// Descriptor parser bounds
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(descriptor_rejects_deep_nesting)
+{
+    // 33 levels of and() nesting → exceeds MAX_PARSE_DEPTH (32) → error
+    std::map<std::string, std::vector<uint8_t>> keys;
+    keys["alice"] = MakePubkey();
+
+    // Build: ladder(or(and(and(and(... sig(@alice) ...))))
+    std::string desc = "ladder(or(";
+    for (int i = 0; i < 33; ++i) desc += "and(";
+    desc += "sig(@alice)";
+    for (int i = 0; i < 33; ++i) desc += ")";
+    desc += "))";
+
+    RungConditions out;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string error;
+    BOOST_CHECK_MESSAGE(!ParseDescriptor(desc, keys, out, pubkeys, error),
+        "Deep nesting should be rejected: " + error);
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_rejects_too_many_items)
+{
+    // 1001+ blocks → exceeds MAX_PARSE_ITEMS (1000) → error
+    std::map<std::string, std::vector<uint8_t>> keys;
+    keys["alice"] = MakePubkey();
+
+    // Build: ladder(or(and(csv(1), csv(1), csv(1), ... 1001 times ...)))
+    std::string desc = "ladder(or(and(";
+    for (int i = 0; i < 1001; ++i) {
+        if (i > 0) desc += ", ";
+        desc += "csv(1)";
+    }
+    desc += ")))";
+
+    RungConditions out;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string error;
+    BOOST_CHECK_MESSAGE(!ParseDescriptor(desc, keys, out, pubkeys, error),
+        "Too many items should be rejected: " + error);
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_rejects_huge_output_index)
+{
+    // output(99999, ...) → exceeds MAX_OUTPUT_INDEX (4096) → error
+    std::map<std::string, std::vector<uint8_t>> keys;
+    keys["alice"] = MakePubkey();
+
+    std::string desc = "ladder(output(99999, sig(@alice)))";
+
+    TxMLSCDescriptor out;
+    std::string error;
+    BOOST_CHECK_MESSAGE(!ParseTxMLSCDescriptor(desc, keys, out, error),
+        "Huge output index should be rejected: " + error);
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_accepts_many_rungs)
+{
+    // Multiple rungs within MAX_PARSE_ITEMS → should succeed
+    std::map<std::string, std::vector<uint8_t>> keys;
+    keys["alice"] = MakePubkey();
+
+    // Build: ladder(or(sig(@alice), sig(@alice), ..., sig(@alice))) with 10 rungs
+    std::string desc = "ladder(or(sig(@alice)";
+    for (int i = 1; i < 10; ++i) desc += ", sig(@alice)";
+    desc += "))";
+
+    RungConditions out;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string error;
+    BOOST_CHECK_MESSAGE(ParseDescriptor(desc, keys, out, pubkeys, error),
+        "Multiple rungs should succeed: " + error);
+    BOOST_CHECK_EQUAL(out.rungs.size(), 10u);
+}
+
+// ============================================================================
+// ACCUMULATOR field type enforcement (via deserialization)
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(serialize_accumulator_rejects_non_hash256)
+{
+    // ACCUMULATOR block with NUMERIC field → should be rejected by deserializer
+    // Build a raw byte stream: 1 rung, 1 block, block_type=ACCUMULATOR,
+    // 1 field of type NUMERIC
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::ACCUMULATOR;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(42)});
+    rung.blocks.push_back(block);
+    ladder.rungs.push_back(rung);
+
+    std::vector<uint8_t> data = SerializeLadderWitness(ladder);
+
+    LadderWitness result;
+    std::string error;
+    BOOST_CHECK_MESSAGE(!DeserializeLadderWitness(data, result, error),
+        "ACCUMULATOR with NUMERIC should be rejected: " + error);
+}
+
+BOOST_AUTO_TEST_CASE(serialize_accumulator_accepts_hash256)
+{
+    // ACCUMULATOR block with HASH256 field → accepted by deserializer
+    // (Note: ACCUMULATOR eval requires 3+ fields but deserializer allows 1+)
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::ACCUMULATOR;
+    block.fields.push_back({RungDataType::HASH256, MakeHash256()});
+    rung.blocks.push_back(block);
+    ladder.rungs.push_back(rung);
+
+    std::vector<uint8_t> data = SerializeLadderWitness(ladder);
+
+    LadderWitness result;
+    std::string error;
+    BOOST_CHECK_MESSAGE(DeserializeLadderWitness(data, result, error),
+        "ACCUMULATOR with HASH256 should be accepted: " + error);
+    BOOST_CHECK_EQUAL(result.rungs.size(), 1U);
+    BOOST_CHECK_EQUAL(result.rungs[0].blocks.size(), 1U);
+    BOOST_CHECK(result.rungs[0].blocks[0].type == RungBlockType::ACCUMULATOR);
+}
+
+// ============================================================================
+// Diff witness bounds (rung_index at limit)
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(diff_witness_rejects_index_at_limit)
+{
+    // rung_index == MAX_RUNGS (16) → out of bounds → rejected
+    // Test via deserialization: build a ladder with MAX_RUNGS+1 rungs → rejected
+    LadderWitness ladder;
+    for (size_t i = 0; i <= MAX_RUNGS; ++i) {
+        Rung rung;
+        RungBlock block;
+        block.type = RungBlockType::CSV;
+        block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
+        rung.blocks.push_back(block);
+        ladder.rungs.push_back(rung);
+    }
+
+    std::vector<uint8_t> data = SerializeLadderWitness(ladder);
+    LadderWitness result;
+    std::string error;
+    BOOST_CHECK_MESSAGE(!DeserializeLadderWitness(data, result, error),
+        "rung_index at MAX_RUNGS should be rejected: " + error);
+}
+
+BOOST_AUTO_TEST_CASE(diff_witness_accepts_index_below_limit)
+{
+    // rung_index == MAX_RUNGS-1 → valid → accepted
+    LadderWitness ladder;
+    for (size_t i = 0; i < MAX_RUNGS; ++i) {
+        Rung rung;
+        RungBlock block;
+        block.type = RungBlockType::CSV;
+        block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
+        rung.blocks.push_back(block);
+        ladder.rungs.push_back(rung);
+    }
+
+    std::vector<uint8_t> data = SerializeLadderWitness(ladder);
+    LadderWitness result;
+    std::string error;
+    BOOST_CHECK_MESSAGE(DeserializeLadderWitness(data, result, error),
+        "rung_index at MAX_RUNGS-1 should be accepted: " + error);
+    BOOST_CHECK_EQUAL(result.rungs.size(), MAX_RUNGS);
+}
+
+// ============================================================================
+// RelativeValue overflow
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(relative_value_large_amounts_no_overflow)
+{
+    // Amounts near INT64_MAX with small ratio — should not overflow (__int128 used)
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::RELATIVE_VALUE;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(9)});   // numerator = 9
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});  // denominator = 10
+
+    RungEvalContext ctx;
+    // input = 2100000000000000 (21 million BTC in sats)
+    ctx.input_amount = 2100000000000000LL;
+    // output = input * 9/10 = 1890000000000000 → exactly at boundary
+    ctx.output_amount = 1890000000000000LL;
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+
+    // Just below → UNSATISFIED
+    ctx.output_amount = 1890000000000000LL - 1;
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(relative_value_zero_numerator)
+{
+    // numerator=0 → output*denom >= input*0 → always SATISFIED (any output >= 0)
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::RELATIVE_VALUE;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});  // numerator = 0
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // denominator = 10
+
+    RungEvalContext ctx;
+    ctx.input_amount = 100000;
+    ctx.output_amount = 0;
+    // 0 * 10 >= 100000 * 0 → 0 >= 0 → SATISFIED
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+}
+
+// ============================================================================
+// EvalRecurseSameBlock fail-closed
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(eval_recurse_same_no_context_satisfied)
+{
+    // RECURSE_SAME with no verified_leaves, no input_conditions → structural only → SATISFIED
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::RECURSE_SAME;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});  // max_depth = 5
+
+    RungEvalContext ctx;
+    // No covenant context — structural check only (depth > 0)
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_recurse_same_with_leaves_no_output_error)
+{
+    // RECURSE_SAME with verified_leaves but no spending_output → ERROR
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::RECURSE_SAME;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
+
+    MLSCVerifiedLeaves verified;
+    verified.leaves = {uint256::ONE, uint256::ZERO};
+    verified.root = uint256::ONE;
+    verified.rung_index = 0;
+    verified.total_rungs = 2;
+    verified.total_relays = 0;
+
+    RungEvalContext ctx;
+    ctx.verified_leaves = &verified;
+    // spending_output is nullptr → ERROR (fail-closed)
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+}
+
+// ============================================================================
+// KEY_REF_SIG direct evaluation
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(eval_key_ref_sig_valid)
+{
+    // KEY_REF_SIG: valid relay reference + sig → SATISFIED
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    // Build relay with a SIG-like block that has a PUBKEY
+    Relay relay;
+    RungBlock relay_block;
+    relay_block.type = RungBlockType::SIG;
+    relay_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    relay.blocks.push_back(relay_block);
+
+    std::vector<Relay> relays = {relay};
+    std::vector<uint16_t> relay_refs = {0};  // this rung declares relay 0
+
+    // KEY_REF_SIG block: relay_idx=0, block_idx=0, + signature
+    RungBlock block;
+    block.type = RungBlockType::KEY_REF_SIG;
+    block.fields.push_back({RungDataType::NUMERIC, {0x00}});  // relay_idx = 0 (1 byte)
+    block.fields.push_back({RungDataType::NUMERIC, {0x00}});  // block_idx = 0 (1 byte)
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+
+    RungEvalContext ctx;
+    ctx.relays = &relays;
+    ctx.rung_relay_refs = &relay_refs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_key_ref_sig_invalid_relay)
+{
+    // KEY_REF_SIG: relay_idx not in rung_relay_refs → ERROR
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    ScriptExecutionData execdata;
+
+    Relay relay;
+    RungBlock relay_block;
+    relay_block.type = RungBlockType::SIG;
+    relay_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    relay.blocks.push_back(relay_block);
+
+    std::vector<Relay> relays = {relay};
+    std::vector<uint16_t> relay_refs = {5};  // declares relay 5, not 0
+
+    RungBlock block;
+    block.type = RungBlockType::KEY_REF_SIG;
+    block.fields.push_back({RungDataType::NUMERIC, {0x00}});  // relay_idx = 0 (not in refs)
+    block.fields.push_back({RungDataType::NUMERIC, {0x00}});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+
+    RungEvalContext ctx;
+    ctx.relays = &relays;
+    ctx.rung_relay_refs = &relay_refs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(eval_key_ref_sig_oversized_index)
+{
+    // KEY_REF_SIG: NUMERIC field > 2 bytes → ERROR
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::KEY_REF_SIG;
+    block.fields.push_back({RungDataType::NUMERIC, {0x00, 0x00, 0x01}});  // 3-byte relay_idx → too big
+    block.fields.push_back({RungDataType::NUMERIC, {0x00}});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+
+    Relay relay;
+    RungBlock relay_block;
+    relay_block.type = RungBlockType::SIG;
+    relay_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    relay.blocks.push_back(relay_block);
+
+    std::vector<Relay> relays = {relay};
+    std::vector<uint16_t> relay_refs = {0};
+
+    RungEvalContext ctx;
+    ctx.relays = &relays;
+    ctx.rung_relay_refs = &relay_refs;
+
+    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+}
+
+// ============================================================================
+// Cross-boundary: Merkle root at creation matches VerifyRungTx at spend
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(root_computation_divergence)
+{
+    // ComputeConditionsRoot and ComputeTxMLSCRoot produce DIFFERENT roots
+    // for the same conditions. VerifyRungTx expects ComputeTxMLSCRoot.
+    // This test documents the intentional divergence.
+
+    // Build a simple SIG rung with SCHEME + PUBKEY
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::SCHEME, {0x01}});  // SCHNORR
+    rung.blocks.push_back(block);
+
+    std::vector<uint8_t> pk = MakePubkey();
+    std::vector<std::vector<uint8_t>> rung_pks = {pk};
+
+    // Old root: ComputeConditionsRoot uses ComputeRungLeaf (serialized blocks + pubkeys)
+    RungConditions conditions;
+    conditions.rungs.push_back(rung);
+    uint256 old_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
+
+    // New root: ComputeTxMLSCRoot uses ComputeTxMLSCLeaf (structural template + value_commitment)
+    CreationProofRung cp_rung;
+    cp_rung.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp_rung.coil.output_index = 0;
+    cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
+    uint256 new_root = ComputeTxMLSCRoot({cp_rung});
+
+    // They MUST be different — if they were the same, the divergence wouldn't matter
+    BOOST_CHECK(old_root != new_root);
+    // Both must be non-null
+    BOOST_CHECK(!old_root.IsNull());
+    BOOST_CHECK(!new_root.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(txmlsc_leaf_matches_verify_path)
+{
+    // Build conditions, compute TX_MLSC leaf, build tree, extract path,
+    // verify path against root — this is exactly what VerifyRungTx does.
+
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::SCHEME, {0x01}});
+    rung.blocks.push_back(block);
+
+    std::vector<uint8_t> pk = MakePubkey();
+    std::vector<std::vector<uint8_t>> rung_pks = {pk};
+
+    // Build CreationProofRung (same as createrungtx/createtxmlsc now does)
+    CreationProofRung cp_rung;
+    cp_rung.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp_rung.coil.output_index = 0;
+    cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
+
+    uint256 leaf = ComputeTxMLSCLeaf(cp_rung);
+    BOOST_CHECK(!leaf.IsNull());
+
+    // For single-leaf tree, the root equals the leaf (padded to power-of-2 = 1)
+    uint256 root = ComputeTxMLSCRoot({cp_rung});
+
+    // Build path and verify
+    std::vector<uint256> leaves = {leaf};
+    auto path = BuildMerklePath(leaves, 0);
+    std::string verify_error;
+    BOOST_CHECK(VerifyMerklePath(leaf, path, leaves.size(), root, verify_error));
+
+    // Wrong leaf should NOT verify
+    uint256 wrong_leaf;
+    CSHA256().Write(reinterpret_cast<const uint8_t*>("wrong"), 5).Finalize(wrong_leaf.data());
+    BOOST_CHECK(!VerifyMerklePath(wrong_leaf, path, leaves.size(), root, verify_error));
+}
+
+BOOST_AUTO_TEST_CASE(txmlsc_multi_rung_path_verification)
+{
+    // 3-rung tree: SIG, CSV, CLTV — verify each leaf's path against root
+
+    auto make_cp = [](RungBlockType type, uint8_t idx) {
+        Rung rung;
+        RungBlock block;
+        block.type = type;
+        block.fields.push_back({RungDataType::NUMERIC, {0x01}});
+        rung.blocks.push_back(block);
+
+        CreationProofRung cp;
+        cp.blocks.push_back({static_cast<uint16_t>(type), 0});
+        cp.coil.output_index = idx;
+        cp.value_commitment = ComputeValueCommitment(rung, {});
+        return cp;
+    };
+
+    std::vector<CreationProofRung> cp_rungs = {
+        make_cp(RungBlockType::SIG, 0),
+        make_cp(RungBlockType::CSV, 0),
+        make_cp(RungBlockType::CLTV, 0),
+    };
+
+    // Compute leaves and root
+    std::vector<uint256> leaves;
+    for (const auto& cp : cp_rungs) {
+        leaves.push_back(ComputeTxMLSCLeaf(cp));
+    }
+    uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));  // copy because BuildMerkleTree moves
+
+    // Verify each leaf's path
+    std::string verify_error;
+    for (size_t i = 0; i < leaves.size(); ++i) {
+        auto path = BuildMerklePath(std::vector<uint256>(leaves), i);
+        BOOST_CHECK_MESSAGE(VerifyMerklePath(leaves[i], path, leaves.size(), root, verify_error),
+            "Leaf " + std::to_string(i) + " path should verify against root");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(createrungtx_root_matches_signrungtx_leaf)
+{
+    // This is the cross-boundary test that catches the createrungtx bug.
+    // Simulate what createrungtx does (build root) and what signrungtx does
+    // (build leaf + proof), verify they agree.
+
+    // 1. Build conditions (what createrungtx receives as input)
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::SCHEME, {0x01}});  // SCHNORR
+    rung.blocks.push_back(block);
+
+    std::vector<uint8_t> pk = MakePubkey();
+    std::vector<std::vector<uint8_t>> rung_pks = {pk};
+
+    // 2. Compute root the way createrungtx does it (TX_MLSC path)
+    CreationProofRung cp_rung;
+    for (const auto& b : rung.blocks) {
+        cp_rung.blocks.push_back({
+            static_cast<uint16_t>(b.type),
+            static_cast<uint8_t>(b.inverted ? 1 : 0)
+        });
+    }
+    cp_rung.coil.output_index = 0;
+    cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
+    uint256 creation_root = ComputeTxMLSCRoot({cp_rung});
+
+    // 3. Compute leaf the way signrungtx/VerifyRungTx does it
+    uint256 spend_leaf = ComputeTxMLSCLeaf(cp_rung);
+
+    // 4. Build Merkle path (single leaf → root should equal leaf after tree construction)
+    std::vector<uint256> leaves = {spend_leaf};
+    uint256 recomputed_root = BuildMerkleTree(std::vector<uint256>(leaves));
+
+    // 5. The creation root and recomputed root MUST match
+    BOOST_CHECK_EQUAL(creation_root, recomputed_root);
+
+    // 6. Path verification must succeed
+    auto path = BuildMerklePath(leaves, 0);
+    std::string verify_error;
+    BOOST_CHECK(VerifyMerklePath(spend_leaf, path, leaves.size(), creation_root, verify_error));
+}
+
+BOOST_AUTO_TEST_CASE(old_root_does_not_verify)
+{
+    // The old ComputeConditionsRoot produces a root that does NOT match
+    // what VerifyRungTx expects. This test ensures the bug stays fixed.
+
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::SCHEME, {0x01}});
+    rung.blocks.push_back(block);
+
+    std::vector<uint8_t> pk = MakePubkey();
+    std::vector<std::vector<uint8_t>> rung_pks = {pk};
+
+    // Old root (ComputeConditionsRoot → ComputeRungLeaf)
+    RungConditions conditions;
+    conditions.rungs.push_back(rung);
+    uint256 old_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
+
+    // Correct leaf (ComputeTxMLSCLeaf — what VerifyRungTx computes)
+    CreationProofRung cp_rung;
+    cp_rung.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp_rung.coil.output_index = 0;
+    cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
+    uint256 correct_leaf = ComputeTxMLSCLeaf(cp_rung);
+
+    // The correct leaf should NOT verify against the old root
+    std::vector<uint256> leaves = {correct_leaf};
+    auto path = BuildMerklePath(leaves, 0);
+    std::string verify_error;
+    BOOST_CHECK_MESSAGE(!VerifyMerklePath(correct_leaf, path, leaves.size(), old_root, verify_error),
+        "TX_MLSC leaf must NOT verify against ComputeConditionsRoot — this is the bug that was fixed");
+}
+
+BOOST_AUTO_TEST_CASE(value_commitment_pubkey_binding)
+{
+    // Changing the pubkey must change the value_commitment (and thus the leaf).
+    // This ensures pubkeys are cryptographically bound even though they're not
+    // in the structural template.
+
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::SCHEME, {0x01}});
+    rung.blocks.push_back(block);
+
+    std::vector<uint8_t> pk1 = MakePubkey();
+    std::vector<uint8_t> pk2(33, 0xDD); pk2[0] = 0x03;  // different key
+
+    uint256 vc1 = ComputeValueCommitment(rung, {pk1});
+    uint256 vc2 = ComputeValueCommitment(rung, {pk2});
+
+    BOOST_CHECK(vc1 != vc2);  // different pubkeys → different commitments
+
+    // And therefore different leaves
+    CreationProofRung cp1, cp2;
+    cp1.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp1.coil.output_index = 0;
+    cp1.value_commitment = vc1;
+
+    cp2.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp2.coil.output_index = 0;
+    cp2.value_commitment = vc2;
+
+    BOOST_CHECK(ComputeTxMLSCLeaf(cp1) != ComputeTxMLSCLeaf(cp2));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

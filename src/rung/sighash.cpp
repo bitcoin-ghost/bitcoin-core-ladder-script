@@ -49,6 +49,8 @@ bool SignatureHashLadder(const PrecomputedTransactionData& cache,
 
     // Validate hash_type: BIP341 base range + ANYPREVOUT (0x40) + ANYPREVOUTANYSCRIPT (0xC0)
     // Valid: {0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}
+    // Note: 0x80 (ANYONECANPAY + SIGHASH_DEFAULT) is excluded, matching BIP341 semantics
+    // where SIGHASH_DEFAULT (0x00) is only valid as the implicit type (no sighash byte).
     const bool valid_hash_type =
         (hash_type <= 0x03) ||                                    // DEFAULT/ALL/NONE/SINGLE
         (hash_type >= 0x40 && hash_type <= 0x43) ||               // ANYPREVOUT variants
@@ -136,7 +138,8 @@ bool SignatureHashLadderKeyPath(const PrecomputedTransactionData& cache,
 {
     assert(nIn < tx.vin.size());
 
-    // Key-path only supports standard sighash types (no ANYPREVOUT)
+    // Key-path only supports standard sighash types (no ANYPREVOUT).
+    // Valid: {0x00-0x03, 0x81-0x83}. 0x80 excluded per BIP341 semantics.
     if (hash_type > 0x03 && hash_type != 0x81 && hash_type != 0x82 && hash_type != 0x83) {
         return false;
     }

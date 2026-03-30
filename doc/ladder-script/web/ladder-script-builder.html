@@ -1,0 +1,2178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ghost Labs — Ladder Script Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --black: #050505;
+  --darker: #0a0a0a;
+  --dark: #0f0f0f;
+  --gray-900: #141414;
+  --gray-800: #1a1a1a;
+  --gray-700: #242424;
+  --gray-600: #333333;
+  --gray-500: #4a4a4a;
+  --gray-400: #666666;
+  --gray-300: #888888;
+  --gray-200: #aaaaaa;
+  --gray-100: #cccccc;
+  --white: #f0f0f0;
+  --orange: #f7931a;
+  --orange-light: #ffb347;
+  --green: #00FFB3;
+  --cyan: #00d4ff;
+  --red: #ff4444;
+  --sig-color: #00FFB3;
+  --timelock-color: #FFB700;
+  --hash-color: #4488FF;
+  --anchor-color: #AA44FF;
+  --covenant-color: #FF6644;
+  --recurse-color: #FF44AA;
+  --font-display: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+}
+html { scroll-behavior: smooth; }
+::selection { background: var(--orange); color: var(--black); }
+body {
+  font-family: var(--font-display);
+  background: var(--black);
+  color: var(--gray-100);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Navigation ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  border-bottom: 1px solid var(--gray-800);
+  backdrop-filter: blur(20px);
+  background: rgba(5, 5, 5, 0.9);
+}
+.nav-inner {
+  max-width: 100%; padding: 0 24px; height: 56px;
+  display: flex; align-items: center; gap: 8px;
+}
+.logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.logo-icon { width: 28px; height: 28px; }
+.logo-icon img { width: 100%; height: 100%; }
+.logo-text { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--white); }
+.logo-text span { color: var(--orange); }
+.nav-links { display: flex; align-items: center; gap: 2px; margin-left: 32px; }
+.nav-links a {
+  color: var(--gray-300); padding: 8px 16px; font-size: 14px; font-weight: 500;
+  text-decoration: none; border-radius: 8px; transition: all 0.2s;
+}
+.nav-links a:hover { color: var(--white); background: var(--gray-800); }
+.nav-links a.active { color: var(--orange); }
+.nav-dropdown { position: relative; }
+.nav-dropdown-menu {
+  position: absolute; top: 100%; left: 0; min-width: 160px;
+  background: var(--gray-900); border: 1px solid var(--gray-800);
+  border-radius: 12px; padding: 8px; opacity: 0; visibility: hidden;
+  transform: translateY(-8px); transition: all 0.2s;
+}
+.nav-dropdown:hover .nav-dropdown-menu { opacity: 1; visibility: visible; transform: translateY(0); }
+.nav-dropdown-menu a { display: block; padding: 8px 12px; font-size: 13px; border-radius: 6px; }
+.nav-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.btn { padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+.btn-ghost { color: var(--gray-300); }
+.btn-ghost:hover { color: var(--white); }
+.btn-primary { background: var(--orange); color: var(--black); }
+.btn-primary:hover { background: var(--orange-light); }
+.labs-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(0, 255, 179, 0.08); border: 1px solid rgba(0, 255, 179, 0.2);
+  padding: 4px 10px; border-radius: 6px; font-size: 11px; color: var(--green);
+  font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.05em;
+}
+.labs-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ── Main Layout ── */
+.app { display: flex; height: calc(100vh - 56px - 28px); margin-top: 56px; }
+.sidebar { width: 260px; min-width: 260px; border-right: 1px solid var(--gray-800); overflow-y: auto; background: var(--darker); }
+.canvas { flex: 1; overflow-y: auto; padding: 24px; background: var(--black); }
+.right-panel { width: 320px; min-width: 320px; border-left: 1px solid var(--gray-800); overflow-y: auto; background: var(--darker); display: flex; flex-direction: column; }
+
+/* ── Sidebar: Block Palette ── */
+.palette-header {
+  padding: 16px 16px 12px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--gray-400); font-weight: 600;
+  border-bottom: 1px solid var(--gray-800);
+}
+.palette-group { border-bottom: 1px solid var(--gray-800); }
+.palette-group-header {
+  padding: 10px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; color: var(--gray-200);
+  transition: background 0.15s; user-select: none;
+}
+.palette-group-header:hover { background: var(--gray-800); }
+.palette-group-header .dot { width: 8px; height: 8px; border-radius: 2px; }
+.palette-group-header .arrow { font-size: 10px; margin-left: auto; color: var(--gray-400); transition: transform 0.2s; }
+.palette-group.collapsed .arrow { transform: rotate(-90deg); }
+.palette-group.collapsed .palette-items { display: none; }
+.palette-items { padding: 4px 12px 8px; }
+.palette-chip {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: 2px 0;
+  border-radius: 6px; font-size: 12px; font-family: var(--font-mono); font-weight: 500;
+  cursor: grab; transition: all 0.15s; border: 1px solid transparent; color: var(--gray-100);
+}
+.palette-chip:hover { background: var(--gray-800); border-color: var(--gray-700); }
+.palette-chip:active { cursor: grabbing; }
+.palette-chip .chip-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
+.palette-chip .phase-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: auto;
+  background: var(--gray-700); color: var(--gray-400); font-weight: 600;
+}
+.palette-chip.dimmed { opacity: 0.4; }
+.palette-chip.dimmed:hover { opacity: 0.6; }
+
+/* ── Canvas: Inputs ── */
+.canvas-section { margin-bottom: 24px; }
+.canvas-section-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.canvas-section-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--gray-400); font-weight: 600;
+}
+.canvas-add-btn {
+  font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-200);
+  font-family: var(--font-mono); transition: all 0.15s;
+}
+.canvas-add-btn:hover { border-color: var(--orange); color: var(--orange); }
+.input-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  padding: 8px 12px; background: var(--gray-900); border: 1px solid var(--gray-800);
+  border-radius: 8px; font-family: var(--font-mono); font-size: 12px;
+}
+.input-row label { color: var(--gray-400); font-size: 11px; min-width: 36px; }
+.input-row input {
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-100);
+  padding: 4px 8px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px;
+  outline: none; transition: border-color 0.15s;
+}
+.input-row input:focus { border-color: var(--orange); }
+.input-row input.txid-input { flex: 1; }
+.input-row input.vout-input { width: 48px; text-align: center; }
+.input-row input.seq-input { width: 80px; text-align: center; }
+.input-row .del-btn {
+  background: none; border: none; color: var(--gray-500); cursor: pointer;
+  font-size: 14px; padding: 2px 6px; border-radius: 4px; transition: color 0.15s;
+}
+.input-row .del-btn:hover { color: var(--red); }
+.input-row .dw-btn {
+  background: none; border: 1px solid var(--gray-600); color: var(--gray-400); cursor: pointer;
+  font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);
+  letter-spacing: 0.5px; transition: all 0.15s;
+}
+.input-row .dw-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.input-row .dw-btn.dw-active { border-color: var(--cyan); color: var(--black); background: var(--cyan); }
+.input-row .dw-src-select {
+  background: var(--gray-800); border: 1px solid var(--cyan); color: var(--cyan); font-size: 12px;
+  font-family: var(--font-mono); padding: 2px 6px; border-radius: 4px; width: 50px;
+}
+
+/* ── Canvas: Output / Ladder Diagram ── */
+.output-card {
+  background: var(--gray-900); border: 1px solid var(--gray-800);
+  border-radius: 12px; margin-bottom: 16px; overflow: visible;
+}
+.output-header {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--gray-800); background: rgba(247, 147, 26, 0.03);
+}
+.output-label {
+  font-size: 12px; font-weight: 600; color: var(--orange);
+  font-family: var(--font-mono);
+}
+.output-amount-input {
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-100);
+  padding: 4px 8px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px;
+  width: 120px; outline: none; margin-left: auto;
+}
+.output-amount-input:focus { border-color: var(--orange); }
+.output-del-btn {
+  background: none; border: none; color: var(--gray-500); cursor: pointer;
+  font-size: 14px; padding: 2px 6px; border-radius: 4px;
+}
+.output-del-btn:hover { color: var(--red); }
+
+/* PLC Ladder Diagram */
+.ladder { padding: 12px 16px; }
+.rung-row {
+  display: flex; align-items: center; min-height: 44px; position: relative;
+}
+.rail-left, .rail-right {
+  width: 3px; background: var(--gray-600); flex-shrink: 0; align-self: stretch;
+}
+.rung-wire { flex: 1; display: flex; align-items: center; gap: 0; padding: 6px 0; }
+.wire-segment {
+  height: 2px; background: var(--gray-600); min-width: 12px; flex-shrink: 0;
+  transition: min-width 0.1s, background 0.1s;
+}
+.block-drop-target { min-width: 8px; }
+.wire-grow { flex: 1; }
+
+/* Contact block on rung */
+.contact {
+  display: flex; align-items: center; padding: 4px 10px; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  border: 1px solid; cursor: grab; white-space: nowrap; transition: all 0.15s;
+  position: relative; flex-shrink: 0;
+}
+.contact:active { cursor: grabbing; }
+.contact:hover { filter: brightness(1.2); transform: translateY(-1px); }
+.contact .inv-slash { margin-right: 2px; }
+.contact .contact-param {
+  font-size: 10px; font-weight: 400; color: inherit; opacity: 0.7; margin-left: 4px;
+}
+
+/* Coil (right side of rung) */
+/* ── Coil Section (below ladder) ── */
+.coil-section {
+  border-top: 1px solid var(--gray-800); margin-top: 8px; padding-top: 8px;
+}
+.coil-section-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.coil-symbol {
+  display: flex; align-items: center; gap: 0; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+}
+.coil-paren { font-size: 18px; color: inherit; }
+.coil-type-select {
+  appearance: none; -webkit-appearance: none; background: transparent; border: none;
+  color: inherit; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  padding: 0 2px; cursor: pointer; outline: none;
+}
+.coil-type-select:hover { color: var(--orange); }
+.coil-type-select option { background: var(--gray-900); color: var(--gray-100); font-size: 12px; }
+.coil-desc {
+  font-size: 10px; color: var(--gray-500); font-family: var(--font-mono);
+}
+.coil-addr-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding-left: 4px;
+}
+.coil-addr-label {
+  font-size: 10px; color: var(--gray-500); font-family: var(--font-mono); flex-shrink: 0;
+}
+.coil-addr-input {
+  flex: 1; background: var(--gray-900); border: 1px solid var(--gray-700); border-radius: 4px;
+  color: var(--gray-100); font-family: var(--font-mono); font-size: 11px;
+  padding: 4px 8px; outline: none; transition: border-color 0.15s;
+}
+.coil-addr-input:focus { border-color: var(--orange); }
+.coil-addr-input::placeholder { color: var(--gray-500); }
+.coil-logic-section { margin-top: 4px; }
+.coil-logic-label {
+  font-size: 9px; color: var(--gray-500); font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; padding-left: 4px;
+}
+.coil-ladder { display: flex; flex-direction: column; gap: 0; }
+.coil-rung-row {
+  display: flex; align-items: center; min-height: 28px;
+}
+.coil-logic-empty {
+  font-size: 10px; color: var(--gray-500); font-family: var(--font-mono);
+  cursor: pointer; padding: 4px 8px;
+}
+.coil-logic-empty:hover { color: var(--orange); }
+.coil-add-rung {
+  background: none; border: 1px dashed var(--gray-700); color: var(--gray-500);
+  font-size: 10px; font-family: var(--font-mono); padding: 3px 10px; border-radius: 4px;
+  cursor: pointer; margin-top: 4px; transition: all 0.15s; align-self: flex-start;
+}
+.coil-add-rung:hover { border-color: var(--orange); color: var(--orange); }
+.coil-rung-del {
+  background: none; border: none; color: var(--gray-600); cursor: pointer;
+  font-size: 12px; padding: 0 4px; transition: color 0.15s;
+}
+.coil-rung-del:hover { color: var(--red); }
+
+/* Rung toolbar (inline, between rail-right and controls) */
+.rung-toolbar {
+  display: flex; align-items: center; gap: 3px; margin-left: 8px;
+  opacity: 0; transition: opacity 0.15s; flex-shrink: 0;
+}
+.rung-row:hover .rung-toolbar { opacity: 1; }
+.rung-toolbar-btn {
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-400);
+  width: 22px; height: 22px; border-radius: 4px; cursor: pointer; font-size: 11px;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  font-family: var(--font-mono); font-weight: 600;
+}
+.rung-toolbar-btn:hover { border-color: var(--orange); color: var(--orange); }
+.rung-toolbar-btn.del:hover { border-color: var(--red); color: var(--red); }
+.rung-toolbar-btn.add-block { color: var(--green); border-color: var(--gray-600); }
+.rung-toolbar-btn.add-block:hover { border-color: var(--green); }
+
+/* Block picker dropdown (for + button) */
+.block-picker {
+  position: absolute; top: 100%; right: 0; z-index: 50;
+  background: var(--gray-900); border: 1px solid var(--gray-800);
+  border-radius: 8px; padding: 6px; min-width: 180px; max-height: 260px;
+  overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.block-picker-item {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  border-radius: 4px; cursor: pointer; font-family: var(--font-mono);
+  font-size: 11px; color: var(--gray-200); transition: background 0.1s;
+}
+.block-picker-item:hover { background: var(--gray-800); }
+.block-picker-item .bp-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
+.block-picker-cat {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--gray-500); padding: 6px 8px 2px; font-weight: 600;
+}
+
+/* Templates bar */
+.templates-bar {
+  display: flex; align-items: center; gap: 8px; padding: 12px 0 16px;
+  border-bottom: 1px solid var(--gray-800); margin-bottom: 16px; flex-wrap: wrap;
+}
+.templates-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--gray-400); font-weight: 600; margin-right: 4px;
+}
+.template-btn {
+  padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--gray-700); background: var(--gray-800);
+  color: var(--gray-200); font-family: var(--font-mono); transition: all 0.15s;
+}
+.template-btn:hover { border-color: var(--green); color: var(--green); background: rgba(0, 255, 179, 0.05); }
+.template-btn .tpl-dot { display: inline-block; width: 6px; height: 6px; border-radius: 2px; margin-right: 5px; }
+
+/* Drop zone */
+.drop-zone {
+  min-height: 36px; border: 2px dashed var(--gray-700); border-radius: 6px;
+  margin: 4px 16px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--gray-500); transition: all 0.2s;
+  font-family: var(--font-mono);
+}
+.drop-zone.drag-over { border-color: var(--orange); background: rgba(247, 147, 26, 0.05); color: var(--orange); }
+.add-rung-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 16px; margin: 8px 16px 12px; border-radius: 6px;
+  background: var(--gray-800); border: 1px dashed var(--gray-700);
+  color: var(--gray-400); font-size: 11px; font-family: var(--font-mono);
+  cursor: pointer; transition: all 0.15s;
+}
+.add-rung-btn:hover { border-color: var(--green); color: var(--green); }
+
+/* ── Right Panel ── */
+.panel-tabs {
+  display: flex; border-bottom: 1px solid var(--gray-800);
+}
+.panel-tab {
+  flex: 1; padding: 10px; text-align: center; font-size: 12px; font-weight: 600;
+  color: var(--gray-400); cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none;
+}
+.panel-tab:hover { color: var(--gray-200); }
+.panel-tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+.panel-content { flex: 1; overflow-y: auto; display: none; }
+.panel-content.active { display: flex; flex-direction: column; }
+
+/* Node tab */
+.node-form { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 11px; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.form-input {
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-100);
+  padding: 8px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px;
+  outline: none; transition: border-color 0.15s;
+}
+.form-input:focus { border-color: var(--orange); }
+.form-select {
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-100);
+  padding: 8px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px;
+  outline: none; cursor: pointer;
+}
+.form-row { display: flex; gap: 8px; }
+.form-row .form-group { flex: 1; }
+.connect-btn {
+  padding: 10px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s; border: none; font-family: var(--font-display);
+}
+.connect-btn.connected { background: rgba(0, 255, 179, 0.1); color: var(--green); border: 1px solid rgba(0, 255, 179, 0.3); }
+.connect-btn.disconnected { background: var(--orange); color: var(--black); }
+.connect-btn:hover { filter: brightness(1.1); }
+.connection-status {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--gray-900); border-radius: 6px; font-size: 12px;
+  font-family: var(--font-mono);
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-dot.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.status-dot.gray { background: var(--gray-500); }
+.broadcast-section { padding: 16px; border-top: 1px solid var(--gray-800); margin-top: auto; }
+.broadcast-btn {
+  width: 100%; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 700;
+  cursor: pointer; border: none; font-family: var(--font-display);
+  background: linear-gradient(135deg, var(--orange), var(--orange-light));
+  color: var(--black); transition: all 0.2s;
+}
+.broadcast-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.broadcast-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* JSON tab */
+.json-preview {
+  flex: 1; padding: 16px; font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+.json-copy-btn {
+  position: sticky; top: 0; align-self: flex-end; margin: 8px 8px 0 0;
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-300);
+  padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  font-family: var(--font-mono); transition: all 0.15s; z-index: 1;
+}
+.json-copy-btn:hover { border-color: var(--orange); color: var(--orange); }
+
+/* Explorer tab */
+.explorer-list { padding: 12px; }
+.explorer-block {
+  padding: 10px 12px; margin-bottom: 6px; background: var(--gray-900);
+  border: 1px solid var(--gray-800); border-radius: 8px; cursor: pointer;
+  transition: all 0.15s; font-family: var(--font-mono); font-size: 11px;
+}
+.explorer-block:hover { border-color: var(--gray-700); }
+.explorer-block-header { display: flex; align-items: center; gap: 8px; }
+.explorer-block-height { color: var(--orange); font-weight: 600; }
+.explorer-block-hash { color: var(--gray-400); overflow: hidden; text-overflow: ellipsis; }
+.explorer-block-txcount { margin-left: auto; color: var(--gray-300); }
+.explorer-block-txs { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--gray-800); display: none; }
+.explorer-block.expanded .explorer-block-txs { display: block; }
+.explorer-tx { padding: 4px 0; display: flex; align-items: center; gap: 6px; }
+.explorer-tx .txid { color: var(--gray-300); overflow: hidden; text-overflow: ellipsis; }
+.v3-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  background: rgba(0, 255, 179, 0.1); color: var(--green); font-weight: 600;
+  border: 1px solid rgba(0, 255, 179, 0.2); flex-shrink: 0;
+}
+.explorer-empty { padding: 24px; text-align: center; color: var(--gray-500); font-size: 12px; }
+.explorer-refresh-btn {
+  margin: 8px 12px; padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  background: var(--gray-800); border: 1px solid var(--gray-700); color: var(--gray-300);
+  font-family: var(--font-mono); transition: all 0.15s; text-align: center;
+}
+.explorer-refresh-btn:hover { border-color: var(--orange); color: var(--orange); }
+
+/* ── Status Bar ── */
+.status-bar {
+  height: 28px; display: flex; align-items: center; gap: 16px;
+  padding: 0 16px; border-top: 1px solid var(--gray-800); background: var(--darker);
+  font-family: var(--font-mono); font-size: 11px; color: var(--gray-400);
+  flex-shrink: 0;
+}
+.status-item { display: flex; align-items: center; gap: 4px; }
+.status-item .val { color: var(--gray-200); }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: var(--gray-900); border: 1px solid var(--gray-800);
+  border-radius: 16px; width: 480px; max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+}
+.modal-header {
+  display: flex; align-items: center; gap: 10px; padding: 16px 20px;
+  border-bottom: 1px solid var(--gray-800);
+}
+.modal-title { font-size: 16px; font-weight: 700; color: var(--white); }
+.modal-close {
+  margin-left: auto; background: none; border: none; color: var(--gray-400);
+  font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+}
+.modal-close:hover { color: var(--white); background: var(--gray-800); }
+.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end; padding: 16px 20px;
+  border-top: 1px solid var(--gray-800);
+}
+.modal-btn {
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: none; font-family: var(--font-display); transition: all 0.15s;
+}
+.modal-btn-cancel { background: var(--gray-800); color: var(--gray-200); }
+.modal-btn-cancel:hover { background: var(--gray-700); }
+.modal-btn-apply { background: var(--orange); color: var(--black); }
+.modal-btn-apply:hover { background: var(--orange-light); }
+.inv-toggle {
+  display: flex; gap: 4px;
+}
+.inv-toggle button {
+  flex: 1; padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--gray-700); background: var(--gray-800);
+  color: var(--gray-300); font-family: var(--font-mono); transition: all 0.15s;
+}
+.inv-toggle button.active { border-color: var(--orange); color: var(--orange); background: rgba(247, 147, 26, 0.08); }
+.inv-hint { font-size: 11px; color: var(--gray-400); line-height: 1.5; padding: 8px 10px; background: var(--gray-800); border-radius: 6px; }
+
+/* ── Toasts ── */
+.toast-container { position: fixed; bottom: 40px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 6px; }
+.toast {
+  padding: 10px 16px; border-radius: 8px; font-size: 12px; font-family: var(--font-mono);
+  background: var(--gray-900); border: 1px solid var(--gray-800);
+  color: var(--gray-100); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.3s ease;
+}
+.toast.success { border-color: rgba(0, 255, 179, 0.3); }
+.toast.error { border-color: rgba(255, 68, 68, 0.3); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Scanline ── */
+.scanline {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 500;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.15; animation: scan 8s linear infinite; pointer-events: none;
+}
+@keyframes scan { from { top: 0; } to { top: 100vh; } }
+
+/* JSON syntax highlighting */
+.json-key { color: var(--green); }
+.json-string { color: var(--timelock-color); }
+.json-number { color: var(--hash-color); }
+.json-bool { color: var(--recurse-color); }
+.json-null { color: var(--gray-400); }
+
+/* ── Phase tabs ── */
+.phase-bar {
+  display: flex; align-items: center; gap: 4px; padding: 8px 0 0;
+  border-bottom: 1px solid var(--gray-800); margin-bottom: 16px;
+}
+.phase-tab {
+  padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: none; background: none; color: var(--gray-400); border-bottom: 2px solid transparent;
+  font-family: var(--font-mono); transition: all 0.15s; white-space: nowrap;
+}
+.phase-tab:hover { color: var(--gray-200); }
+.phase-tab.active { color: var(--green); border-bottom-color: var(--green); }
+.phase-tab .phase-num { color: var(--gray-500); margin-right: 4px; font-size: 10px; }
+.phase-add-btn {
+  padding: 6px 10px; font-size: 11px; cursor: pointer; border: 1px dashed var(--gray-700);
+  background: none; color: var(--gray-500); border-radius: 4px; font-family: var(--font-mono);
+  transition: all 0.15s; margin-left: 4px;
+}
+.phase-add-btn:hover { border-color: var(--green); color: var(--green); }
+.phase-del-btn {
+  font-size: 10px; margin-left: 4px; color: var(--gray-500); cursor: pointer;
+  background: none; border: none; padding: 2px 4px; border-radius: 3px; transition: all 0.15s;
+}
+.phase-del-btn:hover { color: var(--red); }
+.phase-link-btn {
+  padding: 4px 10px; border-radius: 4px; font-size: 10px; cursor: pointer;
+  background: rgba(0, 255, 179, 0.06); border: 1px solid rgba(0, 255, 179, 0.2);
+  color: var(--green); font-family: var(--font-mono); font-weight: 600;
+  transition: all 0.15s; margin-left: auto;
+}
+.phase-link-btn:hover { background: rgba(0, 255, 179, 0.12); border-color: var(--green); }
+.phase-flow-arrow {
+  display: flex; align-items: center; justify-content: center; padding: 8px 0;
+  color: var(--gray-500); font-size: 12px; font-family: var(--font-mono);
+}
+.phase-flow-arrow .arrow { color: var(--green); font-size: 16px; margin: 0 8px; }
+</style>
+</head>
+<body>
+
+<!-- Scanline -->
+<div class="scanline"></div>
+
+<!-- Navigation -->
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="logo">
+      <div class="logo-icon"><img src="logo.png" alt=""></div>
+      <div class="logo-text">Bitcoin<span>Ghost</span></div>
+    </a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="network.html">Network</a>
+      <div class="nav-dropdown">
+        <a href="pool.html">Pool</a>
+        <div class="nav-dropdown-menu">
+          <a href="pool.html">Connect</a>
+          <a href="pool-stats.html">Statistics</a>
+          <a href="node-finder.html">Node Finder</a>
+        </div>
+      </div>
+      <a href="how-it-works.html">How It Works</a>
+      <a href="economics.html">Economics</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="ghost-labs.html" class="active">Labs</a>
+    </div>
+    <div class="nav-right">
+      <div class="labs-badge"><span class="dot"></span> LABS</div>
+      <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" class="btn btn-ghost">GitHub</a>
+      <a href="get-started.html" class="btn btn-primary">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- App Layout -->
+<div class="app">
+  <!-- Sidebar: Block Palette -->
+  <div class="sidebar">
+    <div class="palette-header">Block Palette</div>
+    <div id="palette"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas" id="canvas">
+    <!-- Templates Bar -->
+    <div class="templates-bar" id="templates-bar"></div>
+
+    <!-- Phase Tabs -->
+    <div class="phase-bar" id="phase-bar"></div>
+
+    <!-- Phase Content (inputs + outputs for active phase) -->
+    <div id="phase-content"></div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" onclick="switchTab('node')">Node</button>
+      <button class="panel-tab" onclick="switchTab('json')">JSON</button>
+      <button class="panel-tab" onclick="switchTab('explorer')">Explorer</button>
+    </div>
+
+    <!-- Node Tab -->
+    <div class="panel-content active" id="tab-node">
+      <div class="node-form">
+        <div class="form-group">
+          <label class="form-label">RPC URL</label>
+          <input class="form-input" id="rpc-url" value="http://127.0.0.1:38332" placeholder="http://host:port">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">User</label>
+            <input class="form-input" id="rpc-user" value="ghost" placeholder="rpcuser">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Pass</label>
+            <input class="form-input" id="rpc-pass" type="password" placeholder="rpcpassword">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Network</label>
+          <select class="form-select" id="rpc-network">
+            <option value="regtest">Regtest</option>
+            <option value="signet" selected>Signet</option>
+            <option value="mainnet">Mainnet</option>
+          </select>
+        </div>
+        <button class="connect-btn disconnected" id="connect-btn" onclick="toggleConnection()">Connect</button>
+        <div class="connection-status">
+          <div class="status-dot gray" id="status-dot"></div>
+          <span id="status-text">Not connected</span>
+        </div>
+      </div>
+      <div class="broadcast-section">
+        <button class="broadcast-btn" id="broadcast-btn" disabled onclick="broadcastTx()">Build & Broadcast</button>
+      </div>
+    </div>
+
+    <!-- JSON Tab -->
+    <div class="panel-content" id="tab-json">
+      <button class="json-copy-btn" onclick="copyJSON()">Copy</button>
+      <div class="json-preview" id="json-preview">
+        <span class="json-null">// Build a ladder script to see JSON preview</span>
+      </div>
+    </div>
+
+    <!-- Explorer Tab -->
+    <div class="panel-content" id="tab-explorer">
+      <button class="explorer-refresh-btn" onclick="refreshExplorer()">Refresh</button>
+      <div class="explorer-list" id="explorer-list">
+        <div class="explorer-empty">Connect to a node to explore blocks</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="status-item">inputs: <span class="val" id="stat-inputs">0</span></div>
+  <div class="status-item">outputs: <span class="val" id="stat-outputs">0</span></div>
+  <div class="status-item">rungs: <span class="val" id="stat-rungs">0</span></div>
+  <div class="status-item">blocks: <span class="val" id="stat-blocks">0</span></div>
+  <div class="status-item" style="margin-left:auto" id="stat-network">network: <span class="val">--</span></div>
+</div>
+
+<!-- Block Edit Modal -->
+<div class="modal-overlay" id="block-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Edit Block</div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="modal-btn modal-btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn modal-btn-apply" onclick="applyModal()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// Block Definitions
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BLOCK_DEFS = {
+  // ── SIGNATURE (0x00xx) — Phase 1 ──
+  SIG:               { category: 'sig',      phase: 1, label: 'SIG',               fields: [{name:'pubkey', type:'PUBKEY', placeholder:'02...'}] },
+  MULTISIG:          { category: 'sig',      phase: 1, label: 'MULTISIG',          fields: [{name:'threshold', type:'NUMERIC', placeholder:'2'}, {name:'pubkeys', type:'PUBKEY_LIST', placeholder:'02..., 03...'}] },
+  ADAPTOR_SIG:       { category: 'sig',      phase: 1, label: 'ADAPTOR_SIG',       fields: [{name:'signing_key', type:'PUBKEY', placeholder:'02... signing key'}, {name:'adaptor_point', type:'PUBKEY', placeholder:'adaptor point'}] },
+  MUSIG_THRESHOLD:   { category: 'sig',      phase: 1, label: 'MUSIG_THRESHOLD',   fields: [{name:'aggregate_key', type:'PUBKEY', placeholder:'02... aggregate pubkey'}, {name:'threshold', type:'NUMERIC', placeholder:'2'}, {name:'group_size', type:'NUMERIC', placeholder:'3'}] },
+  KEY_REF_SIG:       { category: 'sig',      phase: 1, label: 'KEY_REF_SIG',       fields: [{name:'relay_index', type:'NUMERIC', placeholder:'relay index'}, {name:'block_index', type:'NUMERIC', placeholder:'block index'}] },
+
+  // ── TIMELOCK (0x01xx) — Phase 1 ──
+  CSV:               { category: 'timelock', phase: 1, label: 'CSV',               fields: [{name:'blocks', type:'NUMERIC', placeholder:'144'}] },
+  CSV_TIME:          { category: 'timelock', phase: 1, label: 'CSV_TIME',          fields: [{name:'seconds', type:'NUMERIC', placeholder:'86400'}] },
+  CLTV:              { category: 'timelock', phase: 1, label: 'CLTV',              fields: [{name:'height', type:'NUMERIC', placeholder:'840000'}] },
+  CLTV_TIME:         { category: 'timelock', phase: 1, label: 'CLTV_TIME',         fields: [{name:'timestamp', type:'NUMERIC', placeholder:'1700000000'}] },
+
+  // ── HASH (0x02xx) — Phase 1 ──
+  // Codes 0x0201 and 0x0202 are reserved (removed block types)
+  TAGGED_HASH:       { category: 'hash',     phase: 1, label: 'TAGGED_HASH',       fields: [{name:'tag_hash', type:'HASH256', placeholder:'SHA256(tag)'}, {name:'expected', type:'HASH256', placeholder:'expected tagged hash'}] },
+  HASH_GUARDED:      { category: 'hash',     phase: 1, label: 'HASH_GUARDED',      fields: [{name:'committed_hash', type:'HASH256', placeholder:'SHA256 committed hash'}] },
+
+  // ── COVENANT (0x03xx) — Phase 2 ──
+  CTV:               { category: 'covenant', phase: 2, label: 'CTV',               fields: [{name:'template_hash', type:'HASH256', placeholder:'BIP-119 template hash'}] },
+  VAULT_LOCK:        { category: 'covenant', phase: 2, label: 'VAULT_LOCK',        fields: [{name:'recovery_key', type:'PUBKEY', placeholder:'02... recovery key'}, {name:'hot_key', type:'PUBKEY', placeholder:'02... hot key'}, {name:'hot_delay', type:'NUMERIC', placeholder:'unvault delay (blocks)'}] },
+  AMOUNT_LOCK:       { category: 'covenant', phase: 2, label: 'AMOUNT_LOCK',       fields: [{name:'min_sats', type:'NUMERIC', placeholder:'min output sats'}, {name:'max_sats', type:'NUMERIC', placeholder:'max output sats'}] },
+
+  // ── ANCHOR L2 (0x05xx) — Phase 2 ──
+  ANCHOR:            { category: 'anchor',   phase: 2, label: 'ANCHOR',            fields: [{name:'state_hash', type:'HASH256', placeholder:'state commitment hash'}] },
+  ANCHOR_CHANNEL:    { category: 'anchor',   phase: 2, label: 'ANCHOR_CHANNEL',    fields: [{name:'local_key', type:'PUBKEY', placeholder:'02... local pubkey'}, {name:'remote_key', type:'PUBKEY', placeholder:'02... remote pubkey'}, {name:'commitment_number', type:'NUMERIC', placeholder:'commitment #'}] },
+  ANCHOR_POOL:       { category: 'anchor',   phase: 2, label: 'ANCHOR_POOL',       fields: [{name:'vtxo_tree_root', type:'HASH256', placeholder:'VTXO tree root'}, {name:'participant_count', type:'NUMERIC', placeholder:'participant count'}] },
+  ANCHOR_RESERVE:    { category: 'anchor',   phase: 2, label: 'ANCHOR_RESERVE',    fields: [{name:'threshold_n', type:'NUMERIC', placeholder:'n'}, {name:'threshold_m', type:'NUMERIC', placeholder:'m'}, {name:'guardian_set_hash', type:'HASH256', placeholder:'guardian set hash'}] },
+  ANCHOR_SEAL:       { category: 'anchor',   phase: 2, label: 'ANCHOR_SEAL',       fields: [{name:'asset_id', type:'HASH256', placeholder:'asset identifier'}, {name:'state_transition', type:'HASH256', placeholder:'state transition hash'}] },
+  ANCHOR_ORACLE:     { category: 'anchor',   phase: 2, label: 'ANCHOR_ORACLE',     fields: [{name:'oracle_key', type:'PUBKEY', placeholder:'02... oracle pubkey'}, {name:'outcome_count', type:'NUMERIC', placeholder:'number of outcomes'}] },
+  DATA_RETURN:       { category: 'anchor',   phase: 2, label: 'DATA_RETURN',       fields: [{name:'data', type:'DATA', placeholder:'hex data (max 40 bytes)'}] },
+
+  // ── RECURSION (0x04xx) — Phase 3 ──
+  RECURSE_SAME:      { category: 'recurse',  phase: 3, label: 'RECURSE_SAME',      fields: [{name:'max_depth', type:'NUMERIC', placeholder:'max recursion depth'}] },
+  RECURSE_MODIFIED:  { category: 'recurse',  phase: 3, label: 'RECURSE_MODIFIED',  fields: [{name:'max_depth', type:'NUMERIC', placeholder:'max depth'}, {name:'mutation_block_idx', type:'NUMERIC', placeholder:'block index'}, {name:'mutation_param_idx', type:'NUMERIC', placeholder:'param index'}, {name:'mutation_delta', type:'NUMERIC', placeholder:'delta value'}] },
+  RECURSE_UNTIL:     { category: 'recurse',  phase: 3, label: 'RECURSE_UNTIL',     fields: [{name:'until_height', type:'NUMERIC', placeholder:'block height to terminate'}] },
+  RECURSE_COUNT:     { category: 'recurse',  phase: 3, label: 'RECURSE_COUNT',     fields: [{name:'max_count', type:'NUMERIC', placeholder:'countdown value'}] },
+  RECURSE_SPLIT:     { category: 'recurse',  phase: 3, label: 'RECURSE_SPLIT',     fields: [{name:'max_splits', type:'NUMERIC', placeholder:'max output splits'}, {name:'min_split_sats', type:'NUMERIC', placeholder:'min sats per output'}] },
+  RECURSE_DECAY:     { category: 'recurse',  phase: 3, label: 'RECURSE_DECAY',     fields: [{name:'max_depth', type:'NUMERIC', placeholder:'max depth'}, {name:'decay_block_idx', type:'NUMERIC', placeholder:'block index'}, {name:'decay_param_idx', type:'NUMERIC', placeholder:'param index'}, {name:'decay_per_step', type:'NUMERIC', placeholder:'decay amount'}] },
+
+  // ── PLC (0x06xx) — Phase 3 ──
+  HYSTERESIS_FEE:    { category: 'plc',      phase: 3, label: 'HYSTERESIS_FEE',    fields: [{name:'high_sat_vb', type:'NUMERIC', placeholder:'high fee threshold'}, {name:'low_sat_vb', type:'NUMERIC', placeholder:'low fee threshold'}] },
+  HYSTERESIS_VALUE:  { category: 'plc',      phase: 3, label: 'HYSTERESIS_VALUE',  fields: [{name:'high_sats', type:'NUMERIC', placeholder:'high value band'}, {name:'low_sats', type:'NUMERIC', placeholder:'low value band'}] },
+  TIMER_CONTINUOUS:  { category: 'plc',      phase: 3, label: 'TIMER_CONTINUOUS',  fields: [{name:'required_blocks', type:'NUMERIC', placeholder:'consecutive blocks required'}] },
+  TIMER_OFF_DELAY:   { category: 'plc',      phase: 3, label: 'TIMER_OFF_DELAY',   fields: [{name:'hold_blocks', type:'NUMERIC', placeholder:'blocks to hold after trigger'}] },
+  LATCH_SET:         { category: 'plc',      phase: 3, label: 'LATCH_SET',         fields: [{name:'setter_key', type:'PUBKEY', placeholder:'02... setter pubkey'}] },
+  LATCH_RESET:       { category: 'plc',      phase: 3, label: 'LATCH_RESET',       fields: [{name:'resetter_key', type:'PUBKEY', placeholder:'02... resetter pubkey'}, {name:'reset_delay', type:'NUMERIC', placeholder:'reset delay (blocks)'}] },
+  COUNTER_DOWN:      { category: 'plc',      phase: 3, label: 'COUNTER_DOWN',      fields: [{name:'event_signer', type:'PUBKEY', placeholder:'02... event signer'}, {name:'initial_count', type:'NUMERIC', placeholder:'initial count'}] },
+  COUNTER_PRESET:    { category: 'plc',      phase: 3, label: 'COUNTER_PRESET',    fields: [{name:'preset_count', type:'NUMERIC', placeholder:'required approvals'}, {name:'window_blocks', type:'NUMERIC', placeholder:'window (blocks)'}] },
+  COUNTER_UP:        { category: 'plc',      phase: 3, label: 'COUNTER_UP',        fields: [{name:'event_signer', type:'PUBKEY', placeholder:'02... event signer'}, {name:'target_count', type:'NUMERIC', placeholder:'target count'}] },
+  COMPARE:           { category: 'plc',      phase: 3, label: 'COMPARE',           fields: [{name:'operator', type:'NUMERIC', placeholder:'01=EQ 03=GT 04=LT 07=RANGE'}, {name:'value_b', type:'NUMERIC', placeholder:'threshold value'}, {name:'value_c', type:'NUMERIC', placeholder:'upper bound (RANGE only)'}] },
+  SEQUENCER:         { category: 'plc',      phase: 3, label: 'SEQUENCER',         fields: [{name:'current_step', type:'NUMERIC', placeholder:'current step'}, {name:'total_steps', type:'NUMERIC', placeholder:'total steps'}] },
+  ONE_SHOT:          { category: 'plc',      phase: 3, label: 'ONE_SHOT',          fields: [{name:'duration_blocks', type:'NUMERIC', placeholder:'activation window (blocks)'}, {name:'commitment', type:'HASH256', placeholder:'activation commitment'}] },
+  RATE_LIMIT:        { category: 'plc',      phase: 3, label: 'RATE_LIMIT',        fields: [{name:'max_per_block', type:'NUMERIC', placeholder:'max sats per block'}, {name:'accumulation_cap', type:'NUMERIC', placeholder:'accumulation cap'}, {name:'refill_blocks', type:'NUMERIC', placeholder:'refill period (blocks)'}] },
+  COSIGN:            { category: 'plc',      phase: 3, label: 'COSIGN',            fields: [{name:'conditions_hash', type:'HASH256', placeholder:'SHA256 of co-input scriptPubKey'}] },
+
+  // ── COMPOUND (0x07xx) — Phase 1 ──
+  TIMELOCKED_SIG:    { category: 'compound', phase: 1, label: 'TIMELOCKED_SIG',    fields: [{name:'pubkey', type:'PUBKEY', placeholder:'02... signing key'}, {name:'csv_delay', type:'NUMERIC', placeholder:'144'}] },
+  HTLC:              { category: 'compound', phase: 1, label: 'HTLC',              fields: [{name:'sender_key', type:'PUBKEY', placeholder:'02... sender key'}, {name:'receiver_key', type:'PUBKEY', placeholder:'02... receiver key'}, {name:'hash_lock', type:'HASH256', placeholder:'SHA256 hash lock'}, {name:'csv_delay', type:'NUMERIC', placeholder:'144'}] },
+  HASH_SIG:          { category: 'compound', phase: 1, label: 'HASH_SIG',          fields: [{name:'pubkey', type:'PUBKEY', placeholder:'02... signing key'}, {name:'hash_lock', type:'HASH256', placeholder:'SHA256 hash lock'}] },
+  PTLC:              { category: 'compound', phase: 1, label: 'PTLC',              fields: [{name:'signing_key', type:'PUBKEY', placeholder:'02... signing key'}, {name:'adaptor_point', type:'PUBKEY', placeholder:'32-byte adaptor point'}, {name:'csv_delay', type:'NUMERIC', placeholder:'144'}] },
+  CLTV_SIG:          { category: 'compound', phase: 1, label: 'CLTV_SIG',          fields: [{name:'pubkey', type:'PUBKEY', placeholder:'02... signing key'}, {name:'cltv_height', type:'NUMERIC', placeholder:'850000'}] },
+  TIMELOCKED_MULTISIG: { category: 'compound', phase: 1, label: 'TIMELOCKED_MULTISIG', fields: [{name:'threshold', type:'NUMERIC', placeholder:'2'}, {name:'pubkeys', type:'PUBKEY_LIST', placeholder:'02..., 03...'}, {name:'csv_delay', type:'NUMERIC', placeholder:'144'}] },
+
+  // ── GOVERNANCE (0x08xx) — Phase 2 ──
+  EPOCH_GATE:        { category: 'govern',   phase: 2, label: 'EPOCH_GATE',        fields: [{name:'epoch_size', type:'NUMERIC', placeholder:'144'}, {name:'window_size', type:'NUMERIC', placeholder:'72'}] },
+  WEIGHT_LIMIT:      { category: 'govern',   phase: 2, label: 'WEIGHT_LIMIT',      fields: [{name:'max_weight', type:'NUMERIC', placeholder:'4000'}] },
+  INPUT_COUNT:       { category: 'govern',   phase: 2, label: 'INPUT_COUNT',       fields: [{name:'min_inputs', type:'NUMERIC', placeholder:'1'}, {name:'max_inputs', type:'NUMERIC', placeholder:'5'}] },
+  OUTPUT_COUNT:      { category: 'govern',   phase: 2, label: 'OUTPUT_COUNT',      fields: [{name:'min_outputs', type:'NUMERIC', placeholder:'1'}, {name:'max_outputs', type:'NUMERIC', placeholder:'3'}] },
+  RELATIVE_VALUE:    { category: 'govern',   phase: 2, label: 'RELATIVE_VALUE',    fields: [{name:'numerator', type:'NUMERIC', placeholder:'9'}, {name:'denominator', type:'NUMERIC', placeholder:'10'}] },
+  ACCUMULATOR:       { category: 'govern',   phase: 2, label: 'ACCUMULATOR',       fields: [{name:'root', type:'HASH256', placeholder:'Merkle root hash'}] },
+};
+
+const CATEGORIES = [
+  { id: 'sig',      name: 'SIGNATURE', color: '#00FFB3' },
+  { id: 'timelock', name: 'TIMELOCK',  color: '#FFB700' },
+  { id: 'hash',     name: 'HASH',      color: '#4488FF' },
+  { id: 'covenant', name: 'UNLOCK',  color: '#FF6644' },
+  { id: 'anchor',   name: 'ANCHOR L2', color: '#AA44FF' },
+  { id: 'recurse',  name: 'RECURSE',   color: '#FF44AA' },
+  { id: 'plc',      name: 'PLC',       color: '#44DDFF' },
+  { id: 'compound', name: 'COMPOUND',  color: '#FFD700' },
+  { id: 'govern',   name: 'GOVERNANCE', color: '#22CC88' },
+];
+
+const COIL_DEFS = {
+  UNLOCK:    { label: 'UNLOCK',    desc: 'Send to address — standard spend.', hasAddress: true, hasLogic: false },
+  UNLOCK_TO: { label: 'UNLOCK_TO', desc: 'Send to address — with additional conditions the recipient must satisfy.', hasAddress: true, hasLogic: true },
+  ,
+};
+const COIL_TYPES = Object.keys(COIL_DEFS);
+
+// Key-consuming block types cannot be inverted (anti-spam: prevents garbage-pubkey data embedding)
+const KEY_CONSUMING_TYPES = new Set([
+  'SIG', 'MULTISIG', 'TIMELOCKED_SIG', 'HTLC', 'HASH_SIG', 'CLTV_SIG', 'PTLC',
+  'TIMELOCKED_MULTISIG', 'KEY_REF_SIG', 'COSIGN', 'ADAPTOR_SIG', 'MUSIG_THRESHOLD',
+  'P2PK_LEGACY', 'P2PKH_LEGACY', 'P2WPKH_LEGACY', 'P2TR_LEGACY', 'P2TR_SCRIPT_LEGACY'
+]);
+
+function isInvertible(blockType) { return !KEY_CONSUMING_TYPES.has(blockType); }
+
+function categoryColor(cat) {
+  const c = CATEGORIES.find(c => c.id === cat);
+  return c ? c.color : '#888';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+
+function emptyPhase(name) {
+  return {
+    name: name || 'Phase 1',
+    inputs: [{ txid: '', vout: 0, sequence: 0xfffffffe }],
+    outputs: [emptyOutput()],
+  };
+}
+
+function emptyCoil(type) {
+  return { type: type || 'UNLOCK', address: '', rungs: [] };
+}
+
+function emptyOutput() {
+  return { amount: '', rungs: [{ blocks: [] }], coil: emptyCoil('UNLOCK') };
+}
+
+function emptyRung() {
+  return { blocks: [] };
+}
+
+let state = {
+  phases: [emptyPhase('Phase 1')],
+  activePhase: 0,
+  connected: false,
+  rpcUrl: '', rpcUser: '', rpcPass: '',
+  modalTarget: null,
+};
+
+// Convenience accessors for the active phase
+function P() { return state.phases[state.activePhase]; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Palette
+// ═══════════════════════════════════════════════════════════════════════════
+
+function buildPalette() {
+  const el = document.getElementById('palette');
+  let html = '';
+  for (const cat of CATEGORIES) {
+    const blocks = Object.entries(BLOCK_DEFS).filter(([, d]) => d.category === cat.id);
+    html += `<div class="palette-group" data-cat="${cat.id}">`;
+    html += `<div class="palette-group-header" onclick="this.parentElement.classList.toggle('collapsed')">`;
+    html += `<div class="dot" style="background:${cat.color}"></div>${cat.name}<span class="arrow">▼</span></div>`;
+    html += `<div class="palette-items">`;
+    for (const [key, def] of blocks) {
+      const dimmed = def.phase > 1 ? ' dimmed' : '';
+      const badge = def.phase > 1 ? `<span class="phase-badge">P${def.phase}</span>` : '';
+      html += `<div class="palette-chip${dimmed}" draggable="true" data-block="${key}" ondragstart="onDragStart(event,'${key}')">`;
+      html += `<div class="chip-dot" style="background:${cat.color}"></div>${def.label}${badge}</div>`;
+    }
+    html += '</div></div>';
+  }
+  el.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rendering
+// ═══════════════════════════════════════════════════════════════════════════
+
+function render() {
+  renderPhaseBar();
+  renderPhaseContent();
+  updateStats();
+  updateJSON();
+}
+
+function renderPhaseBar() {
+  const el = document.getElementById('phase-bar');
+  let html = '';
+  state.phases.forEach((phase, pi) => {
+    const active = pi === state.activePhase ? ' active' : '';
+    html += `<button class="phase-tab${active}" onclick="switchPhase(${pi})">`;
+    html += `<span class="phase-num">${pi + 1}</span>${phase.name}`;
+    if (state.phases.length > 1) html += `<button class="phase-del-btn" onclick="event.stopPropagation();removePhase(${pi})" title="Delete phase">&times;</button>`;
+    html += '</button>';
+  });
+  html += `<button class="phase-add-btn" onclick="addPhase()">+ Phase</button>`;
+  // Link from previous phase button
+  if (state.activePhase > 0) {
+    html += `<button class="phase-link-btn" onclick="linkFromPrevious()" title="Auto-populate inputs from previous phase outputs">&#x21E9; Link inputs from Phase ${state.activePhase}</button>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderPhaseContent() {
+  const el = document.getElementById('phase-content');
+  const p = P();
+  let html = '';
+
+  // Inputs section
+  html += '<div class="canvas-section">';
+  html += '<div class="canvas-section-header">';
+  html += '<div class="canvas-section-label">Inputs</div>';
+  html += '<button class="canvas-add-btn" onclick="addInput()">+ Add Input</button>';
+  html += '</div>';
+  html += '<div id="inputs-list">';
+  p.inputs.forEach((inp, i) => {
+    html += `<div class="input-row">`;
+    html += `<label>#${i}</label>`;
+    html += `<label>txid</label><input class="txid-input" value="${inp.txid}" onchange="P().inputs[${i}].txid=this.value;updateJSON()">`;
+    html += `<label>vout</label><input class="vout-input" type="number" value="${inp.vout}" onchange="P().inputs[${i}].vout=+this.value;updateJSON()">`;
+    html += `<label>seq</label><input class="seq-input" value="${inp.sequence}" onchange="P().inputs[${i}].sequence=+this.value;updateJSON()">`;
+    if (i > 0) {
+      const dwActive = inp.diffWitness ? ' dw-active' : '';
+      html += `<button class="dw-btn${dwActive}" onclick="toggleDiffWitness(${i})" title="Toggle diff witness — inherit witness from another input">DW</button>`;
+    }
+    if (inp.diffWitness) {
+      html += `<label style="color:var(--cyan);font-size:11px">src</label>`;
+      html += `<select class="dw-src-select" onchange="P().inputs[${i}].sourceInput=+this.value;updateJSON()">`;
+      for (let s = 0; s < i; s++) {
+        const sel = inp.sourceInput === s ? ' selected' : '';
+        html += `<option value="${s}"${sel}>#${s}</option>`;
+      }
+      html += `</select>`;
+    }
+    if (p.inputs.length > 1) html += `<button class="del-btn" onclick="removeInput(${i})">&times;</button>`;
+    html += '</div>';
+  });
+  html += '</div></div>';
+
+  // Outputs section
+  html += '<div class="canvas-section">';
+  html += '<div class="canvas-section-header">';
+  html += '<div class="canvas-section-label">Outputs</div>';
+  html += '<button class="canvas-add-btn" onclick="addOutput()">+ Add Output</button>';
+  html += '</div>';
+  html += '<div id="outputs-list">';
+  html += renderOutputsHTML(p);
+  html += '</div></div>';
+
+  el.innerHTML = html;
+}
+
+function renderOutputsHTML(p) {
+  let html = '';
+  p.outputs.forEach((out, oi) => {
+    html += renderSingleOutput(out, oi, p);
+  });
+  return html;
+}
+
+function renderSingleOutput(out, oi, p) {
+  let html = '';
+    html += `<div class="output-card">`;
+    html += `<div class="output-header">`;
+    html += `<span class="output-label">OUTPUT ${oi}</span>`;
+    html += `<input class="output-amount-input" placeholder="amount (BTC)" value="${out.amount}" onchange="P().outputs[${oi}].amount=this.value;updateJSON()">`;
+    if (p.outputs.length > 1) html += `<button class="output-del-btn" onclick="removeOutput(${oi})">&times;</button>`;
+    html += '</div>';
+    html += '<div class="ladder">';
+
+    out.rungs.forEach((rung, ri) => {
+      html += `<div class="rung-row" data-oi="${oi}" data-ri="${ri}">`;
+      html += '<div class="rail-left"></div>';
+      html += '<div class="rung-wire">';
+      html += '<div class="wire-segment"></div>';
+
+      rung.blocks.forEach((block, bi) => {
+        const def = BLOCK_DEFS[block.type];
+        const color = def ? categoryColor(def.category) : '#888';
+        const inv = block.inverted ? '<span class="inv-slash">/</span>' : '';
+        const param = blockParamLabel(block);
+        // Each contact is draggable for reordering within the rung
+        html += `<div class="contact" style="border-color:${color};color:${color}" draggable="true" ondragstart="onContactDragStart(event,${oi},${ri},${bi})" onclick="openBlockModal(${oi},${ri},${bi})" title="${block.type} — drag to reorder">`;
+        html += `${inv}${block.type}`;
+        if (param) html += `<span class="contact-param">${param}</span>`;
+        html += '</div>';
+        // Drop zone between blocks for reordering
+        html += `<div class="wire-segment block-drop-target" data-oi="${oi}" data-ri="${ri}" data-bi="${bi+1}" ondragover="onBlockSlotOver(event)" ondragleave="onBlockSlotLeave(event)" ondrop="onBlockSlotDrop(event)"></div>`;
+      });
+
+      // Drop zone for adding new blocks from palette
+      html += `<div class="drop-zone wire-grow" data-oi="${oi}" data-ri="${ri}" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">${rung.blocks.length ? '+' : 'drop block'}</div>`;
+      html += '<div class="wire-segment"></div>';
+      html += '</div>'; // rung-wire
+      html += '<div class="rail-right"></div>';
+
+      // Inline rung toolbar
+      html += '<div class="rung-toolbar">';
+      html += `<button class="rung-toolbar-btn add-block" onclick="showBlockPicker(event,${oi},${ri})" title="Add block to rung">+</button>`;
+      if (ri > 0) html += `<button class="rung-toolbar-btn" onclick="moveRung(${oi},${ri},-1)" title="Move rung up">&#x25B2;</button>`;
+      if (ri < out.rungs.length - 1) html += `<button class="rung-toolbar-btn" onclick="moveRung(${oi},${ri},1)" title="Move rung down">&#x25BC;</button>`;
+      html += `<button class="rung-toolbar-btn del" onclick="removeRung(${oi},${ri})" title="Delete rung">&times;</button>`;
+      html += '</div>';
+      html += '</div>'; // rung-row
+    });
+
+    html += `<button class="add-rung-btn" onclick="addRung(${oi})">+ Add Rung</button>`;
+    html += '</div>'; // ladder
+
+    // ── Coil Section (below ladder) ──
+    const coil = (out.coil && typeof out.coil === 'object') ? out.coil : emptyCoil(out.coil || 'UNLOCK');
+    if (typeof out.coil !== 'object') out.coil = coil; // migrate old format
+    const coilType = coil.type;
+    const coilDef = COIL_DEFS[coilType];
+    const coilColor = coilType === 'UNLOCK' ? 'var(--gray-200)' : coilType === 'UNLOCK_TO' ? 'var(--green)' : 'var(--orange)';
+
+    html += '<div class="coil-section">';
+    html += '<div class="coil-section-header">';
+    html += `<div class="coil-symbol" style="color:${coilColor}">`;
+    html += `<span class="coil-paren">(</span>`;
+    html += `<select class="coil-type-select" style="color:${coilColor}" onchange="setCoilType(${oi},this.value)" onclick="event.stopPropagation()">`;
+    for (const ct of COIL_TYPES) {
+      html += `<option value="${ct}"${ct === coilType ? ' selected' : ''}>${ct}</option>`;
+    }
+    html += `</select>`;
+    html += `<span class="coil-paren">)</span>`;
+    html += '</div>';
+    html += `<span class="coil-desc">${coilDef ? coilDef.desc : ''}</span>`;
+    html += '</div>';
+
+    // Address field
+    if (coilDef && coilDef.hasAddress) {
+      html += '<div class="coil-addr-row">';
+      html += `<span class="coil-addr-label">&#x2192; address</span>`;
+      html += `<input class="coil-addr-input" type="text" value="${coil.address || ''}" placeholder="bc1q... destination address" onchange="setCoilAddress(${oi},this.value)" onclick="event.stopPropagation()">`;
+      html += '</div>';
+    }
+
+    // Coil logic ladder
+    if (coilDef && coilDef.hasLogic) {
+      html += '<div class="coil-logic-section">';
+      html += '<div class="coil-logic-label">Coil Conditions</div>';
+      html += '<div class="coil-ladder">';
+      if (coil.rungs.length === 0) {
+        html += `<div class="coil-logic-empty" onclick="addCoilRung(${oi})">+ add coil logic rung</div>`;
+      } else {
+        coil.rungs.forEach((cr, cri) => {
+          html += '<div class="coil-rung-row">';
+          html += '<div class="rail-left" style="border-color:var(--orange)"></div>';
+          html += '<div class="rung-wire">';
+          html += '<div class="wire-segment"></div>';
+          cr.blocks.forEach((cb, cbi) => {
+            const cdef = BLOCK_DEFS[cb.type];
+            const cc = cdef ? categoryColor(cdef.category) : '#888';
+            const cinv = cb.inverted ? '<span class="inv-slash">/</span>' : '';
+            const cparam = blockParamLabel(cb);
+            html += `<div class="contact" style="border-color:${cc};color:${cc}" onclick="openCoilBlockModal(${oi},${cri},${cbi})">${cinv}${cb.type}`;
+            if (cparam) html += `<span class="contact-param">${cparam}</span>`;
+            html += '</div>';
+            html += '<div class="wire-segment"></div>';
+          });
+          html += `<div class="drop-zone wire-grow" data-oi="${oi}" data-cri="${cri}" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onCoilDrop(event)" onclick="showCoilBlockPicker(event,${oi},${cri})">${cr.blocks.length ? '+' : 'drop block'}</div>`;
+          html += '<div class="wire-segment"></div>';
+          html += '</div>'; // rung-wire
+          html += '<div class="rail-right" style="border-color:var(--orange)"></div>';
+          html += '<div class="rung-toolbar">';
+          html += `<button class="coil-rung-del" onclick="removeCoilRung(${oi},${cri})" title="Delete coil rung">&times;</button>`;
+          html += '</div>';
+          html += '</div>'; // coil-rung-row
+        });
+      }
+      html += `<button class="coil-add-rung" onclick="addCoilRung(${oi})">+ Add Coil Rung</button>`;
+      html += '</div>'; // coil-ladder
+      html += '</div>'; // coil-logic-section
+    }
+
+    html += '</div>'; // coil-section
+    html += '</div>'; // output-card
+  return html;
+}
+
+function blockParamLabel(block) {
+  if (!block.params) return '';
+  const def = BLOCK_DEFS[block.type];
+  if (!def || !def.fields.length) return '';
+  const first = def.fields[0];
+  const val = block.params[first.name];
+  if (!val) return '';
+  if (first.type === 'NUMERIC') return val;
+  if (typeof val === 'string' && val.length > 12) return val.slice(0, 6) + '...' + val.slice(-4);
+  return val;
+}
+
+
+function updateStats() {
+  let totalInputs = 0, totalOutputs = 0, totalRungs = 0, totalBlocks = 0;
+  state.phases.forEach(p => {
+    totalInputs += p.inputs.length;
+    totalOutputs += p.outputs.length;
+    p.outputs.forEach(o => { totalRungs += o.rungs.length; o.rungs.forEach(r => { totalBlocks += r.blocks.length; }); });
+  });
+  document.getElementById('stat-inputs').textContent = totalInputs;
+  document.getElementById('stat-outputs').textContent = totalOutputs;
+  document.getElementById('stat-rungs').textContent = totalRungs;
+  document.getElementById('stat-blocks').textContent = totalBlocks;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Input / Output Management
+// ═══════════════════════════════════════════════════════════════════════════
+
+function addInput() { P().inputs.push({ txid: '', vout: 0, sequence: 0xfffffffe, diffWitness: false, sourceInput: 0 }); render(); }
+function toggleDiffWitness(idx) {
+  const inp = P().inputs[idx];
+  inp.diffWitness = !inp.diffWitness;
+  if (inp.diffWitness && idx === 0) { inp.diffWitness = false; toast('Input 0 cannot be a diff witness (no prior input to inherit from)', 'error'); return; }
+  render();
+}
+function removeInput(i) { P().inputs.splice(i, 1); render(); }
+function addOutput() { P().outputs.push(emptyOutput()); render(); }
+function removeOutput(i) { P().outputs.splice(i, 1); render(); }
+function addRung(oi) { P().outputs[oi].rungs.push({ blocks: [] }); render(); }
+function removeRung(oi, ri) {
+  if (P().outputs[oi].rungs.length <= 1) { toast('Need at least one rung', 'error'); return; }
+  P().outputs[oi].rungs.splice(ri, 1); render();
+}
+function moveRung(oi, ri, dir) {
+  const rungs = P().outputs[oi].rungs;
+  const ni = ri + dir;
+  if (ni < 0 || ni >= rungs.length) return;
+  [rungs[ri], rungs[ni]] = [rungs[ni], rungs[ri]];
+  render();
+}
+function setCoilType(oi, val) {
+  const out = P().outputs[oi];
+  if (!out.coil || typeof out.coil === 'string') out.coil = emptyCoil(val);
+  else { out.coil.type = val; out.coil.rungs = []; }
+  render();
+}
+function setCoilAddress(oi, val) {
+  const out = P().outputs[oi];
+  if (typeof out.coil === 'object') out.coil.address = val;
+}
+function addCoilRung(oi) {
+  P().outputs[oi].coil.rungs.push({ blocks: [] });
+  render();
+}
+function removeCoilRung(oi, cri) {
+  P().outputs[oi].coil.rungs.splice(cri, 1);
+  render();
+}
+function openCoilBlockModal(oi, cri, cbi) {
+  const coilRung = P().outputs[oi].coil.rungs[cri];
+  const block = coilRung.blocks[cbi];
+  state.modalTarget = { oi, cri, cbi, isCoilBlock: true };
+  // Reuse the same block modal UI
+  const def = BLOCK_DEFS[block.type];
+  if (!def) return;
+  const color = categoryColor(def.category);
+  document.getElementById('modal-title').innerHTML = `<span style="color:${color}">${block.type}</span> — COIL LOGIC`;
+
+  let html = '';
+  if (isInvertible(block.type)) {
+    html += '<div class="form-group"><label class="form-label">Mode</label>';
+    html += '<div class="inv-toggle">';
+    html += `<button id="inv-normal" class="${!block.inverted ? 'active' : ''}" onclick="setCoilBlockInverted(false)">NORMAL</button>`;
+    html += `<button id="inv-inverted" class="${block.inverted ? 'active' : ''}" onclick="setCoilBlockInverted(true)">/INVERTED</button>`;
+    html += '</div>';
+    html += '<div class="inv-hint">Normal: condition must be satisfied. Inverted: condition must NOT be satisfied.</div></div>';
+  } else {
+    block.inverted = false;
+  }
+
+  for (const field of def.fields) {
+    const val = block.params?.[field.name] || '';
+    if (field.type === 'PUBKEY_LIST') {
+      html += `<div class="form-group"><label class="form-label">${field.name}</label>`;
+      html += `<textarea class="form-input" id="field-${field.name}" rows="3" placeholder="${field.placeholder}" style="resize:vertical">${val}</textarea></div>`;
+    } else {
+      const inputType = field.type === 'NUMERIC' ? 'number' : 'text';
+      html += `<div class="form-group"><label class="form-label">${field.name}</label>`;
+      html += `<input class="form-input" id="field-${field.name}" type="${inputType}" value="${val}" placeholder="${field.placeholder}"></div>`;
+    }
+  }
+  html += `<button class="modal-btn" style="background:var(--red);color:#fff;margin-top:8px" onclick="deleteCoilBlock()">Delete Block</button>`;
+
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('block-modal').classList.add('active');
+}
+function setCoilBlockInverted(val) {
+  if (state.modalTarget && state.modalTarget.isCoilBlock) {
+    const { oi, cri, cbi } = state.modalTarget;
+    const block = P().outputs[oi].coil.rungs[cri].blocks[cbi];
+    if (val && !isInvertible(block.type)) return;
+    block.inverted = val;
+  }
+  document.getElementById('inv-normal').classList.toggle('active', !val);
+  document.getElementById('inv-inverted').classList.toggle('active', val);
+}
+function deleteCoilBlock() {
+  if (!state.modalTarget || !state.modalTarget.isCoilBlock) return;
+  const { oi, cri, cbi } = state.modalTarget;
+  P().outputs[oi].coil.rungs[cri].blocks.splice(cbi, 1);
+  closeModal(); render();
+}
+function applyCoilBlockModal() {
+  if (!state.modalTarget || !state.modalTarget.isCoilBlock) return;
+  const { oi, cri, cbi } = state.modalTarget;
+  const block = P().outputs[oi].coil.rungs[cri].blocks[cbi];
+  const def = BLOCK_DEFS[block.type];
+  if (def) {
+    if (!block.params) block.params = {};
+    for (const field of def.fields) {
+      const el = document.getElementById(`field-${field.name}`);
+      if (el) block.params[field.name] = el.value;
+    }
+  }
+  closeModal(); render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase Management
+// ═══════════════════════════════════════════════════════════════════════════
+
+function switchPhase(pi) {
+  state.activePhase = pi;
+  render();
+}
+
+function addPhase() {
+  const n = state.phases.length + 1;
+  state.phases.push(emptyPhase('Phase ' + n));
+  state.activePhase = state.phases.length - 1;
+  render();
+  toast(`Added Phase ${n}`, 'success');
+}
+
+function removePhase(pi) {
+  if (state.phases.length <= 1) { toast('Need at least one phase', 'error'); return; }
+  state.phases.splice(pi, 1);
+  if (state.activePhase >= state.phases.length) state.activePhase = state.phases.length - 1;
+  render();
+}
+
+function linkFromPrevious() {
+  const prevPhase = state.phases[state.activePhase - 1];
+  if (!prevPhase) return;
+  const p = P();
+  // Create one input per output from previous phase, with placeholder txid
+  const fakeTxid = '<phase' + state.activePhase + '_txid>';
+  p.inputs = prevPhase.outputs.map((out, i) => ({
+    txid: fakeTxid,
+    vout: i,
+    sequence: 0xfffffffe,
+  }));
+  render();
+  toast(`Linked ${p.inputs.length} inputs from ${prevPhase.name}`, 'success');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Drag & Drop — Palette to Rung
+// ═══════════════════════════════════════════════════════════════════════════
+
+function onDragStart(e, blockType) {
+  e.dataTransfer.setData('text/plain', blockType);
+  e.dataTransfer.setData('application/x-source', 'palette');
+  e.dataTransfer.effectAllowed = 'copy';
+}
+function onDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function onDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function onDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const src = e.dataTransfer.getData('application/x-source');
+  const oi = +e.currentTarget.dataset.oi;
+  const ri = +e.currentTarget.dataset.ri;
+
+  if (src === 'contact') {
+    // Move block from another position to end of this rung
+    const fromOi = +e.dataTransfer.getData('application/x-oi');
+    const fromRi = +e.dataTransfer.getData('application/x-ri');
+    const fromBi = +e.dataTransfer.getData('application/x-bi');
+    const block = P().outputs[fromOi].rungs[fromRi].blocks.splice(fromBi, 1)[0];
+    P().outputs[oi].rungs[ri].blocks.push(block);
+  } else {
+    const blockType = e.dataTransfer.getData('text/plain');
+    if (!BLOCK_DEFS[blockType]) return;
+    P().outputs[oi].rungs[ri].blocks.push({ type: blockType, inverted: false, params: {} });
+    toast(`Added ${blockType}`, 'success');
+  }
+  render();
+}
+
+function onCoilDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const blockType = e.dataTransfer.getData('text/plain');
+  if (!BLOCK_DEFS[blockType]) return;
+  const oi = +e.currentTarget.dataset.oi;
+  const cri = +e.currentTarget.dataset.cri;
+  P().outputs[oi].coil.rungs[cri].blocks.push({ type: blockType, inverted: false, params: {} });
+  toast(`Added ${blockType} to coil logic`, 'success');
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Drag & Drop — Reorder Blocks Within / Between Rungs
+// ═══════════════════════════════════════════════════════════════════════════
+
+function onContactDragStart(e, oi, ri, bi) {
+  e.stopPropagation();
+  e.dataTransfer.setData('text/plain', P().outputs[oi].rungs[ri].blocks[bi].type);
+  e.dataTransfer.setData('application/x-source', 'contact');
+  e.dataTransfer.setData('application/x-oi', oi);
+  e.dataTransfer.setData('application/x-ri', ri);
+  e.dataTransfer.setData('application/x-bi', bi);
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onBlockSlotOver(e) {
+  e.preventDefault();
+  e.currentTarget.style.background = 'var(--orange)';
+  e.currentTarget.style.minWidth = '24px';
+  e.currentTarget.style.borderRadius = '4px';
+}
+function onBlockSlotLeave(e) {
+  e.currentTarget.style.background = '';
+  e.currentTarget.style.minWidth = '';
+  e.currentTarget.style.borderRadius = '';
+}
+function onBlockSlotDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.style.background = '';
+  e.currentTarget.style.minWidth = '';
+  e.currentTarget.style.borderRadius = '';
+
+  const toOi = +e.currentTarget.dataset.oi;
+  const toRi = +e.currentTarget.dataset.ri;
+  let toBi = +e.currentTarget.dataset.bi;
+
+  const src = e.dataTransfer.getData('application/x-source');
+  if (src === 'contact') {
+    const fromOi = +e.dataTransfer.getData('application/x-oi');
+    const fromRi = +e.dataTransfer.getData('application/x-ri');
+    const fromBi = +e.dataTransfer.getData('application/x-bi');
+    // Remove from old position
+    const block = P().outputs[fromOi].rungs[fromRi].blocks.splice(fromBi, 1)[0];
+    // Adjust target index if same rung and removing shifted it
+    if (fromOi === toOi && fromRi === toRi && fromBi < toBi) toBi--;
+    P().outputs[toOi].rungs[toRi].blocks.splice(toBi, 0, block);
+  } else {
+    // From palette
+    const blockType = e.dataTransfer.getData('text/plain');
+    if (!BLOCK_DEFS[blockType]) return;
+    P().outputs[toOi].rungs[toRi].blocks.splice(toBi, 0, { type: blockType, inverted: false, params: {} });
+    toast(`Added ${blockType}`, 'success');
+  }
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Block Picker (+ button on rung toolbar)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let activePickerCleanup = null;
+
+function showBlockPicker(e, oi, ri) {
+  e.stopPropagation();
+  closeBlockPicker();
+
+  const btn = e.currentTarget;
+  const picker = document.createElement('div');
+  picker.className = 'block-picker';
+
+  for (const cat of CATEGORIES) {
+    const blocks = Object.entries(BLOCK_DEFS).filter(([, d]) => d.category === cat.id && d.phase === 1);
+    if (!blocks.length) continue;
+    const catEl = document.createElement('div');
+    catEl.className = 'block-picker-cat';
+    catEl.textContent = cat.name;
+    picker.appendChild(catEl);
+    for (const [key, def] of blocks) {
+      const item = document.createElement('div');
+      item.className = 'block-picker-item';
+      item.innerHTML = `<div class="bp-dot" style="background:${cat.color}"></div>${def.label}`;
+      item.onclick = () => {
+        P().outputs[oi].rungs[ri].blocks.push({ type: key, inverted: false, params: {} });
+        closeBlockPicker();
+        render();
+        toast(`Added ${key}`, 'success');
+      };
+      picker.appendChild(item);
+    }
+  }
+
+  btn.parentElement.style.position = 'relative';
+  btn.parentElement.appendChild(picker);
+
+  const dismiss = (ev) => { if (!picker.contains(ev.target) && ev.target !== btn) closeBlockPicker(); };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
+  activePickerCleanup = () => { document.removeEventListener('click', dismiss); picker.remove(); activePickerCleanup = null; };
+}
+
+function closeBlockPicker() {
+  if (activePickerCleanup) activePickerCleanup();
+}
+
+function showCoilBlockPicker(e, oi, cri) {
+  e.stopPropagation();
+  closeBlockPicker();
+
+  const btn = e.currentTarget;
+  const picker = document.createElement('div');
+  picker.className = 'block-picker';
+
+  for (const cat of CATEGORIES) {
+    const blocks = Object.entries(BLOCK_DEFS).filter(([, d]) => d.category === cat.id && d.phase === 1);
+    if (!blocks.length) continue;
+    const catEl = document.createElement('div');
+    catEl.className = 'block-picker-cat';
+    catEl.textContent = cat.name;
+    picker.appendChild(catEl);
+    for (const [key, def] of blocks) {
+      const item = document.createElement('div');
+      item.className = 'block-picker-item';
+      item.innerHTML = `<div class="bp-dot" style="background:${cat.color}"></div>${def.label}`;
+      item.onclick = () => {
+        P().outputs[oi].coil.rungs[cri].blocks.push({ type: key, inverted: false, params: {} });
+        closeBlockPicker();
+        render();
+        toast(`Added ${key} to coil logic`, 'success');
+      };
+      picker.appendChild(item);
+    }
+  }
+
+  btn.parentElement.style.position = 'relative';
+  btn.parentElement.appendChild(picker);
+
+  const dismiss = (ev) => { if (!picker.contains(ev.target) && ev.target !== btn) closeBlockPicker(); };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
+  activePickerCleanup = () => { document.removeEventListener('click', dismiss); picker.remove(); activePickerCleanup = null; };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Block Edit Modal
+// ═══════════════════════════════════════════════════════════════════════════
+
+function openBlockModal(oi, ri, bi) {
+  const block = P().outputs[oi].rungs[ri].blocks[bi];
+  const def = BLOCK_DEFS[block.type];
+  if (!def) return;
+  state.modalTarget = { oi, ri, bi };
+
+  const color = categoryColor(def.category);
+  document.getElementById('modal-title').innerHTML = `<span style="color:${color}">${block.type}</span> — ${CATEGORIES.find(c => c.id === def.category)?.name || ''}`;
+
+  let html = '';
+
+  // Inversion toggle (only for non-key-consuming blocks)
+  if (isInvertible(block.type)) {
+    html += '<div class="form-group"><label class="form-label">Mode</label>';
+    html += '<div class="inv-toggle">';
+    html += `<button id="inv-normal" class="${!block.inverted ? 'active' : ''}" onclick="setInverted(false)">NORMAL</button>`;
+    html += `<button id="inv-inverted" class="${block.inverted ? 'active' : ''}" onclick="setInverted(true)">/INVERTED</button>`;
+    html += '</div>';
+    html += `<div class="inv-hint">Normal: condition must be satisfied. Inverted: condition must NOT be satisfied (flips result).</div>`;
+    html += '</div>';
+  } else {
+    // Force non-invertible for key-consuming blocks
+    block.inverted = false;
+  }
+
+  // Parameter fields
+  for (const field of def.fields) {
+    const val = block.params?.[field.name] || '';
+    if (field.type === 'PUBKEY_LIST') {
+      html += `<div class="form-group"><label class="form-label">${field.name}</label>`;
+      html += `<textarea class="form-input" id="field-${field.name}" rows="3" placeholder="${field.placeholder}" style="resize:vertical">${val}</textarea></div>`;
+    } else {
+      const inputType = field.type === 'NUMERIC' ? 'number' : 'text';
+      html += `<div class="form-group"><label class="form-label">${field.name}</label>`;
+      html += `<input class="form-input" id="field-${field.name}" type="${inputType}" value="${val}" placeholder="${field.placeholder}"></div>`;
+    }
+  }
+
+  // Delete block button
+  html += `<button class="modal-btn" style="background:var(--red);color:#fff;margin-top:8px" onclick="deleteBlock()">Delete Block</button>`;
+
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('block-modal').classList.add('active');
+}
+
+function setInverted(val) {
+  if (state.modalTarget) {
+    const { oi, ri, bi } = state.modalTarget;
+    const block = P().outputs[oi].rungs[ri].blocks[bi];
+    if (val && !isInvertible(block.type)) return; // key-consuming blocks cannot be inverted
+    block.inverted = val;
+  }
+  document.getElementById('inv-normal').classList.toggle('active', !val);
+  document.getElementById('inv-inverted').classList.toggle('active', val);
+}
+
+function applyModal() {
+  if (!state.modalTarget) { closeModal(); return; }
+  if (state.modalTarget.isCoilBlock) { applyCoilBlockModal(); return; }
+  const { oi, ri, bi } = state.modalTarget;
+  const block = P().outputs[oi].rungs[ri].blocks[bi];
+  const def = BLOCK_DEFS[block.type];
+  if (!def) { closeModal(); return; }
+
+  if (!block.params) block.params = {};
+  for (const field of def.fields) {
+    const el = document.getElementById(`field-${field.name}`);
+    if (el) block.params[field.name] = el.value;
+  }
+  closeModal();
+  render();
+}
+
+function deleteBlock() {
+  if (!state.modalTarget) return;
+  const { oi, ri, bi } = state.modalTarget;
+  P().outputs[oi].rungs[ri].blocks.splice(bi, 1);
+  closeModal();
+  render();
+}
+
+function closeModal() {
+  document.getElementById('block-modal').classList.remove('active');
+  state.modalTarget = null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// JSON Preview
+// ═══════════════════════════════════════════════════════════════════════════
+
+function buildPhaseJSON(phase) {
+  const inputs = phase.inputs.map(inp => ({
+    txid: inp.txid || '0000000000000000000000000000000000000000000000000000000000000000',
+    vout: inp.vout,
+    ...(inp.sequence !== 0xfffffffe ? { sequence: inp.sequence } : {})
+  }));
+
+  const outputs = phase.outputs.map(out => {
+    const conditions = out.rungs.map(rung => {
+      const blocks = rung.blocks.map(block => {
+        const def = BLOCK_DEFS[block.type];
+        const b = { type: block.type };
+        if (block.inverted && isInvertible(block.type)) b.inverted = true;
+        if (def && def.fields.length > 0) {
+          b.fields = [];
+          for (const fd of def.fields) {
+            const val = block.params?.[fd.name];
+            if (!val) continue;
+            if (fd.type === 'NUMERIC') {
+              b.fields.push({ type: 'NUMERIC', hex: numericHex(+val) });
+            } else if (fd.type === 'PUBKEY_LIST') {
+              const keys = val.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+              for (const k of keys) b.fields.push({ type: 'PUBKEY', hex: k });
+            } else {
+              b.fields.push({ type: fd.type, hex: val });
+            }
+          }
+        }
+        return b;
+      });
+      return { blocks };
+    });
+
+    // Coil (output-level)
+    const coil = (out.coil && typeof out.coil === 'object') ? out.coil : { type: out.coil || 'UNLOCK', address: '', rungs: [] };
+    const coilObj = { type: coil.type };
+    if (coil.address) coilObj.address = coil.address;
+    if (coil.rungs && coil.rungs.length > 0) {
+      coilObj.conditions = coil.rungs.map(cr => {
+        const blocks = cr.blocks.map(cb => {
+          const cdef = BLOCK_DEFS[cb.type];
+          const b = { type: cb.type };
+          if (cb.inverted && isInvertible(cb.type)) b.inverted = true;
+          if (cdef && cdef.fields.length > 0) {
+            b.fields = [];
+            for (const fd of cdef.fields) {
+              const val = cb.params?.[fd.name];
+              if (!val) continue;
+              if (fd.type === 'NUMERIC') b.fields.push({ type: 'NUMERIC', hex: numericHex(+val) });
+              else if (fd.type === 'PUBKEY_LIST') {
+                val.split(/[,\n]/).map(s => s.trim()).filter(Boolean).forEach(k => b.fields.push({ type: 'PUBKEY', hex: k }));
+              } else b.fields.push({ type: fd.type, hex: val });
+            }
+          }
+          return b;
+        });
+        return { blocks };
+      });
+    }
+
+    return { amount: out.amount ? parseFloat(out.amount) : 0, conditions, coil: coilObj };
+  });
+
+  return { inputs, outputs };
+}
+
+function buildAllPhasesJSON() {
+  if (state.phases.length === 1) {
+    const result = buildPhaseJSON(state.phases[0]);
+    // Add signladder hint with diff witness info
+    const dwHints = state.phases[0].inputs
+      .map((inp, i) => ({ idx: i, dw: inp.diffWitness, src: inp.sourceInput }))
+      .filter(h => h.dw);
+    if (dwHints.length > 0) {
+      result._signladder_hint = {
+        note: 'Use diff_witness signer format for these inputs',
+        diff_witness_inputs: dwHints.map(h => ({
+          input: h.idx,
+          diff_witness: { source_input: h.src, diffs: [
+            { rung_index: 0, block_index: 0, field_index: 1,
+              field: { type: 'SIGNATURE', privkey: '<WIF_KEY>' } }
+          ] }
+        }))
+      };
+    }
+    return result;
+  }
+  return state.phases.map((p, i) => ({
+    phase: i + 1,
+    name: p.name,
+    tx: buildPhaseJSON(p),
+  }));
+}
+
+function numericHex(val) {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setUint32(0, val >>> 0, true);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function updateJSON() {
+  const obj = buildAllPhasesJSON();
+  const el = document.getElementById('json-preview');
+  el.innerHTML = syntaxHighlight(JSON.stringify(obj, null, 2));
+}
+
+function syntaxHighlight(json) {
+  return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+    let cls = 'json-number';
+    if (/^"/.test(match)) {
+      cls = /:$/.test(match) ? 'json-key' : 'json-string';
+    } else if (/true|false/.test(match)) {
+      cls = 'json-bool';
+    } else if (/null/.test(match)) {
+      cls = 'json-null';
+    }
+    return `<span class="${cls}">${match}</span>`;
+  });
+}
+
+function copyJSON() {
+  const obj = buildAllPhasesJSON();
+  navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => toast('Copied JSON', 'success'));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RPC Client
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function rpcCall(method, params = []) {
+  const url = document.getElementById('rpc-url').value;
+  const user = document.getElementById('rpc-user').value;
+  const pass = document.getElementById('rpc-pass').value;
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Basic ' + btoa(user + ':' + pass),
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+  });
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error.message);
+  return json.result;
+}
+
+async function toggleConnection() {
+  if (state.connected) {
+    state.connected = false;
+    updateConnectionUI();
+    return;
+  }
+  try {
+    const info = await rpcCall('getblockchaininfo');
+    state.connected = true;
+    state.chainInfo = info;
+    document.getElementById('stat-network').innerHTML = `network: <span class="val">${info.chain}</span>`;
+    updateConnectionUI();
+    toast(`Connected — ${info.chain} @ block ${info.blocks}`, 'success');
+    refreshExplorer();
+  } catch (e) {
+    toast(`Connection failed: ${e.message}`, 'error');
+  }
+}
+
+function updateConnectionUI() {
+  const btn = document.getElementById('connect-btn');
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  const broadcast = document.getElementById('broadcast-btn');
+
+  if (state.connected) {
+    btn.textContent = 'Disconnect';
+    btn.className = 'connect-btn connected';
+    dot.className = 'status-dot green';
+    txt.textContent = `Connected — ${state.chainInfo?.chain || ''} @ ${state.chainInfo?.blocks || ''}`;
+    broadcast.disabled = false;
+  } else {
+    btn.textContent = 'Connect';
+    btn.className = 'connect-btn disconnected';
+    dot.className = 'status-dot gray';
+    txt.textContent = 'Not connected';
+    broadcast.disabled = true;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Broadcast
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function broadcastTx() {
+  if (!state.connected) { toast('Not connected', 'error'); return; }
+  try {
+    const tx = buildPhaseJSON(P());
+    toast('Creating transaction...', 'success');
+
+    // Build createtxmlsc params
+    const inputs = tx.inputs.map(i => ({ txid: i.txid, vout: i.vout, ...(i.sequence !== undefined ? { sequence: i.sequence } : {}) }));
+    const outputs = tx.outputs.map(o => ({ amount: o.amount, conditions: o.conditions, ...(o.coil ? { coil: o.coil } : {}) }));
+
+    const result = await rpcCall('createtxmlsc', [inputs, outputs]);
+    toast(`Created unsigned tx: ${result.hex.length / 2} bytes`, 'success');
+
+    // For now, just show the hex — signing requires private keys
+    const hexPreview = result.hex.slice(0, 40) + '...';
+    toast(`Unsigned hex: ${hexPreview}`, 'success');
+    const dwInputs = P().inputs.filter((inp, i) => i > 0 && inp.diffWitness);
+    if (dwInputs.length > 0) {
+      toast(`${dwInputs.length} input(s) use diff witness — signladder will use diff_witness signer format`, 'success');
+    }
+    toast('Sign with signladder RPC to complete', 'success');
+
+  } catch (e) {
+    toast(`Broadcast failed: ${e.message}`, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Explorer
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function refreshExplorer() {
+  if (!state.connected) { toast('Connect to a node first', 'error'); return; }
+  const el = document.getElementById('explorer-list');
+  try {
+    const height = (await rpcCall('getblockchaininfo')).blocks;
+    let html = '';
+    for (let h = height; h > Math.max(0, height - 5); h--) {
+      const hash = await rpcCall('getblockhash', [h]);
+      const block = await rpcCall('getblock', [hash, 2]);
+      const txcount = block.tx.length;
+      html += `<div class="explorer-block" onclick="this.classList.toggle('expanded')">`;
+      html += `<div class="explorer-block-header">`;
+      html += `<span class="explorer-block-height">#${h}</span>`;
+      html += `<span class="explorer-block-hash">${hash.slice(0, 16)}...</span>`;
+      html += `<span class="explorer-block-txcount">${txcount} tx</span>`;
+      html += '</div>';
+      html += '<div class="explorer-block-txs">';
+      for (const tx of block.tx) {
+        const isV3 = tx.version === 4;
+        html += '<div class="explorer-tx">';
+        if (isV3) html += '<span class="v3-badge">RUNG</span>';
+        html += `<span class="txid">${tx.txid.slice(0, 24)}...</span>`;
+        html += '</div>';
+      }
+      html += '</div></div>';
+    }
+    el.innerHTML = html || '<div class="explorer-empty">No blocks found</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="explorer-empty">Error: ${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tabs
+// ═══════════════════════════════════════════════════════════════════════════
+
+function switchTab(name) {
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.panel-tab[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Toasts
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toast(msg, type = '') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Templates
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TEMPLATES = [
+  {
+    name: 'Simple SIG',
+    color: '#00FFB3',
+    desc: 'Single signature spend',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+      ]}],
+    }),
+  },
+  {
+    name: 'SIG + CSV',
+    color: '#FFB700',
+    desc: 'Signature with 144-block relative timelock',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 144 }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } },
+          { type: 'CSV', inverted: false, params: { blocks: '144' } },
+        ] },
+      ]}],
+    }),
+  },
+  {
+    name: 'HTLC',
+    color: '#4488FF',
+    desc: 'Hash-locked transfer OR timeout — classic atomic swap',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'HTLC', inverted: false, params: { sender_key: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc', receiver_key: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a', hash_lock: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', csv_delay: '144' } }] },
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } },
+          { type: 'CSV', inverted: false, params: { blocks: '144' } },
+        ] },
+      ]}],
+    }),
+  },
+  {
+    name: '2-of-3 Multisig',
+    color: '#00FFB3',
+    desc: 'Threshold multisig — 2 of 3 keys required',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'MULTISIG', inverted: false, params: {
+          threshold: '2',
+          pubkeys: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc\n03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a\n03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708'
+        } }] },
+      ]}],
+    }),
+  },
+  {
+    name: 'Vault',
+    color: '#FF6644',
+    desc: 'Hot key with delay OR cold key immediate',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } },
+          { type: 'CSV', inverted: false, params: { blocks: '1008' } },
+        ] },
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a' } },
+        ] },
+      ]}],
+    }),
+  },
+  {
+    name: 'Inverted CSV',
+    color: '#FFB700',
+    desc: 'Spendable BEFORE timelock — inverted contact',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0 }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'CSV', inverted: true, params: { blocks: '144' } }] },
+      ]}],
+    }),
+  },
+  {
+    name: 'CoinJoin',
+    color: '#00FFB3',
+    desc: '3-party CoinJoin — equal outputs, unlinkable inputs',
+    build: () => ({
+      inputs: [
+        { txid: 'aaaa000000000000000000000000000000000000000000000000000000000001', vout: 0, sequence: 0xfffffffe },
+        { txid: 'bbbb000000000000000000000000000000000000000000000000000000000002', vout: 0, sequence: 0xfffffffe },
+        { txid: 'cccc000000000000000000000000000000000000000000000000000000000003', vout: 0, sequence: 0xfffffffe },
+      ],
+      outputs: [
+        { amount: '0.1', rungs: [
+          { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+        ]},
+        { amount: '0.1', rungs: [
+          { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a' } }] },
+        ]},
+        { amount: '0.1', rungs: [
+          { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708' } }] },
+        ]},
+      ],
+    }),
+  },
+  {
+    name: 'Wraith (full)',
+    color: '#FF44AA',
+    desc: '3-user wraith mix — Phase 1: fan-out, Phase 2-4: fan-in per user',
+    build: () => {
+      const alice = '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc';
+      const bob   = '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a';
+      const carol = '03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708';
+      // Shuffled ownership: [bob, alice, carol, carol, bob, alice, alice, carol, bob]
+      const owners = [bob, alice, carol, carol, bob, alice, alice, carol, bob];
+      const fanoutTxid = '<fanout_txid>';
+      return [
+        // Phase 1: Fan-out — 3 inputs → 9 equal outputs (shuffled)
+        {
+          name: 'Fan-out',
+          inputs: [
+            { txid: 'aaaa000000000000000000000000000000000000000000000000000000000001', vout: 0, sequence: 0xfffffffe },
+            { txid: 'bbbb000000000000000000000000000000000000000000000000000000000002', vout: 0, sequence: 0xfffffffe },
+            { txid: 'cccc000000000000000000000000000000000000000000000000000000000003', vout: 0, sequence: 0xfffffffe },
+          ],
+          outputs: owners.map(pk => ({
+            amount: '0.11',
+            rungs: [{ blocks: [{ type: 'SIG', inverted: false, params: { pubkey: pk } }] }],
+          })),
+        },
+        // Phase 2: Alice fan-in — her 3 outputs (vouts 1, 5, 6) → 1 output
+        {
+          name: 'Alice fan-in',
+          inputs: [
+            { txid: fanoutTxid, vout: 1, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 5, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 6, sequence: 0xfffffffe },
+          ],
+          outputs: [{ amount: '0.329', rungs: [
+            { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: alice } }] },
+          ]}],
+        },
+        // Phase 3: Bob fan-in — his 3 outputs (vouts 0, 4, 8) → 1 output
+        {
+          name: 'Bob fan-in',
+          inputs: [
+            { txid: fanoutTxid, vout: 0, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 4, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 8, sequence: 0xfffffffe },
+          ],
+          outputs: [{ amount: '0.329', rungs: [
+            { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: bob } }] },
+          ]}],
+        },
+        // Phase 4: Carol fan-in — her 3 outputs (vouts 2, 3, 7) → 1 output
+        {
+          name: 'Carol fan-in',
+          inputs: [
+            { txid: fanoutTxid, vout: 2, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 3, sequence: 0xfffffffe },
+            { txid: fanoutTxid, vout: 7, sequence: 0xfffffffe },
+          ],
+          outputs: [{ amount: '0.329', rungs: [
+            { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: carol } }] },
+          ]}],
+        },
+      ];
+    },
+  },
+  {
+    name: 'Multi-IO',
+    color: '#AA44FF',
+    desc: '2 inputs, 2 outputs — batch spend',
+    build: () => ({
+      inputs: [
+        { txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe },
+        { txid: '11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', vout: 1, sequence: 0xfffffffe },
+      ],
+      outputs: [
+        { amount: '0.5', rungs: [
+          { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+        ]},
+        { amount: '0.498', rungs: [
+          { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a' } }] },
+        ]},
+      ],
+    }),
+  },
+  {
+    name: 'Pay To Address',
+    color: '#00FFB3',
+    desc: 'SIG unlocks funds → sent to a specific address',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+      ], coil: { type: 'UNLOCK', address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', rungs: [] }}],
+    }),
+  },
+  {
+    name: 'Escrow (UNLOCK_TO)',
+    color: '#00FFB3',
+    desc: '2-of-3 multisig releases funds → but only to buyer address + buyer must sign',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'MULTISIG', inverted: false, params: { threshold: '2', pubkeys: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc\n03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a\n03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708' } }] },
+      ], coil: { type: 'UNLOCK_TO', address: 'bc1qrp33g0q5b5698ahp5jnf5yzjmgcem8tlc7us37', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708' } }] },
+      ]}}],
+    }),
+  },
+  {
+    name: 'Timed Release',
+    color: '#FFB700',
+    desc: 'Funds unlock after 1008 blocks → must go to cold key, recipient waits 144 more blocks',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 1008 }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } },
+          { type: 'CSV', inverted: false, params: { blocks: '1008' } },
+        ] },
+      ], coil: { type: 'UNLOCK_TO', address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', rungs: [
+        { blocks: [
+          { type: 'SIG', inverted: false, params: { pubkey: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a' } },
+          { type: 'CSV', inverted: false, params: { blocks: '144' } },
+        ] },
+      ]}}],
+    }),
+  },
+  {
+    name: 'Covenant Lock',
+    color: '#FF6644',
+    desc: 'Anyone can spend → but spending tx must include a tagged hash proof and a specific SIG',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+      ], coil: { type: 'UNLOCK', address: '', rungs: [
+        { blocks: [{ type: 'TAGGED_HASH', inverted: false, params: { tag_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', expected: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' } }] },
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03f028892bad7ed57d2fb57bf33081d5cfcf6f9ed3d3d7f159c2e2fff579dc341a' } }] },
+      ]}}],
+    }),
+  },
+  {
+    name: 'Dead Man Switch',
+    color: '#FF44AA',
+    desc: 'Owner can spend anytime → if inactive 52560 blocks, heir gets it (UNLOCK_TO heir)',
+    build: () => ({
+      inputs: [{ txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe }],
+      outputs: [{ amount: '0.999', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+        { blocks: [
+          { type: 'CSV', inverted: false, params: { blocks: '52560' } },
+        ] },
+      ], coil: { type: 'UNLOCK_TO', address: 'bc1qrp33g0q5b5698ahp5jnf5yzjmgcem8tlc7us37', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '03a2fef1829e0742b89c218c51898d9e7cb9d51201ba2bf9d9e9214ebb6af32708' } }] },
+      ]}}],
+    }),
+  },
+  {
+    name: 'Batch Consolidate',
+    color: '#44DDFF',
+    desc: 'Consolidate 3 identical SIG UTXOs — inputs 1 & 2 use diff witness (inherit from input 0)',
+    build: () => ({
+      inputs: [
+        { txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 0, sequence: 0xfffffffe, diffWitness: false, sourceInput: 0 },
+        { txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 1, sequence: 0xfffffffe, diffWitness: true, sourceInput: 0 },
+        { txid: 'aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb', vout: 2, sequence: 0xfffffffe, diffWitness: true, sourceInput: 0 },
+      ],
+      outputs: [{ amount: '2.997', rungs: [
+        { blocks: [{ type: 'SIG', inverted: false, params: { pubkey: '02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc' } }] },
+      ]}],
+    }),
+  },
+];
+
+function buildTemplatesBar() {
+  const el = document.getElementById('templates-bar');
+  let html = '<span class="templates-label">Templates</span>';
+  for (let i = 0; i < TEMPLATES.length; i++) {
+    const t = TEMPLATES[i];
+    html += `<button class="template-btn" onclick="loadTemplate(${i})" title="${t.desc}"><span class="tpl-dot" style="background:${t.color}"></span>${t.name}</button>`;
+  }
+  html += `<button class="template-btn" onclick="clearCanvas()" title="Reset to empty" style="margin-left:auto;border-color:var(--gray-600)">Clear</button>`;
+  el.innerHTML = html;
+}
+
+function loadTemplate(idx) {
+  const t = TEMPLATES[idx];
+  const data = t.build();
+  // Multi-phase template: array of {name, inputs, outputs}
+  if (Array.isArray(data)) {
+    state.phases = data.map((d, i) => ({ name: d.name || `Phase ${i+1}`, inputs: d.inputs, outputs: d.outputs }));
+    state.activePhase = 0;
+  } else {
+    // Single-phase template
+    state.phases = [{ name: 'Phase 1', inputs: data.inputs, outputs: data.outputs }];
+    state.activePhase = 0;
+  }
+  render();
+  toast(`Loaded template: ${t.name}`, 'success');
+}
+
+function clearCanvas() {
+  state.phases = [emptyPhase('Phase 1')];
+  state.activePhase = 0;
+  render();
+  toast('Canvas cleared', 'success');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════
+
+buildPalette();
+buildTemplatesBar();
+render();
+</script>
+<script>(function(){var a=(location.hostname==='localhost'||location.hostname==='127.0.0.1')?'http://localhost:8801':'https://bitcoinghost.org';fetch(a+'/api/ladder/analytics/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:location.pathname,referrer:document.referrer})}).catch(function(){});})()</script>
+</body>
+</html>

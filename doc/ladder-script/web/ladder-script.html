@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ladder Script -- Ghost Labs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f5f5f5;
+  --bg-code: #f0f0f0;
+  --text: #1a1a1a;
+  --text-body: #333333;
+  --text-dim: #666666;
+  --text-light: #999999;
+  --accent: #e67e22;
+  --accent-dark: #d35400;
+  --green: #27ae60;
+  --red: #c0392b;
+  --blue: #2980b9;
+  --border: #e0e0e0;
+  --border-light: #eeeeee;
+}
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
+::selection { background: var(--accent); color: #fff; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* -- HEADER -- */
+.site-header { background: #fff; border-bottom: 1px solid var(--border); padding: 0; }
+.site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { text-decoration: none; color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
+.header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding-top: 10px; padding-bottom: 10px; }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+/* -- MAIN -- */
+.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 48px; }
+
+/* -- SECTIONS -- */
+.section { margin-bottom: 56px; }
+.section-head { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 16px; }
+.section p { margin-bottom: 12px; }
+
+/* -- STATS -- */
+.stats-row { display: flex; gap: 40px; flex-wrap: wrap; margin: 24px 0; }
+.stat { text-align: center; }
+.stat-val { font-size: 28px; font-weight: 700; color: var(--accent); display: block; }
+.stat-key { font-size: 12px; color: var(--text-light); letter-spacing: 0.5px; text-transform: uppercase; }
+
+/* -- ENV VARS -- */
+.env { margin: 16px 0; }
+.env-line { display: flex; gap: 4px; margin-bottom: 4px; font-size: 14px; }
+.env-key { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.env-val { color: var(--text-body); }
+.env-val.highlight { color: var(--accent-dark); }
+
+/* -- CODE BLOCK -- */
+.code-block { background: var(--bg-code); border: 1px solid #ddd; border-radius: 4px; padding: 16px; margin: 16px 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.6; color: var(--text-body); }
+.code-block .comment { color: var(--text-light); }
+.code-block .keyword { color: var(--blue); }
+.code-block .value { color: var(--accent); }
+
+/* -- PANEL -- */
+.panel { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.panel-title { font-size: 13px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+
+/* -- FAMILY GRID -- */
+.families { margin-top: 24px; }
+.family { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.family-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.family-name { font-size: 15px; font-weight: 600; }
+.family-range { font-size: 12px; color: var(--text-light); font-family: 'JetBrains Mono', monospace; }
+.family-desc { font-size: 14px; color: var(--text-dim); margin-bottom: 10px; }
+.family-blocks { display: flex; flex-wrap: wrap; gap: 6px; }
+.family-block { font-size: 12px; padding: 3px 8px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 3px; color: var(--text-body); font-family: 'JetBrains Mono', monospace; }
+
+/* -- LINKS -- */
+.link-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+.link-item { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; display: block; text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.link-item:hover { border-color: var(--accent); text-decoration: none; }
+.link-label { font-size: 15px; color: var(--accent); font-weight: 600; }
+.link-desc { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+/* -- FOOTER -- */
+.site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
+.site-footer a { color: var(--text-light); }
+.site-footer a:hover { color: var(--accent); }
+
+@media (max-width: 600px) {
+  .header-top { flex-direction: column; align-items: flex-start; gap: 8px; height: auto; padding: 12px 0; }
+  .header-nav { flex-wrap: wrap; }
+  .stats-row { gap: 20px; }
+  .link-grid { grid-template-columns: 1fr; }
+  .main { padding: 32px 16px 60px; }
+  .site-header-inner { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="../ghost-labs.html" class="header-title">Ghost Labs</a>
+      <div class="header-right">
+        <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
+        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" class="gh-icon">
+          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="ladder-script.html" class="active">Ladder Script</a>
+      <a href="rung-tx-anatomy.html">Anatomy</a>
+      <a href="block-docs/">Blocks</a>
+      <a href="docs/">Docs</a>
+      <a href="patch-overview.html">Patch</a>
+      <a href="get-started.html">Get Started</a>
+      <a href="ladder-engine.html">Engine</a>
+      <a href="explorer.html">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+<div class="main">
+
+  <h1 class="page-title">Ladder Script</h1>
+  <p class="page-sub">A proposal to replace Bitcoin Script with typed, structured spending conditions</p>
+
+  <!-- THE PROBLEM -->
+  <div class="section">
+    <div class="section-head">The problem</div>
+    <p>Bitcoin Script is a stack-based language from 2009. It works, but it has real limitations. Writing correct scripts is hard. Analysing them requires execution simulation. There is no way to express covenants, recursive conditions, or transaction-level constraints without ugly workarounds. The opcode model allows arbitrary data embedding (inscriptions, stamps), and there is no native path to post-quantum signatures.</p>
+    <p>Every proposal to fix one of these problems (CTV, APO, OP_VAULT, OP_CAT) adds individual opcodes that interact in unpredictable ways with each other and with the existing opcode set. The result is a growing pile of narrow fixes with no coherent model underneath.</p>
+  </div>
+
+  <!-- THE APPROACH -->
+  <div class="section">
+    <div class="section-head">What Ladder Script does</div>
+    <p>Ladder Script replaces the opcode model entirely. Instead of a stack machine that executes arbitrary instructions, spending conditions are declared as <strong>typed blocks</strong> arranged in <strong>rungs</strong>. Each block has a fixed type, fixed fields with enforced sizes, and a single evaluation function. No loops, no stack manipulation, no arbitrary data.</p>
+    <p>The name comes from ladder logic, the programming model used in industrial automation for decades. A ladder diagram has two vertical rails (power in, power out) connected by horizontal rungs. Each rung contains contacts (conditions) and a coil (output). Power flows left to right through a rung only if every contact is closed. If a rung fails, the next one is tried.</p>
+    <p>In Ladder Script, <strong>blocks within a rung are AND</strong> (all must pass) and <strong>rungs are OR</strong> (first passing rung wins). This gives you the same expressiveness as Bitcoin Script's IF/ELSE branching but with a deterministic, bounded evaluation model.</p>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <div class="section-head">How it works</div>
+    <p>A simple example: a vault with a hot key for daily spending and a multisig fallback for recovery.</p>
+    <div class="code-block"><span class="keyword">Rung 0:</span>  <span class="value">SIG(hot_key)</span>  AND  <span class="value">CSV(144 blocks)</span>    &rarr; UNLOCK
+<span class="keyword">Rung 1:</span>  <span class="value">MULTISIG(2-of-3)</span>                     &rarr; UNLOCK
+
+<span class="comment">// Try rung 0 first: hot key signs, but must wait 144 blocks.</span>
+<span class="comment">// If rung 0 fails, try rung 1: any 2 of 3 recovery keys, no delay.</span></div>
+    <p>Ladder Script uses Version 4 transactions (TX_MLSC). Outputs are 8 bytes each (value only, no script). One conditions_root per transaction defines a shared condition tree (PLC model). A creation proof in the witness validates the root is protocol-derived. The actual condition structure is only revealed at spend time in the witness. Unrevealed rungs stay private.</p>
+    <p>You can describe conditions in a compact notation. The <code>output()</code> wrapper maps outputs to the shared condition tree:</p>
+    <div class="code-block"><span class="value">ladder(output(0,
+  or(
+    and(sig(@hot_key), csv(144)),
+    multisig(2, @key_a, @key_b, @key_c)
+  )
+))</span></div>
+  </div>
+
+  <!-- WHAT YOU CAN BUILD -->
+  <div class="section">
+    <div class="section-head">What you can build</div>
+    <p>Ladder Script has 62 block types across 10 families. Here are some things they enable that Bitcoin Script cannot do today:</p>
+    <div style="margin-top:16px">
+      <p><strong style="color:var(--accent)">Vaults with clawback.</strong> Lock funds with a hot key + timelock on rung 0, cold key sweep (no delay) on rung 1. The VAULT_LOCK block handles this in a single block.</p>
+      <p><strong style="color:var(--accent)">Rate-limited wallets.</strong> RATE_LIMIT restricts how many satoshis per block can be spent. Even if your key is compromised, the attacker can only drain at the rate you set.</p>
+      <p><strong style="color:var(--accent)">Recursive covenants.</strong> RECURSE_SAME forces the output to carry the same conditions as the input. RECURSE_COUNT counts down each hop. RECURSE_SPLIT lets a UTXO split into multiple re-encumbered outputs. All with bounded depth.</p>
+      <p><strong style="color:var(--accent)">Per-output governance.</strong> OUTPUT_CHECK verifies that a specific output has the right value and script. Enforce that treasury spends route funds to the correct address.</p>
+      <p><strong style="color:var(--accent)">Cross-input dependencies.</strong> COSIGN requires that another UTXO (identified by its script hash) is spent in the same transaction. Creates physical "key" UTXOs that must be present to authorise spending.</p>
+      <p><strong style="color:var(--accent)">Post-quantum migration.</strong> Any signature block works with Schnorr, ECDSA, FALCON-512, FALCON-1024, Dilithium3, or SPHINCS+ by changing a single SCHEME byte. No new opcodes needed.</p>
+      <p><strong style="color:var(--accent)">Next-generation payment channels.</strong> ANYPREVOUT sighash support enables payment channels where any state can replace any earlier state, removing the need for penalty transactions.</p>
+    </div>
+  </div>
+
+  <!-- HOW SMALL IS THE CHANGE -->
+  <div class="section">
+    <div class="section-head">How small is the change</div>
+    <p>Ladder Script adds <strong>~448 lines</strong> of changes to existing Bitcoin Core code across 16 files. Everything else is a self-contained library of 14,663 lines in 21 new files. The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
+    <div class="stats-row">
+      <div class="stat"><span class="stat-val">~448</span><span class="stat-key">Lines patched</span></div>
+      <div class="stat"><span class="stat-val">14,663</span><span class="stat-key">New lines</span></div>
+      <div class="stat"><span class="stat-val">62</span><span class="stat-key">Block types</span></div>
+      <div class="stat"><span class="stat-val">528</span><span class="stat-key">Unit tests</span></div>
+      <div class="stat"><span class="stat-val">60</span><span class="stat-key">Functional tests</span></div>
+      <div class="stat"><span class="stat-val">80</span><span class="stat-key">Formal properties</span></div>
+    </div>
+    <p>Anti-spam overhead is 112 bytes per transaction (flat). There is no contiguous data block in a TX_MLSC transaction, making inscriptions structurally impossible. A simple payment is 647 WU / 162 vB. A batch of 100 outputs is 7,867 WU / ~1,967 vB.</p>
+    <p>The formal properties come from 21 TLA+ specifications that were model-checked across 3.3 million states, verifying evaluation semantics, anti-spam guarantees, wire format correctness, Merkle proof security, sighash binding, covenant termination, and cross-input rules.</p>
+  </div>
+
+  <!-- TRY IT -->
+  <div class="section">
+    <div class="section-head">Try it</div>
+    <p>Ladder Script is live on a dedicated signet. You can try it right now:</p>
+    <div class="link-grid">
+      <a href="ladder-engine.html" class="link-item">
+        <div class="link-label">Open the Engine</div>
+        <div class="link-desc">Build, simulate, and broadcast transactions in your browser. No install needed. Connects to live signet.</div>
+      </a>
+      <a href="get-started.html" class="link-item">
+        <div class="link-label">Run a Node</div>
+        <div class="link-desc">Download the 7.4 MB binary, connect to signet, create transactions from the command line.</div>
+      </a>
+      <a href="patch-overview.html" class="link-item">
+        <div class="link-label">Review the Patch</div>
+        <div class="link-desc">See exactly what changes in Bitcoin Core. ~448 lines across 15 files.</div>
+      </a>
+      <a href="block-docs/" class="link-item">
+        <div class="link-label">Block Reference</div>
+        <div class="link-desc">Documentation for all 62 block types with evaluation logic, wire format, and examples.</div>
+      </a>
+      <a href="docs/" class="link-item">
+        <div class="link-label">Documentation</div>
+        <div class="link-desc">BIP draft, FAQ, worked examples, integration guide, MLSC specification, glossary.</div>
+      </a>
+      <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" class="link-item">
+        <div class="link-label">Source Code</div>
+        <div class="link-desc">Full repository with C++ reference implementation, tests, TLA+ specs, and tools.</div>
+      </a>
+    </div>
+  </div>
+
+</div>
+
+<footer class="site-footer">
+  <a href="../ghost-labs.html">Ghost Labs</a> &middot; <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
+</footer>
+
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Ladder Script Summary
 
 Ladder Script is a typed, structured transaction scripting system that replaces Bitcoin
-Script's untyped stack machine with 61 declarative function blocks across 10 families:
+Script's untyped stack machine with 62 declarative function blocks across 10 families:
 Signature, Timelock, Hash, Covenant, Recursion, Anchor, PLC, Compound, Governance, and
 Legacy. Blocks are grouped into rungs (AND logic) and ladders (OR logic), with all data
 constrained to 11 typed fields.
@@ -14,7 +14,7 @@ Key-path spending: 119 vB (simple payment). Script-path: 140 vB. Batch 100 outpu
 (71% cheaper than P2WPKH). Full lifecycle 6% cheaper than P2WPKH.
 
 UTXO deduplication: ~8 bytes per output (6× more efficient than P2TR) via synthetic root
-entry. Anti-spam: 144 bytes embeddable data per transaction (flat).
+entry. Anti-spam: 112 bytes embeddable data per transaction (flat).
 
 Public keys folded into Merkle leaves via `merkle_pub_key`. Key-consuming blocks never
 invertible. Post-quantum ready (FALCON-512/1024, Dilithium3, SPHINCS+). ANYPREVOUT sighash
