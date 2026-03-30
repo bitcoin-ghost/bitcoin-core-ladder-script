@@ -77,13 +77,18 @@ for spec in "${SPECS[@]}"; do
     START=$(date +%s)
 
     set +e
+    # Use /dev/shm for TLC metadata (RAM-backed, avoids disk exhaustion)
+    METADIR="/dev/shm/tlc-${spec}"
+    mkdir -p "$METADIR"
     "$JAVA" $JVM_HEAP -cp "$TLA2TOOLS" tlc2.TLC \
         -workers "$WORKERS" \
         -config "$CFG_FILE" \
         -deadlock \
+        -metadir "$METADIR" \
         "$TLA_FILE" \
         > "$LOG_FILE" 2>&1
     EXIT_CODE=$?
+    rm -rf "$METADIR"
     set -e
 
     END=$(date +%s)
