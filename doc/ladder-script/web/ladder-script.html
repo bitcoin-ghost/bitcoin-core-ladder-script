@@ -202,7 +202,7 @@ a:hover { text-decoration: underline; }
       <div class="stat"><span class="stat-val">60</span><span class="stat-key">Functional tests</span></div>
       <div class="stat"><span class="stat-val">80</span><span class="stat-key">Formal properties</span></div>
     </div>
-    <p>Anti-spam overhead is 112 bytes per transaction (flat). There is no contiguous data block in a TX_MLSC transaction, making inscriptions structurally impossible. A simple payment is 647 WU / 162 vB. A batch of 100 outputs is 7,867 WU / ~1,967 vB.</p>
+    <p>Anti-spam overhead is 112 bytes per transaction (flat). There is no contiguous data block in a TX_MLSC transaction, making inscriptions structurally impossible. A simple payment is 119 vB (key-path) / 140 vB (script-path). A batch of 100 outputs is 914 vB (71% cheaper than P2WPKH).</p>
     <p>The formal properties come from 21 TLA+ specifications that were model-checked across 3.3 million states, verifying evaluation semantics, anti-spam guarantees, wire format correctness, Merkle proof security, sighash binding, covenant termination, and cross-input rules.</p>
   </div>
 

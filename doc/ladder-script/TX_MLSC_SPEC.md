@@ -172,15 +172,15 @@ another input's verified proof for same-source transactions.
 
 | Channel | Bytes | Permanent UTXO | Readable |
 |---------|-------|---------------|----------|
-| conditions_root | 32/tx | No (hash in deduped UTXO) | Yes |
+| conditions_root | 32/tx | No (hash in deduped UTXO) | Protocol-derived (not freely embeddable) |
 | DATA_RETURN | 40 | No (zero-value) | Yes |
-| PREIMAGE fields | 64 max | No (witness) | Yes |
+| PREIMAGE fields | 64 max | No (witness) | Yes (hash-bound to committed HASH256) |
 | nLockTime | 4 | No | Yes |
 | nSequence/input | 4/input | No | Yes |
-| **Total (1 input)** | **144** | | |
+| **Total (1 input)** | **112** | | Excludes conditions_root (not attacker-chosen) |
 
 Taproot: 32 bytes readable per OUTPUT.
-TX_MLSC: 32 bytes per TRANSACTION. 100-output batch: 100× better.
+TX_MLSC: 112 bytes per TRANSACTION (attacker-usable). 100-output batch: 100× better.
 
 ### Anti-spam defences
 

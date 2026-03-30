@@ -38,7 +38,7 @@ Every parameter in every block must be one of the following enumerated types. No
 
 **Key principle:** Type enforcement happens at the deserializer — before any cryptographic operation, before mempool admission, before everything. PUBKEY is witness-only; conditions use merkle_pub_key (keys folded into the Merkle leaf hash — no key field in conditions at all). PUBKEY_COMMIT is reserved and rejected in both contexts. The condition data types are: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA. Conditions contain zero user-chosen bytes. A maximum of 2 preimage-bearing fields are permitted per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`, fast reject) and per transaction (`MAX_PREIMAGE_FIELDS_PER_TX = 2`, binding constraint across all inputs). The preimage-bearing blocks are TAGGED_HASH and HASH_GUARDED. Compound blocks HTLC and HASH_SIG also consume PREIMAGE fields. Enum values `0x0201` and `0x0202` are reserved and rejected at deserialization. This is what makes spam structurally impossible.
 
-**TX_MLSC conditions:** Each output is 8 bytes (value only); the RUNG_TX carries one shared `conditions_root` with MLSC prefix byte `0xDF`. A creation proof in the witness is validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. One shared Merkle tree per transaction (PLC model: one program, multiple output coils). Each rung's coil has an `output_index` field declaring which output it governs. Anti-spam surface: 112 bytes per transaction (flat, no contiguous block). UTXO spam: zero readable attacker data (root is protocol-derived). Simple payment: 647 WU / 162 vB. Batch 100: 7,867 WU / ~1,967 vB.
+**TX_MLSC conditions:** Each output is 8 bytes (value only); the RUNG_TX carries one shared `conditions_root` with MLSC prefix byte `0xDF`. A creation proof in the witness is validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. One shared Merkle tree per transaction (PLC model: one program, multiple output coils). Each rung's coil has an `output_index` field declaring which output it governs. Anti-spam surface: 112 bytes per transaction (flat, no contiguous block). UTXO spam: zero readable attacker data (root is protocol-derived). Simple payment: 119 vB (key-path) / 140 vB (script-path). Batch 100: 914 vB (71% cheaper than P2WPKH).
 
 ---
 
@@ -685,10 +685,9 @@ The coil declares what happens when all contacts on a rung are satisfied. It is 
 | Mode | Enum | Witness Size | Proof Location |
 |---|---|---|---|
 | `INLINE` | `0x01` | Full sig (64B Schnorr / 666B FALCON512) | In transaction witness |
-| `AGGREGATE` | `0x02` | Reserved for future extension | Rejected at deserialization |
-| `DEFERRED` | `0x03` | Reserved for future extension | Rejected at deserialization |
+| `AGGREGATE` | `0x02` | R per input in witness, aggregated s-value at tx level | Half-aggregated Schnorr |
 
-Only INLINE attestation is active. AGGREGATE and DEFERRED bytes are reserved for future soft fork extensions.
+INLINE and AGGREGATE are active. AGGREGATE uses half-aggregated Schnorr signatures where each input contributes its R-value in the witness, and a single aggregated s-value is appended at the transaction level.
 
 ---
 

@@ -68,7 +68,7 @@ enum class RungBlockType : uint16_t {
     ANCHOR_RESERVE   = 0x0504, //!< Reserve anchor (guardian set)
     ANCHOR_SEAL      = 0x0505, //!< Seal anchor
     ANCHOR_ORACLE    = 0x0506, //!< Oracle anchor
-    DATA_RETURN      = 0x0507, //!< Unspendable data commitment (max 32 bytes, replaces OP_RETURN)
+    DATA_RETURN      = 0x0507, //!< Unspendable data commitment (max 40 bytes, replaces OP_RETURN)
 
     // Compound family (collapsed multi-block patterns)
     TIMELOCKED_SIG   = 0x0701, //!< SIG + CSV combined: pubkey + sig + block-height timelock
@@ -901,7 +901,7 @@ inline constexpr ImplicitFieldLayout P2TR_SCRIPT_LEGACY_CONDITIONS = {1, {
     {RungDataType::HASH256, 32},
 }};
 
-/** DATA_RETURN conditions: [DATA(var, max 80)] — unspendable data commitment */
+/** DATA_RETURN conditions: [DATA(var, max 40)] — unspendable data commitment */
 inline constexpr ImplicitFieldLayout DATA_RETURN_CONDITIONS = {1, {
     {RungDataType::DATA, 0},
 }};

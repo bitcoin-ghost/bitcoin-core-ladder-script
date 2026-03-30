@@ -157,7 +157,7 @@ COUNTER_DOWN, COUNTER_UP.
 
 ## Q7: What is TX_MLSC?
 
-**TX_MLSC** (Transaction-level Merkelized Ladder Script Conditions) is the output
+**TX_MLSC** (Transaction-level Merkelised Ladder Script Conditions) is the output
 format for Ladder Script. In the TX_MLSC model, there is one shared Merkle tree
 per transaction (PLC model: one program, multiple output coils). Each output is
 8 bytes (value only); the transaction carries a single shared `conditions_root`
@@ -203,7 +203,7 @@ Zero readable attacker data in UTXOs (root is protocol-derived).
 Ladder Script sighash computation uses `TaggedHash("LadderSighash")` and
 supports these hash types:
 
-| Hash type | Value | Behavior |
+| Hash type | Value | Behaviour |
 |-----------|-------|----------|
 | `SIGHASH_DEFAULT` | `0x00` | Commits to all inputs and outputs (same as ALL) |
 | `SIGHASH_ALL` | `0x01` | Commits to all inputs and outputs |
@@ -259,7 +259,7 @@ and sizes of fields from the block type alone.
 
 For example, SIG in CONDITIONS context has the implicit layout `[SCHEME(1)]`,
 meaning exactly 1 byte follows (the scheme byte, no length prefix). SIG in
-WITNESS context has `[SCHEME(1), PUBKEY(var), SIGNATURE(var)]`.
+WITNESS context has `[PUBKEY(var), SIGNATURE(var)]`.
 
 **Varint NUMERIC optimization**: NUMERIC fields are encoded as CompactSize
 values directly (no length prefix), saving 1-4 bytes per numeric field. They
@@ -296,7 +296,7 @@ Ladder Script enforces multiple layers of anti-spam protection:
 1. **Typed fields with size bounds**: Every data type has a minimum and maximum
    size. PUBKEY: 1-2048 bytes. SIGNATURE: 1-50000 bytes. HASH256: exactly 32
    bytes. HASH160: exactly 20 bytes. PREIMAGE: exactly 32 bytes. NUMERIC:
-   1-4 bytes. SCHEME: 1 byte. SCRIPT_BODY: 1-80 bytes. DATA: 1-40 bytes.
+   1-8 bytes. SCHEME: 1 byte. SCRIPT_BODY: 1-80 bytes. DATA: 1-40 bytes.
 
 2. **PREIMAGE/SCRIPT_BODY field cap**: Maximum 2 PREIMAGE or SCRIPT_BODY
    fields per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`, fast reject).
@@ -353,7 +353,7 @@ Every Ladder Script output carries a **coil** with three metadata bytes:
 
 | Field | Type | Values |
 |-------|------|--------|
-| `attestation` | `RungAttestationMode` | `INLINE (0x01)`: signatures inline in witness. `AGGREGATE (0x02)` and `DEFERRED (0x03)` are reserved for future extension (rejected at deserialization). |
+| `attestation` | `RungAttestationMode` | `INLINE (0x01)`: signatures inline in witness. `AGGREGATE (0x02)`: half-aggregated Schnorr (R per input in witness, aggregated s-value at transaction level). |
 | `scheme` | `RungScheme` | `SCHNORR (0x01)`, `ECDSA (0x02)`, `FALCON512 (0x10)`, `FALCON1024 (0x11)`, `DILITHIUM3 (0x12)`, `SPHINCS_SHA (0x13)` |
 
 The coil also carries:
@@ -725,7 +725,7 @@ conditions root, producing output data of 34-73 bytes:
 `0xDF + conditions_root(32) + data(1-40)`.
 
 **Consensus**: `ValidateRungOutputs` allows exactly one DATA_RETURN per
-transaction. The maximum data payload is 80 bytes.
+transaction. The maximum data payload is 40 bytes.
 
 ---
 
@@ -751,7 +751,7 @@ transaction. The maximum data payload is 80 bytes.
 | HASH256 size | exactly 32 bytes | `FieldMinSize == FieldMaxSize` |
 | HASH160 size | exactly 20 bytes | `FieldMinSize == FieldMaxSize` |
 | PREIMAGE size | exactly 32 bytes | `FieldMinSize == FieldMaxSize` |
-| NUMERIC size | 1-4 bytes | `FieldMinSize(NUMERIC)` / `FieldMaxSize(NUMERIC)` |
+| NUMERIC size | 1-8 bytes | `FieldMinSize(NUMERIC)` / `FieldMaxSize(NUMERIC)` |
 | SCHEME size | 1 byte | Fixed |
 | SPEND_INDEX size | 4 bytes | Fixed |
 | PUBKEY_COMMIT size | exactly 32 bytes | Fixed |

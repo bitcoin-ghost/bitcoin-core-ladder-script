@@ -6381,7 +6381,7 @@ function CoilPropertiesPanel({ rungId }) {
               <select
                 className="prop-select"
                 value={rung.output.attestation || 'INLINE'}
-                title="INLINE = signatures in witness data. AGGREGATE and DEFERRED are reserved for future extension."
+                title="INLINE = signatures in witness data. AGGREGATE = half-aggregated Schnorr."
                 onChange={(e) => onChange(rung.id, 'attestation', e.target.value)}
               >
                 {ATTESTATION_TYPES.map(at => (
@@ -9775,7 +9775,7 @@ function SignetPanel() {
       {!online && (
         <div style={{ ...sty.section, borderColor: 'var(--amber-dim)', background: 'var(--amber-glow)' }}>
           <div style={{ color: 'var(--amber)', fontSize: 11, lineHeight: 1.6 }}>
-            Signet proxy is not available. The Ladder Script RPC commands require a ghost-core node running the feature/ladder-script branch. Build and test transactions locally using the BUILD, SIMULATE, and RPC tabs.
+            Signet proxy is not available. The Ladder Script RPC commands require a bitcoin-core-ladder node. Build and test transactions locally using the BUILD, SIMULATE, and RPC tabs.
           </div>
         </div>
       )}
@@ -10757,7 +10757,7 @@ function SpendPanel() {
       {!online && (
         <div style={{ ...sty.section, borderColor: 'var(--amber-dim)', background: 'var(--amber-glow)' }}>
           <div style={{ color: 'var(--amber)', fontSize: 11, lineHeight: 1.6 }}>
-            Signet proxy is not available. Spending RUNG outputs requires a ghost-core node. Create and send RUNG outputs first using the SEND tab.
+            Signet proxy is not available. Spending RUNG outputs requires a bitcoin-core-ladder node. Create and send RUNG outputs first using the SEND tab.
           </div>
         </div>
       )}

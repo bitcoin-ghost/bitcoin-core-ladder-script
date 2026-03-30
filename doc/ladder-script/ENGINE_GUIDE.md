@@ -298,8 +298,7 @@ Configured in the output inspector under "Wire Format":
 | Attestation  | Meaning |
 |--------------|---------|
 | `INLINE`     | Signatures in witness data |
-| `AGGREGATE`  | Reserved — not implemented |
-| `DEFERRED`   | Reserved — not implemented |
+| `AGGREGATE`  | Half-aggregated Schnorr (R per input, shared s-value) |
 
 ### Signature schemes
 

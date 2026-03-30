@@ -84,7 +84,7 @@ enforce the full Ladder Script validation rules.
 
 ## Output Format
 
-All v4 transaction outputs must use TX_MLSC (Transaction-level Merkelized Ladder Script
+All v4 transaction outputs must use TX_MLSC (Transaction-level Merkelised Ladder Script
 Conditions):
 
 ```

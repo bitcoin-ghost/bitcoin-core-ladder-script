@@ -538,9 +538,9 @@ Consensus rules (`ValidateRungOutputs` in `evaluator.cpp`):
 - Maximum payload: **40 bytes** (enforced by `IsMLSCScript` accepting
   `size <= 73`, i.e., 1 + 32 + 40).
 
-Note: `CreateMLSCScript` accepts up to 80 bytes of data, but
-`IsMLSCScript` rejects anything over 73 bytes total, effectively capping
-the payload at 40 bytes at consensus level.
+Note: `CreateMLSCScript` does not enforce a payload size limit internally,
+but `IsMLSCScript` rejects anything over 73 bytes total (1 + 32 + 40),
+effectively capping the DATA_RETURN payload at 40 bytes at consensus level.
 
 **Source**: `conditions.cpp:176-207`, `evaluator.cpp:3264-3287`.
 

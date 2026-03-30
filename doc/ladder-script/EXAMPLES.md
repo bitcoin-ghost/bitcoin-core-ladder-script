@@ -53,9 +53,9 @@ Ladder:
 
 **Shared conditions_root**: `0xDF` + 32-byte Merkle root (once per transaction)
 
-**Simple payment**: 647 WU / 162 vB
+**Simple payment**: 119 vB (key-path) / 140 vB (script-path)
 
-**Batch 100 outputs**: 7,867 WU / ~1,967 vB (cheapest format in existence)
+**Batch 100 outputs**: 914 vB (71% cheaper than P2WPKH)
 
 ---
 
@@ -118,7 +118,7 @@ Ladder:
 
 ## Example 3: HTLC Atomic Swap
 
-**Use case**: Cross-chain atomic swap. Alice pays Bob 1 BTC on Ghost Chain,
+**Use case**: Cross-chain atomic swap. Alice pays Bob 1 BTC on Bitcoin,
 locked by a hash. Bob reveals the preimage to claim, or Alice reclaims after a
 timeout. This uses the compound HTLC block, which combines hash check + CSV +
 SIG into one block per rung.
@@ -778,8 +778,6 @@ chain (source must not itself be a template reference).
 - **UNLOCK_TO**: Directed spend. The output value goes to the address specified
   in the coil's `address_hash` field. Per-rung destinations
   (`rung_destinations`) can override this per rung.
-- **UNLOCK**: Standard spend. Covenant/recursion constraints are enforced by block types (CTV, RECURSE_*, VAULT_LOCK), not the coil.
-  blocks in the rung. The output must carry specific MLSC conditions.
 
 ### Evaluation result semantics
 

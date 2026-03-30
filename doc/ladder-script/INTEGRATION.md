@@ -209,8 +209,7 @@ Coil conditions (the `conditions` field in RungCoil) are reserved and must be em
 | Mode | Code | Behavior |
 |------|------|----------|
 | INLINE | 0x01 | Signatures are inline in the witness. Standard mode. |
-| AGGREGATE | 0x02 | Reserved for future extension. Rejected at deserialization. |
-| DEFERRED | 0x03 | Reserved for future extension. Rejected at deserialization. |
+| AGGREGATE | 0x02 | Half-aggregated Schnorr: R per input in witness, aggregated s-value at tx level. |
 
 ## Per-Rung Destinations (rung_destinations)
 

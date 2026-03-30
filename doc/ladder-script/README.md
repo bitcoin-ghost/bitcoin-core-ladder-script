@@ -2,7 +2,7 @@
 
 Ladder Script (TX_MLSC / RUNG_TX v4) is a typed transaction condition system for Bitcoin,
 implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack machine with
-62 declarative function blocks, 11 typed fields, and Merkelized conditions (MLSC).
+62 declarative function blocks, 11 typed fields, and Merkelised conditions (MLSC).
 
 ## Documentation Index
 

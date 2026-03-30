@@ -763,8 +763,8 @@ types.
   MLSC format (`0xDF` + 32 bytes).
 - **COVENANT coil type (`0x03`):** Only UNLOCK (`0x01`) and UNLOCK_TO
   (`0x02`) are valid.
-- **AGGREGATE/DEFERRED attestation modes:** Only INLINE (`0x01`) is valid.
-  The byte is reserved for future extension.
+- **Attestation modes:** INLINE (`0x01`) and AGGREGATE (`0x02`) are valid.
+  AGGREGATE enables half-aggregated Schnorr signatures.
 
 ## Activation
 
@@ -1264,11 +1264,12 @@ structurally impossible. UTXO spam yields zero readable attacker data
 
 ### Transaction Weights
 
-| Transaction Type | Weight (WU) | vBytes |
-|-----------------|-------------|--------|
-| Simple payment (1-in, 2-out, Schnorr) | 647 | 162 |
-| Batch 100 outputs | 7,867 | ~1,967 |
-| Key-path spend (minimal) | 440 | 110 |
+| Transaction Type | vBytes |
+|-----------------|--------|
+| Simple payment (1-in, 2-out, key-path) | 119 |
+| Simple payment (1-in, 2-out, script-path) | 140 |
+| Batch 100 outputs (key-path) | 914 |
+| Full lifecycle (create + spend, key-path) | 241 |
 
 ### Per-Output Wire Cost
 

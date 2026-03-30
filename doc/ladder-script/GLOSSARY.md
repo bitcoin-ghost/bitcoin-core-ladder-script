@@ -152,7 +152,7 @@ NUMERIC(offset).
 Enum in `evaluator.h`. Four values: SATISFIED (conditions met), UNSATISFIED (valid but
 fails), ERROR (malformed block, consensus failure), UNKNOWN_BLOCK_TYPE (forward-compat,
 treated as unsatisfied). `ApplyInversion()` flips SATISFIED/UNSATISFIED; ERROR is unchanged;
-UNKNOWN_BLOCK_TYPE inverted becomes SATISFIED.
+UNKNOWN_BLOCK_TYPE inverted becomes ERROR (prevents attackers exploiting unknown types).
 
 ### HASH_GUARDED
 Block type 0x0204 (Hash family). Raw SHA256 preimage verification. Conditions:
@@ -249,7 +249,7 @@ deprecated slots 0x07/0x08 set to 0xFFFF). Escape bytes: 0x80 = full header (not
 0x81 = full header (inverted). Defined in `types.h`.
 
 ### MLSC
-Merkelized Ladder Script Conditions. The per-output format prior to TX_MLSC. Originally
+Merkelised Ladder Script Conditions. The per-output format prior to TX_MLSC. Originally
 `0xDF + 32-byte conditions_root` (33 bytes, shared per transaction). Superseded by TX_MLSC which
 uses a shared conditions_root per transaction with 0xDF prefix and 8 bytes per output.
 See TX_MLSC.
@@ -280,7 +280,7 @@ Block type 0x0004 (Signature family). MuSig2/FROST aggregate threshold signature
 Key-consuming with 1 pubkey. Conditions: NUMERIC(M), NUMERIC(N). Not invertible.
 
 ### NUMERIC
-Data type 0x08. Numeric value (threshold, locktime, etc.), 1 to 4 bytes little-endian.
+Data type 0x08. Numeric value (threshold, locktime, etc.), 1 to 8 bytes little-endian.
 Encoded as CompactSize (varint) in the wire format when using implicit layouts. Always
 stored internally as 4-byte LE.
 
@@ -397,8 +397,8 @@ relay_refs. All blocks must return SATISFIED for the rung to pass. Evaluated by
 `EvalRung()` in `evaluator.h`. Maximum 8 blocks per rung (`MAX_BLOCKS_PER_RUNG`).
 
 ### RungAttestationMode
-Enum in `types.h`. INLINE (signatures inline in witness) is the only active mode.
-AGGREGATE and DEFERRED are reserved for future extension (rejected at deserialization).
+Enum in `types.h`. INLINE (0x01, signatures inline in witness) and AGGREGATE (0x02,
+half-aggregated: R per input in witness, aggregated s-value at transaction level).
 
 ### RungBlock
 Struct in `types.h`. A function block within a rung. Contains a `RungBlockType`, a vector
@@ -406,7 +406,7 @@ of `RungField` typed fields, and an `inverted` flag.
 
 ### RungCoil
 Struct in `types.h`. Coil metadata attached to each output. Fields: `coil_type` (UNLOCK,
-UNLOCK_TO, COVENANT), `attestation` (INLINE only; AGGREGATE/DEFERRED reserved), `scheme` (SCHNORR,
+UNLOCK_TO), `attestation` (INLINE or AGGREGATE), `scheme` (SCHNORR,
 ECDSA, FALCON512, FALCON1024, DILITHIUM3, SPHINCS_SHA), `address_hash` (SHA256 of raw
 address, 0 or 32 bytes), `conditions` (reserved, must be empty), `rung_destinations`
 (per-rung destination overrides as pairs of rung_index + address_hash).
@@ -417,8 +417,8 @@ optional template_ref, optional conditions_root (MLSC root from UTXO). Key metho
 `IsMLSC()`, `IsTemplateRef()`, `IsEmpty()`.
 
 ### RungCoilType
-Enum in `types.h`. Three values: UNLOCK (0x01, standard spend), UNLOCK_TO (0x02, send
-covenant/recursion blocks).
+Enum in `types.h`. Two values: UNLOCK (0x01, standard spend), UNLOCK_TO (0x02, send to
+specific destination).
 
 ### RungDataType
 Enum in `types.h`. 11 data types: PUBKEY (0x01), PUBKEY_COMMIT (0x02), HASH256 (0x03),
@@ -450,8 +450,8 @@ multiple output coils). Each output is 8 bytes (value only); the transaction car
 single shared `conditions_root` with MLSC prefix byte `0xDF`. A creation proof witness section is validated at
 block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template ||
 value_commitment)`. Each rung's coil has an `output_index` field declaring which output it
-governs. Anti-spam surface: 112 bytes per transaction (flat). Simple payment: 647 WU /
-162 vB. Batch 100: 7,867 WU / ~1,967 vB. Key functions: `IsMLSCScript()`, `GetMLSCRoot()`,
+governs. Anti-spam surface: 112 bytes per transaction (flat). Simple payment: 119 vB
+(key-path) / 140 vB (script-path). Batch 100: 914 vB (71% cheaper than P2WPKH). Key functions: `IsMLSCScript()`, `GetMLSCRoot()`,
 `CreateMLSCScript()`, `VerifyMLSCProof()`. Leaf order: `[rung_leaf[0], ..., rung_leaf[N-1],
 relay_leaf[0], ..., relay_leaf[M-1], coil_leaf]`.
 

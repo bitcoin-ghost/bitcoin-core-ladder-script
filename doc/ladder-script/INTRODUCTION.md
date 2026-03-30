@@ -19,7 +19,7 @@ belong to a known type with enforced size constraints.
 
 - **Typed fields.** 11 data types with fixed size ranges. No free-form data.
 - **AND/OR evaluation.** Blocks within a rung are AND; rungs within a ladder are OR.
-- **TX_MLSC (Transaction-level Merkelized Ladder Script Conditions).** Each output
+- **TX_MLSC (Transaction-level Merkelised Ladder Script Conditions).** Each output
   is 8 bytes (value only); the transaction carries one shared `conditions_root` with
   prefix `0xDF`. A creation proof in the witness is validated at block acceptance.
   Leaf computation: `TaggedHash("LadderLeaf", structural_template || value_commitment)`.
@@ -33,7 +33,7 @@ belong to a known type with enforced size constraints.
   (SATISFIED becomes UNSATISFIED and vice versa). Key-consuming blocks are never invertible.
 - **Anti-spam.** Fail-closed deserialization rejects unknown block types, unknown data types,
   and trailing bytes. `IsDataEmbeddingType` blocks high-bandwidth types in layout-less blocks.
-  PREIMAGE and SCRIPT_BODY fields are capped at 2 per witness.
+  PREIMAGE and SCRIPT_BODY fields are capped at 2 per witness and 2 per transaction.
 - **Post-quantum readiness.** The SCHEME field supports FALCON-512, FALCON-1024, Dilithium3,
   and SPHINCS+-SHA2-256f alongside Schnorr and ECDSA.
 - **Relays.** Shared condition sets that can be referenced by multiple rungs, enabling
