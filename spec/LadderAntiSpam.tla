@@ -249,7 +249,7 @@ Inv_NoLayoutHash256Rejected ==
      /\ \E i \in DOMAIN tx.block1.fields : tx.block1.fields[i] = "HASH256"
      \* Not a witness-only error (HASH256 is allowed in conditions)
      /\ ~(tx.block1.context = "CONDITIONS"
-          /\ \E i \in DOMAIN tx.block1.fields : tx.block1.fields[i] \in WitnessOnlyTypes))
+          /\ \E j \in DOMAIN tx.block1.fields : tx.block1.fields[j] \in WitnessOnlyTypes))
     => blockResult1 = "ERROR_DATA_EMBEDDING"
 
 \* I6: ACCUMULATOR with <= 10 HASH256 -> accepted (exception)
