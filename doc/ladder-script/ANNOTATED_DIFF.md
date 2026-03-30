@@ -4,26 +4,25 @@ This document explains every change made to Bitcoin Core v30.0 to integrate Ladd
 It is intended as a review aid for Bitcoin Core developers evaluating the architectural
 choices, alternatives considered, and security properties of each modification.
 
-The patch file is `ladder-script-v30.0.patch` (29,742 lines, 52 files).
+The patch file is `ladder-script-v30.0.patch` (29,081 lines, 48 files).
 
 ## Overview
 
 | Category | Files changed | Lines added |
 |----------|--------------|-------------|
-| New module (src/rung/) | 22 + CMakeLists.txt | ~14,663 |
-| Tests (src/test/) | 2 | ~12,755 |
-| Core integration | 15 | ~448 |
-| Documentation | 8 | ~3,580 |
-| **Total** | **53** | **~30,822** |
+| New module (src/rung/) | 22 (incl. CMakeLists.txt) | ~14,771 |
+| Tests | 2 (unit + functional) | ~13,208 |
+| Core integration | 24 | ~411 |
+| **Total** | **48** | **~28,390** |
 
-The design principle is **minimal core intrusion**: 448 lines across 15 existing Bitcoin
+The design principle is **minimal core intrusion**: ~411 lines across 24 existing Bitcoin
 Core files, with all Ladder Script logic contained in a self-standing `src/rung/` module.
 No existing Bitcoin Core function signatures are changed. No existing opcodes are modified.
 No existing transaction versions are reinterpreted. The v4 transaction format is additive.
 
 ---
 
-## Core Integration Points (15 files, ~448 lines)
+## Core Integration Points (24 files, ~411 lines)
 
 ### 1. src/primitives/transaction.h (~110 lines added)
 
@@ -617,7 +616,7 @@ or transaction processing code is changed.
 
 ---
 
-## New Module: src/rung/ (22 files + CMakeLists.txt, ~14,663 lines)
+## New Module: src/rung/ (22 files incl. CMakeLists.txt, ~14,771 lines)
 
 Self-contained module implementing the Ladder Script evaluator, type system, serialization,
 Merkle tree, sighash, descriptors, policy, RPC commands, and post-quantum signature support.

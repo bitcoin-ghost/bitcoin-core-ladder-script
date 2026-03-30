@@ -74,7 +74,7 @@ Interactive HTML pages in [`web/`](web/):
 | `src/rung/pq_verify.cpp` | 145 | Post-quantum signature verification |
 | `src/rung/policy.cpp` | 137 | Mempool policy checks |
 | `src/rung/aggregate.cpp` | 41 | Half-aggregated signature support |
-| **Total src/rung/** | **14,663** | **22 files + CMakeLists.txt** |
+| **Total src/rung/** | **14,771** | **22 files (incl. CMakeLists.txt)** |
 
 ## Test Coverage
 

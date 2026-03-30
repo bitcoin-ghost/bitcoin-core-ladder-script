@@ -126,13 +126,13 @@ tr:nth-child(even) td { background: #f8f8f8; }
   <p class="page-sub">What changes are needed to add Ladder Script to Bitcoin Core</p>
 
   <div class="stats-row">
-    <div class="stat"><span class="stat-val">~448</span><span class="stat-key">Lines Added</span></div>
+    <div class="stat"><span class="stat-val">~411</span><span class="stat-key">Lines Added</span></div>
     <div class="stat"><span class="stat-val">16</span><span class="stat-key">Files Modified</span></div>
-    <div class="stat"><span class="stat-val">14,663</span><span class="stat-key">New Code (Rung Lib)</span></div>
+    <div class="stat"><span class="stat-val">14,771</span><span class="stat-key">New Code (Rung Lib)</span></div>
     <div class="stat"><span class="stat-val">21</span><span class="stat-key">New Files</span></div>
   </div>
 
-  <div class="note">Ladder Script adds a self-contained library (src/rung/) to Bitcoin Core. The patch to existing code is minimal: ~448 lines across 16 files. The bulk of the implementation (14,663 lines) lives in new files that do not touch existing code.</div>
+  <div class="note">Ladder Script adds a self-contained library (src/rung/) to Bitcoin Core. The patch to existing code is minimal: ~411 lines across 16 files. The bulk of the implementation (14,771 lines) lives in new files that do not touch existing code.</div>
 
   <!-- -- PATCH TO EXISTING CODE -- -->
   <div class="section">
@@ -213,7 +213,7 @@ tr:nth-child(even) td { background: #f8f8f8; }
 
     <div class="diff-block">
       <div class="diff-file">patches/bitcoin-core-v30-ladder-script.patch</div>
-      <div class="diff-add">+~448 lines across 16 files</div>
+      <div class="diff-add">+~411 lines across 16 files</div>
       <div class="diff-desc">Core integration: routing, sighash, script solver, policy, address encoding, RPC, build system</div>
     </div>
 
@@ -223,7 +223,7 @@ tr:nth-child(even) td { background: #f8f8f8; }
       <div class="diff-desc">Block height plumbing for EPOCH_GATE and height-dependent governance blocks</div>
     </div>
 
-    <div class="note">Total change to existing Bitcoin Core: ~448 lines across 16 files. The remaining 14,663 lines are new, self-contained code in src/rung/ that does not modify any existing function.</div>
+    <div class="note">Total change to existing Bitcoin Core: ~411 lines across 16 files. The remaining 14,771 lines are new, self-contained code in src/rung/ that does not modify any existing function.</div>
   </div>
 
 </div>

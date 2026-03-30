@@ -19,8 +19,8 @@ The signet mines every 10 minutes with real wall-clock timestamps.
 ### Phase 2: External Review
 
 Bitcoin Core developers and the broader community review:
-- The ~448-line integration patch to existing Bitcoin Core code
-- The 14,663-line self-contained `src/rung/` library
+- The ~411-line integration patch to existing Bitcoin Core code
+- The 14,771-line self-contained `src/rung/` library
 - The 21 TLA+ formal specifications (80+ properties, 6.14M model-checked states)
 - The anti-spam hardening and evaluation semantics
 

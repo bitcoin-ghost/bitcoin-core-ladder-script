@@ -778,8 +778,8 @@ outside the scope of this specification.
 
 ## Reference Implementation
 
-Source: `src/rung/` (14,663 lines). Modifications to existing Bitcoin Core:
-~448 lines across 15 files.
+Source: `src/rung/` (14,771 lines). Modifications to existing Bitcoin Core:
+~411 lines across 24 files.
 
 | File | Description |
 |------|-------------|
