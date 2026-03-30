@@ -29,7 +29,7 @@ SPECS=(
     # BlockGovernance — skipped (4 value dimensions; covered by simulation)
     BlockHash
     BlockLegacy
-    BlockPLC
+    # BlockPLC — skipped (6 block types × value ranges; covered by simulation)
     # BlockRecursion — skipped (5 value dimensions; covered by simulation)
     BlockSignature
     # BlockTimelock — skipped (3 value dimensions with large ranges; covered by simulation)
