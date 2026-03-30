@@ -2467,7 +2467,6 @@ static RPCHelpMan parseladder()
                 });
             }
             cp_rung.coil = conditions.coil;
-            cp_rung.coil.output_index = static_cast<uint32_t>(r);
             std::vector<std::vector<uint8_t>> rpks;
             if (r < pubkeys.size()) rpks = pubkeys[r];
             cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
@@ -2633,7 +2632,6 @@ static RPCHelpMan computemutation()
                 });
             }
             cp_rung.coil = conditions.coil;
-            cp_rung.coil.output_index = static_cast<uint32_t>(r);
             std::vector<std::vector<uint8_t>> rpks;
             if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
             cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);

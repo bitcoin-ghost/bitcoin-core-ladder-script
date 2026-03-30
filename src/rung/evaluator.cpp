@@ -1354,8 +1354,7 @@ static void WriteNumericField(RungField& f, int64_t val)
 /** Build a CreationProofRung from a Rung + pubkeys, suitable for ComputeTxMLSCLeaf. */
 static CreationProofRung BuildCPRung(const Rung& rung,
                                       const std::vector<std::vector<uint8_t>>& pks,
-                                      const RungCoil& coil,
-                                      uint32_t rung_index)
+                                      const RungCoil& coil)
 {
     CreationProofRung cp;
     for (const auto& block : rung.blocks) {
@@ -1365,7 +1364,6 @@ static CreationProofRung BuildCPRung(const Rung& rung,
         });
     }
     cp.coil = coil;
-    cp.coil.output_index = rung_index;
     cp.value_commitment = ComputeValueCommitment(rung, pks);
     return cp;
 }
@@ -1377,7 +1375,7 @@ static uint256 ComputeConditionsRootMLSC(const RungConditions& conditions,
     std::vector<CreationProofRung> cp_rungs;
     for (size_t r = 0; r < conditions.rungs.size(); ++r) {
         const auto& pks = (r < rung_pubkeys.size()) ? rung_pubkeys[r] : std::vector<std::vector<uint8_t>>{};
-        cp_rungs.push_back(BuildCPRung(conditions.rungs[r], pks, conditions.coil, static_cast<uint32_t>(r)));
+        cp_rungs.push_back(BuildCPRung(conditions.rungs[r], pks, conditions.coil));
     }
     return ComputeTxMLSCRoot(cp_rungs);
 }
@@ -1498,7 +1496,7 @@ static EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
 
         // Recompute the leaf for this rung using TX_MLSC leaf computation
         RungCoil coil = ctx.input_conditions->coil;
-        auto cp = BuildCPRung(mutated_rung, rung_pks, coil, static_cast<uint32_t>(m.rung_idx));
+        auto cp = BuildCPRung(mutated_rung, rung_pks, coil);
         leaves_copy[m.rung_idx] = ComputeTxMLSCLeaf(cp);
     }
 
@@ -1693,8 +1691,7 @@ EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& 
             if (ctx.rung_pubkeys && !ctx.rung_pubkeys->empty()) {
                 rung_pks = (*ctx.rung_pubkeys)[0];
             }
-            auto cp = BuildCPRung(mutated, rung_pks, ctx.input_conditions->coil,
-                                   static_cast<uint32_t>(ctx.verified_leaves->rung_index));
+            auto cp = BuildCPRung(mutated, rung_pks, ctx.input_conditions->coil);
             uint256 new_leaf = ComputeTxMLSCLeaf(cp);
             uint256 expected_root = ComputeExpectedRoot(*ctx.verified_leaves,
                                                          ctx.verified_leaves->rung_index, new_leaf);
@@ -1767,8 +1764,7 @@ EvalResult EvalRecurseSplitBlock(const RungBlock& block, const RungEvalContext& 
             if (ctx.rung_pubkeys && !ctx.rung_pubkeys->empty()) {
                 rung_pks = (*ctx.rung_pubkeys)[0];
             }
-            auto cp = BuildCPRung(mutated, rung_pks, ctx.input_conditions->coil,
-                                   static_cast<uint32_t>(ctx.verified_leaves->rung_index));
+            auto cp = BuildCPRung(mutated, rung_pks, ctx.input_conditions->coil);
             uint256 new_leaf = ComputeTxMLSCLeaf(cp);
             expected_root = ComputeExpectedRoot(*ctx.verified_leaves,
                                                 ctx.verified_leaves->rung_index, new_leaf);
