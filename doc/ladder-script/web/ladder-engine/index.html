@@ -7563,7 +7563,7 @@ const EXAMPLES = [
 
   {
     title: 'ACCUMULATOR ALLOWLIST',
-    desc: 'Merkle set membership proof. Spending transaction must prove the destination is in a pre-committed allowlist. Combines with SIG and AMOUNT_LOCK for full access control. Root auto-computed from leaves at fund time.\n\nSEND: SIG authorizes, ACCUMULATOR verifies destination is in the allowlist Merkle tree, AMOUNT_LOCK bounds payout between 10k–5M sats.\nADMIN: 2-of-3 MULTISIG admin sweep bypasses the allowlist.',
+    desc: 'Merkle set membership proof. Spending transaction must prove the destination is in a pre-committed allowlist. Combines with SIG and AMOUNT_LOCK for full access control. Root auto-computed from leaves at fund time.\n\nSEND: SIG authorises, ACCUMULATOR verifies destination is in the allowlist Merkle tree, AMOUNT_LOCK bounds payout between 10k–5M sats.\nADMIN: 2-of-3 MULTISIG admin sweep bypasses the allowlist.',
     tags: [['ACCUM', 'gov'], ['SIG', 'sig'], ['AMT_LOCK', 'cov']],
     rungs: [
       { label: 'SEND', blocks: [

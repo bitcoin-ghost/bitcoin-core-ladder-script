@@ -60,7 +60,7 @@ rejected because:
 3. **Explicit rejection of 0x03**: If a future extension uses both SegWit and TX_MLSC
    simultaneously, it needs its own format specification. Silently accepting 0x03 could lead
    to deserialization mismatches. The explicit `throw` at `transaction.h:249` ensures this
-   is a hard failure rather than undefined behavior.
+   is a hard failure rather than undefined behaviour.
 
 #### Why value-only outputs (8 bytes on wire)
 
