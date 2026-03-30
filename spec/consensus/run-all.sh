@@ -24,7 +24,7 @@ SPECS=(
     AnchorFee
     AutoKeyPath
     BlockAnchor
-    BlockCompound
+    # BlockCompound — skipped (state space too large even at WSL2 constants; covered by simulation mode)
     BlockCovenant
     BlockGovernance
     BlockHash
