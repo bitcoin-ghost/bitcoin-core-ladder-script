@@ -11,7 +11,7 @@ Ladder Script is not proposed as a direct mainnet deployment. The path to activa
 
 Live signet at `85.9.213.194` with all 62 active block types verified end-to-end.
 Engine, descriptor notation, and RPC tooling operational. External review and testing
-invited. BIP-110 submitted for community feedback.
+invited. BIP-XXXX submitted for community feedback.
 
 **Status:** All 62 block types have fund+spend proof with recorded transaction IDs.
 The signet mines every 10 minutes with real wall-clock timestamps.
