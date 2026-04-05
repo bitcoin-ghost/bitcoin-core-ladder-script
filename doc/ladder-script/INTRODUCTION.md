@@ -43,8 +43,6 @@ belong to a known type with enforced size constraints.
   verify a shared s-value across all inputs at the transaction level.
 - **ANYPREVOUT sighash.** BIP-118 analogue flags (0x40, 0xC0) enable LN-Symmetry/eltoo.
 
-## Further Reading
-
 - [Block Library](BLOCK_LIBRARY.md) for all 62 block types
 - [Glossary](GLOSSARY.md) for term definitions
 - [Integration Guide](INTEGRATION.md) for wallet developers
