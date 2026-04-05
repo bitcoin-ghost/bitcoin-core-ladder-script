@@ -123,21 +123,22 @@ a:hover { text-decoration: underline; }
 
     <div class="byte-bar">
       <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 bytes</div><div class="seg-hex">04000000</div></div>
-      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div><div class="seg-hex">0001</div></div>
-      <div class="byte-seg" style="background:var(--c-inputs);flex:4"><div class="seg-label">Input (P2PKH)</div><div class="seg-size">~148 bytes</div><div class="seg-hex">txid + vout + scriptSig + sequence</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:1"><div class="seg-label">Output</div><div class="seg-size">8 bytes</div><div class="seg-hex">value only</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.5"><div class="seg-label">Conditions Root</div><div class="seg-size">33 bytes</div><div class="seg-hex">df + root</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Flag</div><div class="seg-size">2 B</div><div class="seg-hex">0002</div></div>
+      <div class="byte-seg" style="background:var(--c-inputs);flex:4"><div class="seg-label">Inputs</div><div class="seg-size">~41 B each</div><div class="seg-hex">txid + vout + scriptSig(empty) + seq</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.5"><div class="seg-label">Conditions Root</div><div class="seg-size">32 bytes</div><div class="seg-hex">shared Merkle root</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1"><div class="seg-label">Outputs</div><div class="seg-size">8 B each</div><div class="seg-hex">value only</div></div>
+      <div class="byte-seg" style="background:var(--c-witness);flex:2"><div class="seg-label">Witness</div><div class="seg-size">variable</div><div class="seg-hex">creation proof (3+ outputs)</div></div>
       <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 bytes</div><div class="seg-hex">00000000</div></div>
     </div>
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-version)"></div><div class="detail-title">Version</div><div class="detail-bytes">4 bytes, little-endian</div></div>
-      <p>Transaction version <code>4</code> signals a TX_MLSC. Nodes without Ladder Script treat it as a standard transaction (soft fork compatibility). The version routes validation to <code>VerifyRungTx</code> instead of <code>VerifyScript</code>.</p>
+      <p>Transaction version <code>4</code> signals a RUNG_TX. Nodes without Ladder Script treat it as anyone-can-spend (soft fork compatibility via the <code>0xDF</code> scriptPubKey range). The version routes validation to <code>VerifyRungTx</code> instead of <code>VerifyScript</code>.</p>
     </div>
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-inputs)"></div><div class="detail-title">Input</div><div class="detail-bytes">~148 bytes for P2PKH</div></div>
-      <p>The funding input is a standard Bitcoin input: P2PKH, P2WPKH, P2TR, or any existing type. The wallet signs it normally. Ladder Script only governs the output side.</p>
+      <p>Inputs are standard Bitcoin inputs (txid + vout + empty scriptSig + sequence). The RUNG_TX wire format places the conditions_root between the inputs and outputs, not per-output.</p>
     </div>
 
     <div class="detail">
@@ -146,11 +147,11 @@ a:hover { text-decoration: underline; }
     </div>
 
     <div class="detail">
-      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">33 bytes, one per transaction</div></div>
-      <p>One <code>0xDF</code> prefix + 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where outputs are mapped to conditions via the <code>output()</code> wrapper. A creation proof in the witness validates the root is protocol-derived.</p>
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">32 bytes on the wire, one per transaction</div></div>
+      <p>A 32-byte Merkle root shared across all outputs, placed between the inputs and outputs in the RUNG_TX wire format. On deserialization, each output's scriptPubKey is inflated to <code>0xDF</code> + root (33 bytes) for compatibility with existing Bitcoin Core code. The root defines a condition tree (PLC model) where outputs are mapped to conditions via <code>output_index</code> in each rung's coil.</p>
       <table>
-        <tr><td>0xDF</td><td>MLSC prefix (1 byte)</td></tr>
-        <tr><td>root</td><td>SHA-256 Merkle root of conditions, relays, and coil (32 bytes)</td></tr>
+        <tr><td>root</td><td>SHA-256 Merkle root of conditions, relays, and coil (32 bytes on wire)</td></tr>
+        <tr><td>0xDF</td><td>MLSC prefix (added during deserialization, not on wire)</td></tr>
       </table>
     </div>
   </div>
@@ -161,15 +162,17 @@ a:hover { text-decoration: underline; }
 
     <div class="byte-bar">
       <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 B</div><div class="seg-hex">04000000</div></div>
-      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div></div>
-      <div class="byte-seg" style="background:var(--c-inputs);flex:2"><div class="seg-label">Input</div><div class="seg-size">41 B</div><div class="seg-hex">txid + vout + empty scriptSig + seq</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:0.8"><div class="seg-label">Output</div><div class="seg-size">8 B</div><div class="seg-hex">value</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.2"><div class="seg-label">Conditions Root</div><div class="seg-size">33 B</div><div class="seg-hex">df + root</div></div>
-      <div class="byte-seg" style="background:var(--c-witness);flex:4"><div class="seg-label">Witness</div><div class="seg-size">variable</div><div class="seg-hex">ladder witness + MLSC proof</div></div>
-      <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 B</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Flag</div><div class="seg-size">2 B</div><div class="seg-hex">0002</div></div>
+      <div class="byte-seg" style="background:var(--c-inputs);flex:2"><div class="seg-label">Inputs</div><div class="seg-size">41 B each</div><div class="seg-hex">txid + vout + scriptSig(empty) + seq</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.2"><div class="seg-label">Conditions Root</div><div class="seg-size">32 B</div><div class="seg-hex">shared Merkle root</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:0.8"><div class="seg-label">Outputs</div><div class="seg-size">8 B each</div><div class="seg-hex">value only</div></div>
+      <div class="byte-seg" style="background:var(--c-witness);flex:4"><div class="seg-label">Witness</div><div class="seg-size">variable</div><div class="seg-hex">per-input: ladder witness + MLSC proof</div></div>
+      <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 B</div><div class="seg-hex">00000000</div></div>
     </div>
 
-    <p>The per-input witness stack has exactly 2 elements:</p>
+    <p>The per-input witness stack has 1, 2, or 3 elements depending on the spending path:</p>
+    <p><strong>Key-path (1 element):</strong> <code>[signature(64)]</code> &mdash; conditions_root treated as x-only pubkey, no conditions revealed.</p>
+    <p><strong>Script-path (2 elements):</strong></p>
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-witness)"></div><div class="detail-title">Witness Stack[0]: Ladder Witness</div></div>
@@ -181,7 +184,9 @@ a:hover { text-decoration: underline; }
       <p>The Merkle proof linking the revealed conditions to the conditions_root. Contains the rung index, revealed conditions, and sibling hashes.</p>
     </div>
 
-    <p style="margin-top:12px">The <strong>creation proof</strong> is a separate per-transaction blob (not a per-input witness element). It validates that the conditions_root is protocol-derived from valid typed structure. It is carried after all per-input witness stacks in the RUNG_TX wire format (flag byte 0x02).</p>
+    <p><strong>Script-path tweaked (3 elements):</strong> <code>[LadderWitness, MLSCProof, internal_pubkey]</code> &mdash; Merkle proof verified, then tweak check: conditions_root = internal_pubkey + H(internal_pubkey || merkle_root) &times; G.</p>
+
+    <p style="margin-top:12px">The <strong>creation proof</strong> is a separate per-transaction blob (not a per-input witness element). It validates that the conditions_root is protocol-derived from valid typed structure. Required for transactions with 3 or more spendable outputs. It is carried after all per-input witness stacks in the RUNG_TX wire format (flag byte 0x02).</p>
   </div>
 
   <div class="section">
