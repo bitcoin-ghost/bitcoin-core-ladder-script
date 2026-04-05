@@ -226,14 +226,3 @@ same transaction is spending a UTXO whose scriptPubKey hash matches a committed 
 This creates "paired UTXOs" that can only be spent together: UTXO A carries
 `COSIGN(SHA256(scriptPubKey_B))` and UTXO B carries `COSIGN(SHA256(scriptPubKey_A))`.
 
----
-
-## How does the soft fork activate?
-
-Ladder Script uses the `0xDF` scriptPubKey prefix, which falls in Bitcoin's "OP_UNKNOWN"
-range. Pre-activation nodes treat these outputs as anyone-can-spend (standard SegWit-style
-upgrade mechanism). Post-activation, the ladder evaluator enforces the conditions.
-
-The integration patch is ~412 lines across 24 existing Bitcoin Core files. The full
-Ladder Script library is 14,771 lines in 22 new files under `src/rung/` — completely
-self-contained with no modifications to existing evaluation, signing, or consensus logic.
