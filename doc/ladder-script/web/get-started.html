@@ -149,18 +149,18 @@ a:hover { text-decoration: underline; }
     <div class="section-head">Download</div>
 
     <div class="download">
-      <div class="download-title">Ghost Core + Ladder Script</div>
-      <div class="download-meta">Linux x86_64 -- 7.4 MB -- Based on Bitcoin Core v30.0</div>
+      <div class="download-title">Bitcoin Core + Ladder Script</div>
+      <div class="download-meta">Linux x86_64 -- Based on Bitcoin Core v30.0</div>
       <div class="download-stats">
         <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">62</span></span>
-        <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">528</span></span>
-        <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">60</span></span>
-        <span><span class="s-key">PATCH_LINES=</span><span class="s-val">~448</span></span>
+        <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">542</span></span>
+        <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">7</span></span>
+        <span><span class="s-key">PATCH_LINES=</span><span class="s-val">~412</span></span>
       </div>
       <a href="download/ghost-ladder-signet-linux-x86_64.tar.gz" class="download-btn">Download .tar.gz</a>
     </div>
 
-    <div class="note">Bitcoin Core v30.0 with ~448 lines of integration code and the 14,663-line Ladder Script library. Connects to the Ghost Labs signet where you can create and spend rung transactions.</div>
+    <div class="note">Bitcoin Core v30.0 with ~412 lines of integration code and the 14,771-line Ladder Script library (src/rung/). Connects to signet where you can create and spend RUNG_TX transactions.</div>
   </div>
 
   <!-- -- QUICK START -- -->
@@ -233,12 +233,11 @@ a:hover { text-decoration: underline; }
 <span class="cmd">cd bitcoin && git checkout v30.0</span>
 
 <span class="comment"># download the rung library</span>
-<span class="cmd">git clone https://github.com/bitcoin-ghost/ghost-labs-ladder-script.git /tmp/ladder</span>
+<span class="cmd">git clone https://github.com/bitcoin-ghost/bitcoin-core-ladder-script.git /tmp/ladder</span>
 <span class="cmd">cp -r /tmp/ladder/src/rung src/rung</span>
 
-<span class="comment"># apply the integration patch (~448 lines across 15 files)</span>
-<span class="cmd">git apply /tmp/ladder/patches/bitcoin-core-v30-ladder-script.patch</span>
-<span class="cmd">git apply /tmp/ladder/patches/validation-block-height.patch</span>
+<span class="comment"># apply the integration patch (~412 lines across 24 files)</span>
+<span class="cmd">git apply /tmp/ladder/doc/ladder-script/ladder-script-v30.0.patch</span>
 
 <span class="comment"># build</span>
 <span class="cmd">cmake -B build && cmake --build build -j$(nproc)</span></div>
@@ -250,9 +249,10 @@ a:hover { text-decoration: underline; }
     <div class="section-head">RPC Commands</div>
     <div class="code-block"><span class="comment"># transaction building</span>
 createrung         <span class="comment">build a ladder witness from JSON</span>
-createtxmlsc       <span class="comment">create an unsigned v4 TX_MLSC</span>
-signladder         <span class="comment">sign ladder inputs with keys</span>
-fundtxmlsc         <span class="comment">fund an unsigned TX_MLSC from wallet UTXOs</span>
+createtxmlsc       <span class="comment">create an unsigned v4 RUNG_TX with TX_MLSC outputs</span>
+signladder         <span class="comment">sign ladder inputs (auto-lookup funding tx)</span>
+createrungtx       <span class="comment">create unsigned v4 transaction (legacy)</span>
+signrungtx         <span class="comment">sign v4 transaction inputs (legacy)</span>
 
 <span class="comment"># descriptor language</span>
 parseladder        <span class="comment">parse descriptor to conditions hex + MLSC root</span>
@@ -260,17 +260,15 @@ formatladder       <span class="comment">format conditions hex as descriptor str
 
 <span class="comment"># inspection</span>
 decoderung         <span class="comment">decode a ladder witness from hex</span>
+validateladder     <span class="comment">validate a ladder witness without broadcasting</span>
 computectvhash     <span class="comment">compute BIP-119 CTV template hash</span>
 computemutation    <span class="comment">compute mutated conditions root for recursive covenants</span>
-validateladder     <span class="comment">validate a ladder witness without broadcasting</span>
-getladderstats     <span class="comment">return block-type usage stats for the chain</span>
 
-<span class="comment"># key generation</span>
-generatepqkeypair  <span class="comment">generate a post-quantum keypair (FALCON/Dilithium/SPHINCS+)</span>
-
-<span class="comment"># address</span>
-decoderungaddress  <span class="comment">decode a rung1... Bech32m address</span>
-createrungaddress  <span class="comment">create a rung1... address from conditions hex</span></div>
+<span class="comment"># key generation and cryptography</span>
+generatepqkeypair     <span class="comment">generate a post-quantum keypair (FALCON/Dilithium/SPHINCS+)</span>
+pqpubkeycommit        <span class="comment">compute SHA-256 commitment of a PQ public key</span>
+extractadaptorsecret  <span class="comment">extract adaptor secret from a completed signature</span>
+verifyadaptorpresig   <span class="comment">verify an adaptor pre-signature</span></div>
   </div>
 
   <!-- -- LINKS -- -->
