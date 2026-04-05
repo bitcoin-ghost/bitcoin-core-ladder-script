@@ -221,7 +221,7 @@ const S = [
 <div class="card-t">The PLC Model</div>
 <div class="desc" style="margin-bottom:0">
 Think of a PLC (Programmable Logic Controller): <strong>one program</strong>, multiple <strong>output coils</strong>.<br><br>
-A TX_MLSC transaction is the program. Each rung is a logic path. Each rung's coil fires a specific output via <code>output_index</code>. Multiple rungs can target the same output (OR paths), and different rungs can target different outputs within a single transaction.
+A RUNG_TX transaction is the program. Each rung is a logic path. Each rung's coil fires a specific output via <code>output_index</code>. Multiple rungs can target the same output (OR paths), and different rungs can target different outputs within a single transaction.
 </div>
 </div>
 <div class="desc" style="font-size:.72rem;color:#555">Outputs store only 8 bytes (value). The shared 32-byte conditions_root lives at the transaction level. Total on-chain footprint: ~112 bytes regardless of conditions complexity.</div>
