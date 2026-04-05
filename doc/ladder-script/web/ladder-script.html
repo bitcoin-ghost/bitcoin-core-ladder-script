@@ -202,7 +202,10 @@ a:hover { text-decoration: underline; }
       <div class="stat"><span class="stat-val">60</span><span class="stat-key">Functional tests</span></div>
       <div class="stat"><span class="stat-val">80</span><span class="stat-key">Formal properties</span></div>
     </div>
-    <p>Anti-spam overhead is 112 bytes per transaction (flat). There is no contiguous data block in a RUNG_TX transaction, making inscriptions structurally impossible. A simple payment is 119 vB (key-path) / 140 vB (script-path). A batch of 100 outputs is 914 vB (71% cheaper than P2WPKH).</p>
+    <p><strong>Smallest transactions in Bitcoin.</strong> A key-path payment is 119 vB &mdash; cheaper than P2WPKH (143 vB), P2TR (157 vB), and P2PKH (226 vB). Script-path is 140 vB, still beating every legacy type. Full lifecycle (create + spend) is 6% cheaper than P2WPKH.</p>
+    <p><strong>Smallest UTXO footprint ever.</strong> Each output costs ~8 bytes in the UTXO set (vs ~29 bytes for P2WPKH, ~41 bytes for P2TR). A 10-output transaction uses 117 bytes total vs 290 for P2WPKH &mdash; a 60% reduction. This is achieved by compressing the MLSC scriptPubKey to a single byte and deduplicating the conditions root via a synthetic UTXO entry per transaction.</p>
+    <p><strong>Massive batch savings.</strong> A 100-output batch payment is 914 vB (71% cheaper than P2WPKH). A 1000-output batch is 8,114 vB (74% cheaper). Transactions with 3 or more spendable outputs include a creation proof in the witness, binding each output to the shared condition tree and preventing UTXO spam.</p>
+    <p><strong>112 bytes of user-chosen arbitrary data per transaction</strong> (flat, regardless of output count). There is no contiguous data block in a RUNG_TX transaction, making inscriptions structurally impossible. Every byte belongs to a typed field with enforced size constraints.</p>
     <p>The formal properties come from 21 TLA+ specifications that were model-checked across 2.5 billion states, verifying evaluation semantics, anti-spam guarantees, wire format correctness, Merkle proof security, sighash binding, covenant termination, and cross-input rules.</p>
   </div>
 
