@@ -98,6 +98,17 @@ via a shared conditions_root per transaction (MLSC `0xDF` prefix); each output i
 data types are allowed: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA. Never
 PUBKEY, SIGNATURE, PREIMAGE, or SCRIPT_BODY.
 
+### ComputeTxMLSCLeaf
+Function in `conditions.cpp`. Computes a TX_MLSC Merkle leaf from a `CreationProofRung`:
+`TaggedHash("LadderLeaf", structural_template || value_commitment)`. The structural
+template is the block types and inversion flags. The value commitment binds the output
+value and pubkeys to the leaf.
+
+### ComputeValueCommitment
+Function in `conditions.cpp`. Computes the value commitment component of a TX_MLSC leaf.
+Hashes the rung's block fields (conditions-only) concatenated with the pubkeys from
+key-consuming blocks (merkle_pub_key). Returns a 32-byte hash.
+
 ### Creation Proof
 A witness section validated at block acceptance in a RUNG_TX. The creation proof
 binds the shared conditions_root to the transaction's outputs, proving that the structural
@@ -208,6 +219,13 @@ SATISFIED becomes UNSATISFIED and vice versa. Only blocks on the `IsInvertibleBl
 allowlist may be inverted. Key-consuming blocks are never invertible. Encoded on the wire
 as header byte 0x81 (escape + inverted). See `ApplyInversion()` in `evaluator.h`.
 
+### Key-path Spend
+A 1-element witness spend where the `conditions_root` is treated as an x-only public key.
+A Schnorr signature against the tweaked key spends the output with no conditions revealed.
+This is the cheapest transaction type in Bitcoin at 119 vB. Only works if the output was
+tweaked at creation time (see LadderTweak). Verified by `SignatureHashLadderKeyPath` in
+`sighash.cpp`.
+
 ### KEY_REF_SIG
 Block type 0x0005 (Signature family). Signature verification using a pubkey
 resolved from a relay block. Key-consuming. Conditions: NUMERIC(relay_index),
@@ -219,6 +237,14 @@ The complete set of spending paths for one output. Represented by `LadderWitness
 `types.h`. Contains rungs (OR paths), a coil (output metadata), relays (shared conditions),
 and optionally a witness reference (diff witness). `EvalLadder()` evaluates relays first,
 then tries each rung in order; the first satisfied rung wins.
+
+### LadderTweak
+The mechanism that enables key-path spending on outputs that also have script-path
+conditions. `conditions_root = internal_pubkey + H("LadderTweak", internal_pubkey || merkle_root) × G`.
+Same approach as Taproot's output tweaking but with a distinct tag. `createtxmlsc`
+auto-detects single-SIG ladders and tweaks automatically. Functions:
+`ComputeLadderTweakHash()`, `CheckLadderTweak()`, `CreateLadderTweak()` in `pubkey.cpp`.
+`SignSchnorrLadder()` in `key.cpp` signs with the tweaked keypair.
 
 ### LadderSignatureChecker
 Class in `evaluator.h`. Wraps an existing `BaseSignatureChecker` and adds rung conditions
@@ -233,6 +259,12 @@ Block type 0x0622 (PLC family). Latch reset (state deactivation). Key-consuming 
 ### LATCH_SET
 Block type 0x0621 (PLC family). Latch set (state activation). Key-consuming with 1
 pubkey (setter key). Conditions: NUMERIC(state). Not invertible (key-consuming).
+
+### MergeConditionsAndWitness
+Function in `evaluator.cpp`. Combines the conditions (from the MLSC proof — block types,
+condition fields, coil) with the witness (signatures, pubkeys, preimages) into a single
+`LadderWitness` structure that can be evaluated by `EvalLadder()`. Each block's condition
+fields and witness fields are interleaved according to the implicit field layout.
 
 ### Merkle
 See MLSC. Ladder Script uses binary Merkle trees with sorted interior hashing:
@@ -443,11 +475,18 @@ Enum in `types.h`. Signature schemes: SCHNORR (0x01), ECDSA (0x02), FALCON512 (0
 FALCON1024 (0x11), DILITHIUM3 (0x12), SPHINCS_SHA (0x13). Schemes 0x10+ are post-quantum
 (`IsPQScheme()` returns true).
 
+### RUNG_TX
+A version 4 Bitcoin transaction carrying Ladder Script conditions. The wire format uses
+flag byte `0x02` (distinct from SegWit's `0x01`). Layout: nVersion(4) + dummy(0x00) +
+flag(0x02) + vin[] + conditions_root(32) + vout[](8 bytes each) + witness[] +
+aggregated_sig + nLockTime(4). On deserialisation, outputs are inflated to
+`CTxOut(value, 0xDF + root)` for compatibility with existing Bitcoin Core code.
+
 ### RUNG_TX_VERSION
 Transaction version 4. All Ladder Script transactions use this version. Defined as a
 consensus constant. Outputs use MLSC format (`0xDF` prefix, 8 bytes per output, shared
-conditions_root per transaction). Flag byte 0x02 signals RUNG_TX serialization. Witnesses
-are deserialized via `DeserializeLadderWitness()`. Verification entry point: `VerifyRungTx()`.
+conditions_root per transaction). Flag byte 0x02 signals RUNG_TX serialisation. Witnesses
+are deserialised via `DeserializeLadderWitness()`. Verification entry point: `VerifyRungTx()`.
 
 ### TX_MLSC
 Transaction-level Merkelised Ladder Script Conditions. The conditions commitment scheme
@@ -463,6 +502,20 @@ relay_leaf[0], ..., relay_leaf[M-1], coil_leaf]`.
 
 ### SCHEME
 Data type 0x09. Signature scheme selector, exactly 1 byte. Values defined by RungScheme.
+
+### Script-path Spend
+A 2 or 3 element witness spend. The witness carries a `LadderWitness` (stack[0]) and an
+`MLSCProof` (stack[1]). The node deserialises the proof, verifies the Merkle proof against
+the conditions root, merges conditions with the witness, and evaluates the ladder. If the
+output was tweaked (see LadderTweak), a third element (the internal pubkey) proves the
+tweak relationship. This is the 140 vB path.
+
+### Synthetic Root Entry
+A UTXO entry at `(txid, 0xFFFFFFFF)` storing the conditions root once per RUNG_TX.
+Individual outputs store a 1-byte compressed scriptPubKey (`0x06`); the root is recovered
+from this synthetic entry at spend time. Defined by `MLSC_ROOT_VOUT = 0xFFFFFFFF` in
+`coins.h`. This deduplication reduces per-output UTXO cost from ~41 bytes (P2TR) to ~8
+bytes. Written in `AddCoins()` in `coins.cpp`.
 
 ### SCRIPT_BODY
 Data type 0x0A. Serialized inner conditions, 1 to 80 bytes. Witness-only. Used by
@@ -483,11 +536,18 @@ Block type 0x0001 (Signature family). Single signature verification. Key-consumi
 1 pubkey. Conditions: SCHEME(1). Not invertible. Witness: PUBKEY, SIGNATURE.
 
 ### Sighash
-The signature hash for Ladder Script transactions, computed by `SignatureHashLadder()` in
-`sighash.cpp`. Uses tagged hash `TaggedHash("LadderSighash")`. Commits to: epoch (0),
+The signature hash for Ladder Script script-path transactions, computed by
+`SignatureHashLadder()` in `sighash.cpp`. Uses tagged hash `TaggedHash("LadderSighash")`.
+Commits to: epoch (0),
 hash_type, tx version/locktime, prevouts/amounts/sequences (unless ANYONECANPAY/APO),
 outputs (unless NONE), spend_type (always 0), input-specific data, conditions hash (unless
 ANYPREVOUTANYSCRIPT), and output for SIGHASH_SINGLE.
+
+### SignatureHashLadderKeyPath
+Function in `sighash.cpp`. Computes the sighash for key-path spends. Uses tagged hash
+`TaggedHash("LadderKeyPathSighash")`. Does NOT commit to the conditions hash (since no
+conditions are revealed in key-path). Domain-separated from `SignatureHashLadder` to
+prevent cross-path signature replay.
 
 ### SIGNATURE
 Data type 0x06. Signature, 1 to 50000 bytes (accommodates PQ signatures up to 49216 bytes
@@ -526,6 +586,12 @@ A component of the TX_MLSC leaf hash. In the new leaf computation, each leaf is
 `TaggedHash("LadderLeaf", structural_template || value_commitment)`, replacing the
 previous `TaggedHash("LadderLeaf", serialized_blocks || pubkeys)`. The value commitment
 binds the output value to the Merkle tree.
+
+### ValidateRungOutputs
+Function in `evaluator.cpp`. Per-transaction consensus check run on the first input.
+Ensures every output uses MLSC format (`0xDF` prefix), enforces dust threshold
+(`MIN_RUNG_OUTPUT_VALUE = 546 sats`), and allows at most 1 DATA_RETURN output per
+transaction.
 
 ### VAULT_LOCK
 Block type 0x0302 (Covenant family). Vault timelock covenant with hot/cold key pairs.
