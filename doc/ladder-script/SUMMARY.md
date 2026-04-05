@@ -24,9 +24,3 @@ for LN-Symmetry. O(log N) Merkle path proofs. Half-aggregated Schnorr signatures
 Transactions use `RUNG_TX_VERSION = 4`. The RUNG_TX wire format uses flag byte `0x02`.
 
 Based on Bitcoin Core v30.0.
-
-- [Full Specification](TX_MLSC_SPEC.md)
-- [Block Library](BLOCK_LIBRARY.md)
-- [BIP Draft](BIP-XXXX.md)
-- [Examples](EXAMPLES.md)
-- [Review Guide](REVIEW_GUIDE.md)
