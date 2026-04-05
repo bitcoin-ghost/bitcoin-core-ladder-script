@@ -223,7 +223,7 @@ a:hover { text-decoration: underline; }
         <tr><td>PUBKEY</td><td>1&ndash;2,048 B</td><td>Public keys (Schnorr 33B, PQ up to 2KB)</td></tr>
         <tr><td>SIGNATURE</td><td>1&ndash;50,000 B</td><td>Signatures (Schnorr 64B, PQ up to 49KB)</td></tr>
         <tr><td>HASH256</td><td>32 B</td><td>SHA-256 commitments</td></tr>
-        <tr><td>NUMERIC</td><td>1&ndash;4 B</td><td>Thresholds, timelocks, counts</td></tr>
+        <tr><td>NUMERIC</td><td>1&ndash;8 B</td><td>Thresholds, timelocks, counts</td></tr>
         <tr><td>SCHEME</td><td>1 B</td><td>Signature scheme selector</td></tr>
         <tr><td>PREIMAGE</td><td>32 B</td><td>Hash preimage (max 2 per witness)</td></tr>
       </table>
@@ -234,7 +234,7 @@ a:hover { text-decoration: underline; }
       <p>Defines what happens when a rung is satisfied.</p>
       <table>
         <tr><td>coil_type</td><td>UNLOCK (0x01) or UNLOCK_TO (0x02). All other values rejected.</td></tr>
-        <tr><td>attestation</td><td>INLINE (0x01). All other values rejected.</td></tr>
+        <tr><td>attestation</td><td>INLINE (0x01) or AGGREGATE (0x02, half-aggregated Schnorr).</td></tr>
         <tr><td>scheme</td><td>SCHNORR, ECDSA, or PQ scheme</td></tr>
         <tr><td>address_hash</td><td>0 or 32 bytes (destination for UNLOCK_TO)</td></tr>
         <tr><td>rung_destinations</td><td>Per-rung destination overrides</td></tr>
@@ -249,15 +249,15 @@ a:hover { text-decoration: underline; }
         <div class="compare-title" style="color:var(--c-inputs)">Funding (coins enter)</div>
         <p><strong>Input:</strong> any standard Bitcoin output</p>
         <p><strong>Output:</strong> 8 bytes (value only) per output</p>
-        <p><strong>Conditions root:</strong> <code>0xDF</code> + 32-byte Merkle root (one per tx)</p>
-        <p><strong>Witness:</strong> standard Bitcoin witness + creation proof</p>
-        <p>The funding wallet needs the Ladder Script library (or the engine/RPC) to compute the conditions_root from the desired conditions. Each output is just 8 bytes; the shared root is 33 bytes per transaction.</p>
+        <p><strong>Conditions root:</strong> 32-byte Merkle root on the wire (one per tx, between vin and vout)</p>
+        <p><strong>Witness:</strong> creation proof required for 3+ spendable outputs</p>
+        <p>The funding wallet needs the Ladder Script library (or the engine/RPC) to compute the conditions_root from the desired conditions. Each output is just 8 bytes; the shared root is 32 bytes per transaction.</p>
       </div>
       <div class="compare-card">
         <div class="compare-title" style="color:var(--c-witness)">Spending (coins leave)</div>
-        <p><strong>Input:</strong> references the TX_MLSC output</p>
-        <p><strong>Output:</strong> another TX_MLSC output (8 bytes value only)</p>
-        <p><strong>Witness:</strong> ladder witness + MLSC proof + creation proof</p>
+        <p><strong>Input:</strong> references the MLSC output (0xDF scriptPubKey)</p>
+        <p><strong>Output:</strong> another RUNG_TX output (8 bytes value only)</p>
+        <p><strong>Witness:</strong> key-path (signature only) or script-path (ladder witness + MLSC proof)</p>
         <p>The node verifies the Merkle proof, merges conditions with witness, and evaluates the ladder.</p>
       </div>
     </div>
@@ -266,17 +266,25 @@ a:hover { text-decoration: underline; }
   <div class="section">
     <div class="section-head">5. Verification flow</div>
     <div class="detail" style="border-left: 3px solid var(--accent);">
-      <p><strong>1.</strong> Node sees tx version 4, input spending a TX_MLSC output</p>
-      <p><strong>2.</strong> Routes to <code>VerifyRungTx</code></p>
-      <p><strong>3.</strong> Validates outputs are value-only (8 bytes each) with one conditions_root per tx</p>
-      <p><strong>4.</strong> Deserialises witness stack[0] as LadderWitness</p>
-      <p><strong>5.</strong> Deserialises witness stack[1] as MLSCProof</p>
-      <p><strong>6.</strong> Validates the per-transaction creation proof (root is protocol-derived)</p>
-      <p><strong>7.</strong> Extracts pubkeys from witness blocks (merkle_pub_key)</p>
-      <p><strong>8.</strong> Verifies Merkle proof against conditions_root</p>
-      <p><strong>9.</strong> Merges conditions with witness into single structure</p>
-      <p><strong>10.</strong> Evaluates the ladder (AND within rung, OR across rungs)</p>
-      <p><strong>11.</strong> If SATISFIED, the input is valid</p>
+      <p><strong>Per-transaction checks (first input only):</strong></p>
+      <p><strong>1.</strong> Node sees tx version 4, routes to <code>VerifyRungTx</code></p>
+      <p><strong>2.</strong> <code>ValidateRungOutputs</code>: all outputs must be MLSC (<code>0xDF</code>), max 1 DATA_RETURN, dust threshold (546 sats)</p>
+      <p><strong>3.</strong> Creation proof: required for 3+ spendable outputs. Deserialises leaf hashes and validates they build to the conditions_root. Optional for 1&ndash;2 outputs (validated if present)</p>
+      <p><strong>4.</strong> PREIMAGE/SCRIPT_BODY count across ALL inputs must not exceed <code>MAX_PREIMAGE_FIELDS_PER_TX</code> (2)</p>
+      <p>&nbsp;</p>
+      <p><strong>Per-input checks:</strong></p>
+      <p><strong>5.</strong> Verify spent output is MLSC (<code>IsMLSCScript</code>). Witness stack must be 1, 2, or 3 elements</p>
+      <p><strong>6a.</strong> <em>Key-path (1 element):</em> conditions_root treated as x-only pubkey. Verify Schnorr signature against <code>SignatureHashLadderKeyPath</code>. Done &mdash; no conditions revealed</p>
+      <p><strong>6b.</strong> <em>Script-path (2 or 3 elements):</em> deserialise stack[0] as <code>LadderWitness</code>, stack[1] as <code>MLSCProof</code>. Resolve witness references (diff witness mode) if needed</p>
+      <p><strong>7.</strong> Extract pubkeys from witness blocks via <code>ExtractBlockPubkeys</code> (merkle_pub_key)</p>
+      <p><strong>8.</strong> Compute the revealed rung's leaf: <code>ComputeTxMLSCLeaf(structural_template || value_commitment)</code></p>
+      <p><strong>9.</strong> Verify Merkle proof &mdash; FULL_LEAVES: rebuild tree from all leaves. MERKLE_PATH: O(log N) sibling path. SHARED: verify leaf membership in cached tree from earlier input</p>
+      <p><strong>10.</strong> If 3-element witness: verify tweak &mdash; conditions_root = internal_pubkey + H(internal_pubkey || merkle_root) &times; G</p>
+      <p><strong>11.</strong> Verify <code>coil.output_index</code> matches the spent vout index</p>
+      <p><strong>12.</strong> Populate verified leaves data and shared tree cache for covenant blocks and same-source proof sharing</p>
+      <p><strong>13.</strong> <code>MergeConditionsAndWitness</code>: combine conditions (from MLSC proof) with witness (from stack[0]) into a single evaluable structure</p>
+      <p><strong>14.</strong> <code>EvalLadder</code>: evaluate relays first (cached), then try each rung in order. All blocks within a rung must be SATISFIED (AND). First satisfied rung wins (OR)</p>
+      <p><strong>15.</strong> If SATISFIED, the input is valid</p>
     </div>
   </div>
 
