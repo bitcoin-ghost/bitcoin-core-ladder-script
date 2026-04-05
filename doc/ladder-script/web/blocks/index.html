@@ -61,6 +61,16 @@ a:hover { text-decoration: underline; }
 .block-card:hover { border-color: var(--accent); text-decoration: none; }
 .block-code { font-size: 11px; color: var(--text-light); font-family: 'JetBrains Mono', monospace; letter-spacing: 1px; margin-bottom: 2px; }
 .block-name { font-size: 15px; font-weight: 600; color: var(--accent); margin-bottom: 6px; }
+.fam-sig .block-name { color: #c0392b; }
+.fam-time .block-name { color: #e67e22; }
+.fam-hash .block-name { color: #8e44ad; }
+.fam-cov .block-name { color: #c0392b; }
+.fam-rec .block-name { color: #d35400; }
+.fam-anc .block-name { color: #2980b9; }
+.fam-plc .block-name { color: #27ae60; }
+.fam-comp .block-name { color: #555; }
+.fam-gov .block-name { color: #7f8c8d; }
+.fam-leg .block-name { color: #2980b9; }
 .block-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 
 /* -- FOOTER -- */
@@ -113,11 +123,11 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#c0392b;">Signature Family &mdash; 0x0001</h2>
     <p class="family-intro">Signature blocks verify cryptographic signatures against committed public keys. The foundation of UTXO authorisation.</p>
     <div class="block-grid">
-      <a href="sig.html" class="block-card"><div class="block-code">0x0001</div><div class="block-name">SIG</div><div class="block-desc">Single Schnorr/ECDSA/PQ signature verification. Key folded into Merkle leaf via merkle_pub_key.</div></a>
-      <a href="multisig.html" class="block-card"><div class="block-code">0x0002</div><div class="block-name">MULTISIG</div><div class="block-desc">M-of-N threshold signature verification. Conditions commit to N pubkeys and threshold M.</div></a>
-      <a href="adaptor-sig.html" class="block-card"><div class="block-code">0x0003</div><div class="block-name">ADAPTOR_SIG</div><div class="block-desc">Adaptor signature verification for atomic swaps and DLCs. Reveals a secret scalar upon completion.</div></a>
-      <a href="musig-threshold.html" class="block-card"><div class="block-code">0x0004</div><div class="block-name">MUSIG_THRESHOLD</div><div class="block-desc">MuSig2/FROST aggregate threshold signature. On-chain footprint identical to single-sig.</div></a>
-      <a href="key-ref-sig.html" class="block-card"><div class="block-code">0x0005</div><div class="block-name">KEY_REF_SIG</div><div class="block-desc">Signature using a key commitment from a relay block. Cross-rung key sharing without duplicating pubkeys.</div></a>
+      <a href="sig.html" class="block-card fam-sig"><div class="block-code">0x0001</div><div class="block-name">SIG</div><div class="block-desc">Single Schnorr/ECDSA/PQ signature verification. Key folded into Merkle leaf via merkle_pub_key.</div></a>
+      <a href="multisig.html" class="block-card fam-sig"><div class="block-code">0x0002</div><div class="block-name">MULTISIG</div><div class="block-desc">M-of-N threshold signature verification. Conditions commit to N pubkeys and threshold M.</div></a>
+      <a href="adaptor-sig.html" class="block-card fam-sig"><div class="block-code">0x0003</div><div class="block-name">ADAPTOR_SIG</div><div class="block-desc">Adaptor signature verification for atomic swaps and DLCs. Reveals a secret scalar upon completion.</div></a>
+      <a href="musig-threshold.html" class="block-card fam-sig"><div class="block-code">0x0004</div><div class="block-name">MUSIG_THRESHOLD</div><div class="block-desc">MuSig2/FROST aggregate threshold signature. On-chain footprint identical to single-sig.</div></a>
+      <a href="key-ref-sig.html" class="block-card fam-sig"><div class="block-code">0x0005</div><div class="block-name">KEY_REF_SIG</div><div class="block-desc">Signature using a key commitment from a relay block. Cross-rung key sharing without duplicating pubkeys.</div></a>
     </div>
   </div>
 
@@ -126,10 +136,10 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#e67e22;">Timelock Family &mdash; 0x0100</h2>
     <p class="family-intro">Temporal constraints on spending &mdash; relative to confirmation (CSV) or absolute block height / timestamp (CLTV).</p>
     <div class="block-grid">
-      <a href="csv.html" class="block-card"><div class="block-code">0x0101</div><div class="block-name">CSV</div><div class="block-desc">Relative timelock by block count. UTXO cannot be spent until N blocks after confirmation.</div></a>
-      <a href="csv-time.html" class="block-card"><div class="block-code">0x0102</div><div class="block-name">CSV_TIME</div><div class="block-desc">Relative timelock by time (512-second granularity).</div></a>
-      <a href="cltv.html" class="block-card"><div class="block-code">0x0103</div><div class="block-name">CLTV</div><div class="block-desc">Absolute timelock by block height. Equivalent to OP_CHECKLOCKTIMEVERIFY.</div></a>
-      <a href="cltv-time.html" class="block-card"><div class="block-code">0x0104</div><div class="block-name">CLTV_TIME</div><div class="block-desc">Absolute timelock by Unix timestamp using median-time-past.</div></a>
+      <a href="csv.html" class="block-card fam-time"><div class="block-code">0x0101</div><div class="block-name">CSV</div><div class="block-desc">Relative timelock by block count. UTXO cannot be spent until N blocks after confirmation.</div></a>
+      <a href="csv-time.html" class="block-card fam-time"><div class="block-code">0x0102</div><div class="block-name">CSV_TIME</div><div class="block-desc">Relative timelock by time (512-second granularity).</div></a>
+      <a href="cltv.html" class="block-card fam-time"><div class="block-code">0x0103</div><div class="block-name">CLTV</div><div class="block-desc">Absolute timelock by block height. Equivalent to OP_CHECKLOCKTIMEVERIFY.</div></a>
+      <a href="cltv-time.html" class="block-card fam-time"><div class="block-code">0x0104</div><div class="block-name">CLTV_TIME</div><div class="block-desc">Absolute timelock by Unix timestamp using median-time-past.</div></a>
     </div>
   </div>
 
@@ -138,8 +148,8 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#8e44ad;">Hash Family &mdash; 0x0200</h2>
     <p class="family-intro">Hash preimage verification.</p>
     <div class="block-grid">
-      <a href="tagged-hash.html" class="block-card"><div class="block-code">0x0203</div><div class="block-name">TAGGED_HASH</div><div class="block-desc">BIP-340 tagged hash preimage verification. Domain-separated hashing.</div></a>
-      <a href="hash-guarded.html" class="block-card"><div class="block-code">0x0204</div><div class="block-name">HASH_GUARDED</div><div class="block-desc">Non-invertible SHA-256 preimage verification.</div></a>
+      <a href="tagged-hash.html" class="block-card fam-hash"><div class="block-code">0x0203</div><div class="block-name">TAGGED_HASH</div><div class="block-desc">BIP-340 tagged hash preimage verification. Domain-separated hashing.</div></a>
+      <a href="hash-guarded.html" class="block-card fam-hash"><div class="block-code">0x0204</div><div class="block-name">HASH_GUARDED</div><div class="block-desc">Non-invertible SHA-256 preimage verification.</div></a>
     </div>
   </div>
 
@@ -148,9 +158,9 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#c0392b;">Covenant Family &mdash; 0x0300</h2>
     <p class="family-intro">Enforce constraints on how a UTXO can be spent by inspecting the spending transaction. No direct Tapscript equivalent.</p>
     <div class="block-grid">
-      <a href="ctv.html" class="block-card"><div class="block-code">0x0301</div><div class="block-name">CTV</div><div class="block-desc">CheckTemplateVerify (BIP-119). Verifies spending transaction matches a committed template hash.</div></a>
-      <a href="vault-lock.html" class="block-card"><div class="block-code">0x0302</div><div class="block-name">VAULT_LOCK</div><div class="block-desc">Two-path vault with recovery key (immediate) and hot key (CSV-delayed).</div></a>
-      <a href="amount-lock.html" class="block-card"><div class="block-code">0x0303</div><div class="block-name">AMOUNT_LOCK</div><div class="block-desc">Output amount range check. Prevents dust and enforces spending caps.</div></a>
+      <a href="ctv.html" class="block-card fam-cov"><div class="block-code">0x0301</div><div class="block-name">CTV</div><div class="block-desc">CheckTemplateVerify (BIP-119). Verifies spending transaction matches a committed template hash.</div></a>
+      <a href="vault-lock.html" class="block-card fam-cov"><div class="block-code">0x0302</div><div class="block-name">VAULT_LOCK</div><div class="block-desc">Two-path vault with recovery key (immediate) and hot key (CSV-delayed).</div></a>
+      <a href="amount-lock.html" class="block-card fam-cov"><div class="block-code">0x0303</div><div class="block-name">AMOUNT_LOCK</div><div class="block-desc">Output amount range check. Prevents dust and enforces spending caps.</div></a>
     </div>
   </div>
 
@@ -159,12 +169,12 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#d35400;">Recursion Family &mdash; 0x0400</h2>
     <p class="family-intro">Self-referencing covenants &mdash; outputs that enforce spending back into the same or modified covenant structure.</p>
     <div class="block-grid">
-      <a href="recurse-same.html" class="block-card"><div class="block-code">0x0401</div><div class="block-name">RECURSE_SAME</div><div class="block-desc">Enforces output recreates the identical covenant. Perpetual re-encumbrance.</div></a>
-      <a href="recurse-modified.html" class="block-card"><div class="block-code">0x0402</div><div class="block-name">RECURSE_MODIFIED</div><div class="block-desc">Recursive covenant with allowed field mutations per iteration.</div></a>
-      <a href="recurse-until.html" class="block-card"><div class="block-code">0x0403</div><div class="block-name">RECURSE_UNTIL</div><div class="block-desc">Conditional recursion with termination condition. Bounded loops with exit criteria.</div></a>
-      <a href="recurse-count.html" class="block-card"><div class="block-code">0x0404</div><div class="block-name">RECURSE_COUNT</div><div class="block-desc">Count-limited recursion. Decrements counter each spend, terminates at zero.</div></a>
-      <a href="recurse-split.html" class="block-card"><div class="block-code">0x0405</div><div class="block-name">RECURSE_SPLIT</div><div class="block-desc">One input covenant fans out into multiple output covenants.</div></a>
-      <a href="recurse-decay.html" class="block-card"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Recursive covenant with negated NUMERIC field mutations. Parameters decrease each spend.</div></a>
+      <a href="recurse-same.html" class="block-card fam-rec"><div class="block-code">0x0401</div><div class="block-name">RECURSE_SAME</div><div class="block-desc">Enforces output recreates the identical covenant. Perpetual re-encumbrance.</div></a>
+      <a href="recurse-modified.html" class="block-card fam-rec"><div class="block-code">0x0402</div><div class="block-name">RECURSE_MODIFIED</div><div class="block-desc">Recursive covenant with allowed field mutations per iteration.</div></a>
+      <a href="recurse-until.html" class="block-card fam-rec"><div class="block-code">0x0403</div><div class="block-name">RECURSE_UNTIL</div><div class="block-desc">Conditional recursion with termination condition. Bounded loops with exit criteria.</div></a>
+      <a href="recurse-count.html" class="block-card fam-rec"><div class="block-code">0x0404</div><div class="block-name">RECURSE_COUNT</div><div class="block-desc">Count-limited recursion. Decrements counter each spend, terminates at zero.</div></a>
+      <a href="recurse-split.html" class="block-card fam-rec"><div class="block-code">0x0405</div><div class="block-name">RECURSE_SPLIT</div><div class="block-desc">One input covenant fans out into multiple output covenants.</div></a>
+      <a href="recurse-decay.html" class="block-card fam-rec"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Recursive covenant with negated NUMERIC field mutations. Parameters decrease each spend.</div></a>
     </div>
   </div>
 
@@ -173,13 +183,13 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#2980b9;">Anchor Family &mdash; 0x0500</h2>
     <p class="family-intro">Commit to external state references &mdash; channel IDs, pool IDs, reserve requirements, oracle attestations, tamper-evident seals.</p>
     <div class="block-grid">
-      <a href="anchor.html" class="block-card"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor marker with a single NUMERIC(anchor_id) field.</div></a>
-      <a href="anchor-channel.html" class="block-card"><div class="block-code">0x0502</div><div class="block-name">ANCHOR_CHANNEL</div><div class="block-desc">Payment channel anchor. Channel ID and sequence number.</div></a>
-      <a href="anchor-pool.html" class="block-card"><div class="block-code">0x0503</div><div class="block-name">ANCHOR_POOL</div><div class="block-desc">Liquidity pool anchor. Binds UTXO to a specific pool structure.</div></a>
-      <a href="anchor-reserve.html" class="block-card"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Reserve proof anchor. Minimum reserve amount for proof of reserves.</div></a>
-      <a href="anchor-seal.html" class="block-card"><div class="block-code">0x0505</div><div class="block-name">ANCHOR_SEAL</div><div class="block-desc">Tamper-evident seal. Single-use commitment for client-side validation.</div></a>
-      <a href="anchor-oracle.html" class="block-card"><div class="block-code">0x0506</div><div class="block-name">ANCHOR_ORACLE</div><div class="block-desc">Oracle attestation anchor. Spending requires oracle's signed event attestation.</div></a>
-      <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. Up to 40 bytes, max one per transaction.</div></a>
+      <a href="anchor.html" class="block-card fam-anc"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor marker with a single NUMERIC(anchor_id) field.</div></a>
+      <a href="anchor-channel.html" class="block-card fam-anc"><div class="block-code">0x0502</div><div class="block-name">ANCHOR_CHANNEL</div><div class="block-desc">Payment channel anchor. Channel ID and sequence number.</div></a>
+      <a href="anchor-pool.html" class="block-card fam-anc"><div class="block-code">0x0503</div><div class="block-name">ANCHOR_POOL</div><div class="block-desc">Liquidity pool anchor. Binds UTXO to a specific pool structure.</div></a>
+      <a href="anchor-reserve.html" class="block-card fam-anc"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Reserve proof anchor. Minimum reserve amount for proof of reserves.</div></a>
+      <a href="anchor-seal.html" class="block-card fam-anc"><div class="block-code">0x0505</div><div class="block-name">ANCHOR_SEAL</div><div class="block-desc">Tamper-evident seal. Single-use commitment for client-side validation.</div></a>
+      <a href="anchor-oracle.html" class="block-card fam-anc"><div class="block-code">0x0506</div><div class="block-name">ANCHOR_ORACLE</div><div class="block-desc">Oracle attestation anchor. Spending requires oracle's signed event attestation.</div></a>
+      <a href="data-return.html" class="block-card fam-anc"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. Up to 40 bytes, max one per transaction.</div></a>
     </div>
   </div>
 
@@ -188,20 +198,20 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#27ae60;">PLC Family &mdash; 0x0600</h2>
     <p class="family-intro">Industrial automation primitives for Bitcoin script. Hysteresis, timers, latches, counters, comparators, sequencers, rate limiters.</p>
     <div class="block-grid">
-      <a href="hysteresis-fee.html" class="block-card"><div class="block-code">0x0601</div><div class="block-name">HYSTERESIS_FEE</div><div class="block-desc">Fee-rate hysteresis controller with deadband.</div></a>
-      <a href="hysteresis-value.html" class="block-card"><div class="block-code">0x0602</div><div class="block-name">HYSTERESIS_VALUE</div><div class="block-desc">Value-based hysteresis with high/low thresholds.</div></a>
-      <a href="timer-continuous.html" class="block-card"><div class="block-code">0x0611</div><div class="block-name">TIMER_CONTINUOUS</div><div class="block-desc">Continuous on-delay timer. Spending allowed after preset duration elapses.</div></a>
-      <a href="timer-off-delay.html" class="block-card"><div class="block-code">0x0612</div><div class="block-name">TIMER_OFF_DELAY</div><div class="block-desc">Off-delay timer. Time-limited withdrawal windows.</div></a>
-      <a href="latch-set.html" class="block-card"><div class="block-code">0x0621</div><div class="block-name">LATCH_SET</div><div class="block-desc">Set-dominant latch. Irreversible state transitions.</div></a>
-      <a href="latch-reset.html" class="block-card"><div class="block-code">0x0622</div><div class="block-name">LATCH_RESET</div><div class="block-desc">Reset-dominant latch. Inverse of LATCH_SET.</div></a>
-      <a href="counter-down.html" class="block-card"><div class="block-code">0x0631</div><div class="block-name">COUNTER_DOWN</div><div class="block-desc">Down counter for N-spend limits.</div></a>
-      <a href="counter-preset.html" class="block-card"><div class="block-code">0x0632</div><div class="block-name">COUNTER_PRESET</div><div class="block-desc">Preset counter with configurable target. Reset on trigger.</div></a>
-      <a href="counter-up.html" class="block-card"><div class="block-code">0x0633</div><div class="block-name">COUNTER_UP</div><div class="block-desc">Up counter for tracking spend count in stateful covenants.</div></a>
-      <a href="compare.html" class="block-card"><div class="block-code">0x0641</div><div class="block-name">COMPARE</div><div class="block-desc">Numeric comparator with configurable operator (EQ, NE, LT, LE, GT, GE).</div></a>
-      <a href="sequencer.html" class="block-card"><div class="block-code">0x0651</div><div class="block-name">SEQUENCER</div><div class="block-desc">Step sequencer. Ordered multi-phase spending policies.</div></a>
-      <a href="one-shot.html" class="block-card"><div class="block-code">0x0661</div><div class="block-name">ONE_SHOT</div><div class="block-desc">Single-pulse trigger. Exactly one spend, then permanently disables.</div></a>
-      <a href="rate-limit.html" class="block-card"><div class="block-code">0x0671</div><div class="block-name">RATE_LIMIT</div><div class="block-desc">Maximum spends within a block-height window.</div></a>
-      <a href="cosign.html" class="block-card"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Cross-input co-spend constraint. Requires another input with a matching scriptPubKey hash.</div></a>
+      <a href="hysteresis-fee.html" class="block-card fam-plc"><div class="block-code">0x0601</div><div class="block-name">HYSTERESIS_FEE</div><div class="block-desc">Fee-rate hysteresis controller with deadband.</div></a>
+      <a href="hysteresis-value.html" class="block-card fam-plc"><div class="block-code">0x0602</div><div class="block-name">HYSTERESIS_VALUE</div><div class="block-desc">Value-based hysteresis with high/low thresholds.</div></a>
+      <a href="timer-continuous.html" class="block-card fam-plc"><div class="block-code">0x0611</div><div class="block-name">TIMER_CONTINUOUS</div><div class="block-desc">Continuous on-delay timer. Spending allowed after preset duration elapses.</div></a>
+      <a href="timer-off-delay.html" class="block-card fam-plc"><div class="block-code">0x0612</div><div class="block-name">TIMER_OFF_DELAY</div><div class="block-desc">Off-delay timer. Time-limited withdrawal windows.</div></a>
+      <a href="latch-set.html" class="block-card fam-plc"><div class="block-code">0x0621</div><div class="block-name">LATCH_SET</div><div class="block-desc">Set-dominant latch. Irreversible state transitions.</div></a>
+      <a href="latch-reset.html" class="block-card fam-plc"><div class="block-code">0x0622</div><div class="block-name">LATCH_RESET</div><div class="block-desc">Reset-dominant latch. Inverse of LATCH_SET.</div></a>
+      <a href="counter-down.html" class="block-card fam-plc"><div class="block-code">0x0631</div><div class="block-name">COUNTER_DOWN</div><div class="block-desc">Down counter for N-spend limits.</div></a>
+      <a href="counter-preset.html" class="block-card fam-plc"><div class="block-code">0x0632</div><div class="block-name">COUNTER_PRESET</div><div class="block-desc">Preset counter with configurable target. Reset on trigger.</div></a>
+      <a href="counter-up.html" class="block-card fam-plc"><div class="block-code">0x0633</div><div class="block-name">COUNTER_UP</div><div class="block-desc">Up counter for tracking spend count in stateful covenants.</div></a>
+      <a href="compare.html" class="block-card fam-plc"><div class="block-code">0x0641</div><div class="block-name">COMPARE</div><div class="block-desc">Numeric comparator with configurable operator (EQ, NE, LT, LE, GT, GE).</div></a>
+      <a href="sequencer.html" class="block-card fam-plc"><div class="block-code">0x0651</div><div class="block-name">SEQUENCER</div><div class="block-desc">Step sequencer. Ordered multi-phase spending policies.</div></a>
+      <a href="one-shot.html" class="block-card fam-plc"><div class="block-code">0x0661</div><div class="block-name">ONE_SHOT</div><div class="block-desc">Single-pulse trigger. Exactly one spend, then permanently disables.</div></a>
+      <a href="rate-limit.html" class="block-card fam-plc"><div class="block-code">0x0671</div><div class="block-name">RATE_LIMIT</div><div class="block-desc">Maximum spends within a block-height window.</div></a>
+      <a href="cosign.html" class="block-card fam-plc"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Cross-input co-spend constraint. Requires another input with a matching scriptPubKey hash.</div></a>
     </div>
   </div>
 
@@ -210,13 +220,13 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#555;">Compound Family &mdash; 0x0700</h2>
     <p class="family-intro">Common multi-block patterns collapsed into single blocks, reducing wire overhead.</p>
     <div class="block-grid">
-      <a href="timelocked-sig.html" class="block-card"><div class="block-code">0x0701</div><div class="block-name">TIMELOCKED_SIG</div><div class="block-desc">SIG + CSV in one block. Saves 8 bytes on wire.</div></a>
-      <a href="htlc.html" class="block-card"><div class="block-code">0x0702</div><div class="block-name">HTLC</div><div class="block-desc">Hash + timelock + signature. Replaces 3 blocks. Saves 16 bytes.</div></a>
-      <a href="hash-sig.html" class="block-card"><div class="block-code">0x0703</div><div class="block-name">HASH_SIG</div><div class="block-desc">Hash preimage + signature check. Saves 8 bytes.</div></a>
-      <a href="ptlc.html" class="block-card"><div class="block-code">0x0704</div><div class="block-name">PTLC</div><div class="block-desc">Adaptor point + CSV + signature. For payment channels.</div></a>
-      <a href="cltv-sig.html" class="block-card"><div class="block-code">0x0705</div><div class="block-name">CLTV_SIG</div><div class="block-desc">SIG + CLTV in one block. Saves 8 bytes.</div></a>
-      <a href="timelocked-multisig.html" class="block-card"><div class="block-code">0x0706</div><div class="block-name">TIMELOCKED_MULTISIG</div><div class="block-desc">M-of-N + CSV for penalty branches and vault recovery.</div></a>
-      <a href="anchor-fee.html" class="block-card"><div class="block-code">0x0707</div><div class="block-name">ANCHOR_FEE</div><div class="block-desc">Anti-pinning fee anchor. 2-of-2 sigs + fee rate band + weight limit for safe CPFP.</div></a>
+      <a href="timelocked-sig.html" class="block-card fam-comp"><div class="block-code">0x0701</div><div class="block-name">TIMELOCKED_SIG</div><div class="block-desc">SIG + CSV in one block. Saves 8 bytes on wire.</div></a>
+      <a href="htlc.html" class="block-card fam-comp"><div class="block-code">0x0702</div><div class="block-name">HTLC</div><div class="block-desc">Hash + timelock + signature. Replaces 3 blocks. Saves 16 bytes.</div></a>
+      <a href="hash-sig.html" class="block-card fam-comp"><div class="block-code">0x0703</div><div class="block-name">HASH_SIG</div><div class="block-desc">Hash preimage + signature check. Saves 8 bytes.</div></a>
+      <a href="ptlc.html" class="block-card fam-comp"><div class="block-code">0x0704</div><div class="block-name">PTLC</div><div class="block-desc">Adaptor point + CSV + signature. For payment channels.</div></a>
+      <a href="cltv-sig.html" class="block-card fam-comp"><div class="block-code">0x0705</div><div class="block-name">CLTV_SIG</div><div class="block-desc">SIG + CLTV in one block. Saves 8 bytes.</div></a>
+      <a href="timelocked-multisig.html" class="block-card fam-comp"><div class="block-code">0x0706</div><div class="block-name">TIMELOCKED_MULTISIG</div><div class="block-desc">M-of-N + CSV for penalty branches and vault recovery.</div></a>
+      <a href="anchor-fee.html" class="block-card fam-comp"><div class="block-code">0x0707</div><div class="block-name">ANCHOR_FEE</div><div class="block-desc">Anti-pinning fee anchor. 2-of-2 sigs + fee rate band + weight limit for safe CPFP.</div></a>
     </div>
   </div>
 
@@ -225,13 +235,13 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#7f8c8d;">Governance Family &mdash; 0x0800</h2>
     <p class="family-intro">Transaction-level constraints with no Tapscript equivalent. Inspect structure, weight, I/O counts, value ratios.</p>
     <div class="block-grid">
-      <a href="epoch-gate.html" class="block-card"><div class="block-code">0x0801</div><div class="block-name">EPOCH_GATE</div><div class="block-desc">Periodic spending windows using block height modular arithmetic.</div></a>
-      <a href="weight-limit.html" class="block-card"><div class="block-code">0x0802</div><div class="block-name">WEIGHT_LIMIT</div><div class="block-desc">Maximum transaction weight constraint.</div></a>
-      <a href="input-count.html" class="block-card"><div class="block-code">0x0803</div><div class="block-name">INPUT_COUNT</div><div class="block-desc">Min/max bounds on input count.</div></a>
-      <a href="output-count.html" class="block-card"><div class="block-code">0x0804</div><div class="block-name">OUTPUT_COUNT</div><div class="block-desc">Min/max bounds on output count.</div></a>
-      <a href="relative-value.html" class="block-card"><div class="block-code">0x0805</div><div class="block-name">RELATIVE_VALUE</div><div class="block-desc">Anti-siphon ratio enforcement. Output/input value ratio check.</div></a>
-      <a href="accumulator.html" class="block-card"><div class="block-code">0x0806</div><div class="block-name">ACCUMULATOR</div><div class="block-desc">Merkle set membership proof with sorted-pair proofs.</div></a>
-      <a href="output-check.html" class="block-card"><div class="block-code">0x0807</div><div class="block-name">OUTPUT_CHECK</div><div class="block-desc">Per-output value and script constraint.</div></a>
+      <a href="epoch-gate.html" class="block-card fam-gov"><div class="block-code">0x0801</div><div class="block-name">EPOCH_GATE</div><div class="block-desc">Periodic spending windows using block height modular arithmetic.</div></a>
+      <a href="weight-limit.html" class="block-card fam-gov"><div class="block-code">0x0802</div><div class="block-name">WEIGHT_LIMIT</div><div class="block-desc">Maximum transaction weight constraint.</div></a>
+      <a href="input-count.html" class="block-card fam-gov"><div class="block-code">0x0803</div><div class="block-name">INPUT_COUNT</div><div class="block-desc">Min/max bounds on input count.</div></a>
+      <a href="output-count.html" class="block-card fam-gov"><div class="block-code">0x0804</div><div class="block-name">OUTPUT_COUNT</div><div class="block-desc">Min/max bounds on output count.</div></a>
+      <a href="relative-value.html" class="block-card fam-gov"><div class="block-code">0x0805</div><div class="block-name">RELATIVE_VALUE</div><div class="block-desc">Anti-siphon ratio enforcement. Output/input value ratio check.</div></a>
+      <a href="accumulator.html" class="block-card fam-gov"><div class="block-code">0x0806</div><div class="block-name">ACCUMULATOR</div><div class="block-desc">Merkle set membership proof with sorted-pair proofs.</div></a>
+      <a href="output-check.html" class="block-card fam-gov"><div class="block-code">0x0807</div><div class="block-name">OUTPUT_CHECK</div><div class="block-desc">Per-output value and script constraint.</div></a>
     </div>
   </div>
 
@@ -240,13 +250,13 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#2980b9;">Legacy Family &mdash; 0x0900</h2>
     <p class="family-intro">Wraps Bitcoin's original transaction types as typed Ladder Script blocks. Same spending semantics, all fields typed. Closes inscription and data-embedding vectors.</p>
     <div class="block-grid">
-      <a href="p2pk-legacy.html" class="block-card"><div class="block-code">0x0901</div><div class="block-name">P2PK_LEGACY</div><div class="block-desc">Pay-to-Public-Key. Delegates to EvalSigBlock.</div></a>
-      <a href="p2pkh-legacy.html" class="block-card"><div class="block-code">0x0902</div><div class="block-name">P2PKH_LEGACY</div><div class="block-desc">Pay-to-Public-Key-Hash. HASH160(pubkey) + signature check.</div></a>
-      <a href="p2sh-legacy.html" class="block-card"><div class="block-code">0x0903</div><div class="block-name">P2SH_LEGACY</div><div class="block-desc">Pay-to-Script-Hash. Inner script must be valid Ladder Script conditions.</div></a>
-      <a href="p2wpkh-legacy.html" class="block-card"><div class="block-code">0x0904</div><div class="block-name">P2WPKH_LEGACY</div><div class="block-desc">SegWit v0 key-hash spending.</div></a>
-      <a href="p2wsh-legacy.html" class="block-card"><div class="block-code">0x0905</div><div class="block-name">P2WSH_LEGACY</div><div class="block-desc">SegWit v0 script-hash with typed inner conditions.</div></a>
-      <a href="p2tr-legacy.html" class="block-card"><div class="block-code">0x0906</div><div class="block-name">P2TR_LEGACY</div><div class="block-desc">Taproot key-path spend. Delegates to EvalSigBlock.</div></a>
-      <a href="p2tr-script-legacy.html" class="block-card"><div class="block-code">0x0907</div><div class="block-name">P2TR_SCRIPT_LEGACY</div><div class="block-desc">Taproot script-path spend. Closes the primary inscription vector.</div></a>
+      <a href="p2pk-legacy.html" class="block-card fam-leg"><div class="block-code">0x0901</div><div class="block-name">P2PK_LEGACY</div><div class="block-desc">Pay-to-Public-Key. Delegates to EvalSigBlock.</div></a>
+      <a href="p2pkh-legacy.html" class="block-card fam-leg"><div class="block-code">0x0902</div><div class="block-name">P2PKH_LEGACY</div><div class="block-desc">Pay-to-Public-Key-Hash. HASH160(pubkey) + signature check.</div></a>
+      <a href="p2sh-legacy.html" class="block-card fam-leg"><div class="block-code">0x0903</div><div class="block-name">P2SH_LEGACY</div><div class="block-desc">Pay-to-Script-Hash. Inner script must be valid Ladder Script conditions.</div></a>
+      <a href="p2wpkh-legacy.html" class="block-card fam-leg"><div class="block-code">0x0904</div><div class="block-name">P2WPKH_LEGACY</div><div class="block-desc">SegWit v0 key-hash spending.</div></a>
+      <a href="p2wsh-legacy.html" class="block-card fam-leg"><div class="block-code">0x0905</div><div class="block-name">P2WSH_LEGACY</div><div class="block-desc">SegWit v0 script-hash with typed inner conditions.</div></a>
+      <a href="p2tr-legacy.html" class="block-card fam-leg"><div class="block-code">0x0906</div><div class="block-name">P2TR_LEGACY</div><div class="block-desc">Taproot key-path spend. Delegates to EvalSigBlock.</div></a>
+      <a href="p2tr-script-legacy.html" class="block-card fam-leg"><div class="block-code">0x0907</div><div class="block-name">P2TR_SCRIPT_LEGACY</div><div class="block-desc">Taproot script-path spend. Closes the primary inscription vector.</div></a>
     </div>
   </div>
 
