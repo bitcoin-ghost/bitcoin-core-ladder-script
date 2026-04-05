@@ -193,14 +193,14 @@ a:hover { text-decoration: underline; }
   <!-- HOW SMALL IS THE CHANGE -->
   <div class="section">
     <div class="section-head">How small is the change</div>
-    <p>Ladder Script adds <strong>~448 lines</strong> of changes to existing Bitcoin Core code across 16 files. Everything else is a self-contained library of 14,663 lines in 21 new files. The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
+    <p>Ladder Script adds <strong>~412 lines</strong> of changes to existing Bitcoin Core code across 24 files. Everything else is a self-contained library of 14,771 lines in 22 new files. The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
     <div class="stats-row">
-      <div class="stat"><span class="stat-val">~448</span><span class="stat-key">Lines patched</span></div>
-      <div class="stat"><span class="stat-val">14,663</span><span class="stat-key">New lines</span></div>
+      <div class="stat"><span class="stat-val">~412</span><span class="stat-key">Lines patched</span></div>
+      <div class="stat"><span class="stat-val">14,771</span><span class="stat-key">New lines</span></div>
       <div class="stat"><span class="stat-val">62</span><span class="stat-key">Block types</span></div>
-      <div class="stat"><span class="stat-val">528</span><span class="stat-key">Unit tests</span></div>
-      <div class="stat"><span class="stat-val">60</span><span class="stat-key">Functional tests</span></div>
-      <div class="stat"><span class="stat-val">80</span><span class="stat-key">Formal properties</span></div>
+      <div class="stat"><span class="stat-val">542</span><span class="stat-key">Unit tests</span></div>
+      <div class="stat"><span class="stat-val">7</span><span class="stat-key">Functional tests</span></div>
+      <div class="stat"><span class="stat-val">197</span><span class="stat-key">Formal properties</span></div>
     </div>
     <p><strong>Smallest transactions in Bitcoin.</strong> A key-path payment is 119 vB &mdash; cheaper than P2WPKH (143 vB), P2TR (157 vB), and P2PKH (226 vB). Script-path is 140 vB, still beating every legacy type. Full lifecycle (create + spend) is 6% cheaper than P2WPKH.</p>
     <p><strong>Smallest UTXO footprint ever.</strong> Each output costs ~8 bytes in the UTXO set (vs ~29 bytes for P2WPKH, ~41 bytes for P2TR). A 10-output transaction uses 117 bytes total vs 290 for P2WPKH &mdash; a 60% reduction. This is achieved by compressing the MLSC scriptPubKey to a single byte and deduplicating the conditions root via a synthetic UTXO entry per transaction.</p>
