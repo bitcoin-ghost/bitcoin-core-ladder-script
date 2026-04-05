@@ -23,13 +23,19 @@ two NUMERIC fields (min, max). Invertible. Conditions-only implicit layout.
 Block type 0x0501 (Anchor family). Generic anchor marker with a single NUMERIC(anchor_id).
 Invertible. Conditions-only implicit layout.
 
+### ANCHOR_FEE
+Block type 0x0707 (Compound family). Anti-pinning fee anchor combining 2-of-2 signatures
+with fee rate band enforcement and weight limit. Key-consuming with 2 pubkeys. Conditions:
+SCHEME(1), NUMERIC(min_fee_rate), NUMERIC(max_fee_rate), NUMERIC(max_weight),
+NUMERIC(commitment). Not invertible.
+
 ### ANCHOR_CHANNEL
 Block type 0x0502 (Anchor family). Lightning channel anchor. Key-consuming with 2 pubkeys
-(local and remote). Conditions: NUMERIC(commitment_number). Invertible.
+(local and remote). Conditions: NUMERIC(commitment_number). Not invertible (key-consuming).
 
 ### ANCHOR_ORACLE
 Block type 0x0506 (Anchor family). Oracle anchor. Key-consuming with 1 pubkey (oracle key).
-Conditions: NUMERIC(outcome_count). Invertible.
+Conditions: NUMERIC(outcome_count). Not invertible (key-consuming).
 
 ### ANCHOR_POOL
 Block type 0x0503 (Anchor family). Pool anchor. Conditions: HASH256(vtxo_tree_root),
@@ -99,13 +105,13 @@ template and value commitments are correctly constructed.
 
 ### COSIGN
 Block type 0x0681 (PLC family). Cross-input co-spend constraint. Requires another input
-in the same transaction to have matching conditions identified by a HASH256. Key-consuming
-(despite being in the PLC range). Not invertible. Uses the `spent_outputs` field of
+in the same transaction to have matching conditions identified by a HASH256. Not
+key-consuming (pubkey_count=0). Not invertible. Uses the `spent_outputs` field of
 RungEvalContext.
 
 ### COUNTER_DOWN
 Block type 0x0631 (PLC family). Down counter decremented on event. Key-consuming with
-1 pubkey (event signer). Conditions: NUMERIC(count). Invertible.
+1 pubkey (event signer). Conditions: NUMERIC(count). Not invertible (key-consuming).
 
 ### COUNTER_PRESET
 Block type 0x0632 (PLC family). Preset counter (approval accumulator). Conditions:
@@ -113,7 +119,7 @@ NUMERIC(current), NUMERIC(preset). Invertible. Not key-consuming.
 
 ### COUNTER_UP
 Block type 0x0633 (PLC family). Up counter incremented on event. Key-consuming with
-1 pubkey (event signer). Conditions: NUMERIC(current), NUMERIC(target). Invertible.
+1 pubkey (event signer). Conditions: NUMERIC(current), NUMERIC(target). Not invertible (key-consuming).
 
 ### CSV
 Block type 0x0101 (Timelock family). Relative timelock checking BIP 68 sequence against
@@ -222,11 +228,11 @@ an optional `m_batch` pointer to `BatchVerifier`.
 
 ### LATCH_RESET
 Block type 0x0622 (PLC family). Latch reset (state deactivation). Key-consuming with
-1 pubkey (resetter key). Conditions: NUMERIC(state), NUMERIC(delay). Invertible.
+1 pubkey (resetter key). Conditions: NUMERIC(state), NUMERIC(delay). Not invertible (key-consuming).
 
 ### LATCH_SET
 Block type 0x0621 (PLC family). Latch set (state activation). Key-consuming with 1
-pubkey (setter key). Conditions: NUMERIC(state). Invertible.
+pubkey (setter key). Conditions: NUMERIC(state). Not invertible (key-consuming).
 
 ### Merkle
 See MLSC. Ladder Script uses binary Merkle trees with sorted interior hashing:
@@ -523,7 +529,7 @@ binds the output value to the Merkle tree.
 
 ### VAULT_LOCK
 Block type 0x0302 (Covenant family). Vault timelock covenant with hot/cold key pairs.
-Key-consuming with 2 pubkeys. Conditions: NUMERIC(hot_delay). Invertible.
+Key-consuming with 2 pubkeys. Conditions: NUMERIC(hot_delay). Not invertible.
 
 ### WEIGHT_LIMIT
 Block type 0x0802 (Governance family). Maximum transaction weight constraint. Conditions:
