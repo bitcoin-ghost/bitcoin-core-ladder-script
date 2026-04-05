@@ -157,7 +157,7 @@ a:hover { text-decoration: underline; }
         <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">7</span></span>
         <span><span class="s-key">PATCH_LINES=</span><span class="s-val">~412</span></span>
       </div>
-      <a href="download/ghost-ladder-signet-linux-x86_64.tar.gz" class="download-btn">Download .tar.gz</a>
+      <a href="download/bitcoin-core-ladder-signet-linux-x86_64.tar.gz" class="download-btn">Download .tar.gz</a>
     </div>
 
     <div class="note">Bitcoin Core v30.0 with ~412 lines of integration code and the 14,771-line Ladder Script library (src/rung/). Connects to signet where you can create and spend RUNG_TX transactions.</div>
@@ -168,27 +168,27 @@ a:hover { text-decoration: underline; }
     <div class="section-head">Quick Start</div>
 
     <p>Extract and configure:</p>
-    <div class="code-block"><span class="cmd">tar xzf ghost-ladder-signet-linux-x86_64.tar.gz</span>
+    <div class="code-block"><span class="cmd">tar xzf bitcoin-core-ladder-signet-linux-x86_64.tar.gz</span>
 <span class="cmd">mkdir -p ~/.bitcoin</span>
-<span class="cmd">cp ladder-signet.conf ~/.bitcoin/bitcoin.conf</span>
+<span class="cmd">cp signet.conf ~/.bitcoin/bitcoin.conf</span>
 <span class="comment"># edit ~/.bitcoin/bitcoin.conf and change rpcpassword</span></div>
 
     <p>Start the node:</p>
-    <div class="code-block"><span class="cmd">./ghostd -daemon</span>
-<span class="output">Ghost Core starting</span>
+    <div class="code-block"><span class="cmd">./bitcoind -daemon</span>
+<span class="output">Bitcoin Core starting</span>
 
-<span class="comment"># wait for sync (~30 seconds on fresh node)</span>
-<span class="cmd">./ghost-cli -signet getblockcount</span>
-<span class="output">533</span></div>
+<span class="comment"># wait for signet sync</span>
+<span class="cmd">./bitcoin-cli -signet getblockcount</span>
+<span class="output">298755</span></div>
 
     <p>Create a wallet:</p>
-    <div class="code-block"><span class="cmd">./ghost-cli -signet createwallet test</span>
-<span class="cmd">./ghost-cli -signet -rpcwallet=test getnewaddress "" legacy</span>
-<span class="output">mibryXkbkCBrLMkVZik8UkLKfcjEH3Mstu</span></div>
+    <div class="code-block"><span class="cmd">./bitcoin-cli -signet createwallet ladder</span>
+<span class="cmd">./bitcoin-cli -signet -rpcwallet=ladder getnewaddress "" bech32</span>
+<span class="output">tb1q...</span></div>
 
     <p>Create a Ladder Script transaction:</p>
     <div class="code-block"><span class="comment"># parse a descriptor</span>
-<span class="cmd">./ghost-cli -signet parseladder "ladder(sig(@alice))" \</span>
+<span class="cmd">./bitcoin-cli -signet parseladder "ladder(sig(@alice))" \</span>
 <span class="cmd">  '{"alice":"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"}'</span>
 <span class="output">{
   "conditions_hex": "01010001010101000000",
@@ -197,7 +197,7 @@ a:hover { text-decoration: underline; }
 }</span>
 
 <span class="comment"># format it back</span>
-<span class="cmd">./ghost-cli -signet formatladder "01010001010101000000"</span>
+<span class="cmd">./bitcoin-cli -signet formatladder "01010001010101000000"</span>
 <span class="output">{
   "descriptor": "ladder(sig(@?))"
 }</span></div>
@@ -206,16 +206,14 @@ a:hover { text-decoration: underline; }
   <!-- -- SIGNET CONFIG -- -->
   <div class="section">
     <div class="section-head">Signet Configuration</div>
-    <div class="code-block"><span class="comment"># Ladder Script Signet</span>
+    <div class="code-block"><span class="comment"># Ladder Script Signet Configuration</span>
 <span class="key">signet</span>=<span class="val">1</span>
 
 <span class="comment">[signet]</span>
 <span class="key">server</span>=<span class="val">1</span>
 <span class="key">txindex</span>=<span class="val">1</span>
 <span class="key">fallbackfee</span>=<span class="val">0.0001</span>
-
-<span class="comment"># Ghost Labs signet challenge</span>
-<span class="key">signetchallenge</span>=<span class="val">21036bae004d5cd7bb65742cdbf735bf6f3a384d69f4d52dba84689a3db972848f68ac</span>
+<span class="key">rpcport</span>=<span class="val">38332</span>
 
 <span class="comment"># Seed node (Amsterdam)</span>
 <span class="key">addnode</span>=<span class="val">85.9.213.194</span>
