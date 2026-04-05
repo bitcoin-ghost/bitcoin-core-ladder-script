@@ -85,7 +85,7 @@ a:hover { text-decoration: underline; }
       <a href="../../ghost-labs.html" class="header-title">Ghost Labs</a>
       <div class="header-right">
         <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
-        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" class="gh-icon">
+        <a href="https://github.com/bitcoin-ghost/bitcoin-core-ladder-script" target="_blank" class="gh-icon">
           <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
       </div>
@@ -113,7 +113,7 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#c0392b;">Signature Family &mdash; 0x0001</h2>
     <p class="family-intro">Signature blocks verify cryptographic signatures against committed public keys. The foundation of UTXO authorisation.</p>
     <div class="block-grid">
-      <a href="sig.html" class="block-card"><div class="block-code">0x0001</div><div class="block-name">SIG</div><div class="block-desc">Single Schnorr signature verification against a committed public key. Equivalent to OP_CHECKSIG in Tapscript.</div></a>
+      <a href="sig.html" class="block-card"><div class="block-code">0x0001</div><div class="block-name">SIG</div><div class="block-desc">Single Schnorr/ECDSA/PQ signature verification. Key folded into Merkle leaf via merkle_pub_key.</div></a>
       <a href="multisig.html" class="block-card"><div class="block-code">0x0002</div><div class="block-name">MULTISIG</div><div class="block-desc">M-of-N threshold signature verification. Conditions commit to N pubkeys and threshold M.</div></a>
       <a href="adaptor-sig.html" class="block-card"><div class="block-code">0x0003</div><div class="block-name">ADAPTOR_SIG</div><div class="block-desc">Adaptor signature verification for atomic swaps and DLCs. Reveals a secret scalar upon completion.</div></a>
       <a href="musig-threshold.html" class="block-card"><div class="block-code">0x0004</div><div class="block-name">MUSIG_THRESHOLD</div><div class="block-desc">MuSig2/FROST aggregate threshold signature. On-chain footprint identical to single-sig.</div></a>
@@ -164,7 +164,7 @@ a:hover { text-decoration: underline; }
       <a href="recurse-until.html" class="block-card"><div class="block-code">0x0403</div><div class="block-name">RECURSE_UNTIL</div><div class="block-desc">Conditional recursion with termination condition. Bounded loops with exit criteria.</div></a>
       <a href="recurse-count.html" class="block-card"><div class="block-code">0x0404</div><div class="block-name">RECURSE_COUNT</div><div class="block-desc">Count-limited recursion. Decrements counter each spend, terminates at zero.</div></a>
       <a href="recurse-split.html" class="block-card"><div class="block-code">0x0405</div><div class="block-name">RECURSE_SPLIT</div><div class="block-desc">One input covenant fans out into multiple output covenants.</div></a>
-      <a href="recurse-decay.html" class="block-card"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Each recursive spend reduces output value by a committed decay factor.</div></a>
+      <a href="recurse-decay.html" class="block-card"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Recursive covenant with negated NUMERIC field mutations. Parameters decrease each spend.</div></a>
     </div>
   </div>
 
@@ -173,13 +173,13 @@ a:hover { text-decoration: underline; }
     <h2 class="family-title" style="color:#2980b9;">Anchor Family &mdash; 0x0500</h2>
     <p class="family-intro">Commit to external state references &mdash; channel IDs, pool IDs, reserve requirements, oracle attestations, tamper-evident seals.</p>
     <div class="block-grid">
-      <a href="anchor.html" class="block-card"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor point. 32-byte anchor hash identifying an off-chain structure.</div></a>
+      <a href="anchor.html" class="block-card"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor marker with a single NUMERIC(anchor_id) field.</div></a>
       <a href="anchor-channel.html" class="block-card"><div class="block-code">0x0502</div><div class="block-name">ANCHOR_CHANNEL</div><div class="block-desc">Payment channel anchor. Channel ID and sequence number.</div></a>
       <a href="anchor-pool.html" class="block-card"><div class="block-code">0x0503</div><div class="block-name">ANCHOR_POOL</div><div class="block-desc">Liquidity pool anchor. Binds UTXO to a specific pool structure.</div></a>
       <a href="anchor-reserve.html" class="block-card"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Reserve proof anchor. Minimum reserve amount for proof of reserves.</div></a>
       <a href="anchor-seal.html" class="block-card"><div class="block-code">0x0505</div><div class="block-name">ANCHOR_SEAL</div><div class="block-desc">Tamper-evident seal. Single-use commitment for client-side validation.</div></a>
       <a href="anchor-oracle.html" class="block-card"><div class="block-code">0x0506</div><div class="block-name">ANCHOR_ORACLE</div><div class="block-desc">Oracle attestation anchor. Spending requires oracle's signed event attestation.</div></a>
-      <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. Up to 32 bytes, max one per transaction.</div></a>
+      <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. Up to 40 bytes, max one per transaction.</div></a>
     </div>
   </div>
 
@@ -201,7 +201,7 @@ a:hover { text-decoration: underline; }
       <a href="sequencer.html" class="block-card"><div class="block-code">0x0651</div><div class="block-name">SEQUENCER</div><div class="block-desc">Step sequencer. Ordered multi-phase spending policies.</div></a>
       <a href="one-shot.html" class="block-card"><div class="block-code">0x0661</div><div class="block-name">ONE_SHOT</div><div class="block-desc">Single-pulse trigger. Exactly one spend, then permanently disables.</div></a>
       <a href="rate-limit.html" class="block-card"><div class="block-code">0x0671</div><div class="block-name">RATE_LIMIT</div><div class="block-desc">Maximum spends within a block-height window.</div></a>
-      <a href="cosign.html" class="block-card"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Co-signing gate. Additional signature from a committed co-signer key.</div></a>
+      <a href="cosign.html" class="block-card"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Cross-input co-spend constraint. Requires another input with a matching scriptPubKey hash.</div></a>
     </div>
   </div>
 
@@ -250,9 +250,6 @@ a:hover { text-decoration: underline; }
     </div>
   </div>
 
-  <!-- -- COMPACT -- -->
-  <div class="family">
-  </div>
 
 </div>
 
