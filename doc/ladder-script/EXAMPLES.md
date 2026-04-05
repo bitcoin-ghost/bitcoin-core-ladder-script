@@ -7,7 +7,7 @@ applicable), block structure, evaluation logic, and approximate wire format size
 All examples use `RUNG_TX_VERSION = 4` and TX_MLSC (`0xDF`) outputs. Each
 output is 8 bytes (value only) with one shared conditions_root per transaction.
 A creation proof in the witness is validated at block acceptance. Inline
-conditions (`0xC1`) and per-output MLSC (`0xC2`) are removed.
+conditions (`0xC1`) have been removed — all outputs use MLSC (`0xDF`).
 
 ---
 

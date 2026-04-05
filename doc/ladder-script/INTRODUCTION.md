@@ -24,8 +24,8 @@ belong to a known type with enforced size constraints.
   prefix `0xDF`. A creation proof in the witness is validated at block acceptance.
   Leaf computation: `TaggedHash("LadderLeaf", structural_template || value_commitment)`.
   One shared Merkle tree per transaction (PLC model: one program, multiple output coils).
-  Full conditions are revealed only at spend time. Inline conditions (0xC1) and per-output
-  MLSC (0xC2) have been removed.
+  Full conditions are revealed only at spend time. Inline conditions (`0xC1`) have been
+  removed — all outputs use MLSC (`0xDF`).
 - **merkle_pub_key.** Public keys for key-consuming blocks are folded into the Merkle
   leaf hash, not stored in conditions fields. This prevents arbitrary data embedding
   through the PUBKEY_COMMIT writable surface.
@@ -38,8 +38,9 @@ belong to a known type with enforced size constraints.
   and SPHINCS+-SHA2-256f alongside Schnorr and ECDSA.
 - **Relays.** Shared condition sets that can be referenced by multiple rungs, enabling
   DRY composition and cross-rung AND dependencies.
-- **Batch verification.** Schnorr signatures are collected during evaluation and verified
-  in a single batch after all inputs pass.
+- **Batch verification.** `BatchVerifier` infrastructure collects Schnorr signatures for
+  deferred batch verification. Half-aggregated signatures (`AGGREGATE` attestation mode)
+  verify a shared s-value across all inputs at the transaction level.
 - **ANYPREVOUT sighash.** BIP-118 analogue flags (0x40, 0xC0) enable LN-Symmetry/eltoo.
 
 ## Further Reading

@@ -30,7 +30,7 @@ Core evaluation engine. Key review points:
 - `EvalRung()`: AND logic; all blocks must be SATISFIED; checks relay_refs against cached relay results
 - `EvalLadder()`: OR logic; evaluates relays first via `EvalRelays()`, then tries rungs; `satisfied_rung_out` reports which rung passed
 - `VerifyRungTx()`: top-level entry point; deserializes witness, verifies MLSC proof, evaluates ladder, runs batch verification, validates all outputs via `ValidateRungOutputs()`
-- `ValidateRungOutputs()`: consensus rule that every output must be TX_MLSC (0xDF); rejects raw OP_RETURN, legacy scriptPubKey types, and old per-output MLSC (0xC2). Validates creation proof in witness at block acceptance.
+- `ValidateRungOutputs()`: consensus rule that every output must be TX_MLSC (0xDF); rejects raw OP_RETURN, legacy scriptPubKey types, . Validates creation proof in witness at block acceptance.
 - `BatchVerifier`: collects Schnorr entries during evaluation; `Verify()` batch-checks all at once
 - `LadderSignatureChecker`: wraps `BaseSignatureChecker`; dispatches to `SignatureHashLadder` for `SigVersion::LADDER`
 - `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes ERROR
@@ -63,7 +63,7 @@ layout when layout exists). DATA type restricted to DATA_RETURN. ACCUMULATOR whi
 from IsDataEmbeddingType check.
 
 ### conditions.h / conditions.cpp
-MLSC conditions system. MLSC prefix `0xDF` (replaces per-output `0xC2`). Inline conditions 0xC1 removed (stubs return false). Creation proof validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. Each rung's coil has `output_index` declaring which output it governs.
+MLSC conditions system. MLSC prefix `0xDF`. Inline conditions 0xC1 removed (stubs return false). Creation proof validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. Each rung's coil has `output_index` declaring which output it governs.
 - `IsConditionDataType()`: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA allowed; PUBKEY_COMMIT removed
 - Merkle tree: sorted interior hashing, `MLSC_EMPTY_LEAF` padding
 - Leaf order: rungs, then relays, then coil

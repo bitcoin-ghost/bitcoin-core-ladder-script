@@ -11,7 +11,7 @@
 ## 1. Output Format
 
 TX_MLSC is the **only** accepted output format for v4 (rung) transactions.
-Inline conditions (`0xC1`) and per-output MLSC (`0xC2`) are removed and always
+Inline conditions (`0xC1`) have been removed and always
 rejected.
 
 ### TX_MLSC Layout
