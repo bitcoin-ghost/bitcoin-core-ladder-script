@@ -84,14 +84,21 @@ When spending, the witness reveals one rung's conditions plus a Merkle proof. Th
 verifies the proof against the root, merges conditions with the witness, and evaluates the
 ladder. Unrevealed rungs stay hidden behind their leaf hashes.
 
-**Key-path spend** (1-element witness): the conditions root is treated as an x-only public
-key. A Schnorr signature against it spends the output with no conditions revealed at all.
+**Key-path spend** (1-element witness): the conditions root is treated as an x-only
+public key. A Schnorr signature against the tweaked key spends the output with no
+conditions revealed at all. This is the 119 vB path — the cheapest transaction type
+in Bitcoin.
 
 **Script-path spend** (2 or 3 element witness): ladder witness + Merkle proof. The
-revealed rung is evaluated. If a third element is provided (the internal pubkey), the
-node verifies that the conditions root is a tweak of that key — this is the same
-relationship as Taproot's output_key = internal_key + H(internal_key || merkle_root) × G,
-enabling both key-path and script-path spending from the same output.
+revealed rung is evaluated.
+
+The key to both paths working from the same output is the **tweak**. When `createtxmlsc`
+detects a single-SIG rung, it automatically tweaks the output:
+`conditions_root = internal_pubkey + H("LadderTweak", internal_pubkey || merkle_root) × G`.
+This is the same approach as Taproot. When script-path spending, the witness includes
+the internal pubkey (3 elements) so the node can verify the tweak relationship and
+recover the raw Merkle root. Without the tweak, only script-path spending would be
+possible (2 elements, the conditions root is the raw Merkle root directly).
 
 Three proof modes: **FULL_LEAVES** (all leaf hashes provided), **MERKLE_PATH** (O(log N)
 sibling path — the default), **SHARED** (references a previously verified input from the
