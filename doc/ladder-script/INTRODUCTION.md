@@ -1,59 +1,66 @@
 # Ladder Script
 
-Ladder Script is a typed, structured replacement for Bitcoin Script designed for
-version 4 (`RUNG_TX_VERSION = 4`) transactions. It eliminates the untyped stack machine
-in favour of 62 declarative function blocks across 10 families: Signature, Timelock,
-Hash, Covenant, Recursion, Anchor, PLC, Compound, Governance, and Legacy.
+Ladder Script replaces Bitcoin Script with 62 typed function blocks. Instead of
+an untyped stack machine, every spending condition is a named block with declared
+fields. Blocks are grouped into rungs (AND — all must pass) and ladders (OR —
+first satisfied rung wins). Every byte in a transaction belongs to one of 11 typed
+fields with enforced size constraints.
+
+A version 4 transaction (`RUNG_TX`) carries a single shared Merkle root covering
+all outputs. Each output is 8 bytes on the wire (value only). The full spending
+conditions are committed in the Merkle tree and revealed only at spend time — the
+unrevealed paths stay private. This is Merkelised Ladder Script Conditions (MLSC).
 
 Based on Bitcoin Core v30.0.
 
-## Core Concepts
+## Why Use It
 
-A **ladder** is a set of spending paths for a single output. Each path is a **rung**
-containing one or more **blocks**. Blocks within a rung are combined with AND logic
-(all must be satisfied). Rungs within a ladder are combined with OR logic (first
-satisfied rung wins).
+**Smallest transactions in Bitcoin.** A key-path payment is 119 vB — cheaper than
+P2WPKH (143 vB), P2TR (157 vB), and P2PKH (226 vB). Script-path is 140 vB, still
+beating every legacy type. Full lifecycle (create + spend) is 6% cheaper than P2WPKH.
 
-Every field has an explicit **data type** (11 types: PUBKEY, SIGNATURE, HASH256,
-HASH160, PREIMAGE, NUMERIC, SCHEME, SPEND_INDEX, SCRIPT_BODY, DATA, PUBKEY_COMMIT).
-There are no arbitrary data pushes. Every byte belongs to a known type with enforced
-size constraints.
+**Smallest UTXO footprint ever.** Each output costs ~8 bytes in the UTXO set versus
+~29 for P2WPKH and ~41 for P2TR. A 100-output batch payment is 914 vB — 71% cheaper
+than P2WPKH. The MLSC scriptPubKey compresses to a single byte; the conditions root
+is stored once per transaction via a synthetic UTXO entry.
 
-## Transaction Format
+**Inscriptions are structurally impossible.** Every byte must belong to a typed field.
+There is no contiguous data block in a RUNG_TX. The total user-chosen arbitrary data
+surface is 112 bytes per transaction, flat, regardless of how many outputs you create.
+Fail-closed deserialisation rejects unknown types, unknown fields, and trailing bytes.
 
-Outputs use **TX_MLSC** (Transaction-level Merkelised Ladder Script Conditions): 8 bytes
-per output (value only) with one shared `conditions_root` (32 bytes on the wire) per
-transaction. The RUNG_TX wire format uses flag byte `0x02`. Conditions are revealed only
-at spend time via Merkle proofs. Inline conditions (`0xC1`) have been removed — all
-outputs use MLSC (`0xDF`).
+**Privacy by default.** When you spend via one rung, only that rung's conditions are
+revealed. Every other spending path stays hidden behind its Merkle leaf hash. An observer
+sees how many paths exist but not what they contain.
 
-## Performance
+**Post-quantum ready.** Swap the SCHEME field to FALCON-512, FALCON-1024, Dilithium3,
+or SPHINCS+ and the same transaction structure works with quantum-resistant signatures.
+No new opcodes, no new transaction format — just a different scheme byte.
 
-- **Key-path spending:** 119 vB — cheaper than P2WPKH (143 vB), P2TR (157 vB), and P2PKH (226 vB).
-- **Script-path:** 140 vB — still beats every legacy type.
-- **Full lifecycle** (create + spend): 6% cheaper than P2WPKH.
-- **Batch 100 outputs:** 914 vB (71% cheaper than P2WPKH).
-- **UTXO footprint:** ~8 bytes per output (5× more efficient than P2TR's ~41 bytes) via synthetic root entry and 1-byte MLSC compression.
-- **Anti-spam:** 112 bytes of user-chosen arbitrary data per transaction (flat, regardless of output count).
+**Native covenants and state machines.** CTV template verification, recursive covenants
+(RECURSE_SAME, RECURSE_MODIFIED, RECURSE_COUNT, RECURSE_SPLIT, RECURSE_DECAY,
+RECURSE_UNTIL), vaults with clawback (VAULT_LOCK), rate limiters, latches, counters,
+sequencers, and cross-input constraints (COSIGN) — all as single typed blocks, not
+fragile opcode sequences.
 
-## Key Properties
+**ANYPREVOUT for payment channels.** BIP-118 analogue sighash flags (0x40, 0xC0) enable
+LN-Symmetry/eltoo-style channels where the latest state simply replaces any older state.
 
-- **merkle_pub_key.** Public keys for key-consuming blocks are folded into the Merkle
-  leaf hash, not stored in conditions fields. This prevents arbitrary data embedding
-  through the PUBKEY_COMMIT writable surface.
-- **Selective inversion.** Blocks on an explicit allowlist may be inverted
-  (SATISFIED becomes UNSATISFIED and vice versa). Key-consuming blocks are never invertible.
-- **Anti-spam.** Fail-closed deserialisation rejects unknown block types, unknown data types,
-  and trailing bytes. `IsDataEmbeddingType` blocks high-bandwidth types in layout-less blocks.
-  PREIMAGE and SCRIPT_BODY fields are capped at 2 per witness and 2 per transaction.
-- **Post-quantum readiness.** The SCHEME field supports FALCON-512, FALCON-1024, Dilithium3,
-  and SPHINCS+-SHA2-256f alongside Schnorr and ECDSA.
-- **Relays.** Shared condition sets that can be referenced by multiple rungs, enabling
-  DRY composition and cross-rung AND dependencies.
-- **Half-aggregated Schnorr signatures.** `AGGREGATE` attestation mode verifies a shared
-  s-value across all inputs at the transaction level. `BatchVerifier` infrastructure
-  supports deferred batch verification.
-- **ANYPREVOUT sighash.** BIP-118 analogue flags (0x40, 0xC0) enable LN-Symmetry/eltoo.
-- **O(log N) Merkle path proofs.** Default proof mode for spend-time condition revelation.
-- **Creation proof.** Required for transactions with 3 or more spendable outputs, binding
-  each output to the shared condition tree and preventing UTXO spam.
+**Half-aggregated Schnorr signatures.** The AGGREGATE attestation mode collects each
+input's R-value in the witness and verifies a single shared s-value at the transaction
+level, reducing multi-input transaction size.
+
+## How It Works
+
+A **ladder** is a set of spending paths. Each path is a **rung** of one or more
+**blocks**. A SIG block checks a signature. A CSV block checks a relative timelock.
+An HTLC block checks a hash preimage + timelock + signature in one block. You combine
+them with AND logic within a rung, and OR logic across rungs.
+
+Public keys are folded into the Merkle leaf hash (`merkle_pub_key`) rather than stored
+in the on-chain conditions. This eliminates the writable surface that inscriptions exploit
+in Taproot. Key-consuming blocks are never invertible — you cannot embed arbitrary data
+by providing a garbage pubkey and inverting the result.
+
+Transactions with 3 or more spendable outputs include a creation proof in the witness,
+binding each output to the shared condition tree and preventing UTXO spam.
