@@ -13,8 +13,9 @@ are revealed only at spend time via Merkle proofs.
 Key-path spending: 119 vB (simple payment). Script-path: 140 vB. Batch 100 outputs: 914 vB
 (71% cheaper than P2WPKH). Full lifecycle 6% cheaper than P2WPKH.
 
-UTXO deduplication: ~8 bytes per output (6× more efficient than P2TR) via synthetic root
-entry. Anti-spam: 112 bytes embeddable data per transaction (1 input, flat).
+UTXO deduplication: ~8 bytes per output (5× more efficient than P2TR's ~41 bytes) via
+synthetic root entry. Anti-spam: 112 bytes of user-chosen arbitrary data per transaction
+(flat, regardless of output count).
 
 Public keys folded into Merkle leaves via `merkle_pub_key`. Key-consuming blocks never
 invertible. Post-quantum ready (FALCON-512/1024, Dilithium3, SPHINCS+). ANYPREVOUT sighash
