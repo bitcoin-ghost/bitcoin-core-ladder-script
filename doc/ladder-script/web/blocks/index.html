@@ -61,16 +61,16 @@ a:hover { text-decoration: underline; }
 .block-card:hover { border-color: var(--accent); text-decoration: none; }
 .block-code { font-size: 11px; color: var(--text-light); font-family: 'JetBrains Mono', monospace; letter-spacing: 1px; margin-bottom: 2px; }
 .block-name { font-size: 15px; font-weight: 600; color: var(--accent); margin-bottom: 6px; }
-.fam-sig .block-name { color: #c0392b; }   /* red */
-.fam-time .block-name { color: #e67e22; }  /* orange */
-.fam-hash .block-name { color: #d4a017; }  /* gold */
-.fam-cov .block-name { color: #27ae60; }   /* green */
-.fam-rec .block-name { color: #16a085; }   /* teal */
-.fam-anc .block-name { color: #2980b9; }   /* blue */
-.fam-plc .block-name { color: #8e44ad; }   /* purple */
-.fam-comp .block-name { color: #e84393; }  /* pink */
-.fam-gov .block-name { color: #6c5ce7; }   /* indigo */
-.fam-leg .block-name { color: #636e72; }   /* slate */
+.fam-sig .block-name { color: #e60000; }   /* bright red */
+.fam-time .block-name { color: #ff8c00; }  /* vivid orange */
+.fam-hash .block-name { color: #ccaa00; }  /* yellow */
+.fam-cov .block-name { color: #00b33c; }   /* bright green */
+.fam-rec .block-name { color: #00cccc; }   /* cyan */
+.fam-anc .block-name { color: #0066ff; }   /* bold blue */
+.fam-plc .block-name { color: #9900cc; }   /* vivid purple */
+.fam-comp .block-name { color: #ff0080; }  /* hot pink */
+.fam-gov .block-name { color: #4400cc; }   /* deep violet */
+.fam-leg .block-name { color: #666; }      /* neutral grey */
 .block-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 
 /* -- FOOTER -- */
@@ -120,7 +120,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- SIGNATURE -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#c0392b;">Signature Family &mdash; 0x0001</h2>
+    <h2 class="family-title" style="color:#e60000;">Signature Family &mdash; 0x0001</h2>
     <p class="family-intro">Signature blocks verify cryptographic signatures against committed public keys. The foundation of UTXO authorisation.</p>
     <div class="block-grid">
       <a href="sig.html" class="block-card fam-sig"><div class="block-code">0x0001</div><div class="block-name">SIG</div><div class="block-desc">Single Schnorr/ECDSA/PQ signature verification. Key folded into Merkle leaf via merkle_pub_key.</div></a>
@@ -133,7 +133,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- TIMELOCK -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#e67e22;">Timelock Family &mdash; 0x0100</h2>
+    <h2 class="family-title" style="color:#ff8c00;">Timelock Family &mdash; 0x0100</h2>
     <p class="family-intro">Temporal constraints on spending &mdash; relative to confirmation (CSV) or absolute block height / timestamp (CLTV).</p>
     <div class="block-grid">
       <a href="csv.html" class="block-card fam-time"><div class="block-code">0x0101</div><div class="block-name">CSV</div><div class="block-desc">Relative timelock by block count. UTXO cannot be spent until N blocks after confirmation.</div></a>
@@ -145,7 +145,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- HASH -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#d4a017;">Hash Family &mdash; 0x0200</h2>
+    <h2 class="family-title" style="color:#ccaa00;">Hash Family &mdash; 0x0200</h2>
     <p class="family-intro">Hash preimage verification.</p>
     <div class="block-grid">
       <a href="tagged-hash.html" class="block-card fam-hash"><div class="block-code">0x0203</div><div class="block-name">TAGGED_HASH</div><div class="block-desc">BIP-340 tagged hash preimage verification. Domain-separated hashing.</div></a>
@@ -155,7 +155,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- COVENANT -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#27ae60;">Covenant Family &mdash; 0x0300</h2>
+    <h2 class="family-title" style="color:#00b33c;">Covenant Family &mdash; 0x0300</h2>
     <p class="family-intro">Enforce constraints on how a UTXO can be spent by inspecting the spending transaction. No direct Tapscript equivalent.</p>
     <div class="block-grid">
       <a href="ctv.html" class="block-card fam-cov"><div class="block-code">0x0301</div><div class="block-name">CTV</div><div class="block-desc">CheckTemplateVerify (BIP-119). Verifies spending transaction matches a committed template hash.</div></a>
@@ -166,7 +166,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- RECURSION -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#16a085;">Recursion Family &mdash; 0x0400</h2>
+    <h2 class="family-title" style="color:#00cccc;">Recursion Family &mdash; 0x0400</h2>
     <p class="family-intro">Self-referencing covenants &mdash; outputs that enforce spending back into the same or modified covenant structure.</p>
     <div class="block-grid">
       <a href="recurse-same.html" class="block-card fam-rec"><div class="block-code">0x0401</div><div class="block-name">RECURSE_SAME</div><div class="block-desc">Enforces output recreates the identical covenant. Perpetual re-encumbrance.</div></a>
@@ -180,7 +180,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- ANCHOR -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#2980b9;">Anchor Family &mdash; 0x0500</h2>
+    <h2 class="family-title" style="color:#0066ff;">Anchor Family &mdash; 0x0500</h2>
     <p class="family-intro">Commit to external state references &mdash; channel IDs, pool IDs, reserve requirements, oracle attestations, tamper-evident seals.</p>
     <div class="block-grid">
       <a href="anchor.html" class="block-card fam-anc"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor marker with a single NUMERIC(anchor_id) field.</div></a>
@@ -195,7 +195,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- PLC -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#8e44ad;">PLC Family &mdash; 0x0600</h2>
+    <h2 class="family-title" style="color:#9900cc;">PLC Family &mdash; 0x0600</h2>
     <p class="family-intro">Industrial automation primitives for Bitcoin script. Hysteresis, timers, latches, counters, comparators, sequencers, rate limiters.</p>
     <div class="block-grid">
       <a href="hysteresis-fee.html" class="block-card fam-plc"><div class="block-code">0x0601</div><div class="block-name">HYSTERESIS_FEE</div><div class="block-desc">Fee-rate hysteresis controller with deadband.</div></a>
@@ -217,7 +217,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- COMPOUND -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#e84393;">Compound Family &mdash; 0x0700</h2>
+    <h2 class="family-title" style="color:#ff0080;">Compound Family &mdash; 0x0700</h2>
     <p class="family-intro">Common multi-block patterns collapsed into single blocks, reducing wire overhead.</p>
     <div class="block-grid">
       <a href="timelocked-sig.html" class="block-card fam-comp"><div class="block-code">0x0701</div><div class="block-name">TIMELOCKED_SIG</div><div class="block-desc">SIG + CSV in one block. Saves 8 bytes on wire.</div></a>
@@ -232,7 +232,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- GOVERNANCE -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#6c5ce7;">Governance Family &mdash; 0x0800</h2>
+    <h2 class="family-title" style="color:#4400cc;">Governance Family &mdash; 0x0800</h2>
     <p class="family-intro">Transaction-level constraints with no Tapscript equivalent. Inspect structure, weight, I/O counts, value ratios.</p>
     <div class="block-grid">
       <a href="epoch-gate.html" class="block-card fam-gov"><div class="block-code">0x0801</div><div class="block-name">EPOCH_GATE</div><div class="block-desc">Periodic spending windows using block height modular arithmetic.</div></a>
@@ -247,7 +247,7 @@ a:hover { text-decoration: underline; }
 
   <!-- -- LEGACY -- -->
   <div class="family">
-    <h2 class="family-title" style="color:#636e72;">Legacy Family &mdash; 0x0900</h2>
+    <h2 class="family-title" style="color:#666;">Legacy Family &mdash; 0x0900</h2>
     <p class="family-intro">Wraps Bitcoin's original transaction types as typed Ladder Script blocks. Same spending semantics, all fields typed. Closes inscription and data-embedding vectors.</p>
     <div class="block-grid">
       <a href="p2pk-legacy.html" class="block-card fam-leg"><div class="block-code">0x0901</div><div class="block-name">P2PK_LEGACY</div><div class="block-desc">Pay-to-Public-Key. Delegates to EvalSigBlock.</div></a>
