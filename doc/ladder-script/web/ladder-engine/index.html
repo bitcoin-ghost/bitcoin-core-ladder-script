@@ -9761,7 +9761,7 @@ function SignetPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={sty.dot(online ? '#2ea043' : '#c43030')} />
           <span style={{ color: online ? 'var(--green-bright)' : 'var(--red-bright)', fontSize: 13, fontWeight: 600, letterSpacing: 1 }}>
-            {online ? 'GHOST SIGNET ONLINE' : 'SIGNET OFFLINE'}
+            {online ? 'LADDER SIGNET ONLINE' : 'SIGNET OFFLINE'}
           </span>
           {online && <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>Block {status.blocks}</span>}
         </div>
@@ -11435,7 +11435,7 @@ const WALKTHROUGH_STEPS = [
   },
   {
     title: 'Signet Mode',
-    body: 'Switch to the <code>SEND</code> tab to interact with a live Ghost signet node. This is where you create, fund, sign, and broadcast real transactions on the test network.',
+    body: 'Switch to the <code>SEND</code> tab to interact with a live Ladder Script signet node. This is where you create, fund, sign, and broadcast real transactions on the test network.',
     targetSelector: '.mode-tabs',
   },
   {
@@ -12159,7 +12159,7 @@ function App() {
       '{"amount":0.001,"scriptPubKey":"c2..."}'
     );
     const spentStr = '[' + spentOutputs.join(', ') + ']';
-    return `ghost-cli -signet signladder \\\n  "<TX_HEX>" \\\n  "${descriptorOutput}" \\\n  '${keyMap}' \\\n  '${spentStr}'`;
+    return `bitcoin-cli -signet signladder \\\n  "<TX_HEX>" \\\n  "${descriptorOutput}" \\\n  '${keyMap}' \\\n  '${spentStr}'`;
   }, [rungs, txInputs, descriptorOutput]);
 
   // Compute which output names and rung numbers are energized (for OUTPUT_REF cross-referencing)
@@ -12805,7 +12805,7 @@ ${ladderRows.map(r => `
           title="Toggle help tooltips"
         >{showTooltips ? '? ON' : '? OFF'}</button>
         <div className="status-item" style={{ color: 'var(--text-dim)' }}>
-          GHOST LADDER v2.0
+          LADDER SCRIPT v2.0
         </div>
       </div>
 
