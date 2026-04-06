@@ -4159,7 +4159,8 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
   txOutputs.forEach((o, idx) => {
     if (!rungs.some(r => r.output.type !== 'relay' && r.output.txOutputId === o.id)) return;
     outputIdToIndex.set(o.id, amounts.length);
-    amounts.push((parseInt(o.amount) || 0) / 100000000); // sats → BTC
+    const sats = parseInt(o.amount) || 1000; // default 1000 sats if empty
+    amounts.push(sats / 100000000); // sats → BTC
   });
 
   // Build shared rung array with output_index
@@ -7010,8 +7011,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 45000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr1, amount: 1500 },
+      { address: FAKE.addr2, amount: 1000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7030,8 +7031,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 10000 },
-      { address: FAKE.addr4, amount: 9900 },
+      { address: FAKE.addr3, amount: 1000 },
+      { address: FAKE.addr4, amount: 900 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7051,7 +7052,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 25000 },
+      { address: FAKE.addr1, amount: 1500 },
       { address: FAKE.addr2, amount: 24800 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7092,7 +7093,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 100000 },
+      { address: FAKE.addr3, amount: 2000 },
       { address: FAKE.addr6, amount: 99900 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7113,8 +7114,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr4, amount: 50000 },
-      { address: FAKE.addr1, amount: 50000 },
+      { address: FAKE.addr4, amount: 2000 },
+      { address: FAKE.addr1, amount: 2000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7135,7 +7136,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 250000 },
+      { address: FAKE.addr1, amount: 1500 },
       { address: FAKE.addr5, amount: 249900 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7162,8 +7163,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 7500 },
-      { address: FAKE.addr4, amount: 7500 },
+      { address: FAKE.addr3, amount: 1000 },
+      { address: FAKE.addr4, amount: 1000 },
       { address: FAKE.addr5, amount: 7400 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
@@ -7190,9 +7191,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 1 }, { txid: FAKE.txid2, vout: 3 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 30000 },
-      { address: FAKE.addr2, amount: 20000 },
-      { address: FAKE.addr4, amount: 20000 },
+      { address: FAKE.addr1, amount: 1500 },
+      { address: FAKE.addr2, amount: 1000 },
+      { address: FAKE.addr4, amount: 1000 },
     ],
     inputMap: [[0, 1], [0], [1]], outputMap: [0, 1, 2],
   },
@@ -7237,8 +7238,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr2, amount: 50000 },
-      { address: FAKE.addr6, amount: 30000 },
+      { address: FAKE.addr2, amount: 2000 },
+      { address: FAKE.addr6, amount: 1500 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7262,7 +7263,7 @@ const EXAMPLES = [
     txInputs: [{ txid: FAKE.txid4, vout: 2 }],
     txOutputs: [
       { address: FAKE.addr1, amount: 1000 },
-      { address: FAKE.addr3, amount: 5000 },
+      { address: FAKE.addr3, amount: 1000 },
       { address: FAKE.addr5, amount: 4000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
@@ -7279,7 +7280,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 2 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7296,7 +7297,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 3 }],
     txOutputs: [
-      { address: FAKE.addr6, amount: 15000 },
+      { address: FAKE.addr6, amount: 1500 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7348,9 +7349,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 150000 },
+      { address: FAKE.addr1, amount: 2000 },
       { address: FAKE.addr6, amount: 149900 },
-      { address: FAKE.addr3, amount: 50000 },
+      { address: FAKE.addr3, amount: 2000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7377,9 +7378,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 0 }, { txid: FAKE.txid1, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 50000 },
-      { address: FAKE.addr2, amount: 50000 },
-      { address: FAKE.addr5, amount: 100000 },
+      { address: FAKE.addr1, amount: 2000 },
+      { address: FAKE.addr2, amount: 2000 },
+      { address: FAKE.addr5, amount: 2000 },
       { address: FAKE.addr6, amount: 99500 },
     ],
     inputMap: [[0, 1], [0], [0, 1], [0, 1]], outputMap: [0, 1, 2, 3],
@@ -7401,7 +7402,7 @@ const EXAMPLES = [
       { txid: FAKE.txid3, vout: 0 },
     ],
     txOutputs: [
-      { address: FAKE.addr1, amount: 75000 },
+      { address: FAKE.addr1, amount: 2000 },
     ],
     inputMap: [[0, 1, 2]], outputMap: [0],
   },
@@ -7421,7 +7422,7 @@ const EXAMPLES = [
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
       { address: FAKE.addr1, amount: 95000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr2, amount: 1000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7439,8 +7440,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 30000 },
-      { address: FAKE.addr4, amount: 20000 },
+      { address: FAKE.addr3, amount: 1500 },
+      { address: FAKE.addr4, amount: 1000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7463,9 +7464,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 2500 },
-      { address: FAKE.addr2, amount: 2500 },
-      { address: FAKE.addr3, amount: 10000 },
+      { address: FAKE.addr1, amount: 1000 },
+      { address: FAKE.addr2, amount: 1000 },
+      { address: FAKE.addr3, amount: 1000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7488,9 +7489,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 5000 },
-      { address: FAKE.addr3, amount: 45000 },
-      { address: FAKE.addr5, amount: 50000 },
+      { address: FAKE.addr1, amount: 1000 },
+      { address: FAKE.addr3, amount: 1500 },
+      { address: FAKE.addr5, amount: 2000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7509,8 +7510,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 2 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 10000 },
-      { address: FAKE.addr2, amount: 9900 },
+      { address: FAKE.addr1, amount: 1000 },
+      { address: FAKE.addr2, amount: 900 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7530,7 +7531,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 3 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 5000 },
+      { address: FAKE.addr3, amount: 1000 },
       { address: FAKE.addr4, amount: 4900 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7577,7 +7578,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr2, amount: 25000 },
+      { address: FAKE.addr2, amount: 1500 },
       { address: FAKE.addr6, amount: 70000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7599,7 +7600,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 30000 },
+      { address: FAKE.addr3, amount: 1500 },
       { address: FAKE.addr4, amount: 29800 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
@@ -7626,9 +7627,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 2 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 500000 },
+      { address: FAKE.addr1, amount: 1000 },
       { address: FAKE.addr5, amount: 7000 },
-      { address: FAKE.addr6, amount: 5000 },
+      { address: FAKE.addr6, amount: 1000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7654,9 +7655,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 3 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 150000 },
-      { address: FAKE.addr3, amount: 5000 },
-      { address: FAKE.addr5, amount: 50000 },
+      { address: FAKE.addr1, amount: 2000 },
+      { address: FAKE.addr3, amount: 1000 },
+      { address: FAKE.addr5, amount: 2000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7682,9 +7683,9 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 2 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 30000 },
-      { address: FAKE.addr2, amount: 20000 },
-      { address: FAKE.addr4, amount: 50000 },
+      { address: FAKE.addr1, amount: 1500 },
+      { address: FAKE.addr2, amount: 1000 },
+      { address: FAKE.addr4, amount: 2000 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7699,7 +7700,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 10000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7718,8 +7719,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 10000 },
-      { address: FAKE.addr2, amount: 10000 },
+      { address: FAKE.addr1, amount: 1000 },
+      { address: FAKE.addr2, amount: 1000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7735,7 +7736,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7751,7 +7752,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7767,7 +7768,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7787,8 +7788,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 45000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr1, amount: 1500 },
+      { address: FAKE.addr2, amount: 1000 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7813,8 +7814,8 @@ const EXAMPLES = [
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
       { address: FAKE.addr3, amount: 40000 },
-      { address: FAKE.addr4, amount: 30000 },
-      { address: FAKE.addr5, amount: 29500 },
+      { address: FAKE.addr4, amount: 1500 },
+      { address: FAKE.addr5, amount: 1500 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
   },
@@ -7838,8 +7839,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 50000 },
-      { address: FAKE.addr2, amount: 30000 },
+      { address: FAKE.addr1, amount: 2000 },
+      { address: FAKE.addr2, amount: 1500 },
       { address: FAKE.addr6, amount: 19500 },
     ],
     inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
@@ -7856,7 +7857,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7872,7 +7873,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 25000 },
+      { address: FAKE.addr1, amount: 1500 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7888,7 +7889,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 25000 },
+      { address: FAKE.addr1, amount: 1500 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7904,7 +7905,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 25000 },
+      { address: FAKE.addr1, amount: 1500 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7924,8 +7925,8 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 30000 },
-      { address: FAKE.addr2, amount: 29500 },
+      { address: FAKE.addr1, amount: 1500 },
+      { address: FAKE.addr2, amount: 1500 },
     ],
     inputMap: [[0], [0]], outputMap: [0, 1],
   },
@@ -7941,7 +7942,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 10000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7957,7 +7958,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 50000 },
+      { address: FAKE.addr1, amount: 2000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7973,7 +7974,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 100000 },
+      { address: FAKE.addr1, amount: 2000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -7989,7 +7990,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 20000 },
+      { address: FAKE.addr1, amount: 1000 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
@@ -8005,7 +8006,7 @@ const EXAMPLES = [
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 15000 },
+      { address: FAKE.addr1, amount: 1500 },
     ],
     inputMap: [[0]], outputMap: [0],
   },
