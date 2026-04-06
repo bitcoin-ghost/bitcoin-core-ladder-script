@@ -4224,7 +4224,31 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
     sharedRungs.push(rungObj);
   });
 
-  const result = { inputs, outputs: amounts, rungs: sharedRungs };
+  // Build output objects: {amount, conditions, coil} per output index
+  const outputsByIndex = new Map();
+  sharedRungs.forEach(r => {
+    const idx = r.output_index;
+    if (!outputsByIndex.has(idx)) {
+      outputsByIndex.set(idx, { amount: amounts[idx] || 0.00001, conditions: [], pubkeys: [] });
+    }
+    const entry = outputsByIndex.get(idx);
+    entry.conditions.push({ blocks: r.blocks });
+    if (r.pubkeys) entry.pubkeys.push(...r.pubkeys);
+  });
+
+  const outputs = [];
+  for (let i = 0; i < amounts.length; i++) {
+    const entry = outputsByIndex.get(i);
+    if (entry) {
+      const out = { amount: entry.amount, conditions: entry.conditions };
+      if (entry.pubkeys.length > 0) out.pubkeys = entry.pubkeys;
+      outputs.push(out);
+    } else {
+      outputs.push({ amount: amounts[i] || 0.00001, conditions: [{ blocks: [] }] });
+    }
+  }
+
+  const result = { inputs, outputs };
   const lt = parseInt(locktime);
   if (lt > 0) result.locktime = lt;
 
