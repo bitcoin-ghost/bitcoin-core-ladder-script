@@ -80,7 +80,7 @@ ladder(or(
 Ladder:
   Rung 0: (hot path: 2-of-3 multisig)
     Block 0: MULTISIG
-      Conditions fields: [NUMERIC(2)]         -- threshold M=2
+      Conditions fields: [NUMERIC(2), SCHEME(0x01)] -- threshold M=2, Schnorr
       Witness fields:    [PUBKEY(32), PUBKEY(32), PUBKEY(32),
                           SIGNATURE(64), SIGNATURE(64)]
   Rung 1: (recovery path: timelocked single sig)
@@ -136,8 +136,8 @@ Rung 1: TIMELOCKED_SIG block (Alice reclaims after timeout)
 Ladder:
   Rung 0: (claim path)
     Block 0: HTLC (0x0702)
-      Conditions fields: [HASH256(payment_hash), NUMERIC(0)]  -- 0 = no CSV for claim
-      Witness fields:    [PREIMAGE(32), PUBKEY(32), SIGNATURE(64)]
+      Conditions fields: [HASH256(payment_hash), NUMERIC(0), SCHEME(0x01)]
+      Witness fields:    [PUBKEY(32), SIGNATURE(64), PUBKEY(32), PREIMAGE(32), NUMERIC]
   Rung 1: (refund path)
     Block 0: TIMELOCKED_SIG (0x0701)
       Conditions fields: [SCHEME(0x01), NUMERIC(144)]          -- 144 blocks (~24h)
