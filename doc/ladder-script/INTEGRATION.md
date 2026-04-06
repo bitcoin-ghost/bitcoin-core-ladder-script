@@ -6,14 +6,12 @@ modes, PQ schemes, and per-rung destinations.
 
 ## Overview
 
-Ladder Script transactions use `RUNG_TX_VERSION = 4`. Each output is 8 bytes (value only)
-and the transaction carries one shared `conditions_root` with MLSC prefix byte `0xDF`. A
-creation proof in the witness is validated at block acceptance. The RUNG_TX wire format
-uses flag byte `0x02`; TX_MLSC defines the conditions commitment (one shared root per
-transaction). The spending
-witness carries the full conditions for one rung plus a Merkle proof for the unrevealed
-rungs. The node verifies the Merkle proof, evaluates the revealed rung, and (if signatures
-are batched) verifies all Schnorr signatures in a single batch.
+Ladder Script uses version 4 transactions (`RUNG_TX`). Each output is 8 bytes on the wire
+(value only). A single 32-byte `conditions_root` is shared across all outputs, carrying the
+Merkelised Ladder Script Conditions. Flag byte `0x02` signals the RUNG_TX wire format. A
+creation proof in the witness is required for 3 or more spendable outputs. At spend time,
+the witness reveals one rung's conditions plus a Merkle proof. The node verifies the proof,
+merges conditions with the witness, and evaluates the ladder.
 
 ## Creating Outputs (MLSC)
 
@@ -78,11 +76,15 @@ is 1 to 40 bytes.
 
 ### Standard Witness
 
-The witness stack has two elements:
+The witness stack has 1, 2, or 3 elements depending on the spending path:
 
-- `stack[0]`: Serialized `LadderWitness` (the spending witness with rungs, blocks, fields,
-  and coil).
-- `stack[1]`: Serialized `MLSCProof` (Merkle proof revealing one rung).
+- **Key-path** (1 element): `[signature(64)]` — sign against the tweaked conditions root
+  as an x-only pubkey. No conditions revealed. 119 vB.
+- **Script-path** (2 elements): `[LadderWitness, MLSCProof]` — reveal one rung's
+  conditions with a Merkle proof.
+- **Tweaked script-path** (3 elements): `[LadderWitness, MLSCProof, internal_pubkey]` —
+  same as script-path but proves the tweak relationship for outputs that also support
+  key-path spending.
 
 The `LadderWitness` contains:
 - Rungs with blocks and typed fields (PUBKEY, SIGNATURE, NUMERIC, etc.)
@@ -170,27 +172,35 @@ rung = block | and(block, ...)      single block or AND composition
 
 ### Block Syntax
 
+All 62 block types are supported in descriptors. Common examples:
+
 | Block | Syntax |
 |-------|--------|
 | sig | `sig(@alias)` or `sig(@alias, scheme)` |
-| csv | `csv(N)` |
-| csv_time | `csv_time(N)` |
-| cltv | `cltv(N)` |
-| cltv_time | `cltv_time(N)` |
 | multisig | `multisig(M, @pk1, @pk2, ...)` |
-| hash_guarded | `hash_guarded(hex32)` |
+| csv / csv_time | `csv(N)` / `csv_time(N)` |
+| cltv / cltv_time | `cltv(N)` / `cltv_time(N)` |
+| timelocked_sig | `timelocked_sig(@alias, N)` |
+| htlc | `htlc(@claim, @refund, hash_hex, csv_N)` |
 | ctv | `ctv(hex32)` |
 | amount_lock | `amount_lock(min, max)` |
-| timelocked_sig | `timelocked_sig(@alias, N)` |
+| vault_lock | `vault_lock(@recovery, @hot, delay)` |
 | output_check | `output_check(idx, min, max, hex32)` |
+| recurse_same | `recurse_same(max_depth)` |
+| recurse_count | `recurse_count(N)` |
+| cosign | `cosign(hex32)` |
+| hash_guarded | `hash_guarded(hex32)` |
 | (inverted) | `!block` prefix |
+
+All other blocks follow the pattern `block_name(args...)`. The full list of 44
+parseable names matches the block type names in lowercase with underscores.
 
 Scheme names: `schnorr`, `ecdsa`, `falcon512`, `falcon1024`, `dilithium3`, `sphincs_sha`.
 
 ### RPC Commands
 
 - `parseladder "descriptor" '{"alias": "pubkey_hex", ...}'` — parse descriptor to conditions
-- `formatladder <conditions_json>` — format conditions as descriptor string
+- `formatladder <conditions_hex>` — format conditions hex as descriptor string
 
 ## Coil Types
 
@@ -242,14 +252,21 @@ cached results before evaluating the rung's own blocks.
 
 The full validation pipeline for a v4 RUNG_TX:
 
-1. `VerifyRungTx()` is called for each input.
-2. Witness `stack[0]` is deserialized via `DeserializeLadderWitness()`.
-3. Witness `stack[1]` is deserialized via `DeserializeMLSCProof()`.
-4. `VerifyMLSCProof()` reconstructs the Merkle tree and verifies the root matches the UTXO.
-5. Conditions are assembled from the proof's revealed rung.
-6. `EvalLadder()` evaluates relays, then the revealed rung.
-7. If batch verification is active, `BatchVerifier::Verify()` checks all Schnorr signatures.
-8. `ValidateRungOutputs()` verifies every output is valid MLSC.
+**Per-transaction (first input only):**
+
+1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN, dust threshold.
+2. Creation proof validated (required for 3+ spendable outputs).
+3. PREIMAGE/SCRIPT_BODY count across all inputs checked against `MAX_PREIMAGE_FIELDS_PER_TX`.
+
+**Per-input:**
+
+4. `VerifyRungTx()` is called. Witness stack size determines spending path (1/2/3 elements).
+5. Key-path (1 element): verify Schnorr signature against conditions root as pubkey. Done.
+6. Script-path (2-3 elements): deserialise `LadderWitness` (stack[0]) and `MLSCProof` (stack[1]).
+7. Extract pubkeys via `ExtractBlockPubkeys()` (merkle_pub_key).
+8. Verify Merkle proof against conditions root (or tweak for 3-element witness).
+9. `MergeConditionsAndWitness()`: combine conditions from proof with witness fields.
+10. `EvalLadder()`: evaluate relays (cached), then the revealed rung (AND/OR logic).
 
 ## RPC Command Reference
 
@@ -258,7 +275,7 @@ The full validation pipeline for a v4 RUNG_TX:
 | `decoderung` | Decode a ladder witness from hex |
 | `createrung` | Build conditions and compute MLSC root |
 | `validateladder` | Validate a ladder witness structure |
-| `createtxmlsc` | Build a raw v4 TX_MLSC transaction (replaces `createrungtx`) |
+| `createtxmlsc` | Build a raw v4 RUNG_TX transaction (replaces `createrungtx`) |
 | `signladder` | Sign a v4 transaction input with funding tx auto-lookup (replaces `signrungtx`) |
 | `computectvhash` | Compute BIP-119 CTV template hash |
 | `generatepqkeypair` | Generate a PQ keypair |
