@@ -5,15 +5,19 @@ what isn't, and how to migrate.
 
 ## The Threat
 
-A sufficiently powerful quantum computer running Shor's algorithm can derive
-an elliptic curve private key from a public key. Today's Bitcoin transactions
-expose public keys in two ways:
+No quantum computer capable of breaking elliptic curve cryptography exists
+today. However, advances in quantum computing may make this possible in the
+future. Shor's algorithm, if run on a sufficiently powerful quantum computer,
+could theoretically derive an elliptic curve private key from a public key.
+
+If that day comes, Bitcoin transactions that expose public keys would be
+vulnerable in two ways:
 
 1. **On-chain in the output** (P2PK, Taproot key-path) — the pubkey sits in the
-   UTXO set. An attacker can crack it at leisure before you spend.
+   UTXO set. An attacker could crack it at leisure before you spend.
 2. **In the witness at spend time** (P2PKH, P2WPKH, P2WSH) — the pubkey is
-   revealed when you broadcast the spending transaction. An attacker must crack
-   it before the transaction confirms.
+   revealed when you broadcast the spending transaction. An attacker would need
+   to crack it before the transaction confirms.
 
 Address reuse makes (2) worse: once you spend from an address, the pubkey is
 known, and any other UTXOs at the same address are vulnerable.
