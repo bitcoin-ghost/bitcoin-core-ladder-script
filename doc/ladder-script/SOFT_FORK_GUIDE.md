@@ -21,7 +21,7 @@ The signet mines every 10 minutes with real wall-clock timestamps.
 Bitcoin Core developers and the broader community review:
 - The ~411-line integration patch to existing Bitcoin Core code
 - The 14,771-line self-contained `src/rung/` library
-- The 21 TLA+ formal specifications (80+ properties, 6.14M model-checked states)
+- The 21 TLA+ formal specifications (80+ properties, 2.5B model-checked states)
 - The anti-spam hardening and evaluation semantics
 
 Fuzz testing targets are being expanded. Third-party adversarial testing encouraged
@@ -84,8 +84,8 @@ enforce the full Ladder Script validation rules.
 
 ## Output Format
 
-All v4 transaction outputs must use TX_MLSC (Transaction-level Merkelised Ladder Script
-Conditions):
+All v4 transaction outputs use Merkelised Ladder Script
+Conditions (MLSC):
 
 ```
 Each output: 8 bytes (value only)
@@ -97,9 +97,9 @@ A creation proof in the witness section is validated at block acceptance. Each r
 coil has an `output_index` field declaring which output it governs. One shared Merkle
 tree per transaction (PLC model: one program, multiple output coils).
 
-Inline conditions (0xC1) and per-output MLSC (0xC2) have been removed.
+Inline conditions (`0xC1`) have been removed — all outputs use MLSC (`0xDF`).
 `ValidateRungOutputs()` in `evaluator.cpp` enforces this as a consensus rule: every
-output of a v4 transaction must be a valid TX_MLSC output or a DATA_RETURN block (exactly
+output of a v4 transaction must be a valid MLSC output (`0xDF` prefix) or a DATA_RETURN block (exactly
 one per transaction, max 40 bytes). Raw OP_RETURN and legacy scriptPubKey types are
 rejected.
 
@@ -107,41 +107,38 @@ rejected.
 
 ### Transaction-Level
 
-`VerifyRungTx()` in `evaluator.cpp` is the top-level entry point. For each input of a v4
-transaction:
+`VerifyRungTx()` in `evaluator.cpp` is the top-level entry point.
 
-1. Witness `stack[0]` is deserialized via `DeserializeLadderWitness()`. The deserializer
-   enforces all structural limits at consensus:
-   - `MAX_RUNGS = 16`
-   - `MAX_BLOCKS_PER_RUNG = 8`
-   - `MAX_FIELDS_PER_BLOCK = 16`
+**Per-transaction (first input only):**
+
+1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN,
+   dust threshold (546 sats).
+2. Creation proof: required for 3+ spendable outputs. Validates leaf hashes build
+   to conditions_root.
+3. PREIMAGE/SCRIPT_BODY count across all inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2).
+
+**Per-input:**
+
+4. Witness stack size determines spending path (1, 2, or 3 elements).
+5. **Key-path** (1 element): verify Schnorr signature against conditions_root as
+   x-only pubkey via `SignatureHashLadderKeyPath`. Done — no conditions revealed.
+6. **Script-path** (2-3 elements): deserialise `LadderWitness` (stack[0]) and
+   `MLSCProof` (stack[1]). The deserialiser enforces all structural limits:
+   - `MAX_RUNGS = 16`, `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`
    - `MAX_LADDER_WITNESS_SIZE = 100000`
    - `MAX_PREIMAGE_FIELDS_PER_WITNESS = 2` (per-input fast reject)
-   - `MAX_PREIMAGE_FIELDS_PER_TX = 2` (per-transaction binding constraint)
    - `MAX_RELAYS = 8`, `MAX_RELAY_DEPTH = 4`
-   - Known block types only (`IsKnownBlockType` returns true)
-   - Non-invertible block types cannot have `inverted = true`
-   - Implicit layout enforcement (field count and types must match)
-   - `IsDataEmbeddingType` rejection for layout-less blocks
-   - DATA type restricted to DATA_RETURN blocks
-   - No trailing bytes
-
-2. Witness `stack[1]` is deserialized as an MLSC proof via `DeserializeMLSCProof()`.
-
-3. `VerifyMLSCProof()` reconstructs the Merkle tree from revealed and proof data, verifies
-   the computed root matches the UTXO's conditions root.
-
-4. `EvalLadder()` evaluates relays (if any), then evaluates the revealed rung. All blocks
-   in the rung must return `SATISFIED` (AND logic).
-
-5. `BatchVerifier::Verify()` batch-verifies all collected Schnorr signatures.
-
-6. `ValidateRungOutputs()` checks every output.
+   - Known block types only, non-invertible blocks cannot have `inverted = true`
+   - Implicit layout enforcement, `IsDataEmbeddingType` rejection, DATA restriction
+7. Extract pubkeys via `ExtractBlockPubkeys()` (merkle_pub_key).
+8. Verify Merkle proof against conditions_root (or tweak for 3-element witness).
+9. `MergeConditionsAndWitness()`: combine conditions from proof with witness fields.
+10. `EvalLadder()`: evaluate relays (cached), then the revealed rung (AND/OR logic).
 
 ### Script Flags
 
 `RUNG_VERIFY_MLSC_ONLY` (bit 28) is set for mainnet. When active, inline conditions (0xC1)
-and per-output MLSC (0xC2) are always rejected; only TX_MLSC (0xDF) is accepted. This
+are always rejected; only MLSC (`0xDF`) is accepted. This
 flag is checked in `ValidateRungOutputs()`.
 
 ### Integration Points
@@ -197,16 +194,16 @@ All 62 block types activate simultaneously:
 
 Total: 62
 
-## Anti-Spam Hardening
+## User-Chosen Data Limits
 
-The soft fork includes comprehensive anti-spam measures enforced at consensus:
+The soft fork limits user-chosen arbitrary data to 112 bytes per transaction. The following consensus rules enforce this:
 
 1. **Fail-closed deserialization.** Unknown block types, unknown data types, and deprecated
    blocks are rejected at the wire format level.
 2. **Selective inversion.** Explicit allowlist. Key-consuming blocks are never invertible.
 3. **IsDataEmbeddingType.** PUBKEY_COMMIT, HASH256, HASH160, and DATA are blocked in blocks
    without implicit layouts.
-4. **PREIMAGE/SCRIPT_BODY cap.** Maximum 2 per witness (combined), bounding user-chosen
+4. **PREIMAGE/SCRIPT_BODY cap.** Maximum 2 per witness (combined), bounding user-chosen arbitrary
    data to 64 bytes.
 5. **DATA type restriction.** Only allowed in DATA_RETURN blocks.
 6. **merkle_pub_key.** Pubkeys folded into Merkle leaves, not stored as condition fields.
@@ -216,24 +213,21 @@ The soft fork includes comprehensive anti-spam measures enforced at consensus:
 
 | Suite | Count | Purpose |
 |-------|-------|---------|
-| Unit tests | 528 | All block evaluators, serialization, Merkle tree, sighash, anti-spam |
-| Functional tests | 60 | End-to-end regtest: create, sign, broadcast, verify v4 transactions |
+| Unit tests | 542 | All block evaluators, serialization, Merkle tree, sighash, anti-spam |
+| Functional tests | 7 | End-to-end regtest: create, sign, broadcast, verify v4 transactions |
 | Signet verification | 62/62 | All active block types: fund + mine + spend on live signet with recorded txids |
 | Documentation accuracy | 43 | types.h consistency, engine templates, block reference pages, markdown docs |
 | Proxy unit tests | 15 | BIP32 derivation, base58, RIPEMD-160, WIF encoding |
-| Engine smoke tests | 20 | 48 templates, 62 block types, getTypeHex coverage, dead code checks |
-| TLA+ formal specs | 21 specs, 80+ properties, 6.14M states | Evaluation semantics, composition, anti-spam, wire format, Merkle, sighash, covenants, cross-input |
+| Engine smoke tests | 48 | 48 templates, 62 block types, getTypeHex coverage, dead code checks |
+| TLA+ formal specs | 21 specs, 197 properties, 2.5B states | Evaluation semantics, composition, anti-spam, wire format, Merkle, sighash, covenants, cross-input |
 | Fuzz targets | 1 (deserializer) | `rung_deserialize_fuzz.cpp` — needs evaluator + sighash targets |
 
-The first 10 of the 21 TLA+ specifications are:
+All 21 TLA+ specifications:
 
-1. **LadderEval** — rung/ladder evaluation with inversion and recursion termination
-2. **LadderEvalCheck** — type invariants and safety properties
-3. **LadderBlockEval** — individual block evaluation
-4. **LadderComposition** — AND/OR composition with relays
-5. **LadderAntiSpam** — anti-spam field limits
-6. **LadderWireFormat** — serialization invariants
-7. **LadderMerkle** — Merkle tree construction and verification
-8. **LadderSighash** — sighash computation properties
-9. **LadderCovenant** — covenant/recursion safety and termination
-10. **LadderCrossInput** — cross-input (COSIGN) dependency safety
+**Core features (4):** AnchorFee, AutoKeyPath, HybridCreationProof, UTXODedup
+
+**General evaluation (7):** LadderEval, LadderMerkle, LadderSighash, LadderAntiSpam,
+LadderWireFormat, SharedProof, RecursiveCovenant
+
+**Per-family block types (10):** BlockSignature, BlockTimelock, BlockHash, BlockCovenant,
+BlockRecursion, BlockAnchor, BlockPLC, BlockCompound, BlockGovernance, BlockLegacy
