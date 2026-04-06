@@ -6,6 +6,10 @@ choices, alternatives considered, and security properties of each modification.
 
 The patch file is `ladder-script-v30.0.patch` (29,081 lines, 48 files).
 
+> **Note:** Source line numbers cited in this document are approximate and may drift as the
+> code evolves. Use function names and file paths for navigation. The patch file is the
+> authoritative reference for the exact diff.
+
 ## Overview
 
 | Category | Files changed | Lines added |
@@ -24,7 +28,7 @@ No existing transaction versions are reinterpreted. The v4 transaction format is
 
 ## Core Integration Points (24 files, ~411 lines)
 
-### 1. src/primitives/transaction.h (~110 lines added)
+### 1. src/primitives/transaction.h (~112 lines added)
 
 #### What was added
 
@@ -101,7 +105,7 @@ is not arbitrary -- it is the exact size of a scalar field element.
 
 ---
 
-### 2. src/primitives/transaction.cpp (~4 lines added)
+### 2. src/primitives/transaction.cpp (~3 lines added)
 
 #### What was added
 
@@ -121,7 +125,7 @@ the move constructor for efficiency.
 
 ---
 
-### 3. src/script/interpreter.h (~3 lines added)
+### 3. src/script/interpreter.h (~4 lines added)
 
 #### What was added
 
@@ -153,7 +157,7 @@ on a non-v4 transaction due to a bug.
 
 ---
 
-### 4. src/script/interpreter.cpp (~13 lines added)
+### 4. src/script/interpreter.cpp (~14 lines added)
 
 #### What was added
 
@@ -219,7 +223,7 @@ because:
 
 ---
 
-### 6. src/validation.cpp (~140 lines added)
+### 6. src/validation.cpp (~96 lines added)
 
 This is the largest integration point and contains the most critical consensus logic.
 
@@ -312,7 +316,7 @@ whether a block was never connected or was connected and then disconnected.
 
 ---
 
-### 7. src/validation.h (~36 lines added)
+### 7. src/validation.h (~23 lines added)
 
 #### What was added
 
@@ -588,7 +592,7 @@ instead of `ComputeTapTweakHash`.
 
 ---
 
-### 15. src/rpc/util.cpp (~6 lines added)
+### 15. src/rpc/util.cpp (~9 lines added)
 
 #### What was added
 
@@ -613,6 +617,18 @@ Script-specific.
 
 None. This only affects the `help` RPC output serialization. No consensus, validation,
 or transaction processing code is changed.
+
+### 16. Minor changes (6 files, ~25 lines total)
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/rpc/mempool.cpp` | +4 | Skip burn-amount check for MLSC outputs in `sendrawtransaction` and `submitpackage` |
+| `src/script/script_error.cpp` | +4 | Ladder error strings (`SCRIPT_ERR_LADDER_INVALID_WITNESS`, `SCRIPT_ERR_LADDER_EVAL_FALSE`) |
+| `src/script/script_error.h` | +4 | Ladder error code enum values |
+| `src/rpc/register.h` | +3 | Register rung RPC commands via `RegisterRungRPCCommands()` |
+| `src/test/txvalidationcache_tests.cpp` | +2 | Skip v4 transaction in validation cache tests |
+| `src/test/CMakeLists.txt` | +1 | Add `rung_tests.cpp` to test binary |
+| `test/functional/test_runner.py` | +1 | Register `feature_rung_tx.py` functional test |
 
 ---
 
@@ -675,7 +691,7 @@ is expensive in consensus code and would increase witness size.
 one of 11 typed fields. There are no arbitrary data pushes. This is a fundamental
 difference from Bitcoin Script, where `OP_PUSH` can push arbitrary data. The type system
 enables:
-- **Anti-spam**: `IsDataEmbeddingType()` identifies types that could carry arbitrary data
+- **User-chosen data limits**: `IsDataEmbeddingType()` identifies types that could carry arbitrary data
   (PUBKEY_COMMIT, HASH256, HASH160, DATA). These are blocked in blocks without implicit
   layouts to prevent data embedding.
 - **Bounded verification**: The evaluator knows exactly what data to expect in each field
@@ -699,7 +715,7 @@ while still binding the pubkeys to the conditions cryptographically. At spend ti
 witness provides the pubkeys, and the evaluator recomputes the leaf hash to verify they
 match.
 
-### evaluator.h/cpp (4,501 lines) -- Block Evaluator
+### evaluator.h/cpp (4,534 lines) -- Block Evaluator
 
 #### Purpose and scope
 
@@ -930,7 +946,7 @@ liboqs is not compiled in (parsing succeeds; verification fails at runtime).
 `ladder(output(0, or(...)), output(1, or(...)))` syntax. Each output specifies its
 output_index and its rungs.
 
-### rpc.cpp (3,370 lines) -- RPC Commands
+### rpc.cpp (3,400 lines) -- RPC Commands
 
 #### Purpose and scope
 
@@ -1013,7 +1029,7 @@ exists for forward compatibility but is not activated.
 - All 62 block type evaluators individually
 - Serialization roundtrips (witness + conditions, all implicit layouts)
 - Merkle tree construction, path generation, and verification
-- Anti-spam field restrictions (IsDataEmbeddingType, MAX_PREIMAGE_FIELDS)
+- User-chosen data field restrictions (IsDataEmbeddingType, MAX_PREIMAGE_FIELDS)
 - Policy validation (IsStandardRungTx)
 - All 3 MLSC proof modes (FULL_LEAVES, MERKLE_PATH, SHARED)
 - TX_MLSC leaf/root computation with creation proofs
@@ -1052,7 +1068,7 @@ exists for forward compatibility but is not activated.
    16 * 8 * 16 = 2,048 field checks per input. Compare to Script where a single
    input can execute up to 201 opcodes with unbounded stack operations.
 
-4. **Anti-spam by construction**: Every witness byte belongs to a typed field. Data
+4. **User-chosen data structurally limited**: Every witness byte belongs to a typed field. Data
    embedding types (PUBKEY_COMMIT, HASH256, HASH160, DATA) are rejected in blocks
    without implicit layouts. MAX_PREIMAGE_FIELDS_PER_TX=2 prevents multi-input data
    embedding. DATA_RETURN payload is capped at 40 bytes. Net embeddable data per
