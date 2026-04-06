@@ -156,3 +156,31 @@ Merkle leaf with different conditions).
 This hybrid approach means you don't need to predict when quantum computers
 will arrive. Create outputs with both paths today. Spend via the cheap
 classical path until it's no longer safe, then switch to the PQ path.
+
+## Batch Quantum Protection
+
+A RUNG_TX shares one `conditions_root` across all outputs. This means a single
+PQ-protected condition tree covers every output in the transaction:
+
+```
+ladder(output(0, sig(@pq_key, falcon512)),
+       output(1, sig(@pq_key, falcon512)),
+       output(2, sig(@pq_key, falcon512)))
+```
+
+100 outputs, one Merkle tree, one PQ pubkey commitment. The PQ pubkey (897 bytes
+for FALCON-512) is hashed into the Merkle leaf once — not stored per output. Each
+output is just 8 bytes on the wire. The UTXO cost is ~8 bytes per output regardless
+of the signature scheme.
+
+When spending, each input reveals the PQ pubkey and provides a PQ signature in the
+witness. But the creation cost is flat: one tree, one creation proof, one root.
+
+This is unique to Ladder Script. In legacy Bitcoin, each output carries its own
+scriptPubKey and would need its own PQ commitment. In a RUNG_TX, the shared root
+amortises the PQ overhead across all outputs — making batch PQ payments practical
+even with large PQ pubkeys.
+
+Combined with the hybrid approach, you can batch-create 100 outputs that are each
+spendable via cheap Schnorr today or quantum-safe FALCON-512 in the future, all
+from one compact transaction.
