@@ -129,7 +129,7 @@ tr:nth-child(even) td { background: #fafafa; }
     <div class="sidebar-label">Specification</div>
     <a href="docs/#BIP-XXXX" class="sidebar-link">BIP-XXXX</a>
     <a href="docs/#BLOCK_LIBRARY" class="sidebar-link">Block Library</a>
-    <a href="docs/#MERKLE-UTXO-SPEC" class="sidebar-link">MLSC Specification</a>
+    <a href="docs/#RUNG_TX_SPEC" class="sidebar-link">RUNG_TX Specification</a>
 
     <div class="sidebar-divider"></div>
     <div class="sidebar-label">Guides</div>
@@ -182,7 +182,7 @@ tr:nth-child(even) td { background: #fafafa; }
 <span class="alias">@alice</span>                            <span class="cm">// resolved from a key map at parse time</span></div>
 
     <div class="note">
-      The <code>output()</code> wrapper is new in TX_MLSC. It maps each output index to its conditions within the shared condition tree. One <code>conditions_root</code> per transaction defines the entire tree. This replaces the old model where each output carried its own <code>0xC2 + root</code>.
+      The <code>output()</code> wrapper maps each output index to its conditions within the shared condition tree. One <code>conditions_root</code> per transaction defines the entire tree. The <code>output()</code> wrapper maps each output index to its conditions within the shared Merkle tree.
     </div>
   </div>
 
@@ -250,14 +250,13 @@ tr:nth-child(even) td { background: #fafafa; }
     <table>
       <thead><tr><th>Notation</th><th>Block type</th><th>Arguments</th></tr></thead>
       <tbody>
-        <tr><td>anchor()</td><td>ANCHOR</td><td>Generic anchor output</td></tr>
+        <tr><td>anchor(N)</td><td>ANCHOR</td><td>Numeric anchor identifier</td></tr>
         <tr><td>anchor_channel()</td><td>ANCHOR_CHANNEL</td><td>Lightning channel anchor</td></tr>
         <tr><td>anchor_pool()</td><td>ANCHOR_POOL</td><td>Pool anchor</td></tr>
         <tr><td>anchor_reserve()</td><td>ANCHOR_RESERVE</td><td>Reserve anchor (guardian set)</td></tr>
         <tr><td>anchor_seal()</td><td>ANCHOR_SEAL</td><td>Seal anchor</td></tr>
         <tr><td>anchor_oracle()</td><td>ANCHOR_ORACLE</td><td>Oracle anchor</td></tr>
-        <tr><td>anchor_fee()</td><td>ANCHOR_FEE</td><td>Fee-bump anchor (ephemeral, anyone-can-spend)</td></tr>
-        <tr><td>data_return(hex)</td><td>DATA_RETURN</td><td>1&ndash;32 byte data payload (replaces OP_RETURN)</td></tr>
+        <tr><td>data_return(hex)</td><td>DATA_RETURN</td><td>11&ndash;32 byte data payloadndash;40 byte data payload (replaces OP_RETURN)</td></tr>
       </tbody>
     </table>
 
@@ -272,11 +271,11 @@ tr:nth-child(even) td { background: #fafafa; }
         <tr><td>latch_set(@pk, state)</td><td>LATCH_SET</td><td>Key + state value</td></tr>
         <tr><td>latch_reset(@pk, state)</td><td>LATCH_RESET</td><td>Key + state value</td></tr>
         <tr><td>counter_down(@pk, count)</td><td>COUNTER_DOWN</td><td>Key + counter target</td></tr>
-        <tr><td>counter_preset(@pk, count)</td><td>COUNTER_PRESET</td><td>Key + preset count</td></tr>
+        <tr><td>counter_preset(current, preset)</td><td>COUNTER_PRESET</td><td>Current value + preset target (not key-consuming)</td></tr>
         <tr><td>counter_up(@pk, count)</td><td>COUNTER_UP</td><td>Key + counter target</td></tr>
         <tr><td>compare(op, value_b)</td><td>COMPARE</td><td>Operator (1=EQ..7=IN_RANGE) + threshold. Optional value_c for IN_RANGE</td></tr>
         <tr><td>sequencer(steps)</td><td>SEQUENCER</td><td>Number of sequence steps</td></tr>
-        <tr><td>one_shot(@pk, N)</td><td>ONE_SHOT</td><td>Key + activation window</td></tr>
+        <tr><td>one_shot(state, commitment)</td><td>ONE_SHOT</td><td>State value + 32-byte hash commitment (not key-consuming)</td></tr>
         <tr><td>rate_limit(max, cap, refill)</td><td>RATE_LIMIT</td><td>Max per block, accumulation cap, refill blocks</td></tr>
         <tr><td>cosign(hex)</td><td>COSIGN</td><td>32-byte conditions hash of co-input</td></tr>
       </tbody>
@@ -292,6 +291,7 @@ tr:nth-child(even) td { background: #fafafa; }
         <tr><td>ptlc(@pk, @point, csv)</td><td>PTLC</td><td>Key, adaptor point, CSV blocks</td></tr>
         <tr><td>cltv_sig(@pk, height)</td><td>CLTV_SIG</td><td>Signature + absolute timelock</td></tr>
         <tr><td>timelocked_multisig(M, @k1, ..., csv)</td><td>TIMELOCKED_MULTISIG</td><td>Threshold, keys, CSV blocks</td></tr>
+        <tr><td>anchor_fee(@k1, @k2, min_fee, max_fee, max_weight, commitment)</td><td>ANCHOR_FEE</td><td>2-of-2 sigs + fee rate band + weight limit</td></tr>
       </tbody>
     </table>
 
