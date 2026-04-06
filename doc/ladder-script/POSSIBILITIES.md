@@ -63,8 +63,8 @@ approved destinations in approved amounts during approved periods.
 
 ## Post-Quantum Safe Migration
 
-Migrate existing funds to PQ-safe spending conditions before quantum computers break
-elliptic curve cryptography.
+Migrate existing funds to PQ-safe spending conditions in preparation for potential future
+advances in quantum computing.
 
 **Block types:** SIG (0x0001) with SPHINCS_SHA scheme (0x13), TIMELOCKED_SIG (0x0701)
 
