@@ -325,15 +325,20 @@ when hosted.
 |-----------------------------------------|--------|---------|
 | `/api/ladder/status`                    | GET    | Node status check |
 | `/api/ladder/wallet/balance`            | GET    | Wallet balance |
-| `/api/ladder/wallet/newaddress`         | POST   | Generate new address |
-| `/api/ladder/faucet`                    | POST   | Request test coins |
+| `/api/ladder/wallet/address`            | GET    | Generate new address |
+| `/api/ladder/wallet/keypair`            | GET    | Generate address + pubkey + privkey |
 | `/api/ladder/wallet/utxos`              | GET    | List UTXOs |
-| `/api/ladder/createtxmlsc`              | POST   | Create TX_MLSC transaction (replaces createrungtx) |
-| `/api/ladder/signrawtransactionwithwallet` | POST | Sign raw transaction |
-| `/api/ladder/sendrawtransaction`        | POST   | Broadcast transaction |
+| `/api/ladder/faucet`                    | POST   | Request test coins |
+| `/api/ladder/create`                    | POST   | Create RUNG_TX transaction |
+| `/api/ladder/sign`                      | POST   | Sign transaction |
+| `/api/ladder/broadcast`                 | POST   | Broadcast signed transaction |
 | `/api/ladder/tx/{txid}`                 | GET    | Look up transaction |
-| `/api/ladder/decoderawtransaction`      | POST   | Decode raw hex |
+| `/api/ladder/decode`                    | POST   | Decode ladder witness hex |
+| `/api/ladder/decode-tx`                 | POST   | Decode raw transaction hex |
 | `/api/ladder/validate`                  | POST   | Validate ladder witness |
+| `/api/ladder/ctv-hash`                  | POST   | Compute BIP-119 CTV hash |
+| `/api/ladder/pq/keypair`               | POST   | Generate PQ keypair |
+| `/api/ladder/preimage`                  | GET    | Generate random preimage + hashes |
 | `/api/ladder/mempool`                   | GET    | Mempool info |
 | `/api/ladder/blocks/recent`             | GET    | Recent blocks |
 | `/api/ladder/mine`                      | POST   | Mine a block (regtest) |
@@ -348,13 +353,12 @@ when hosted.
 
 ### Create / Sign / Broadcast pipeline
 
-1. **CREATE**: calls `createtxmlsc` with the ladder conditions, inputs,
-   and outputs (replaces `createrungtx`). The engine runs `planFund()` to
-   inventory keys, hashes, and timelocks, then auto-assigns pubkeys and
-   generates keypairs as needed. A fund record is saved to localStorage for
-   later spending.
-2. **SIGN**: calls `signrawtransactionwithwallet` with the raw hex.
-3. **BROADCAST**: calls `sendrawtransaction` with the signed hex. A session
+1. **CREATE**: calls `/api/ladder/create` with the ladder conditions, inputs,
+   and outputs. The engine runs `planFund()` to inventory keys, hashes, and
+   timelocks, then auto-assigns pubkeys and generates keypairs as needed. A
+   fund record is saved to localStorage for later spending.
+2. **SIGN**: calls `/api/ladder/sign` with the raw hex and signer data.
+3. **BROADCAST**: calls `/api/ladder/broadcast` with the signed hex. A session
    log entry is saved for the Review tab.
 
 ---
@@ -469,7 +473,7 @@ so the walkthrough does not reappear.
 
 ## 15. Templates
 
-The ExamplesModal displays a two-column grid of **39 template programs**.
+The ExamplesModal displays a two-column grid of **48 template programs**.
 Each card shows a title, description, and coloured tag badges. Clicking a
 card loads its rungs, TX inputs, and TX outputs into the builder.
 
@@ -514,3 +518,12 @@ Complete list of template names:
 37. LEGACY P2SH MULTISIG VAULT
 38. P2TR TAPROOT MIGRATION
 39. SINGLE SIG (SPHINCS+)
+40. RECURSE_COUNT COUNTDOWN
+41. RECURSE_DECAY DIMINISHING RETURNS
+42. KEY_REF_SIG RELAY KEY
+43. LEGACY P2WSH MULTISIG
+44. ANCHOR TAG
+45. ANCHOR POOL (VTXO)
+46. ANCHOR RESERVE
+47. ANCHOR SEAL
+48. ANCHOR ORACLE
