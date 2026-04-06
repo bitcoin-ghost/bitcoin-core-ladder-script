@@ -103,12 +103,20 @@ Address reuse is dangerous regardless of signature scheme:
 - If you have other UTXOs with the same `conditions_root`, they share the
   same Merkle tree and the same pubkeys.
 - For **EC schemes** (Schnorr, ECDSA): the revealed EC pubkey is vulnerable
-  to quantum attack on the remaining UTXOs.
-- For **PQ schemes**: the revealed PQ pubkey is NOT vulnerable to quantum
-  attack, but the spend still reveals your spending conditions (privacy loss).
+  to quantum attack on the remaining UTXOs. This is the dangerous case.
+- For **PQ schemes**: the revealed PQ pubkey does NOT compromise the
+  remaining UTXOs. A quantum attacker who sees a FALCON-512 pubkey still
+  cannot derive the private key — that is the entire point of post-quantum
+  cryptography. The remaining outputs are still fully protected. The only
+  cost is privacy (the revealed pubkey links the outputs).
 
-**Best practice:** never reuse addresses. Generate a fresh `conditions_root`
-for every output.
+**This means batch PQ outputs are safe to spend incrementally.** Create 100
+outputs sharing one PQ-protected conditions root. Spend them one at a time.
+Each spend reveals the PQ pubkey in the witness, but the other 99 outputs
+remain quantum-safe because the PQ scheme resists key recovery.
+
+For EC schemes, avoid address reuse. For PQ schemes, address reuse is
+cryptographically safe — only a privacy consideration.
 
 ## Migration Path
 
