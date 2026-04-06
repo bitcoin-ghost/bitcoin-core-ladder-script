@@ -21,7 +21,7 @@ The patch file is `ladder-script-v30.0.patch` (29,081 lines, 48 files).
 
 The design principle is **minimal core intrusion**: ~411 lines across 24 existing Bitcoin
 Core files, with all Ladder Script logic contained in a self-standing `src/rung/` module.
-No existing Bitcoin Core function signatures are changed. No existing opcodes are modified.
+No existing Bitcoin Core function signatures are changed (two gain defaulted parameters for block_height plumbing). No existing opcodes are modified.
 No existing transaction versions are reinterpreted. The v4 transaction format is additive.
 
 ---
@@ -82,7 +82,7 @@ changes to downstream consumers.
 
 The creation proof contains leaf hashes (32 bytes each) for a maximum of 252 leaves
 (CompactSize encoding: 1 byte for count). This limits tree size while allowing substantial
-multi-output transactions. The 252-leaf limit means max 252 outputs per TX_MLSC transaction,
+multi-output transactions. The 252-leaf limit means max 252 spendable outputs per RUNG_TX transaction,
 which is well above practical needs but below the point where Merkle proof verification
 becomes expensive.
 
@@ -105,7 +105,7 @@ is not arbitrary -- it is the exact size of a scalar field element.
 
 ---
 
-### 2. src/primitives/transaction.cpp (~3 lines added)
+### 2. src/primitives/transaction.cpp (~3 lines modified)
 
 #### What was added
 
@@ -344,7 +344,7 @@ is freed. This is simpler and safer than manual lifetime management.
 
 ---
 
-### 8. src/policy/policy.h/cpp (~15 lines added)
+### 8. src/policy/policy.cpp (~13 lines added)
 
 #### What was added
 
@@ -626,7 +626,7 @@ or transaction processing code is changed.
 | `src/script/script_error.cpp` | +4 | Ladder error strings (`SCRIPT_ERR_LADDER_INVALID_WITNESS`, `SCRIPT_ERR_LADDER_EVAL_FALSE`) |
 | `src/script/script_error.h` | +4 | Ladder error code enum values |
 | `src/rpc/register.h` | +3 | Register rung RPC commands via `RegisterRungRPCCommands()` |
-| `src/test/txvalidationcache_tests.cpp` | +2 | Skip v4 transaction in validation cache tests |
+| `src/test/txvalidationcache_tests.cpp` | +2 | Update CheckInputScripts forward declaration to match new signature |
 | `src/test/CMakeLists.txt` | +1 | Add `rung_tests.cpp` to test binary |
 | `test/functional/test_runner.py` | +1 | Register `feature_rung_tx.py` functional test |
 
@@ -884,7 +884,7 @@ embedding arbitrary data in conditions, which would be permanent on-chain data.
 - `MAX_LADDER_WITNESS_SIZE = 100,000`: Must accommodate PQ signatures (SPHINCS+ up to ~49KB)
 - `MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`: Fast reject for data embedding via preimages
 - `MAX_PREIMAGE_FIELDS_PER_TX = 2`: Cross-input data embedding prevention
-- `MIN_RUNG_OUTPUT_VALUE = 546 sats`: Consensus dust threshold matching Bitcoin's witness dust
+- `MIN_RUNG_OUTPUT_VALUE = 546 sats`: Consensus dust threshold matching Bitcoin's P2PKH dust threshold
 
 **Compact coil sentinel** (`serialize.h:56`): `0x00` at the coil position expands to a
 default coil (UNLOCK + INLINE + SCHNORR + no address). This saves ~5 bytes for the
@@ -1023,9 +1023,9 @@ exists for forward compatibility but is not activated.
 
 ---
 
-## Tests: src/test/rung_tests.cpp (12,755 lines, 528 test cases)
+## Tests: src/test/rung_tests.cpp (12,755 lines, 542 test cases)
 
-528 test cases covering:
+542 test cases covering:
 - All 62 block type evaluators individually
 - Serialization roundtrips (witness + conditions, all implicit layouts)
 - Merkle tree construction, path generation, and verification
