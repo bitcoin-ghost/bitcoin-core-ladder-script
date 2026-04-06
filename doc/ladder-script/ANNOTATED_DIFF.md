@@ -62,7 +62,7 @@ rejected because:
    other than 0x01 for future use).
 3. **Explicit rejection of 0x03**: If a future extension uses both SegWit and TX_MLSC
    simultaneously, it needs its own format specification. Silently accepting 0x03 could lead
-   to deserialization mismatches. The explicit `throw` at `transaction.h:249` ensures this
+   to deserialization mismatches. The explicit `throw` at `transaction.h:250` ensures this
    is a hard failure rather than undefined behaviour.
 
 #### Why value-only outputs (8 bytes on wire)
@@ -74,7 +74,7 @@ transaction with 10 outputs, that is 320 bytes of redundant data.
 
 Instead, the conditions_root is stored once (32 bytes), and each output contributes only
 its 8-byte `nValue`. On deserialization, the scriptPubKey is reconstructed as `0xDF + root`
-for all outputs (`transaction.h:260-265`). This means all internal Bitcoin Core code that
+for all outputs (`transaction.h:259-265`). This means all internal Bitcoin Core code that
 accesses `tx.vout[i].scriptPubKey` gets a valid 33-byte MLSC scriptPubKey without any
 changes to downstream consumers.
 
@@ -90,7 +90,7 @@ becomes expensive.
 
 Half-aggregation of Schnorr signatures produces a single 32-byte `s` value. Each individual
 signature's `R` point (32 bytes) remains per-input in the witness. The aggregate `s` replaces
-N individual `s` values with one, saving 32*(N-1) bytes. The 32-byte cap at `transaction.h:301`
+N individual `s` values with one, saving 32*(N-1) bytes. The 32-byte cap at `transaction.h:295`
 is not arbitrary -- it is the exact size of a scalar field element.
 
 #### Security implications
@@ -277,7 +277,7 @@ the compressor from stripping the root data. The inflation code checks for `0xDE
 `validation.cpp:2235` before extracting the root. If the synthetic entry is missing or
 malformed, the root remains null and the output cannot be spent (fail-closed).
 
-#### 6c. SharedTreeCache creation (`validation.cpp:2258-2261`)
+#### 6c. SharedTreeCache creation (`validation.cpp:2264-2266`)
 
 **What**: For v4 transactions, a `ThreadSafeSharedTreeCache` is created and shared across
 all `CScriptCheck` instances for that transaction's inputs.
@@ -291,7 +291,7 @@ The cache is wrapped in `ThreadSafeSharedTreeCache` (a struct with a `Mutex` and
 `GUARDED_BY` annotation) because CScriptCheck instances run in parallel on the CheckQueue
 worker threads.
 
-#### 6d. ConnectBlock -- block_height passing (`validation.cpp:2734-2737`)
+#### 6d. ConnectBlock -- block_height passing (`validation.cpp:2740-2743`)
 
 **What**: `pindex->nHeight` is passed to `CheckInputScripts` and forwarded to the
 ladder evaluator via `CScriptCheck::m_block_height`.
@@ -304,7 +304,7 @@ Without block_height, these evaluators would need to access chain state, which i
 available inside CScriptCheck (it runs on worker threads without access to `cs_main`).
 Passing the height as a value avoids any locking issues.
 
-#### 6e. DisconnectBlock -- synthetic root cleanup (`validation.cpp:2389-2392`)
+#### 6e. DisconnectBlock -- synthetic root cleanup (`validation.cpp:2395-2397`)
 
 **What**: On block disconnect (reorg), the synthetic root entry at
 `(txid, MLSC_ROOT_VOUT)` is removed from the UTXO cache.
@@ -349,7 +349,7 @@ is freed. This is simpler and safer than manual lifetime management.
 #### What was added
 
 **In policy.cpp**:
-- Early return for v4 transactions: `if (tx.version == CTransaction::RUNG_TX_VERSION) return rung::IsStandardRungTx(tx, reason);` (`policy.cpp:104-106`)
+- Early return for v4 transactions: `if (tx.version == CTransaction::RUNG_TX_VERSION) return rung::IsStandardRungTx(tx, reason);` (`policy.cpp:104-105`)
 - Skip MLSC inputs in `AreInputsStandard` and `IsWitnessStandard`: `if (rung::IsLadderScript(prev.scriptPubKey)) continue;` (`policy.cpp:234`, `policy.cpp:276`)
 
 #### Why early-return rather than raising TX_MAX_STANDARD_VERSION
@@ -597,7 +597,7 @@ instead of `ComputeTapTweakHash`.
 #### What was added
 
 Implemented the `Type::OBJ` / `Type::OBJ_NAMED_PARAMS` / `Type::OBJ_USER_KEYS` cases
-in `RPCArg::ToStringObj()` (`rpc/util.cpp:1243-1251`). Previously these hit
+in `RPCArg::ToStringObj()` (`rpc/util.cpp:1249-1257`). Previously these hit
 `NONFATAL_UNREACHABLE()` because no upstream Bitcoin Core RPC had nested object arguments
 deep enough to trigger this code path.
 
@@ -802,7 +802,7 @@ Implements the Merkelised Ladder Script Conditions (MLSC) system:
 
 #### Key design decisions
 
-**Sorted interior nodes** (`conditions.h:142-143`): Interior hashing uses
+**Sorted interior nodes** (`conditions.h:207-143`): Interior hashing uses
 `SHA256(0x01 || sort(left, right))`. Sorting children lexicographically eliminates the
 need for direction bits in Merkle proofs. This saves 1 bit per proof level (log2(N) bits
 total). The `0x01` prefix provides domain separation from leaf nodes (which use the raw
@@ -813,7 +813,7 @@ bits). Rejected because direction bits increase proof size and complicate proof
 verification. The sorted approach is used by several other projects (e.g., Ethereum's
 MPT) and is well-understood.
 
-**MLSC_EMPTY_LEAF padding** (`conditions.h:30-31`): Trees are padded to the next power
+**MLSC_EMPTY_LEAF padding** (`conditions.h:31-31`): Trees are padded to the next power
 of 2 using `SHA256("LADDER_EMPTY_LEAF")`. This is a nothing-up-my-sleeve constant that
 cannot collide with valid serialized rung data (the preimage is known and short).
 
@@ -829,7 +829,7 @@ The evaluator accepts all three modes and verifies them identically (rebuild the
 compare the root). The choice of mode is the spender's optimization decision, not a
 consensus parameter.
 
-**Leaf order** (`conditions.h:179`): Leaves are ordered as
+**Leaf order** (`conditions.h:190`): Leaves are ordered as
 `[rung_0, ..., rung_N, relay_0, ..., relay_M, coil]`. This fixed order means the
 prover and verifier agree on which leaf index corresponds to which component without
 any additional metadata.
@@ -839,7 +839,7 @@ array is captured. Covenant evaluators (RECURSE_SAME, RECURSE_MODIFIED, RECURSE_
 use this array to mutate a specific leaf and rebuild the tree to check the output root.
 This avoids re-verification of the entire proof for each covenant check.
 
-**Creation proof** (`conditions.h:282-298`): For transactions with 3+ outputs, a creation
+**Creation proof** (`conditions.h:302-298`): For transactions with 3+ outputs, a creation
 proof is required to bind the leaf hashes to the conditions_root. This prevents an
 attacker from creating outputs whose leaf hashes do not correspond to any valid rung
 structure. The creation proof is a simple list of leaf hashes that must rebuild to the
