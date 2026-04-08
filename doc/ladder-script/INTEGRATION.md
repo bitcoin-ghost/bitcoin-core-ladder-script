@@ -79,7 +79,7 @@ is 1 to 40 bytes.
 The witness stack has 1, 2, or 3 elements depending on the spending path:
 
 - **Key-path** (1 element): `[signature(64)]` — sign against the tweaked conditions root
-  as an x-only pubkey. No conditions revealed. 119 vB.
+  as an x-only pubkey. No conditions revealed. 110 vB (1-in, 1-out).
 - **Script-path** (2 elements): `[LadderWitness, MLSCProof]` — reveal one rung's
   conditions with a Merkle proof.
 - **Tweaked script-path** (3 elements): `[LadderWitness, MLSCProof, internal_pubkey]` —

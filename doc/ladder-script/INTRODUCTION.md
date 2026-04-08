@@ -15,9 +15,10 @@ Based on Bitcoin Core v30.0.
 
 ## Why Use It
 
-**Smallest transactions in Bitcoin.** A key-path payment is 119 vB — cheaper than
-P2WPKH (143 vB), P2TR (157 vB), and P2PKH (226 vB). Script-path is 140 vB, still
-beating every legacy type. Full lifecycle (create + spend) is 6% cheaper than P2WPKH.
+**Smallest transactions in Bitcoin.** A key-path spend is 110 vB (1-in, 1-out) or
+118 vB for a standard 2-output payment — cheaper than P2WPKH (143 vB), P2TR (157 vB),
+and P2PKH (226 vB). Script-path starts at 124 vB, still beating every legacy type.
+Full lifecycle (create + spend) is 6% cheaper than P2WPKH.
 
 **Smallest UTXO footprint ever.** Each output costs ~8 bytes in the UTXO set versus
 ~29 for P2WPKH and ~41 for P2TR. A 100-output batch payment is 914 vB — 71% cheaper

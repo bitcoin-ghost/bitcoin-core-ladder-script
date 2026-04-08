@@ -118,7 +118,7 @@ in `pubkey.cpp`. `SignSchnorrLadder()` in `key.cpp`.
 
 The `conditions_root` is treated as an x-only public key. Schnorr signature verified
 using `SignatureHashLadderKeyPath` (tagged hash `"LadderKeyPathSighash"`). No conditions
-revealed. This is the 119 vB path.
+revealed. This is the 110 vB path (1-in, 1-out) or 118 vB for a standard 2-output payment.
 
 ### Script-path (2 or 3 element witness): `[LadderWitness, MLSCProof, (internal_pubkey)]`
 
@@ -223,6 +223,15 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 
 ## 8. Size and Fee Analysis
 
+### Minimal spend (1 input, 1 output)
+
+| Format | vBytes | Fee (10 sat/vB) |
+|--------|--------|-----------------|
+| P2PKH | 192 | 1,920 sats |
+| P2WPKH | 110 | 1,100 sats |
+| P2TR key-path | 111 | 1,110 sats |
+| **RUNG_TX key-path** | **110** | **1,100 sats** |
+
 ### Simple payment (1 input, 2 outputs)
 
 | Format | vBytes | Fee (10 sat/vB) |
@@ -230,14 +239,14 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 | P2PKH | 226 | 2,260 sats |
 | P2WPKH | 143 | 1,430 sats |
 | P2TR key-path | 157 | 1,570 sats |
-| **RUNG_TX key-path** | **119** | **1,190 sats** |
-| **RUNG_TX script-path** | **140** | **1,400 sats** |
+| **RUNG_TX key-path** | **118** | **1,180 sats** |
+| **RUNG_TX script-path (SIG+CSV)** | **124** | **1,240 sats** |
 
 ### Batch payment (1 input, N outputs)
 
 | Outputs | P2WPKH | P2TR | **RUNG_TX key** | Saving vs P2WPKH |
 |---------|--------|------|-----------------|------------------|
-| 2 | 143 vB | 167 vB | **119 vB** | 17% |
+| 2 | 143 vB | 167 vB | **118 vB** | 17% |
 | 10 | 391 vB | 511 vB | **194 vB** | 50% |
 | 100 | 3,181 vB | 4,381 vB | **914 vB** | 71% |
 | 1000 | 31,081 vB | 43,081 vB | **8,114 vB** | 74% |

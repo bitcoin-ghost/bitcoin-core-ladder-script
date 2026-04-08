@@ -40,7 +40,7 @@ spend time — the paths you don't use stay private.
 
 | Family | Blocks | What they do |
 |--------|--------|-------------|
-| **Signature** | SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG | Verify signatures — Schnorr, ECDSA, or post-quantum |
+| **Signature** | SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG| Verify signatures — Schnorr, ECDSA, or post-quantum |
 | **Timelock** | CSV, CSV_TIME, CLTV, CLTV_TIME | Relative and absolute time/height locks |
 | **Hash** | TAGGED_HASH, HASH_GUARDED | Hash preimage verification |
 | **Covenant** | CTV, VAULT_LOCK, AMOUNT_LOCK | Constrain the spending transaction |
@@ -86,8 +86,8 @@ ladder. Unrevealed rungs stay hidden behind their leaf hashes.
 
 **Key-path spend** (1-element witness): the conditions root is treated as an x-only
 public key. A Schnorr signature against the tweaked key spends the output with no
-conditions revealed at all. This is the 119 vB path — the cheapest transaction type
-in Bitcoin.
+conditions revealed at all. This is the 110 vB path (1-in, 1-out) — the cheapest
+transaction type in Bitcoin.
 
 **Script-path spend** (2 or 3 element witness): ladder witness + Merkle proof. The
 revealed rung is evaluated.

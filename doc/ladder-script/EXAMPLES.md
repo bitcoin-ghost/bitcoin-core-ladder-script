@@ -53,7 +53,9 @@ Ladder:
 
 **Shared conditions_root**: `0xDF` + 32-byte Merkle root (once per transaction)
 
-**Simple payment**: 119 vB (key-path) / 140 vB (script-path)
+**Simple payment (1-in, 1-out)**: 110 vB (key-path)
+**Standard payment (1-in, 2-out)**: 118 vB (key-path)
+**Script-path (SIG + CSV)**: 124 vB · **(HASH_SIG)**: 140 vB · **(2-of-3 MULTISIG)**: 175 vB
 
 **Batch 100 outputs**: 914 vB (71% cheaper than P2WPKH)
 

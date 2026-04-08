@@ -1266,8 +1266,9 @@ structurally impossible. UTXO spam yields zero readable attacker data
 
 | Transaction Type | vBytes |
 |-----------------|--------|
-| Simple payment (1-in, 2-out, key-path) | 119 |
-| Simple payment (1-in, 2-out, script-path) | 140 |
+| Minimal spend (1-in, 1-out, key-path) | 110 |
+| Simple payment (1-in, 2-out, key-path) | 118 |
+| Simple payment (1-in, 2-out, script-path SIG+CSV) | 124 |
 | Batch 100 outputs (key-path) | 914 |
 | Full lifecycle (create + spend, key-path) | 241 |
 
