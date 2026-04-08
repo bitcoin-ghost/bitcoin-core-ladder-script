@@ -71,11 +71,11 @@ bool LadderSignatureChecker::CheckSchnorrSignature(std::span<const unsigned char
 
     uint256 sighash;
     if (!SignatureHashLadder(m_txdata, m_tx, m_nIn, hashtype, m_conditions, sighash)) {
+        LogPrintf("LadderSigCheck: SignatureHashLadder FAILED ladder_ready=%d spent_ready=%d\n",
+                  m_txdata.m_ladder_ready, m_txdata.m_spent_outputs_ready);
         if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_HASHTYPE;
         return false;
     }
-
-
     // Batch mode: defer verification
     if (m_batch && m_batch->active) {
         m_batch->Add(sighash, pubkey, std::span<const unsigned char>{sig_data.data(), sig_data.size()});
@@ -2730,17 +2730,14 @@ EvalResult EvalKeyRefSigBlock(const RungBlock& block,
     auto numerics = FindAllFields(block, RungDataType::NUMERIC);
     if (numerics.size() < 2) return EvalResult::ERROR;
 
-    // NUMERIC fields for relay/block index must be ≤ 2 bytes (uint16_t range)
-    if (numerics[0]->data.size() > 2 || numerics[1]->data.size() > 2) return EvalResult::ERROR;
+    // NUMERIC fields for relay/block index must fit uint16_t range.
+    // Deserialized NUMERICs are always 4-byte LE — check VALUE, not size.
+    auto ri_opt = ReadNumeric(*numerics[0]);
+    auto bi_opt = ReadNumeric(*numerics[1]);
+    if (!ri_opt || !bi_opt || *ri_opt > 0xFFFF || *bi_opt > 0xFFFF) return EvalResult::ERROR;
 
-    uint16_t relay_idx = 0;
-    uint16_t block_idx = 0;
-    for (size_t i = 0; i < numerics[0]->data.size(); ++i) {
-        relay_idx |= static_cast<uint16_t>(numerics[0]->data[i]) << (8 * i);
-    }
-    for (size_t i = 0; i < numerics[1]->data.size(); ++i) {
-        block_idx |= static_cast<uint16_t>(numerics[1]->data[i]) << (8 * i);
-    }
+    uint16_t relay_idx = static_cast<uint16_t>(*ri_opt);
+    uint16_t block_idx = static_cast<uint16_t>(*bi_opt);
 
     // Validate relay context is available
     if (!ctx.relays || !ctx.rung_relay_refs) return EvalResult::ERROR;
@@ -3926,6 +3923,7 @@ bool VerifyRungTx(const CTransaction& tx,
         // Deserialize MLSC proof from stack[1]
         std::string proof_error;
         if (!DeserializeMLSCProof(witness.stack[1], mlsc_proof, proof_error)) {
+            LogPrintf("MLSC proof deserialization failed: %s\n", proof_error);
             if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
             return false;
         }

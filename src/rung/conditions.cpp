@@ -375,7 +375,7 @@ bool VerifyMerklePath(const uint256& leaf,
             return false;
         }
         if (leaf != expected_root) {
-            error = "single leaf does not match root";
+            error = "single leaf does not match root: leaf=" + leaf.GetHex() + " root=" + expected_root.GetHex();
             return false;
         }
         return true;

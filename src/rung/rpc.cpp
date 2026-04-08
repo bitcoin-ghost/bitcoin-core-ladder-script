@@ -329,8 +329,12 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                 throw JSONRPCError(RPC_INVALID_PARAMETER,
                     "Use PREIMAGE instead of HASH160 for " + type_str + "; the node computes the hash automatically");
             }
+            // HASH256: reject for blocks where the hash should be auto-computed
+            // from a PREIMAGE field. Allow for blocks where HASH256 is an external
+            // commitment in the conditions layout (the user provides it directly).
             // HASH256: blanket rejection with whitelist for block types where
             // the hash is an external commitment (not a preimage hash).
+            // All other blocks must use PREIMAGE — the node computes the hash.
             if (field.type == RungDataType::HASH256) {
                 if (block.type != RungBlockType::CTV &&
                     block.type != RungBlockType::TAGGED_HASH &&
@@ -1126,7 +1130,6 @@ static void SignSingleKey(const UniValue& block_spec,
     if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Failed to compute sighash", block_name));
     }
-
     CPubKey pubkey = privkey.GetPubKey();
     block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(pubkey.begin(), pubkey.end())});
 
@@ -1136,6 +1139,8 @@ static void SignSingleKey(const UniValue& block_spec,
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Schnorr signing failed", block_name));
     }
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
+    LogPrintf("SignSingleKey(%s): sig=%s\n", block_name,
+              HexStr(std::span<const uint8_t>(sig_buf, 64)).substr(0, 32).c_str());
 }
 
 /** PQ-aware multi-key signing for MULTISIG and TIMELOCKED_MULTISIG.
@@ -2059,14 +2064,77 @@ static RPCHelpMan signrungtx()
                     ladder.relays.push_back(std::move(wit_relay));
                 }
             } else {
-                // No relay_blocks provided — build dummy relays for all
+                // No relay_blocks provided — build relay witness blocks with
+                // pubkeys from relay_pubkeys (needed for key-consuming relay
+                // blocks like SIG in KEY_REF_SIG patterns).
                 for (size_t rl = 0; rl < conditions.relays.size(); ++rl) {
                     Relay wit_relay;
                     wit_relay.relay_refs = conditions.relays[rl].relay_refs;
+                    size_t rpk_cursor = 0;
+                    const auto& rpks = (rl < relay_pubkeys2.size())
+                        ? relay_pubkeys2[rl]
+                        : std::vector<std::vector<uint8_t>>{};
                     for (const auto& cond_block : conditions.relays[rl].blocks) {
-                        RungBlock dummy;
-                        dummy.type = cond_block.type;
-                        wit_relay.blocks.push_back(std::move(dummy));
+                        RungBlock wit_block;
+                        wit_block.type = cond_block.type;
+                        // Add pubkeys for key-consuming blocks (merkle_pub_key)
+                        size_t n_pk = rung::PubkeyCountForBlock(cond_block.type, cond_block);
+                        if (n_pk == 0 && rung::IsKeyConsumingBlockType(cond_block.type) &&
+                            rpk_cursor < rpks.size()) {
+                            n_pk = rpks.size() - rpk_cursor;
+                        }
+                        for (size_t p = 0; p < n_pk && (rpk_cursor + p) < rpks.size(); ++p) {
+                            wit_block.fields.push_back({RungDataType::PUBKEY, rpks[rpk_cursor + p]});
+                        }
+                        rpk_cursor += n_pk;
+                        // Relay witness blocks must match the witness implicit layout.
+                        // For SIG-family blocks, produce a real SIGNATURE (the relay
+                        // is evaluated by EvalLadder — its SIG block must be SATISFIED
+                        // for KEY_REF_SIG rungs that reference it).
+                        if (rung::IsKeyConsumingBlockType(cond_block.type) && n_pk > 0) {
+                            const auto& wit_layout = rung::GetImplicitLayout(
+                                cond_block.type, 0 /*WITNESS*/);
+                            for (uint8_t wl = 0; wl < wit_layout.count; ++wl) {
+                                if (wit_layout.fields[wl].type == RungDataType::SIGNATURE) {
+                                    // Sign with the relay's key (find matching privkey)
+                                    bool signed_relay = false;
+                                    // Find a privkey matching the relay's pubkey from
+                                    // the signer's block specs
+                                    if (rpk_cursor > 0 && (rpk_cursor - n_pk) < rpks.size()) {
+                                        const auto& rpk = rpks[rpk_cursor - n_pk];
+                                        // Search signer blocks for a matching privkey
+                                        if (signer_obj.exists("blocks")) {
+                                            const auto& sblocks = signer_obj["blocks"].get_array();
+                                            for (size_t sb = 0; sb < sblocks.size() && !signed_relay; ++sb) {
+                                                if (!sblocks[sb].exists("privkey")) continue;
+                                                CKey k = DecodeSecret(sblocks[sb]["privkey"].get_str());
+                                                if (!k.IsValid()) continue;
+                                                CPubKey pub = k.GetPubKey();
+                                                if (std::vector<uint8_t>(pub.begin(), pub.end()) == rpk) {
+                                                    uint256 sighash;
+                                                    if (rung::SignatureHashLadder(txdata, mtx, input_idx,
+                                                            SIGHASH_DEFAULT, conditions, sighash)) {
+                                                        unsigned char rsig[64];
+                                                        uint256 raux = GetRandHash();
+                                                        if (k.SignSchnorr(sighash, rsig, nullptr, raux)) {
+                                                            wit_block.fields.push_back({RungDataType::SIGNATURE,
+                                                                std::vector<uint8_t>(rsig, rsig + 64)});
+                                                            signed_relay = true;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (!signed_relay) {
+                                        // Fallback: dummy signature (relay eval will fail)
+                                        wit_block.fields.push_back({RungDataType::SIGNATURE,
+                                            std::vector<uint8_t>(64, 0x00)});
+                                    }
+                                }
+                            }
+                        }
+                        wit_relay.blocks.push_back(std::move(wit_block));
                     }
                     ladder.relays.push_back(std::move(wit_relay));
                 }
@@ -2098,6 +2166,7 @@ static RPCHelpMan signrungtx()
             mlsc_proof.total_rungs = static_cast<uint16_t>(conditions.rungs.size());
             mlsc_proof.total_relays = static_cast<uint16_t>(conditions.relays.size());
             mlsc_proof.rung_index = static_cast<uint16_t>(target_rung);
+
             mlsc_proof.revealed_rung = conditions.rungs[target_rung];
 
             // Reveal relays referenced by the target rung
@@ -2788,12 +2857,24 @@ static RPCHelpMan signladder()
             keys_val.read(request.params[2].get_str());
         }
 
-        // Build pubkey map (for ParseDescriptor) and privkey map (for signing)
+        // Build pubkey map (for ParseDescriptor) and privkey map (for signing).
+        // Aliases prefixed with '_' are treated as raw hex data (e.g. preimages)
+        // rather than WIF private keys, stored in data_map for witness building.
         std::map<std::string, std::vector<uint8_t>> pubkey_map;
         std::map<std::string, CKey> privkey_map;
+        std::map<std::string, std::vector<uint8_t>> data_map;
         for (const auto& alias : keys_val.getKeys()) {
-            std::string wif = keys_val[alias].get_str();
-            CKey key = DecodeSecret(wif);
+            std::string val = keys_val[alias].get_str();
+            if (!alias.empty() && alias[0] == '_') {
+                // '_'-prefixed alias: raw hex data (preimage, etc.)
+                if (!IsHex(val)) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        "Data alias _" + alias.substr(1) + " must be hex-encoded");
+                }
+                data_map[alias.substr(1)] = ParseHex(val);
+                continue;
+            }
+            CKey key = DecodeSecret(val);
             if (!key.IsValid()) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
                     "Invalid WIF key for alias @" + alias);
@@ -2938,11 +3019,44 @@ static RPCHelpMan signladder()
             const auto& cond_block = target_cond_rung.blocks[b];
             size_t n_pks = rung::PubkeyCountForBlock(cond_block.type, cond_block);
 
+            // ParseDescriptor pushes pubkeys into rung_pks (not block.fields) for
+            // key-consuming blocks like MULTISIG. PubkeyCountForBlock only counts
+            // PUBKEY fields, so it returns 0 for conditions-format blocks. Fall back
+            // to the actual rung_pks count for key-consuming blocks.
+            if (n_pks == 0 && rung::IsKeyConsumingBlockType(cond_block.type) &&
+                pk_cursor < rung_pks.size()) {
+                n_pks = rung_pks.size() - pk_cursor;
+            }
+
             // Build a JSON block spec that BuildWitnessBlock understands
             UniValue block_spec(UniValue::VOBJ);
             block_spec.pushKV("type", rung::BlockTypeName(cond_block.type));
 
             bool is_sig = rung::IsKeyConsumingBlockType(cond_block.type);
+
+            // P2PKH/P2WPKH_LEGACY: pubkey_count=0 but key_consuming=true.
+            // Keys aren't in rung_pks (they're HASH160'd in conditions).
+            // Match by computing HASH160(pubkey) for each privkey and comparing.
+            if (n_pks == 0 && is_sig &&
+                (cond_block.type == RungBlockType::P2PKH_LEGACY ||
+                 cond_block.type == RungBlockType::P2WPKH_LEGACY)) {
+                // Find HASH160 field in conditions block
+                const rung::RungField* h160 = nullptr;
+                for (const auto& f : cond_block.fields) {
+                    if (f.type == RungDataType::HASH160) { h160 = &f; break; }
+                }
+                if (h160 && h160->data.size() == 20) {
+                    for (const auto& [alias, key] : privkey_map) {
+                        CPubKey pub = key.GetPubKey();
+                        std::vector<uint8_t> computed(CHash160::OUTPUT_SIZE);
+                        CHash160().Write(std::span<const uint8_t>(pub.begin(), pub.end())).Finalize(computed);
+                        if (computed == h160->data) {
+                            block_spec.pushKV("privkey", EncodeSecret(key));
+                            break;
+                        }
+                    }
+                }
+            }
 
             if (n_pks >= 1 && pk_cursor < rung_pks.size()) {
                 // Add privkey for signature blocks
@@ -2957,11 +3071,14 @@ static RPCHelpMan signladder()
                     }
                 }
 
-                // Add pubkeys for ALL blocks with pubkey_count > 0
-                // (signature blocks, PLC blocks with merkle_pub_key binding, anchors, etc.)
+                // Add pubkeys for blocks with pubkey_count > 1.
+                // Most blocks: pass ALL pubkeys (handler adds them from the array).
+                // HTLC: skip index 0 since SignSingleKey already adds the signing
+                //   key — including all would duplicate it, breaking ExtractBlockPubkeys.
                 if (n_pks >= 2) {
+                    size_t pk_start = (cond_block.type == RungBlockType::HTLC) ? 1 : 0;
                     UniValue pk_arr(UniValue::VARR);
-                    for (size_t p = 0; p < n_pks && (pk_cursor + p) < rung_pks.size(); ++p) {
+                    for (size_t p = pk_start; p < n_pks && (pk_cursor + p) < rung_pks.size(); ++p) {
                         pk_arr.push_back(HexStr(rung_pks[pk_cursor + p]));
                     }
                     block_spec.pushKV("pubkeys", pk_arr);
@@ -2981,11 +3098,48 @@ static RPCHelpMan signladder()
                         }
                         block_spec.pushKV("privkeys", privkeys_arr);
                     }
-                } else if (n_pks == 1 && !is_sig) {
-                    // Single pubkey non-sig blocks: add pubkey hex for witness
+                } else if (n_pks == 1) {
+                    // Single pubkey blocks: add pubkey hex for witness (merkle_pub_key).
+                    // For SIG-family blocks, SignSingleKey adds it from privkey;
+                    // for PLC/anchor blocks, the default handler reads it from here.
                     block_spec.pushKV("pubkey", HexStr(rung_pks[pk_cursor]));
                 }
                 pk_cursor += n_pks;
+            }
+
+            // Preimage-bearing blocks: require preimage in the witness block.
+            // User provides via '_preimage' (single) or '_preimage', '_preimage2' etc.
+            // Multi-hash blocks (ANCHOR_SEAL) need multiple preimages passed as '_preimages' JSON array.
+            if (cond_block.type == RungBlockType::HASH_SIG ||
+                cond_block.type == RungBlockType::HTLC ||
+                cond_block.type == RungBlockType::HASH_GUARDED ||
+                cond_block.type == RungBlockType::TAGGED_HASH ||
+                cond_block.type == RungBlockType::ANCHOR_POOL ||
+                cond_block.type == RungBlockType::ANCHOR_RESERVE ||
+                cond_block.type == RungBlockType::ANCHOR_SEAL) {
+                // Check for preimages array first (multi-hash blocks)
+                auto it_arr = data_map.find("preimages");
+                if (it_arr != data_map.end()) {
+                    // _preimages is a JSON array hex-encoded as a single hex blob.
+                    // Not ideal — use individual _preimage entries instead.
+                }
+                auto it = data_map.find("preimage");
+                if (it != data_map.end()) {
+                    block_spec.pushKV("preimage", HexStr(it->second));
+                }
+                // Additional preimages: _preimage2, _preimage3 etc.
+                auto it2 = data_map.find("preimage2");
+                if (it2 != data_map.end()) {
+                    // Build preimages array for multi-hash blocks
+                    UniValue pi_arr(UniValue::VARR);
+                    pi_arr.push_back(HexStr(it->second));
+                    pi_arr.push_back(HexStr(it2->second));
+                    auto it3 = data_map.find("preimage3");
+                    if (it3 != data_map.end()) pi_arr.push_back(HexStr(it3->second));
+                    block_spec.pushKV("preimages", pi_arr);
+                    // Remove single preimage to avoid conflict
+                    // (default handler checks preimages first, then preimage)
+                }
             }
 
             // Use BuildWitnessBlock (the tested code path from signrungtx)

@@ -5,6 +5,7 @@
 #include <rung/descriptor.h>
 
 #include <crypto/sha256.h>
+#include <hash.h>
 #include <util/strencodings.h>
 
 #include <algorithm>
@@ -243,6 +244,10 @@ bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<
             break;
         }
     }
+
+    // MULTISIG_CONDITIONS layout: [NUMERIC(threshold_M), SCHEME(1)] — exactly 2 fields.
+    // All keys share the same scheme. Default: SCHNORR.
+    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
 
     return Expect(ctx, ')');
 }
@@ -834,6 +839,46 @@ bool ParseTimelockedMultisig(ParseContext& ctx, RungBlock& block, std::vector<st
     return Expect(ctx, ')');
 }
 
+bool ParseAnchorFee(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
+{
+    // anchor_fee(@pk1, @pk2, min_fee, max_fee, max_weight, commitment)
+    if (!Expect(ctx, '(')) return false;
+
+    // Two pubkeys
+    std::string a1 = ReadAlias(ctx);
+    if (a1.empty()) return false;
+    std::vector<uint8_t> pk1;
+    if (!LookupKey(ctx, a1, pk1)) return false;
+    rung_pks.push_back(pk1);
+
+    if (!Expect(ctx, ',')) return false;
+    std::string a2 = ReadAlias(ctx);
+    if (a2.empty()) return false;
+    std::vector<uint8_t> pk2;
+    if (!LookupKey(ctx, a2, pk2)) return false;
+    rung_pks.push_back(pk2);
+
+    // Four numerics: min_fee, max_fee, max_weight, commitment
+    uint32_t min_fee, max_fee, max_weight, commitment;
+    if (!Expect(ctx, ',')) return false;
+    if (!ReadUint32(ctx, min_fee)) return false;
+    if (!Expect(ctx, ',')) return false;
+    if (!ReadUint32(ctx, max_fee)) return false;
+    if (!Expect(ctx, ',')) return false;
+    if (!ReadUint32(ctx, max_weight)) return false;
+    if (!Expect(ctx, ',')) return false;
+    if (!ReadUint32(ctx, commitment)) return false;
+
+    block.type = RungBlockType::ANCHOR_FEE;
+    // Conditions layout: [SCHEME(1), NUMERIC, NUMERIC, NUMERIC, NUMERIC]
+    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(min_fee)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(max_fee)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(max_weight)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(commitment)});
+    return Expect(ctx, ')');
+}
+
 // ── Governance family (new) ────────────────────────────────────────────
 
 bool ParseAccumulator(ParseContext& ctx, RungBlock& block)
@@ -875,12 +920,16 @@ bool ParseLegacySingleKey(ParseContext& ctx, RungBlock& block, RungBlockType typ
 
     block.type = type;
 
-    // P2PKH/P2WPKH: PUBKEY goes through ParseConditionsSpec→HASH160 auto-conversion
+    // P2PKH/P2WPKH: PUBKEY → HASH160(pubkey) in conditions
     // (pubkey_count=0, NOT added to Merkle leaf)
     // P2PK/P2TR: PUBKEY goes to rung_pubkeys (Merkle leaf) + SCHEME in conditions
     if (type == RungBlockType::P2PKH_LEGACY || type == RungBlockType::P2WPKH_LEGACY) {
-        // PUBKEY → auto-converted to HASH160 by ParseConditionsSpec
-        block.fields.push_back({RungDataType::PUBKEY, pk});
+        // Compute RIPEMD160(SHA256(pubkey)) for conditions
+        RungField h160_field;
+        h160_field.type = RungDataType::HASH160;
+        h160_field.data.resize(CHash160::OUTPUT_SIZE);
+        CHash160().Write(pk).Finalize(h160_field.data);
+        block.fields.push_back(std::move(h160_field));
     } else {
         // P2PK, P2TR: pubkey in Merkle leaf + SCHEME
         rung_pks.push_back(pk);
@@ -1006,6 +1055,7 @@ bool ParseBlock(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uin
     else if (name == "hash_sig") ok = ParseHashSig(ctx, block, rung_pks);
     else if (name == "ptlc") ok = ParsePtlc(ctx, block, rung_pks);
     else if (name == "timelocked_multisig") ok = ParseTimelockedMultisig(ctx, block, rung_pks);
+    else if (name == "anchor_fee") ok = ParseAnchorFee(ctx, block, rung_pks);
     // Governance family
     else if (name == "epoch_gate") ok = ParseTwoNumericBlock(ctx, block, RungBlockType::EPOCH_GATE);
     else if (name == "weight_limit") ok = ParseOneNumericBlock(ctx, block, RungBlockType::WEIGHT_LIMIT);
