@@ -85,10 +85,6 @@ static UniValue CoilToJSON(const RungCoil& coil)
     case RungCoilType::UNLOCK_TO: obj.pushKV("type", "UNLOCK_TO"); break;
     default: obj.pushKV("type", "UNKNOWN"); break;
     }
-    switch (coil.attestation) {
-    case RungAttestationMode::INLINE:    obj.pushKV("attestation", "INLINE"); break;
-    default: obj.pushKV("attestation", "UNKNOWN"); break;
-    }
     switch (coil.scheme) {
     case RungScheme::SCHNORR:     obj.pushKV("scheme", "SCHNORR"); break;
     case RungScheme::ECDSA:       obj.pushKV("scheme", "ECDSA"); break;
@@ -442,10 +438,6 @@ static RungCoil ParseCoil(const UniValue& obj)
         if (t == "UNLOCK")    coil.coil_type = RungCoilType::UNLOCK;
         else if (t == "UNLOCK_TO") coil.coil_type = RungCoilType::UNLOCK_TO;
     }
-    if (obj.exists("attestation")) {
-        std::string a = obj["attestation"].get_str();
-        if (a == "INLINE")     coil.attestation = RungAttestationMode::INLINE;
-    }
     if (obj.exists("scheme")) {
         std::string s = obj["scheme"].get_str();
         if (s == "SCHNORR") coil.scheme = RungScheme::SCHNORR;
@@ -523,7 +515,6 @@ static RPCHelpMan decoderung()
             {RPCResult::Type::OBJ, "coil", "Coil metadata (per-output)",
                 {
                     {RPCResult::Type::STR, "type", "Coil type"},
-                    {RPCResult::Type::STR, "attestation", "Attestation mode"},
                     {RPCResult::Type::STR, "scheme", "Signature scheme"},
                     {RPCResult::Type::STR_HEX, "address", /*optional=*/ true, "Destination scriptPubKey hex"},
                     {RPCResult::Type::ARR, "conditions", /*optional=*/ true, "Coil condition rungs (same block format as input rungs)",
@@ -599,10 +590,9 @@ static RPCHelpMan createrung()
                     },
                 },
             },
-            {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata (default UNLOCK/INLINE/SCHNORR).",
+            {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata (default UNLOCK/SCHNORR).",
                 {
                     {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "UNLOCK or UNLOCK_TO"},
-                    {"attestation", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "INLINE"},
                     {"scheme", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "SCHNORR or ECDSA"},
                     {"address", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Destination scriptPubKey hex"},
                 },
@@ -908,10 +898,9 @@ static RPCHelpMan createrungtx()
                                     },
                                 },
                             },
-                            {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata (per-output, default UNLOCK/INLINE/SCHNORR).",
+                            {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata (per-output, default UNLOCK/SCHNORR).",
                                 {
                                     {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "UNLOCK or UNLOCK_TO"},
-                                    {"attestation", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "INLINE"},
                                     {"scheme", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "SCHNORR or ECDSA"},
                                     {"address", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Destination scriptPubKey hex"},
                                 },
@@ -3295,7 +3284,6 @@ static RPCHelpMan createtxmlsc()
                             {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata",
                                 {
                                     {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "UNLOCK or UNLOCK_TO"},
-                                    {"attestation", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "INLINE"},
                                     {"scheme", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "SCHNORR or ECDSA"},
                                 },
                             },
@@ -3435,7 +3423,6 @@ static RPCHelpMan createtxmlsc()
     // Key-path tweak: auto-detect or use explicit internal_pubkey.
     // If all rungs are single-SIG with the same pubkey, auto-tweak for key-path spending.
     bool has_explicit_pubkey = !request.params[4].isNull() && !request.params[4].get_str().empty();
-    bool auto_tweaked = false;
     std::vector<uint8_t> internal_pubkey_bytes;
 
     if (has_explicit_pubkey) {
@@ -3469,7 +3456,6 @@ static RPCHelpMan createtxmlsc()
             } else {
                 internal_pubkey_bytes = first_pk;
             }
-            auto_tweaked = true;
         }
     }
 

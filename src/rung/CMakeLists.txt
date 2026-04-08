@@ -16,7 +16,6 @@ add_library(bitcoin_rung STATIC EXCLUDE_FROM_ALL
   policy.cpp
   rpc.cpp
   pq_verify.cpp
-  aggregate.cpp
   descriptor.cpp
 )
 

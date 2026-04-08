@@ -85,6 +85,27 @@ static std::vector<uint8_t> MakePubkeyCommit(const std::vector<uint8_t>& pubkey)
     return commit;
 }
 
+/** Compute TX_MLSC conditions root from RungConditions (matches evaluator path). */
+static uint256 ComputeMLSCRoot(const RungConditions& conditions,
+                                const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys = {})
+{
+    std::vector<CreationProofRung> cp_rungs;
+    for (size_t r = 0; r < conditions.rungs.size(); ++r) {
+        CreationProofRung cp;
+        for (const auto& block : conditions.rungs[r].blocks) {
+            cp.blocks.push_back({
+                static_cast<uint16_t>(block.type),
+                static_cast<uint8_t>(block.inverted ? 1 : 0)
+            });
+        }
+        cp.coil = conditions.coil;
+        const auto& pks = (r < rung_pubkeys.size()) ? rung_pubkeys[r] : std::vector<std::vector<uint8_t>>{};
+        cp.value_commitment = ComputeValueCommitment(conditions.rungs[r], pks);
+        cp_rungs.push_back(std::move(cp));
+    }
+    return ComputeTxMLSCRoot(cp_rungs);
+}
+
 BOOST_FIXTURE_TEST_SUITE(rung_tests, BasicTestingSetup)
 
 // ============================================================================
@@ -1115,8 +1136,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_all_field_types)
     input_conds.rungs.push_back(rung0);
     input_conds.rungs.push_back(rung1);
 
-    // Create MLSC output with matching conditions root
-    uint256 root = ComputeConditionsRoot(input_conds);
+    // Create MLSC output with matching conditions root (TX_MLSC path)
+    uint256 root = ComputeMLSCRoot(input_conds);
     CScript spk = CreateMLSCScript(root);
     CTxOut output;
     output.scriptPubKey = spk;
@@ -1365,8 +1386,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_compound_carry_forward)
     RungConditions input_conds;
     input_conds.rungs.push_back(rung);
 
-    // Identical output — use MLSC root
-    uint256 root = ComputeConditionsRoot(input_conds);
+    // Identical output — use TX_MLSC root
+    uint256 root = ComputeMLSCRoot(input_conds);
     CScript spk = CreateMLSCScript(root);
     CTxOut output;
     output.scriptPubKey = spk;
@@ -2226,12 +2247,12 @@ BOOST_AUTO_TEST_CASE(eval_pq_scheme_validation)
 }
 
 // ============================================================================
-// Removed attestation modes (AGGREGATE=0x02, DEFERRED=0x03) must be rejected
+// Unknown attestation modes (0x02, 0x03, etc.) must be rejected
 // ============================================================================
 
-BOOST_AUTO_TEST_CASE(deserialize_accepts_aggregate_attestation)
+BOOST_AUTO_TEST_CASE(deserialize_rejects_aggregate_attestation)
 {
-    // AGGREGATE attestation (0x02) is now valid — verify it deserializes correctly
+    // AGGREGATE (0x02) was removed — verify deserialization rejects it
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
@@ -2240,15 +2261,24 @@ BOOST_AUTO_TEST_CASE(deserialize_accepts_aggregate_attestation)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
-    ladder.coil.attestation = RungAttestationMode::AGGREGATE;
+    ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
+    ladder.coil.address_hash.resize(32, 0xDD);
 
     auto bytes = SerializeLadderWitness(ladder);
+    // Full coil: type(0x02) att(0x01) scheme(0x01) — patch attestation to 0x02 (AGGREGATE, now invalid)
+    bool patched = false;
+    for (size_t i = 0; i + 2 < bytes.size(); ++i) {
+        if (bytes[i] == 0x02 && bytes[i+1] == 0x01 && bytes[i+2] == 0x01) {
+            bytes[i+1] = 0x02; // attestation = AGGREGATE (removed)
+            patched = true;
+            break;
+        }
+    }
+    BOOST_CHECK(patched);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK_MESSAGE(DeserializeLadderWitness(bytes, decoded, error),
-        "AGGREGATE attestation should be accepted: " + error);
-    BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.attestation),
-                      static_cast<uint8_t>(RungAttestationMode::AGGREGATE));
+    BOOST_CHECK(!DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(error.find("attestation") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(deserialize_rejects_deferred_attestation)
@@ -4512,7 +4542,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_legacy_compat)
     }
 
     CTxOut output;
-    uint256 root = ComputeConditionsRoot(output_conds);
+    uint256 root = ComputeMLSCRoot(output_conds);
     output.scriptPubKey = CreateMLSCScript(root);
 
     RungEvalContext ctx;
@@ -4580,7 +4610,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_cross_rung)
 
     CTxOut output;
     {
-        uint256 root = ComputeConditionsRoot(output_conds);
+        uint256 root = ComputeMLSCRoot(output_conds);
         output.scriptPubKey = CreateMLSCScript(root);
     }
 
@@ -4653,7 +4683,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
 
     CTxOut output;
     {
-        uint256 root = ComputeConditionsRoot(output_conds);
+        uint256 root = ComputeMLSCRoot(output_conds);
         output.scriptPubKey = CreateMLSCScript(root);
     }
 
@@ -4703,7 +4733,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
 
     CTxOut bad_output;
     {
-        uint256 root = ComputeConditionsRoot(bad_output_conds);
+        uint256 root = ComputeMLSCRoot(bad_output_conds);
         bad_output.scriptPubKey = CreateMLSCScript(root);
     }
     ctx.spending_output = &bad_output;
@@ -4777,7 +4807,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
 
     CTxOut good_output;
     {
-        uint256 root = ComputeConditionsRoot(good_output_conds);
+        uint256 root = ComputeMLSCRoot(good_output_conds);
         good_output.scriptPubKey = CreateMLSCScript(root);
     }
     good_output.nValue = 50000;
@@ -4805,7 +4835,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
 
     CTxOut bad_output;
     {
-        uint256 root = ComputeConditionsRoot(bad_output_conds);
+        uint256 root = ComputeMLSCRoot(bad_output_conds);
         bad_output.scriptPubKey = CreateMLSCScript(root);
     }
     bad_output.nValue = 50000;
@@ -4865,7 +4895,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_legacy_compat)
 
     CTxOut output;
     {
-        uint256 root = ComputeConditionsRoot(output_conds);
+        uint256 root = ComputeMLSCRoot(output_conds);
         output.scriptPubKey = CreateMLSCScript(root);
     }
 
@@ -4934,7 +4964,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_multi_mutation)
 
     CTxOut output;
     {
-        uint256 root = ComputeConditionsRoot(output_conds);
+        uint256 root = ComputeMLSCRoot(output_conds);
         output.scriptPubKey = CreateMLSCScript(root);
     }
 
@@ -8972,8 +9002,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_mixed_pq_schnorr_carry_forward)
         input_conds.rungs.push_back(rung);
     }
 
-    // Create MLSC scriptPubKey
-    uint256 root = ComputeConditionsRoot(input_conds);
+    // Create MLSC scriptPubKey (TX_MLSC path)
+    uint256 root = ComputeMLSCRoot(input_conds);
     CScript spk = CreateMLSCScript(root);
     CTxOut mock_output(50000, spk);
 
@@ -8991,7 +9021,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_mixed_pq_schnorr_carry_forward)
     // Now tamper: change the FALCON512 scheme to DILITHIUM3 in output
     RungConditions tampered = input_conds;
     tampered.rungs[0].blocks[1].fields[0].data = {0x12}; // DILITHIUM3 (field[0] = SCHEME)
-    uint256 tampered_root = ComputeConditionsRoot(tampered);
+    uint256 tampered_root = ComputeMLSCRoot(tampered);
     CScript tampered_spk = CreateMLSCScript(tampered_root);
     CTxOut tampered_output(50000, tampered_spk);
 
@@ -9533,113 +9563,6 @@ BOOST_AUTO_TEST_CASE(full_leaves_proof_backward_compat)
     if (!decoded.proof_hashes.empty()) {
         BOOST_CHECK(decoded.proof_hashes[0] == sibling_hash);
     }
-}
-
-BOOST_AUTO_TEST_CASE(half_aggregation_single_entry)
-{
-    // Single-entry half-aggregation: s_agg = s_0, verify normally
-    CKey key;
-    key.MakeNewKey(true);
-    XOnlyPubKey pubkey{key.GetPubKey()};
-
-    uint256 msg;
-    msg = *uint256::FromHex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
-
-    // Sign normally to get R || s
-    std::vector<unsigned char> full_sig(64);
-    uint256 aux;
-    BOOST_CHECK(key.SignSchnorr(msg, full_sig, nullptr, aux));
-
-    // Verify via BatchVerifier with single aggregated entry
-    BatchVerifier bv;
-    bv.active = true;
-    bv.aggregated_s.assign(full_sig.begin() + 32, full_sig.end()); // s part
-    std::vector<unsigned char> R_only(full_sig.begin(), full_sig.begin() + 32); // R part
-    bv.Add(msg, pubkey, R_only, true);
-
-    BOOST_CHECK(bv.Verify());
-
-    // Corrupt s_agg — should fail
-    BatchVerifier bv_bad = bv;
-    bv_bad.aggregated_s[0] ^= 0xFF;
-    BOOST_CHECK(!bv_bad.Verify());
-}
-
-BOOST_AUTO_TEST_CASE(half_aggregation_two_entries)
-{
-    // Two-entry half-aggregation: s_agg = z_0 * s_0 + z_1 * s_1
-    CKey key1, key2;
-    key1.MakeNewKey(true);
-    key2.MakeNewKey(true);
-    XOnlyPubKey pk1{key1.GetPubKey()};
-    XOnlyPubKey pk2{key2.GetPubKey()};
-
-    uint256 msg1, msg2;
-    msg1 = *uint256::FromHex("1111111111111111111111111111111111111111111111111111111111111111");
-    msg2 = *uint256::FromHex("2222222222222222222222222222222222222222222222222222222222222222");
-
-    // Sign individually
-    std::vector<unsigned char> sig1(64), sig2(64);
-    uint256 aux;
-    BOOST_CHECK(key1.SignSchnorr(msg1, sig1, nullptr, aux));
-    BOOST_CHECK(key2.SignSchnorr(msg2, sig2, nullptr, aux));
-
-    // Compute weights: z_0 = 1, z_1 = H(ctx || 1)
-    // Build context hash (same as BatchVerifier::Verify)
-    HashWriter agg_ctx{TaggedHash("LadderHalfAggCtx")};
-    agg_ctx.write(std::as_bytes(std::span<const unsigned char>{sig1.data(), 32}));
-    agg_ctx.write(std::as_bytes(std::span<const unsigned char>{pk1.data(), 32}));
-    agg_ctx.write(std::as_bytes(std::span<const unsigned char>{sig2.data(), 32}));
-    agg_ctx.write(std::as_bytes(std::span<const unsigned char>{pk2.data(), 32}));
-    uint256 ctx_hash = agg_ctx.GetSHA256();
-
-    // z_0 = 1 (big-endian)
-    unsigned char z0[32] = {};
-    z0[31] = 1;
-    // z_1 = H(ctx || 1)
-    uint256 z1_hash = (HashWriter{TaggedHash("LadderHalfAggWeight")} << ctx_hash << static_cast<uint32_t>(1)).GetSHA256();
-    unsigned char z1[32];
-    std::memcpy(z1, z1_hash.data(), 32);
-
-    // Compute s_agg = z_0 * s_0 + z_1 * s_1 using secp256k1 scalar ops
-    unsigned char s0[32], s1[32];
-    std::memcpy(s0, sig1.data() + 32, 32);
-    std::memcpy(s1, sig2.data() + 32, 32);
-
-    // z_0 * s_0 = 1 * s_0 = s_0
-    unsigned char term0[32];
-    std::memcpy(term0, s0, 32);
-    // secp256k1 scalar ops need a non-static context for some versions
-    secp256k1_context* sctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
-    BOOST_CHECK(secp256k1_ec_seckey_tweak_mul(sctx, term0, z0));
-
-    // z_1 * s_1
-    unsigned char term1[32];
-    std::memcpy(term1, s1, 32);
-    BOOST_CHECK(secp256k1_ec_seckey_tweak_mul(sctx, term1, z1));
-
-    // s_agg = term0 + term1 (scalar addition)
-    unsigned char s_agg[32];
-    std::memcpy(s_agg, term0, 32);
-    BOOST_CHECK(secp256k1_ec_seckey_tweak_add(sctx, s_agg, term1));
-    secp256k1_context_destroy(sctx);
-
-    // Build BatchVerifier with 2 aggregated entries
-    BatchVerifier bv;
-    bv.active = true;
-    bv.aggregated_s.assign(s_agg, s_agg + 32);
-
-    std::vector<unsigned char> R1(sig1.begin(), sig1.begin() + 32);
-    std::vector<unsigned char> R2(sig2.begin(), sig2.begin() + 32);
-    bv.Add(msg1, pk1, R1, true);
-    bv.Add(msg2, pk2, R2, true);
-
-    BOOST_CHECK_MESSAGE(bv.Verify(), "Half-aggregation verification failed for 2 entries");
-
-    // Corrupt s_agg — should fail
-    BatchVerifier bv_bad = bv;
-    bv_bad.aggregated_s[0] ^= 0xFF;
-    BOOST_CHECK(!bv_bad.Verify());
 }
 
 // ============================================================================
@@ -11423,33 +11346,6 @@ BOOST_AUTO_TEST_CASE(block_descriptor_table_consistency)
         BOOST_CHECK_MESSAGE(std::string(desc->name) == BlockTypeName(bt),
             "name mismatch for " + BlockTypeName(bt));
     }
-}
-
-// ============================================================================
-// Feature 5: Batch verifier tests
-// ============================================================================
-
-BOOST_AUTO_TEST_CASE(batch_verifier_empty)
-{
-    rung::BatchVerifier bv;
-    bv.active = true;
-    // Empty batch should verify
-    BOOST_CHECK(bv.Verify());
-}
-
-BOOST_AUTO_TEST_CASE(batch_verifier_disabled_mode)
-{
-    rung::BatchVerifier bv;
-    // active is false by default
-    BOOST_CHECK(!bv.active);
-    BOOST_CHECK(bv.entries.empty());
-}
-
-BOOST_AUTO_TEST_CASE(batch_verifier_find_failure_empty)
-{
-    rung::BatchVerifier bv;
-    // No entries, no failure
-    BOOST_CHECK_EQUAL(bv.FindFailure(), -1);
 }
 
 // ============================================================================

@@ -23,43 +23,6 @@ class CTxOut;
 
 namespace rung {
 
-/** Batch Schnorr signature verifier.
- *  Collects (sighash, pubkey, signature) tuples during evaluation and verifies
- *  them all in a single batch after all inputs pass. Falls back to individual
- *  verification if batch verification is not available.
- *
- *  Half-aggregation support: entries with aggregated=true contain only R (32 bytes).
- *  Verification uses the transaction-level aggregated_s value. */
-struct BatchVerifier {
-    struct Entry {
-        uint256 sighash;
-        XOnlyPubKey pubkey;
-        std::vector<unsigned char> sig; //!< R||s (64 bytes) for INLINE, R only (32 bytes) for AGGREGATE
-        bool aggregated{false};         //!< If true, sig is R only; s comes from aggregated_sig
-    };
-    std::vector<Entry> entries;
-    bool active{false};
-    std::vector<unsigned char> aggregated_s; //!< 32-byte aggregated s value from transaction
-
-    /** Add a verification entry to the batch. */
-    void Add(const uint256& sighash, const XOnlyPubKey& pk, std::span<const unsigned char> sig, bool agg = false) {
-        Entry e;
-        e.sighash = sighash;
-        e.pubkey = pk;
-        e.sig.assign(sig.begin(), sig.end());
-        e.aggregated = agg;
-        entries.push_back(std::move(e));
-    }
-
-    /** Batch verify all entries. Returns true if all signatures are valid.
-     *  For aggregated entries, uses half-aggregation verification with aggregated_s. */
-    bool Verify() const;
-
-    /** On batch failure, find the index of the first invalid entry.
-     *  Returns -1 if all entries are individually valid (shouldn't happen). */
-    int FindFailure() const;
-};
-
 /** Signature checker that wraps an existing checker and adds rung conditions context.
  *  When CheckSchnorrSignature is called with SigVersion::LADDER, it computes
  *  SignatureHashLadder instead of SignatureHashSchnorr. */
@@ -70,21 +33,18 @@ private:
     const PrecomputedTransactionData& m_txdata;
     const CTransaction& m_tx;
     unsigned int m_nIn;
-    BatchVerifier* m_batch{nullptr}; //!< If non-null, defer verification to batch
 
 public:
     LadderSignatureChecker(const BaseSignatureChecker& checker,
                            const RungConditions& conditions,
                            const PrecomputedTransactionData& txdata,
                            const CTransaction& tx,
-                           unsigned int nIn,
-                           BatchVerifier* batch = nullptr)
+                           unsigned int nIn)
         : DeferringSignatureChecker(checker),
           m_conditions(conditions),
           m_txdata(txdata),
           m_tx(tx),
-          m_nIn(nIn),
-          m_batch(batch) {}
+          m_nIn(nIn) {}
 
     bool CheckSchnorrSignature(std::span<const unsigned char> sig,
                                std::span<const unsigned char> pubkey,

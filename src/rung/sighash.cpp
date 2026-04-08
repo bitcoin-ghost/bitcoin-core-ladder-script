@@ -69,7 +69,7 @@ bool SignatureHashLadder(const PrecomputedTransactionData& cache,
     }
 
     const uint8_t base_hash_type = hash_type & 0x03; // strip APO/ACP flags
-    const uint8_t output_type = (hash_type == SIGHASH_DEFAULT || base_hash_type == 0) ? SIGHASH_ALL : base_hash_type;
+    const uint8_t output_type = (hash_type == SIGHASH_DEFAULT || base_hash_type == 0) ? static_cast<uint8_t>(SIGHASH_ALL) : base_hash_type;
     const uint8_t input_type = hash_type & SIGHASH_INPUT_MASK;
 
     HashWriter ss{HASHER_LADDERSIGHASH};

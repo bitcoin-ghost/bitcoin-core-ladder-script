@@ -212,6 +212,10 @@ inline bool IsKnownBlockType(uint16_t b)
     case RungBlockType::P2TR_LEGACY:
     case RungBlockType::P2TR_SCRIPT_LEGACY:
         return true;
+    // Explicitly rejected: removed block types
+    case RungBlockType::RESERVED_0201:
+    case RungBlockType::RESERVED_0202:
+        return false;
     }
     return false;
 }
@@ -476,7 +480,6 @@ enum class RungCoilType : uint8_t {
 /** Attestation mode for signatures in this rung. */
 enum class RungAttestationMode : uint8_t {
     INLINE    = 0x01, //!< Signatures inline in witness
-    AGGREGATE = 0x02, //!< Half-aggregated: R per input in witness, aggregated s at tx level
 };
 
 /** Signature scheme for this rung. */
@@ -505,7 +508,6 @@ inline bool IsKnownAttestationMode(uint8_t a)
 {
     switch (static_cast<RungAttestationMode>(a)) {
     case RungAttestationMode::INLINE:
-    case RungAttestationMode::AGGREGATE:
         return true;
     }
     return false;

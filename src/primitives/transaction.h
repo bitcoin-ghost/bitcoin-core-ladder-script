@@ -404,7 +404,7 @@ public:
     // Ladder Script: shared conditions root and witness-carried proofs.
     const uint256 conditions_root;
     const std::vector<uint8_t> creation_proof;  //!< Leaf hashes proving conditions_root (required for 3+ outputs)
-    const std::vector<uint8_t> aggregated_sig;  //!< Half-aggregated s value (32 bytes if present)
+    const std::vector<uint8_t> aggregated_sig;  //!< Reserved (always empty, wire format compat)
 
 private:
     /** Memory only. */
