@@ -121,7 +121,7 @@ a:hover { text-decoration: underline; }
       <a href="../ghost-labs.html" class="header-title">Ghost Labs</a>
       <div class="header-right">
         <a href="https://bitcoinghost.org">Bitcoin Ghost</a>
-        <a href="https://github.com/bitcoin-ghost/ghost-labs-ladder-script" target="_blank" class="gh-icon">
+        <a href="https://github.com/bitcoin-ghost/bitcoin-core-ladder-script" target="_blank" class="gh-icon">
           <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
       </div>
@@ -163,6 +163,13 @@ a:hover { text-decoration: underline; }
       <span class="status-label">Chain</span>
       <span class="status-value" id="status-chain">signet</span>
     </div>
+  </div>
+
+  <!-- Mempool -->
+  <div class="blocks-header">Mempool — Pending Transactions</div>
+  <div id="mempool-panel" style="margin-bottom:32px">
+    <div class="loading" id="mempool-loading">Loading mempool...</div>
+    <div id="mempool-list"></div>
   </div>
 
   <!-- Block Goggles -->
@@ -243,6 +250,40 @@ async function loadStatus() {
   } catch (e) {
     document.getElementById('status-dot').className = 'status-dot offline';
     document.getElementById('status-text').textContent = 'offline';
+  }
+}
+
+async function loadMempool() {
+  const container = document.getElementById('mempool-list');
+  const loading = document.getElementById('mempool-loading');
+  try {
+    const data = await fetchJSON('/api/ladder/mempool/txs');
+    loading.style.display = 'none';
+    if (!data.txs || data.txs.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-light);font-size:13px;padding:12px 0">No pending transactions</div>';
+      return;
+    }
+    let html = '<div class="block-row header"><div>TXID</div><div style="text-align:center">Version</div><div style="text-align:center">vSize</div><div style="text-align:center">Inputs</div><div style="text-align:center">Outputs</div></div>';
+    for (const tx of data.txs) {
+      const isLadder = tx.is_ladder || tx.version === 4;
+      const txidShort = (tx.txid || '').substring(0, 16) + '...';
+      const cls = isLadder ? 'style="color:var(--accent);font-weight:600"' : '';
+      const badge = isLadder ? ' <span style="background:var(--accent);color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:600">RUNG</span>' : '';
+      html += `<div class="block-row" style="cursor:pointer" onclick="document.getElementById('search-input').value='${tx.txid}';searchTx()">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px" ${cls}>${txidShort}${badge}</div>
+        <div style="text-align:center">v${tx.version || '?'}</div>
+        <div style="text-align:center">${tx.vsize || '?'} vB</div>
+        <div style="text-align:center">${tx.vin_count || '?'}</div>
+        <div style="text-align:center">${tx.vout_count || '?'}</div>
+      </div>`;
+    }
+    if (data.count > data.txs.length) {
+      html += `<div style="color:var(--text-light);font-size:12px;padding:8px 0">Showing ${data.txs.length} of ${data.count} pending transactions</div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    loading.style.display = 'none';
+    container.innerHTML = '<div style="color:var(--text-light);font-size:13px">Mempool unavailable</div>';
   }
 }
 
@@ -437,12 +478,14 @@ async function loadGoggles() {
 loadStatus();
 loadGoggles();
 loadBlocks();
+loadMempool();
 
 // Auto-refresh every 30s
 setInterval(() => {
   loadStatus();
   loadGoggles();
   loadBlocks();
+  loadMempool();
 }, 30000);
 
 // Enter key in search
