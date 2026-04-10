@@ -12654,6 +12654,7 @@ BOOST_AUTO_TEST_SUITE_END()
 // QABI — Quantum Atomic Batch Input / Output
 // ============================================================================
 
+#include <rung/descriptor.h>
 #include <rung/qabi.h>
 
 BOOST_FIXTURE_TEST_SUITE(qabi_tests, BasicTestingSetup)
@@ -14317,6 +14318,92 @@ BOOST_AUTO_TEST_CASE(serialize_single_block_witness_roundtrip)
     int64_t depth = 0;
     BOOST_CHECK(ExtractQABIPrimeDepth(CTransaction(mtx), 0, depth));
     BOOST_CHECK_EQUAL(depth, 7);
+}
+
+// ============================================================================
+// Descriptor grammar: qabi_prime() and qabi_spend(...) tokens
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(descriptor_qabi_prime_parse_format_roundtrip)
+{
+    std::string desc = "ladder(or(qabi_prime()))";
+    std::map<std::string, std::vector<uint8_t>> keys;
+    RungConditions conditions;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string err;
+
+    BOOST_REQUIRE_MESSAGE(ParseDescriptor(desc, keys, conditions, pubkeys, err),
+                          "parse failed: " << err);
+    BOOST_REQUIRE_EQUAL(conditions.rungs.size(), 1u);
+    BOOST_REQUIRE_EQUAL(conditions.rungs[0].blocks.size(), 1u);
+    BOOST_CHECK(conditions.rungs[0].blocks[0].type == RungBlockType::QABI_PRIME);
+    BOOST_CHECK_EQUAL(conditions.rungs[0].blocks[0].fields.size(), 0u);
+
+    std::string formatted = FormatDescriptor(conditions, pubkeys);
+    BOOST_CHECK_NE(formatted.find("qabi_prime()"), std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_qabi_spend_parse_format_roundtrip)
+{
+    std::string auth_tip_hex(64, 'a');
+    std::string committed_root_hex(64, 'b');
+    std::string owner_id_hex(64, 'c');
+    std::string desc = "ladder(or(qabi_spend(" + auth_tip_hex + ", " +
+                        committed_root_hex + ", 10, 1000, " + owner_id_hex + ")))";
+
+    std::map<std::string, std::vector<uint8_t>> keys;
+    RungConditions conditions;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string err;
+
+    BOOST_REQUIRE_MESSAGE(ParseDescriptor(desc, keys, conditions, pubkeys, err),
+                          "parse failed: " << err);
+    BOOST_REQUIRE_EQUAL(conditions.rungs.size(), 1u);
+    BOOST_REQUIRE_EQUAL(conditions.rungs[0].blocks.size(), 1u);
+    const auto& block = conditions.rungs[0].blocks[0];
+    BOOST_CHECK(block.type == RungBlockType::QABI_SPEND);
+    BOOST_REQUIRE_EQUAL(block.fields.size(), 5u);
+    BOOST_CHECK(block.fields[0].type == RungDataType::HASH256);
+    BOOST_CHECK(block.fields[1].type == RungDataType::HASH256);
+    BOOST_CHECK(block.fields[2].type == RungDataType::NUMERIC);
+    BOOST_CHECK(block.fields[3].type == RungDataType::NUMERIC);
+    BOOST_CHECK(block.fields[4].type == RungDataType::PUBKEY_COMMIT);
+
+    std::string formatted = FormatDescriptor(conditions, pubkeys);
+    BOOST_CHECK_NE(formatted.find("qabi_spend("), std::string::npos);
+    BOOST_CHECK_NE(formatted.find(auth_tip_hex), std::string::npos);
+    BOOST_CHECK_NE(formatted.find("10"), std::string::npos);
+    BOOST_CHECK_NE(formatted.find("1000"), std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_qabi_full_utxo_shape)
+{
+    // A full QABI-enabled UTXO descriptor composed with existing tokens:
+    // Rung 0 (self-spend) + Rung 1 (priming path) + Rung 2 (batch spend).
+    std::string auth_tip_hex(64, 'a');
+    std::string root_hex(64, '0');  // unprimed
+    std::string owner_id_hex(64, 'c');
+    std::string desc = "ladder(or("
+                        "sig(@alice, falcon512), "
+                        "qabi_prime(), "
+                        "qabi_spend(" + auth_tip_hex + ", " + root_hex +
+                            ", 0, 0, " + owner_id_hex + ")"
+                        "))";
+
+    std::map<std::string, std::vector<uint8_t>> keys;
+    // Dummy 897-byte FALCON pubkey for @alice
+    keys["alice"] = std::vector<uint8_t>(897, 0x42);
+
+    RungConditions conditions;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string err;
+
+    BOOST_REQUIRE_MESSAGE(ParseDescriptor(desc, keys, conditions, pubkeys, err),
+                          "parse failed: " << err);
+    BOOST_REQUIRE_EQUAL(conditions.rungs.size(), 3u);
+    BOOST_CHECK(conditions.rungs[0].blocks[0].type == RungBlockType::SIG);
+    BOOST_CHECK(conditions.rungs[1].blocks[0].type == RungBlockType::QABI_PRIME);
+    BOOST_CHECK(conditions.rungs[2].blocks[0].type == RungBlockType::QABI_SPEND);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
