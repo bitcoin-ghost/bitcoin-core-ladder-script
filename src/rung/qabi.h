@@ -96,6 +96,19 @@ uint256 ComputeQABIRoot(const std::vector<uint8_t>& serialised_block_bytes);
  *  ComputeQABIRoot(SerializeQABIBlock(block)). */
 uint256 ComputeQABIRoot(const QABIBlock& block);
 
+/** Compute SIGHASH_QABO — the sighash used for the coordinator's FALCON QABO
+ *  signature on a QABIO batch tx.
+ *
+ *  Phase 4 interim implementation: flat hash over version + vin outpoints +
+ *  vout + conditions_root + qabi_block + nLockTime. Deliberately EXCLUDES
+ *  tx.aggregated_sig (chicken-and-egg). Per-input witnesses are also currently
+ *  excluded; Phase 9 will refine coverage to close any witness malleation gap.
+ *
+ *  The same sighash is produced for every input in the tx — the coordinator
+ *  signs once, every primed input's QABI_SPEND evaluator verifies against the
+ *  same hash. */
+uint256 ComputeSighashQABO(const CTransaction& tx);
+
 } // namespace rung
 
 #endif // BITCOIN_RUNG_QABI_H

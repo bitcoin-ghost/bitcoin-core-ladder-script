@@ -195,4 +195,52 @@ uint256 ComputeQABIRoot(const QABIBlock& block)
     return ComputeQABIRoot(SerializeQABIBlock(block));
 }
 
+/* ---------------- SIGHASH_QABO (Phase 4 interim) ---------------- */
+
+uint256 ComputeSighashQABO(const CTransaction& tx)
+{
+    // Phase 4 interim. Phase 9 will refine this.
+    CSHA256 hasher;
+
+    // Version
+    uint32_t ver = tx.version;
+    hasher.Write(reinterpret_cast<const uint8_t*>(&ver), sizeof(ver));
+
+    // vin (outpoints + sequences, in order)
+    for (const auto& in : tx.vin) {
+        hasher.Write(reinterpret_cast<const unsigned char*>(in.prevout.hash.begin()), 32);
+        uint32_t n = in.prevout.n;
+        hasher.Write(reinterpret_cast<const uint8_t*>(&n), sizeof(n));
+        uint32_t seq = in.nSequence;
+        hasher.Write(reinterpret_cast<const uint8_t*>(&seq), sizeof(seq));
+    }
+
+    // vout (value + scriptPubKey, in order)
+    for (const auto& o : tx.vout) {
+        int64_t v = o.nValue;
+        hasher.Write(reinterpret_cast<const uint8_t*>(&v), sizeof(v));
+        uint64_t spk_size = o.scriptPubKey.size();
+        hasher.Write(reinterpret_cast<const uint8_t*>(&spk_size), sizeof(spk_size));
+        if (!o.scriptPubKey.empty()) {
+            hasher.Write(o.scriptPubKey.data(), o.scriptPubKey.size());
+        }
+    }
+
+    // Ladder Script tx-level fields (excluding aggregated_sig)
+    hasher.Write(reinterpret_cast<const unsigned char*>(tx.conditions_root.begin()), 32);
+    uint64_t qb_size = tx.qabi_block.size();
+    hasher.Write(reinterpret_cast<const uint8_t*>(&qb_size), sizeof(qb_size));
+    if (!tx.qabi_block.empty()) {
+        hasher.Write(tx.qabi_block.data(), tx.qabi_block.size());
+    }
+
+    // nLockTime
+    uint32_t lt = tx.nLockTime;
+    hasher.Write(reinterpret_cast<const uint8_t*>(&lt), sizeof(lt));
+
+    uint256 out;
+    hasher.Finalize(out.begin());
+    return out;
+}
+
 } // namespace rung
