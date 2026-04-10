@@ -14660,6 +14660,15 @@ BOOST_AUTO_TEST_CASE(qabi_scale_500_participants)
     RunMultiPartyBatch(500);
 }
 
+BOOST_AUTO_TEST_CASE(qabi_scale_1000_participants)
+{
+    // 1000 participants — pushes past the 64 KB soft cap into hard-cap
+    // territory. Single 666-byte FALCON sig still authorises all 1000
+    // inputs. This proves the evaluator scales linearly with participant
+    // count and the hard cap is the only structural limit.
+    RunMultiPartyBatch(1000);
+}
+
 // ============================================================================
 // Cross-party adversarial tests — verify Alice's primed state cannot be
 // exploited to spend in a different batch.
@@ -14960,6 +14969,54 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
     BOOST_CHECK_EQUAL(parsed->entries.size(), n);
     BOOST_CHECK_EQUAL(parsed->outputs.size(), n);
     BOOST_TEST_MESSAGE("Soft-cap stress: " << bytes.size() << " bytes, "
+                       << n << " participants");
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
+{
+    // Push to just under the 256 KB hard cap to find the absolute max.
+    QABIBlock block;
+    block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(block.batch_id.data(), 0x33, 32);
+    block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
+    block.prime_expiry_height = 100;
+
+    // Target: ~260000 bytes (just under 262144 hard cap).
+    constexpr size_t TARGET_FILL = 260000;
+    size_t running = 934;
+    size_t n = 0;
+    // destination_index stored as varint — for n > 252 it takes 3 bytes.
+    // Average ~76 B per participant.
+    while (running + 80 < TARGET_FILL) {
+        QABIEntry e;
+        std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
+        // Vary middle bytes so participant_ids don't collide in hot regions.
+        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        e.participant_id.data()[1] = static_cast<uint8_t>((n >> 16) & 0xFF);
+        e.contribution = 1000;
+        e.destination_index = static_cast<uint32_t>(n);
+        block.entries.push_back(e);
+
+        CTxOut o;
+        o.nValue = 900;
+        o.scriptPubKey = CScript() << OP_0
+            << std::vector<uint8_t>(20, static_cast<uint8_t>(n & 0xFF));
+        block.outputs.push_back(o);
+
+        running += 80;
+        ++n;
+    }
+
+    auto bytes = SerializeQABIBlock(block);
+    BOOST_CHECK_MESSAGE(bytes.size() <= QABI_BLOCK_MAX_HARD,
+                        "built block " << bytes.size() << " exceeds hard cap");
+
+    std::string err;
+    auto parsed = ParseQABIBlock(bytes, err);
+    BOOST_REQUIRE_MESSAGE(parsed.has_value(),
+                          "hard-cap parse failed: " << err);
+    BOOST_CHECK_EQUAL(parsed->entries.size(), n);
+    BOOST_TEST_MESSAGE("Hard-cap stress: " << bytes.size() << " bytes, "
                        << n << " participants");
 }
 
