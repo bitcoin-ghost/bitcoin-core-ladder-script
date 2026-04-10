@@ -5,6 +5,7 @@
 #include <rung/evaluator.h>
 #include <rung/conditions.h>
 #include <rung/pq_verify.h>
+#include <rung/qabi.h>
 #include <rung/serialize.h>
 #include <rung/sighash.h>
 
@@ -2882,6 +2883,328 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
 }
 
 // ============================================================================
+// QABI family — stubs (Phase 3 skeleton; real logic arrives in Phase 4 / 5)
+// ============================================================================
+
+/** QABI_PRIME — priming state transition.
+ *
+ *  Witness-only fields (in order):
+ *    [0] HASH256  new_committed_root    (from witness)
+ *    [1] NUMERIC  prime_depth           (from witness)
+ *    [2] NUMERIC  new_committed_expiry  (from witness)
+ *    [3] PREIMAGE prime_preimage        (from witness)
+ *
+ *  The "current state" (auth_tip, committed_root, committed_depth,
+ *  committed_expiry, owner_pubkey_hash) is read from the input's QABI_SPEND
+ *  block (searched across all rungs in ctx.input_conditions). QABI_PRIME
+ *  does not duplicate state in its own committed fields.
+ *
+ *  Consensus checks:
+ *    1. All 4 witness fields present, correctly typed, correct sizes
+ *    2. Exactly one QABI_SPEND block is discoverable in input_conditions
+ *    3. prime_depth > committed_depth                (monotonic progression)
+ *    4. SHA256^prime_depth(prime_preimage) == auth_tip (preimage valid)
+ *    5. Covenant: rebuild input_conditions with the QABI_SPEND block's
+ *       committed_root/committed_depth/committed_expiry mutated to the new
+ *       values, recompute the MLSC root, and verify it matches the output's
+ *       committed conditions_root. Everything else (auth_tip, owner_pubkey,
+ *       other rungs, coil data) must be preserved bit-exact.
+ */
+static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
+                                      const BaseSignatureChecker& /*checker*/,
+                                      SigVersion /*sigversion*/,
+                                      ScriptExecutionData& /*execdata*/,
+                                      const RungEvalContext& ctx)
+{
+    // -- Witness field extraction ---------------------------------------
+
+    if (block.fields.size() != 4) return EvalResult::ERROR;
+
+    const RungField* new_root_field   = FindField(block, RungDataType::HASH256);
+    auto nums = FindAllFields(block, RungDataType::NUMERIC);
+    const RungField* preimage_field   = FindField(block, RungDataType::PREIMAGE);
+
+    if (!new_root_field || nums.size() != 2 || !preimage_field) {
+        return EvalResult::ERROR;
+    }
+    if (new_root_field->data.size() != 32) return EvalResult::ERROR;
+    if (preimage_field->data.size() != 32) return EvalResult::ERROR;
+
+    auto prime_depth_opt          = ReadNumeric(*nums[0]);
+    auto new_committed_expiry_opt = ReadNumeric(*nums[1]);
+    if (!prime_depth_opt || !new_committed_expiry_opt) return EvalResult::ERROR;
+    if (*prime_depth_opt <= 0 || *new_committed_expiry_opt < 0) return EvalResult::ERROR;
+    const int64_t prime_depth          = *prime_depth_opt;
+    const int64_t new_committed_expiry = *new_committed_expiry_opt;
+
+    if (prime_depth >= static_cast<int64_t>(rung::QABI_AUTH_CHAIN_DEFAULT_LENGTH * 10)) {
+        return EvalResult::ERROR;
+    }
+
+    // -- Locate the QABI_SPEND block in input_conditions -----------------
+
+    if (ctx.input_conditions == nullptr || ctx.spending_output == nullptr) {
+        return EvalResult::ERROR;
+    }
+
+    const RungBlock* qabi_spend = nullptr;
+    size_t qabi_spend_rung_idx = 0;
+    size_t qabi_spend_block_idx = 0;
+    for (size_t r = 0; r < ctx.input_conditions->rungs.size(); ++r) {
+        const auto& rung = ctx.input_conditions->rungs[r];
+        for (size_t b = 0; b < rung.blocks.size(); ++b) {
+            if (rung.blocks[b].type == RungBlockType::QABI_SPEND) {
+                if (qabi_spend != nullptr) {
+                    // Multiple QABI_SPEND blocks — ambiguous, reject.
+                    return EvalResult::ERROR;
+                }
+                qabi_spend = &rung.blocks[b];
+                qabi_spend_rung_idx = r;
+                qabi_spend_block_idx = b;
+            }
+        }
+    }
+    if (qabi_spend == nullptr) return EvalResult::UNSATISFIED;
+
+    // -- Read current state from QABI_SPEND -----------------------------
+    //
+    // input_conditions carries CONDITIONS-context blocks. QABI_SPEND in
+    // conditions context has 5 fields (auth_tip, committed_root,
+    // committed_depth, committed_expiry, owner_id) — the witness-only
+    // PREIMAGE spend_preimage is not in the committed tree.
+    if (qabi_spend->fields.size() != 5) return EvalResult::ERROR;
+    auto spend_hashes = FindAllFields(*qabi_spend, RungDataType::HASH256);
+    auto spend_nums   = FindAllFields(*qabi_spend, RungDataType::NUMERIC);
+    if (spend_hashes.size() != 2 || spend_nums.size() != 2) return EvalResult::ERROR;
+    if (spend_hashes[0]->data.size() != 32) return EvalResult::ERROR;
+
+    const RungField* auth_tip_field        = spend_hashes[0];
+    auto committed_depth_opt = ReadNumeric(*spend_nums[0]);
+    if (!committed_depth_opt || *committed_depth_opt < 0) return EvalResult::ERROR;
+    const int64_t committed_depth = *committed_depth_opt;
+
+    // -- Check 3: monotonic depth progression ----------------------------
+
+    if (prime_depth <= committed_depth) return EvalResult::UNSATISFIED;
+
+    // -- Check 4: preimage valid against auth_tip ------------------------
+
+    unsigned char current[CSHA256::OUTPUT_SIZE];
+    std::memcpy(current, preimage_field->data.data(), 32);
+    for (int64_t i = 0; i < prime_depth; ++i) {
+        unsigned char next[CSHA256::OUTPUT_SIZE];
+        CSHA256().Write(current, 32).Finalize(next);
+        std::memcpy(current, next, 32);
+    }
+    if (std::memcmp(current, auth_tip_field->data.data(), 32) != 0) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 5: covenant — rebuild with mutated QABI_SPEND state -------
+
+    RungConditions expected = *ctx.input_conditions;
+    Rung& mutated_rung = expected.rungs[qabi_spend_rung_idx];
+    RungBlock& mutated_block = mutated_rung.blocks[qabi_spend_block_idx];
+
+    // Re-locate the fields in the mutated copy (same order preserved).
+    auto m_hashes = std::vector<RungField*>{};
+    auto m_nums   = std::vector<RungField*>{};
+    for (auto& f : mutated_block.fields) {
+        if (f.type == RungDataType::HASH256) m_hashes.push_back(&f);
+        else if (f.type == RungDataType::NUMERIC) m_nums.push_back(&f);
+    }
+    if (m_hashes.size() != 2 || m_nums.size() != 2) return EvalResult::ERROR;
+
+    // Mutate committed_root (HASH256 index 1 — second hash, first is auth_tip)
+    m_hashes[1]->data.assign(new_root_field->data.begin(), new_root_field->data.end());
+
+    // Mutate committed_depth (NUMERIC index 0)
+    WriteNumericField(*m_nums[0], prime_depth);
+
+    // Mutate committed_expiry (NUMERIC index 1)
+    WriteNumericField(*m_nums[1], new_committed_expiry);
+
+    // Compute expected MLSC root from mutated conditions.
+    std::vector<std::vector<std::vector<uint8_t>>> pks;
+    if (ctx.rung_pubkeys) pks = *ctx.rung_pubkeys;
+    uint256 expected_root = ComputeConditionsRootMLSC(expected, pks);
+
+    // Extract the output's committed conditions_root.
+    uint256 output_root;
+    if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    if (output_root != expected_root) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    return EvalResult::SATISFIED;
+}
+
+/** QABI_SPEND — fat evaluator doing nine consensus checks per primed input.
+ *
+ *  Block field layout (strict order):
+ *    [0] HASH256       auth_tip           (committed; H^N(auth_seed))
+ *    [1] HASH256       committed_root     (committed; current primed batch root)
+ *    [2] NUMERIC       committed_depth    (committed; depth of last consumed preimage)
+ *    [3] NUMERIC       committed_expiry   (committed; max block height for spend)
+ *    [4] PUBKEY_COMMIT owner_pubkey_hash  (committed; = participant_id =
+ *                                          SHA256(Rung 0 FALCON pubkey))
+ *    [5] PREIMAGE      spend_preimage     (witness; preimage at committed_depth+1)
+ *
+ *  The nine checks in order:
+ *    1. committed_root != 0                           (UTXO is primed)
+ *    2. ctx.block_height <= committed_expiry          (batch not expired)
+ *    3. SHA256^(committed_depth+1)(spend_preimage) == auth_tip
+ *                                                     (spend preimage valid, deeper than priming)
+ *    4. SHA256(tx.qabi_block) == committed_root       (root match)
+ *    5. ParseQABIBlock(tx.qabi_block) succeeds        (block is well-formed)
+ *    6. parsed_block.prime_expiry_height == committed_expiry  (expiry binding)
+ *    7. owner_pubkey_hash appears in parsed_block.entries[*].participant_id
+ *                                                     (identity in block)
+ *    8. tx.vout.size() == parsed_block.outputs.size()
+ *       tx.vout[i] == parsed_block.outputs[i] for all i
+ *                                                     (full output-set match —
+ *                                                      closes coordinator-skim hole)
+ *    9. FalconVerify(coordinator_pubkey,
+ *                    ComputeSighashQABO(tx),
+ *                    tx.aggregated_sig) == VALID      (QABO sig valid)
+ */
+static EvalResult EvalQABISpendBlock(const RungBlock& block,
+                                      const BaseSignatureChecker& /*checker*/,
+                                      SigVersion /*sigversion*/,
+                                      ScriptExecutionData& /*execdata*/,
+                                      const RungEvalContext& ctx)
+{
+    // Context safety
+    if (ctx.tx == nullptr) return EvalResult::ERROR;
+
+    // -- Field extraction & validation ----------------------------------
+
+    if (block.fields.size() != 6) return EvalResult::ERROR;
+
+    auto hashes = FindAllFields(block, RungDataType::HASH256);
+    auto nums   = FindAllFields(block, RungDataType::NUMERIC);
+    const RungField* commit_field   = FindField(block, RungDataType::PUBKEY_COMMIT);
+    const RungField* preimage_field = FindField(block, RungDataType::PREIMAGE);
+
+    if (hashes.size() != 2 || nums.size() != 2 || !commit_field || !preimage_field) {
+        return EvalResult::ERROR;
+    }
+    if (hashes[0]->data.size() != 32) return EvalResult::ERROR;
+    if (hashes[1]->data.size() != 32) return EvalResult::ERROR;
+    if (commit_field->data.size() != 32) return EvalResult::ERROR;
+    if (preimage_field->data.size() != 32) return EvalResult::ERROR;
+
+    const RungField* auth_tip_field       = hashes[0];
+    const RungField* committed_root_field = hashes[1];
+
+    auto committed_depth_opt  = ReadNumeric(*nums[0]);
+    auto committed_expiry_opt = ReadNumeric(*nums[1]);
+    if (!committed_depth_opt || !committed_expiry_opt) return EvalResult::ERROR;
+    if (*committed_depth_opt < 0 || *committed_expiry_opt < 0) return EvalResult::ERROR;
+    const int64_t committed_depth  = *committed_depth_opt;
+    const int64_t committed_expiry = *committed_expiry_opt;
+
+    // Sanity ceiling on depth to bound the hash-chain walk cost.
+    if (committed_depth >= static_cast<int64_t>(rung::QABI_AUTH_CHAIN_DEFAULT_LENGTH * 10)) {
+        return EvalResult::ERROR;
+    }
+
+    // -- Check 1: UTXO is primed ----------------------------------------
+
+    const bool all_zero = std::all_of(committed_root_field->data.begin(),
+                                       committed_root_field->data.end(),
+                                       [](uint8_t b) { return b == 0; });
+    if (all_zero) return EvalResult::UNSATISFIED;
+
+    // -- Check 2: expiry window -----------------------------------------
+
+    if (static_cast<int64_t>(ctx.block_height) > committed_expiry) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 3: spend preimage at depth committed_depth+1 -------------
+
+    unsigned char current[CSHA256::OUTPUT_SIZE];
+    std::memcpy(current, preimage_field->data.data(), 32);
+    const int64_t total_iterations = committed_depth + 1;
+    for (int64_t i = 0; i < total_iterations; ++i) {
+        unsigned char next[CSHA256::OUTPUT_SIZE];
+        CSHA256().Write(current, 32).Finalize(next);
+        std::memcpy(current, next, 32);
+    }
+    if (std::memcmp(current, auth_tip_field->data.data(), 32) != 0) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 4: root match --------------------------------------------
+
+    if (ctx.tx->qabi_block.empty()) return EvalResult::UNSATISFIED;
+    unsigned char qabi_root_hash[CSHA256::OUTPUT_SIZE];
+    CSHA256()
+        .Write(ctx.tx->qabi_block.data(), ctx.tx->qabi_block.size())
+        .Finalize(qabi_root_hash);
+    if (std::memcmp(qabi_root_hash, committed_root_field->data.data(), 32) != 0) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 5: block parses as well-formed ---------------------------
+
+    std::string parse_err;
+    auto parsed_opt = rung::ParseQABIBlock(ctx.tx->qabi_block, parse_err);
+    if (!parsed_opt) return EvalResult::UNSATISFIED;
+    const rung::QABIBlock& parsed = *parsed_opt;
+
+    // -- Check 6: expiry binding ----------------------------------------
+
+    if (static_cast<int64_t>(parsed.prime_expiry_height) != committed_expiry) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 7: identity in block -------------------------------------
+
+    uint256 my_id;
+    std::memcpy(my_id.begin(), commit_field->data.data(), 32);
+    bool identity_found = false;
+    for (const auto& e : parsed.entries) {
+        if (e.participant_id == my_id) {
+            identity_found = true;
+            break;
+        }
+    }
+    if (!identity_found) return EvalResult::UNSATISFIED;
+
+    // -- Check 8: full output-set match (closes coordinator-skim hole) --
+
+    if (ctx.tx->vout.size() != parsed.outputs.size()) return EvalResult::UNSATISFIED;
+    for (size_t i = 0; i < parsed.outputs.size(); ++i) {
+        if (ctx.tx->vout[i].nValue != parsed.outputs[i].nValue) return EvalResult::UNSATISFIED;
+        if (ctx.tx->vout[i].scriptPubKey != parsed.outputs[i].scriptPubKey) return EvalResult::UNSATISFIED;
+    }
+
+    // -- Check 9: QABO FALCON sig verification --------------------------
+
+    if (ctx.tx->aggregated_sig.size() != rung::QABI_AGGREGATED_SIG_MAX) {
+        return EvalResult::UNSATISFIED;
+    }
+    if (parsed.coordinator_pubkey.size() != rung::QABI_COORDINATOR_PUBKEY_SIZE) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    uint256 sighash = rung::ComputeSighashQABO(*ctx.tx);
+    const bool sig_ok = rung::VerifyPQSignature(
+        rung::RungScheme::FALCON512,
+        std::span<const uint8_t>(ctx.tx->aggregated_sig.data(), ctx.tx->aggregated_sig.size()),
+        std::span<const uint8_t>(sighash.begin(), 32),
+        std::span<const uint8_t>(parsed.coordinator_pubkey.data(), parsed.coordinator_pubkey.size()));
+    if (!sig_ok) return EvalResult::UNSATISFIED;
+
+    return EvalResult::SATISFIED;
+}
+
+// ============================================================================
 // Block dispatch
 // ============================================================================
 
@@ -3097,6 +3420,13 @@ EvalResult EvalBlock(const RungBlock& block,
         // DATA_RETURN is unspendable — if we reach evaluation, the output should
         // never have been spent. Return ERROR to make the transaction invalid.
         raw = EvalResult::ERROR;
+        break;
+    // QABI family (Phase 3 stubs; real logic in Phases 4–5)
+    case RungBlockType::QABI_PRIME:
+        raw = EvalQABIPrimeBlock(block, checker, sigversion, execdata, ctx);
+        break;
+    case RungBlockType::QABI_SPEND:
+        raw = EvalQABISpendBlock(block, checker, sigversion, execdata, ctx);
         break;
     default:
         raw = EvalResult::UNKNOWN_BLOCK_TYPE;

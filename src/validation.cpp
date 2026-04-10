@@ -42,6 +42,7 @@
 #include <primitives/block.h>
 #include <rung/evaluator.h>
 #include <rung/conditions.h>
+#include <rung/policy.h>
 #include <primitives/transaction.h>
 #include <random.h>
 #include <script/script.h>
@@ -1097,6 +1098,44 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
     const Txid& hash = ws.m_hash;
     TxValidationState& state = ws.m_state;
 
+    // QABI Replace-By-Depth (RBD):
+    // If the incoming tx is a QABI_PRIME priming tx AND every conflicting tx
+    // in the mempool is also a priming tx, evaluate replacement via the RBD
+    // policy (deeper prime_depth wins) instead of fee-based RBF.
+    //
+    // Rationale: deeper preimages can only be produced by the UTXO owner
+    // (one-way hash), so RBD gives the legitimate owner a cryptographic
+    // "last word" over any sniper who scraped a shallower preimage from
+    // the mempool. Fee-based RBF does not capture this — a sniper could
+    // attach a higher fee and steal the priming.
+    //
+    // Mixed cases (some conflicts priming, others not) fall through to
+    // standard RBF: we cannot safely combine the two policies.
+    bool is_rbd_replacement = false;
+    if (!ws.m_iters_conflicting.empty() && rung::IsQABIPrimingTx(tx)) {
+        bool all_conflicts_are_priming = true;
+        for (CTxMemPool::txiter it : ws.m_iters_conflicting) {
+            if (!rung::IsQABIPrimingTx(it->GetTx())) {
+                all_conflicts_are_priming = false;
+                break;
+            }
+        }
+        if (all_conflicts_are_priming) {
+            bool all_rbd_ok = true;
+            for (CTxMemPool::txiter it : ws.m_iters_conflicting) {
+                std::string rbd_reason;
+                if (!rung::IsValidRBDReplacement(tx, it->GetTx(), rbd_reason)) {
+                    all_rbd_ok = false;
+                    return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY,
+                                         "rbd-replacement-rejected", rbd_reason);
+                }
+            }
+            if (all_rbd_ok) {
+                is_rbd_replacement = true;
+            }
+        }
+    }
+
     CFeeRate newFeeRate(ws.m_modified_fees, ws.m_vsize);
     // Enforce Rule #6. The replacement transaction must have a higher feerate than its direct conflicts.
     // - The motivation for this check is to ensure that the replacement transaction is preferable for
@@ -1107,11 +1146,17 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
     //   guarantee that this is incentive-compatible for miners, because it is possible for a
     //   descendant transaction of a direct conflict to pay a higher feerate than the transaction that
     //   might replace them, under these rules.
-    if (const auto err_string{PaysMoreThanConflicts(ws.m_iters_conflicting, newFeeRate, hash)}) {
-        // This fee-related failure is TX_RECONSIDERABLE because validating in a package may change
-        // the result.
-        return state.Invalid(TxValidationResult::TX_RECONSIDERABLE,
-                             strprintf("insufficient fee%s", ws.m_sibling_eviction ? " (including sibling eviction)" : ""), *err_string);
+    //
+    // QABI RBD: when the replacement is a deeper-depth priming tx, the
+    // fee-based feerate comparison does not apply — the depth progression
+    // IS the economic/cryptographic signal.
+    if (!is_rbd_replacement) {
+        if (const auto err_string{PaysMoreThanConflicts(ws.m_iters_conflicting, newFeeRate, hash)}) {
+            // This fee-related failure is TX_RECONSIDERABLE because validating in a package may change
+            // the result.
+            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE,
+                                 strprintf("insufficient fee%s", ws.m_sibling_eviction ? " (including sibling eviction)" : ""), *err_string);
+        }
     }
 
     CTxMemPool::setEntries all_conflicts;
@@ -1135,11 +1180,15 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
         m_subpackage.m_conflicting_fees += it->GetModifiedFee();
         m_subpackage.m_conflicting_size += it->GetTxSize();
     }
-    if (const auto err_string{PaysForRBF(m_subpackage.m_conflicting_fees, ws.m_modified_fees, ws.m_vsize,
-                                         m_pool.m_opts.incremental_relay_feerate, hash)}) {
-        // Result may change in a package context
-        return state.Invalid(TxValidationResult::TX_RECONSIDERABLE,
-                             strprintf("insufficient fee%s", ws.m_sibling_eviction ? " (including sibling eviction)" : ""), *err_string);
+    // QABI RBD: same rationale as the PaysMoreThanConflicts bypass above —
+    // RBD replacements use depth progression, not fee economics.
+    if (!is_rbd_replacement) {
+        if (const auto err_string{PaysForRBF(m_subpackage.m_conflicting_fees, ws.m_modified_fees, ws.m_vsize,
+                                             m_pool.m_opts.incremental_relay_feerate, hash)}) {
+            // Result may change in a package context
+            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE,
+                                 strprintf("insufficient fee%s", ws.m_sibling_eviction ? " (including sibling eviction)" : ""), *err_string);
+        }
     }
 
     // Add all the to-be-removed transactions to the changeset.

@@ -7,7 +7,11 @@
 #include <rung/serialize.h>
 #include <rung/types.h>
 
+#include <primitives/transaction.h>
+
 #include <algorithm>
+#include <map>
+#include <string>
 
 namespace rung {
 
@@ -133,5 +137,129 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 
 // IsStandardRungOutput removed — inline conditions (0xC1) are dead.
 // Output validation is consensus: ValidateRungOutputs in VerifyRungTx.
+
+// ============================================================================
+// QABI Replace-By-Depth (RBD) mempool policy
+// ============================================================================
+
+/** Read a little-endian NUMERIC field value (local to policy.cpp to avoid
+ *  reaching into evaluator.cpp's statics). */
+static bool PolicyReadNumeric(const RungField& f, int64_t& out)
+{
+    if (f.type != RungDataType::NUMERIC) return false;
+    if (f.data.empty() || f.data.size() > 8) return false;
+    uint64_t val = 0;
+    for (size_t i = 0; i < f.data.size(); ++i) {
+        val |= static_cast<uint64_t>(f.data[i]) << (8 * i);
+    }
+    out = static_cast<int64_t>(val);
+    return true;
+}
+
+/** Scan a LadderWitness for the first QABI_PRIME block and return its
+ *  prime_depth. Returns false if no QABI_PRIME block is present or the
+ *  prime_depth field is missing/malformed. */
+static bool FindPrimeDepthInLadder(const LadderWitness& ladder, int64_t& depth_out)
+{
+    for (const auto& rung : ladder.rungs) {
+        for (const auto& block : rung.blocks) {
+            if (block.type != RungBlockType::QABI_PRIME) continue;
+
+            // The first NUMERIC field in QABI_PRIME's witness is prime_depth.
+            for (const auto& f : block.fields) {
+                if (f.type == RungDataType::NUMERIC) {
+                    return PolicyReadNumeric(f, depth_out);
+                }
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+bool ExtractQABIPrimeDepth(const CTransaction& tx,
+                            uint32_t input_index,
+                            int64_t& depth_out)
+{
+    if (input_index >= tx.vin.size()) return false;
+    const auto& witness = tx.vin[input_index].scriptWitness;
+    if (witness.stack.empty()) return false;
+
+    LadderWitness ladder;
+    std::string err;
+    if (!DeserializeLadderWitness(witness.stack[0], ladder, err)) return false;
+
+    return FindPrimeDepthInLadder(ladder, depth_out);
+}
+
+bool IsQABIPrimingTx(const CTransaction& tx)
+{
+    for (uint32_t i = 0; i < tx.vin.size(); ++i) {
+        int64_t dummy;
+        if (ExtractQABIPrimeDepth(tx, i, dummy)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsValidRBDReplacement(const CTransaction& new_tx,
+                            const CTransaction& old_tx,
+                            std::string& reason)
+{
+    // Both must be priming txs.
+    if (!IsQABIPrimingTx(new_tx)) {
+        reason = "rbd-new-not-priming";
+        return false;
+    }
+    if (!IsQABIPrimingTx(old_tx)) {
+        reason = "rbd-old-not-priming";
+        return false;
+    }
+
+    // Collect (prevout → prime_depth) for each priming input of the old tx.
+    // We only care about inputs whose witness carries a QABI_PRIME block; a
+    // single tx may mix priming and non-priming inputs (e.g., a coordinator
+    // fee input) but only the QABI_PRIME inputs participate in RBD.
+    struct PrimeEntry {
+        uint32_t input_idx;
+        int64_t depth;
+    };
+    std::map<COutPoint, PrimeEntry> old_primes;
+    for (uint32_t i = 0; i < old_tx.vin.size(); ++i) {
+        int64_t d;
+        if (ExtractQABIPrimeDepth(old_tx, i, d)) {
+            old_primes.emplace(old_tx.vin[i].prevout, PrimeEntry{i, d});
+        }
+    }
+    if (old_primes.empty()) {
+        reason = "rbd-old-has-no-primings";
+        return false;
+    }
+
+    // For every QABI_PRIME input in new_tx that shares a prevout with old_tx,
+    // require new_tx.depth > old_tx.depth.
+    bool found_shared = false;
+    for (uint32_t i = 0; i < new_tx.vin.size(); ++i) {
+        int64_t new_depth;
+        if (!ExtractQABIPrimeDepth(new_tx, i, new_depth)) continue;
+
+        auto it = old_primes.find(new_tx.vin[i].prevout);
+        if (it == old_primes.end()) continue;
+
+        found_shared = true;
+        if (new_depth <= it->second.depth) {
+            reason = "rbd-depth-not-deeper";
+            return false;
+        }
+    }
+
+    if (!found_shared) {
+        reason = "rbd-no-shared-primed-inputs";
+        return false;
+    }
+
+    return true;
+}
 
 } // namespace rung

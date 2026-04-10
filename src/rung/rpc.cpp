@@ -8,6 +8,7 @@
 #include <rung/evaluator.h>
 #include <rung/policy.h>
 #include <rung/pq_verify.h>
+#include <rung/qabi.h>
 #include <rung/serialize.h>
 #include <rung/sighash.h>
 #include <rung/types.h>
@@ -247,6 +248,9 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
     if (name == "P2TR_SCRIPT_LEGACY") { out = RungBlockType::P2TR_SCRIPT_LEGACY; return true; }
     // Utility family
     if (name == "DATA_RETURN")        { out = RungBlockType::DATA_RETURN; return true; }
+    // QABI family
+    if (name == "QABI_PRIME")         { out = RungBlockType::QABI_PRIME; return true; }
+    if (name == "QABI_SPEND")         { out = RungBlockType::QABI_SPEND; return true; }
     // Backward compat aliases
     if (name == "HASHLOCK") {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -264,10 +268,7 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
 static bool ParseDataType(const std::string& name, RungDataType& out)
 {
     if (name == "PUBKEY")        { out = RungDataType::PUBKEY; return true; }
-    if (name == "PUBKEY_COMMIT") {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-            "PUBKEY_COMMIT is no longer a condition field. Pubkeys are folded into the Merkle leaf. Use PUBKEY instead.");
-    }
+    if (name == "PUBKEY_COMMIT") { out = RungDataType::PUBKEY_COMMIT; return true; }
     if (name == "HASH256")       { out = RungDataType::HASH256; return true; }
     if (name == "HASH160")       { out = RungDataType::HASH160; return true; }
     if (name == "PREIMAGE")      { out = RungDataType::PREIMAGE; return true; }
@@ -336,10 +337,24 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                     block.type != RungBlockType::TAGGED_HASH &&
                     block.type != RungBlockType::ACCUMULATOR &&
                     block.type != RungBlockType::COSIGN &&
-                    block.type != RungBlockType::OUTPUT_CHECK) {
+                    block.type != RungBlockType::OUTPUT_CHECK &&
+                    // QABI_SPEND carries auth_tip and committed_root as external
+                    // commitments — the user provides them directly, not as
+                    // preimages.
+                    block.type != RungBlockType::QABI_SPEND) {
                     throw JSONRPCError(RPC_INVALID_PARAMETER,
                         "Use PREIMAGE instead of HASH256 for " + type_str +
                         "; the node computes the hash commitment automatically");
+                }
+            }
+            // PUBKEY_COMMIT: normally not a condition field (pubkeys are folded
+            // into Merkle leaves via merkle_pub_key). Exception: QABI_SPEND
+            // carries owner_id as an explicit 32-byte commitment.
+            if (field.type == RungDataType::PUBKEY_COMMIT) {
+                if (block.type != RungBlockType::QABI_SPEND) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        "PUBKEY_COMMIT is only allowed in QABI_SPEND conditions; "
+                        "other blocks fold pubkeys into the Merkle leaf — use PUBKEY instead.");
                 }
             }
         }
@@ -394,8 +409,17 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
             continue;
         }
         if (conditions_only && !rung::IsConditionDataType(field.type)) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER,
-                "Data type " + ftype_str + " not allowed in conditions (witness-only)");
+            // QABI_SPEND bypass: its conditions layout legitimately carries
+            // PUBKEY_COMMIT as an explicit owner identity commitment. The
+            // consensus deserialiser accepts it via the implicit layout path
+            // (QABI_SPEND_CONDITIONS), so we accept it here too.
+            const bool qabi_spend_pubkey_commit =
+                block.type == RungBlockType::QABI_SPEND &&
+                field.type == RungDataType::PUBKEY_COMMIT;
+            if (!qabi_spend_pubkey_commit) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "Data type " + ftype_str + " not allowed in conditions (witness-only)");
+            }
         }
         block.fields.push_back(std::move(field));
     }
@@ -1685,6 +1709,102 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         if (block_spec.exists("privkey")) {
             SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "P2TR_SCRIPT_LEGACY");
         }
+        break;
+    }
+    case RungBlockType::QABI_PRIME: {
+        // QABI priming witness: 4 fields in the exact order the evaluator
+        // expects (matching QABI_PRIME_WITNESS implicit layout):
+        //   [0] HASH256  new_committed_root
+        //   [1] NUMERIC  prime_depth
+        //   [2] NUMERIC  new_committed_expiry
+        //   [3] PREIMAGE prime_preimage
+        //
+        // The caller provides:
+        //   new_committed_root   (hex, 32 bytes)
+        //   prime_depth          (int)
+        //   new_committed_expiry (int)
+        //   And either:
+        //     prime_preimage     (hex, 32 bytes — pre-derived), or
+        //     auth_seed + chain_length (hex + int — for in-RPC derivation)
+        //
+        // Convenience: supplying auth_seed + chain_length lets the wallet
+        // pass its secret and have the preimage derived server-side.
+        if (!block_spec.exists("new_committed_root")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires new_committed_root hex");
+        }
+        auto new_root = ParseHex(block_spec["new_committed_root"].get_str());
+        if (new_root.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "new_committed_root must be exactly 32 bytes");
+        }
+        if (!block_spec.exists("prime_depth")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_PRIME requires prime_depth");
+        }
+        int64_t prime_depth = block_spec["prime_depth"].getInt<int64_t>();
+        if (prime_depth <= 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "prime_depth must be > 0");
+        }
+        if (!block_spec.exists("new_committed_expiry")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires new_committed_expiry");
+        }
+        int64_t new_expiry = block_spec["new_committed_expiry"].getInt<int64_t>();
+        if (new_expiry < 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "new_committed_expiry must be >= 0");
+        }
+
+        // Derive or accept the preimage.
+        std::vector<uint8_t> preimage_bytes;
+        if (block_spec.exists("prime_preimage")) {
+            preimage_bytes = ParseHex(block_spec["prime_preimage"].get_str());
+            if (preimage_bytes.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "prime_preimage must be exactly 32 bytes");
+            }
+        } else if (block_spec.exists("auth_seed") && block_spec.exists("chain_length")) {
+            auto seed = ParseHex(block_spec["auth_seed"].get_str());
+            if (seed.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "auth_seed must be exactly 32 bytes");
+            }
+            uint32_t chain_length = block_spec["chain_length"].getInt<uint32_t>();
+            uint256 preimage_u256;
+            if (!rung::ComputeAuthChainPreimageAt(
+                    std::span<const uint8_t>(seed), chain_length,
+                    static_cast<uint32_t>(prime_depth), preimage_u256)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "failed to derive preimage (bad depth or chain length)");
+            }
+            preimage_bytes.assign(preimage_u256.data(), preimage_u256.data() + 32);
+        } else {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires either prime_preimage OR (auth_seed + chain_length)");
+        }
+
+        // Assemble the 4 witness fields in exact layout order.
+        block.fields.push_back({RungDataType::HASH256, new_root});
+        {
+            RungField f;
+            f.type = RungDataType::NUMERIC;
+            uint32_t v = static_cast<uint32_t>(prime_depth);
+            f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+            block.fields.push_back(f);
+        }
+        {
+            RungField f;
+            f.type = RungDataType::NUMERIC;
+            uint32_t v = static_cast<uint32_t>(new_expiry);
+            f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+            block.fields.push_back(f);
+        }
+        block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
         break;
     }
     default: {
@@ -3293,6 +3413,10 @@ static RPCHelpMan createtxmlsc()
             },
             {"locktime", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Transaction nLockTime (default 0)"},
             {"internal_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "32-byte x-only internal pubkey for key-path spending. When provided, conditions_root is tweaked."},
+            {"qabi_block", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED,
+                "Optional serialised QABIBlock bytes (hex). Present iff this is a QABIO batch tx. "
+                "When non-empty, tx.qabi_block is populated, which marks the tx as a QABIO carrier. "
+                "Use qabi_buildblock to construct the serialised bytes."},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::STR_HEX, "hex", "The unsigned TX_MLSC transaction hex"},
@@ -3495,6 +3619,27 @@ static RPCHelpMan createtxmlsc()
         out.scriptPubKey = mlsc_spk;
     }
 
+    // QABIO: optional qabi_block tx-level field. When set, this tx is a
+    // QABIO batch carrier and the coordinator will later sign via
+    // qabi_signqabo (which populates tx.aggregated_sig).
+    if (!request.params[5].isNull()) {
+        auto qb_bytes = ParseHex(request.params[5].get_str());
+        if (qb_bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "qabi_block exceeds QABI_BLOCK_MAX_HARD");
+        }
+        // Strict parse check: the bytes must be a well-formed QABIBlock.
+        if (!qb_bytes.empty()) {
+            std::string parse_err;
+            auto parsed = rung::ParseQABIBlock(qb_bytes, parse_err);
+            if (!parsed) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "qabi_block parse failed: " + parse_err);
+            }
+        }
+        mtx.qabi_block = std::move(qb_bytes);
+    }
+
     UniValue result(UniValue::VOBJ);
     result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
     result.pushKV("conditions_root", mtx.conditions_root.GetHex());
@@ -3515,6 +3660,377 @@ static RPCHelpMan createtxmlsc()
     };
 }
 
+// ============================================================================
+// QABI RPC commands
+// ============================================================================
+
+static RPCHelpMan qabi_buildblock()
+{
+    return RPCHelpMan{
+        "qabi_buildblock",
+        "Build a QABIBlock from the given participants and outputs, and return\n"
+        "its canonical serialised bytes and SHA256 root. Used by coordinators\n"
+        "to construct the batch structure before distributing to participants.\n",
+        {
+            {"coordinator_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Coordinator's FALCON-512 public key (897 bytes, hex)"},
+            {"prime_expiry_height", RPCArg::Type::NUM, RPCArg::Optional::NO,
+             "Max block height at which the QABIO tx may execute"},
+            {"batch_id", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Unique batch identifier (32 bytes, hex)"},
+            {"entries", RPCArg::Type::ARR, RPCArg::Optional::NO, "Participant list",
+                {
+                    {"entry", RPCArg::Type::OBJ, RPCArg::Optional::NO, "One participant",
+                        {
+                            {"participant_id", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+                                "SHA256(participant's Rung 0 FALCON pubkey), 32 bytes hex"},
+                            {"contribution", RPCArg::Type::AMOUNT, RPCArg::Optional::NO,
+                                "Satoshis this participant contributes"},
+                            {"destination_index", RPCArg::Type::NUM, RPCArg::Optional::NO,
+                                "Index into outputs[] for this participant's destination"},
+                        },
+                    },
+                },
+            },
+            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO,
+                "Destination outputs — tx.vout must match this bit-exact",
+                {
+                    {"output", RPCArg::Type::OBJ, RPCArg::Optional::NO, "One output",
+                        {
+                            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO,
+                                "Output value in satoshis"},
+                            {"script_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+                                "Output scriptPubKey (hex)"},
+                        },
+                    },
+                },
+            },
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "qabi_block", "Serialised QABIBlock bytes (hex)"},
+            {RPCResult::Type::STR_HEX, "qabi_root", "SHA256(serialised block) — 32 bytes hex"},
+            {RPCResult::Type::NUM, "size", "Serialised block size in bytes"},
+        }},
+        RPCExamples{HelpExampleCli("qabi_buildblock", "...")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        rung::QABIBlock block;
+        block.version = rung::QABI_BLOCK_VERSION_CURRENT;
+
+        auto pk = ParseHex(self.Arg<std::string>("coordinator_pubkey"));
+        if (pk.size() != rung::QABI_COORDINATOR_PUBKEY_SIZE) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                strprintf("coordinator_pubkey must be exactly %d bytes", rung::QABI_COORDINATOR_PUBKEY_SIZE));
+        }
+        block.coordinator_pubkey = pk;
+
+        block.prime_expiry_height = self.Arg<uint64_t>("prime_expiry_height");
+
+        auto bid = ParseHex(self.Arg<std::string>("batch_id"));
+        if (bid.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "batch_id must be 32 bytes");
+        }
+        std::memcpy(block.batch_id.data(), bid.data(), 32);
+
+        const UniValue& entries = request.params[3].get_array();
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const UniValue& e = entries[i];
+            rung::QABIEntry entry;
+            auto pid = ParseHex(e["participant_id"].get_str());
+            if (pid.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "participant_id must be 32 bytes at index " + std::to_string(i));
+            }
+            std::memcpy(entry.participant_id.data(), pid.data(), 32);
+            entry.contribution = AmountFromValue(e["contribution"]);
+            entry.destination_index = e["destination_index"].getInt<uint32_t>();
+            block.entries.push_back(entry);
+        }
+
+        const UniValue& outs = request.params[4].get_array();
+        for (size_t i = 0; i < outs.size(); ++i) {
+            const UniValue& o = outs[i];
+            CTxOut out;
+            out.nValue = AmountFromValue(o["amount"]);
+            auto spk = ParseHex(o["script_pubkey"].get_str());
+            out.scriptPubKey = CScript(spk.begin(), spk.end());
+            block.outputs.push_back(out);
+        }
+
+        // Validate destination_index bounds.
+        for (size_t i = 0; i < block.entries.size(); ++i) {
+            if (block.entries[i].destination_index >= block.outputs.size()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "destination_index out of range at entry " + std::to_string(i));
+            }
+        }
+
+        auto bytes = rung::SerializeQABIBlock(block);
+        if (bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "serialised qabi_block exceeds hard cap");
+        }
+        uint256 root = rung::ComputeQABIRoot(bytes);
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("qabi_block", HexStr(bytes));
+        result.pushKV("qabi_root", root.GetHex());
+        result.pushKV("size", static_cast<uint64_t>(bytes.size()));
+        return result;
+    },
+    };
+}
+
+static RPCHelpMan qabi_blockinfo()
+{
+    return RPCHelpMan{
+        "qabi_blockinfo",
+        "Decode serialised qabi_block bytes into a JSON representation for\n"
+        "inspection and debugging. Useful for wallets reviewing a batch before\n"
+        "priming, and for validators investigating a rejected QABIO tx.\n",
+        {
+            {"qabi_block", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Serialised QABIBlock bytes (hex)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::NUM, "version", "Block format version"},
+            {RPCResult::Type::STR_HEX, "batch_id", ""},
+            {RPCResult::Type::STR_HEX, "coordinator_pubkey", ""},
+            {RPCResult::Type::NUM, "prime_expiry_height", ""},
+            {RPCResult::Type::NUM, "n_entries", ""},
+            {RPCResult::Type::NUM, "n_outputs", ""},
+            {RPCResult::Type::STR_HEX, "qabi_root", "SHA256 of the serialised bytes"},
+            {RPCResult::Type::ARR, "entries", "Participant list", {
+                {RPCResult::Type::OBJ, "", "Entry", {
+                    {RPCResult::Type::STR_HEX, "participant_id", ""},
+                    {RPCResult::Type::STR_AMOUNT, "contribution", ""},
+                    {RPCResult::Type::NUM, "destination_index", ""},
+                }},
+            }},
+            {RPCResult::Type::ARR, "outputs", "Destination list", {
+                {RPCResult::Type::OBJ, "", "Output", {
+                    {RPCResult::Type::STR_AMOUNT, "amount", ""},
+                    {RPCResult::Type::STR_HEX, "script_pubkey", ""},
+                }},
+            }},
+        }},
+        RPCExamples{HelpExampleCli("qabi_blockinfo", "\"<hex>\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        auto bytes = ParseHex(self.Arg<std::string>("qabi_block"));
+
+        std::string err;
+        auto parsed = rung::ParseQABIBlock(bytes, err);
+        if (!parsed) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "parse failed: " + err);
+        }
+
+        uint256 root = rung::ComputeQABIRoot(bytes);
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("version", static_cast<int>(parsed->version));
+        result.pushKV("batch_id", parsed->batch_id.GetHex());
+        result.pushKV("coordinator_pubkey", HexStr(parsed->coordinator_pubkey));
+        result.pushKV("prime_expiry_height", static_cast<uint64_t>(parsed->prime_expiry_height));
+        result.pushKV("n_entries", static_cast<uint64_t>(parsed->entries.size()));
+        result.pushKV("n_outputs", static_cast<uint64_t>(parsed->outputs.size()));
+        result.pushKV("qabi_root", root.GetHex());
+
+        UniValue entries(UniValue::VARR);
+        for (const auto& e : parsed->entries) {
+            UniValue entry(UniValue::VOBJ);
+            entry.pushKV("participant_id", e.participant_id.GetHex());
+            entry.pushKV("contribution", ValueFromAmount(e.contribution));
+            entry.pushKV("destination_index", static_cast<uint64_t>(e.destination_index));
+            entries.push_back(entry);
+        }
+        result.pushKV("entries", entries);
+
+        UniValue outputs(UniValue::VARR);
+        for (const auto& o : parsed->outputs) {
+            UniValue out(UniValue::VOBJ);
+            out.pushKV("amount", ValueFromAmount(o.nValue));
+            out.pushKV("script_pubkey", HexStr(o.scriptPubKey));
+            outputs.push_back(out);
+        }
+        result.pushKV("outputs", outputs);
+
+        return result;
+    },
+    };
+}
+
+static RPCHelpMan qabi_authchain()
+{
+    return RPCHelpMan{
+        "qabi_authchain",
+        "Compute the auth_tip and the preimage at a given depth for a QABI\n"
+        "hash chain. Used by wallets to derive the committed state for a new\n"
+        "QABI-enabled UTXO and to reveal preimages at priming/spend time.\n",
+        {
+            {"auth_seed", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "32-byte wallet secret (hex)"},
+            {"chain_length", RPCArg::Type::NUM, RPCArg::Optional::NO,
+             "Chain length N. auth_tip = H^N(auth_seed)"},
+            {"depth", RPCArg::Type::NUM, RPCArg::Optional::OMITTED,
+             "If specified, also return the preimage at this depth (0 = tip, N = seed)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "auth_tip", "H^chain_length(auth_seed)"},
+            {RPCResult::Type::STR_HEX, "preimage", /*optional=*/true, "Preimage at depth (present if depth was specified)"},
+        }},
+        RPCExamples{HelpExampleCli("qabi_authchain", "\"<seed>\" 20000 10")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        auto seed = ParseHex(self.Arg<std::string>("auth_seed"));
+        if (seed.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "auth_seed must be exactly 32 bytes");
+        }
+        uint32_t chain_length = self.Arg<uint64_t>("chain_length");
+
+        uint256 tip = rung::ComputeAuthChainTip(std::span<const uint8_t>(seed), chain_length);
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("auth_tip", tip.GetHex());
+
+        if (!request.params[2].isNull()) {
+            uint32_t depth = request.params[2].getInt<uint32_t>();
+            uint256 preimage;
+            if (!rung::ComputeAuthChainPreimageAt(
+                    std::span<const uint8_t>(seed), chain_length, depth, preimage)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid depth (must be <= chain_length)");
+            }
+            result.pushKV("preimage", preimage.GetHex());
+        }
+
+        return result;
+    },
+    };
+}
+
+static RPCHelpMan qabi_signqabo()
+{
+    return RPCHelpMan{
+        "qabi_signqabo",
+        "Coordinator-side signing operation for a QABIO batch tx. Takes an\n"
+        "unsigned TX_MLSC v4 tx (with tx.qabi_block populated but\n"
+        "tx.aggregated_sig empty or placeholder) and the coordinator's FALCON-512\n"
+        "private key, computes SIGHASH_QABO over the tx, signs the hash, and\n"
+        "returns a new tx hex with tx.aggregated_sig set to the resulting\n"
+        "FALCON-512 signature.\n"
+        "\n"
+        "Inputs:\n"
+        "  - hex_tx: unsigned (or partially signed) TX_MLSC v4 tx hex\n"
+        "  - privkey: coordinator's FALCON-512 private key (hex)\n"
+        "\n"
+        "Output: signed tx hex with aggregated_sig = FALCON(privkey, SIGHASH_QABO(tx))\n"
+        "\n"
+        "Requires liboqs support for FALCON-512 signing.\n",
+        {
+            {"hex_tx", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "The unsigned TX_MLSC v4 transaction hex"},
+            {"privkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Coordinator's FALCON-512 private key (hex)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "hex", "Signed tx hex (aggregated_sig populated)"},
+            {RPCResult::Type::STR_HEX, "sighash", "The SIGHASH_QABO that was signed"},
+            {RPCResult::Type::NUM, "sig_size", "Size of the FALCON signature in bytes"},
+        }},
+        RPCExamples{HelpExampleCli("qabi_signqabo", "\"<tx hex>\" \"<falcon privkey hex>\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        if (!rung::HasPQSupport()) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR,
+                "qabi_signqabo requires liboqs support (not compiled in)");
+        }
+
+        CMutableTransaction mtx;
+        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"), true)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "tx decode failed");
+        }
+        if (mtx.qabi_block.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "tx.qabi_block is empty — not a QABIO batch tx");
+        }
+
+        auto privkey = ParseHex(self.Arg<std::string>("privkey"));
+        if (privkey.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "empty privkey");
+        }
+
+        // Zero out aggregated_sig before computing the sighash — SIGHASH_QABO
+        // deliberately excludes it (chicken-and-egg) so the hash is the same
+        // regardless of what's currently in that field.
+        mtx.aggregated_sig.clear();
+
+        uint256 sighash = rung::ComputeSighashQABO(CTransaction(mtx));
+
+        std::vector<uint8_t> sig;
+        if (!rung::SignPQ(rung::RungScheme::FALCON512,
+                           std::span<const uint8_t>(privkey),
+                           std::span<const uint8_t>(sighash.begin(), 32),
+                           sig)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "FALCON-512 signing failed");
+        }
+
+        // Pad to exactly 666 bytes (consensus cap) — liboqs FALCON signatures
+        // are variable-length ≤666 bytes. Zero-pad any shorter result.
+        if (sig.size() > rung::QABI_AGGREGATED_SIG_MAX) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR,
+                "FALCON signature exceeds consensus cap");
+        }
+        sig.resize(rung::QABI_AGGREGATED_SIG_MAX, 0x00);
+        mtx.aggregated_sig = sig;
+
+        // Re-serialise the signed tx.
+        DataStream ss;
+        ss << TX_WITH_WITNESS(CTransaction(mtx));
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("hex", HexStr(ss));
+        result.pushKV("sighash", sighash.GetHex());
+        result.pushKV("sig_size", static_cast<uint64_t>(sig.size()));
+        return result;
+    },
+    };
+}
+
+static RPCHelpMan qabi_sighash()
+{
+    return RPCHelpMan{
+        "qabi_sighash",
+        "Compute SIGHASH_QABO for a QABIO tx. Used by coordinators to\n"
+        "determine what bytes their FALCON signature must cover before signing.\n"
+        "The sighash covers tx.version, vin, vout, conditions_root, qabi_block,\n"
+        "per-input scriptWitness stacks, and nLockTime. It deliberately excludes\n"
+        "tx.aggregated_sig (chicken-and-egg) and tx.creation_proof.\n",
+        {
+            {"hex_tx", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Hex-encoded CTransaction (RUNG_TX_VERSION with tx-level fields)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "sighash", "SIGHASH_QABO — 32 bytes hex"},
+        }},
+        RPCExamples{HelpExampleCli("qabi_sighash", "\"<tx hex>\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        CMutableTransaction mtx;
+        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"), true)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "tx decode failed");
+        }
+        CTransaction tx(mtx);
+        uint256 sighash = rung::ComputeSighashQABO(tx);
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("sighash", sighash.GetHex());
+        return result;
+    },
+    };
+}
+
+// ============================================================================
+
 void RegisterRungRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -3533,6 +4049,12 @@ void RegisterRungRPCCommands(CRPCTable& t)
         {"rung", &verifyadaptorpresig},
         {"rung", &parseladder},
         {"rung", &formatladder},
+        // QABI family
+        {"rung", &qabi_buildblock},
+        {"rung", &qabi_blockinfo},
+        {"rung", &qabi_authchain},
+        {"rung", &qabi_sighash},
+        {"rung", &qabi_signqabo},
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);

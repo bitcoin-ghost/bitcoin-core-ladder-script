@@ -280,6 +280,58 @@ bool ParseCtv(ParseContext& ctx, RungBlock& block)
     return Expect(ctx, ')');
 }
 
+// QABI family
+bool ParseQABIPrime(ParseContext& ctx, RungBlock& block)
+{
+    // qabi_prime() — no committed fields in conditions context.
+    if (!Expect(ctx, '(')) return false;
+    block.type = RungBlockType::QABI_PRIME;
+    return Expect(ctx, ')');
+}
+
+bool ParseQABISpend(ParseContext& ctx, RungBlock& block)
+{
+    // qabi_spend(auth_tip_hex, committed_root_hex, committed_depth,
+    //             committed_expiry, owner_id_hex)
+    if (!Expect(ctx, '(')) return false;
+
+    auto auth_tip = ParseHex(ReadHex(ctx));
+    if (auth_tip.size() != 32) {
+        ctx.error = "qabi_spend auth_tip must be 32 bytes";
+        return false;
+    }
+    if (!Expect(ctx, ',')) return false;
+
+    auto committed_root = ParseHex(ReadHex(ctx));
+    if (committed_root.size() != 32) {
+        ctx.error = "qabi_spend committed_root must be 32 bytes";
+        return false;
+    }
+    if (!Expect(ctx, ',')) return false;
+
+    uint32_t committed_depth;
+    if (!ReadUint32(ctx, committed_depth)) return false;
+    if (!Expect(ctx, ',')) return false;
+
+    uint32_t committed_expiry;
+    if (!ReadUint32(ctx, committed_expiry)) return false;
+    if (!Expect(ctx, ',')) return false;
+
+    auto owner_id = ParseHex(ReadHex(ctx));
+    if (owner_id.size() != 32) {
+        ctx.error = "qabi_spend owner_id must be 32 bytes";
+        return false;
+    }
+
+    block.type = RungBlockType::QABI_SPEND;
+    block.fields.push_back({RungDataType::HASH256, auth_tip});
+    block.fields.push_back({RungDataType::HASH256, committed_root});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(committed_depth)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(committed_expiry)});
+    block.fields.push_back({RungDataType::PUBKEY_COMMIT, owner_id});
+    return Expect(ctx, ')');
+}
+
 bool ParseAmountLock(ParseContext& ctx, RungBlock& block)
 {
     if (!Expect(ctx, '(')) return false;
@@ -986,6 +1038,9 @@ bool ParseBlock(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uin
     // Hash family
     else if (name == "tagged_hash") ok = ParseTaggedHash(ctx, block);
     else if (name == "hash_guarded") ok = ParseHashGuarded(ctx, block);
+    // QABI family
+    else if (name == "qabi_prime") ok = ParseQABIPrime(ctx, block);
+    else if (name == "qabi_spend") ok = ParseQABISpend(ctx, block);
     // Covenant family
     else if (name == "ctv") ok = ParseCtv(ctx, block);
     else if (name == "vault_lock") ok = ParseVaultLock(ctx, block, rung_pks);
@@ -1310,6 +1365,30 @@ std::string FormatDescriptor(const RungConditions& conditions,
         case RungBlockType::HASH_GUARDED: {
             result += "hash_guarded(";
             if (!block.fields.empty()) result += HexStr(block.fields[0].data);
+            result += ")";
+            return result;
+        }
+        case RungBlockType::QABI_PRIME: {
+            result += "qabi_prime()";
+            return result;
+        }
+        case RungBlockType::QABI_SPEND: {
+            // Fields: HASH256 auth_tip, HASH256 committed_root,
+            //          NUMERIC committed_depth, NUMERIC committed_expiry,
+            //          PUBKEY_COMMIT owner_id
+            result += "qabi_spend(";
+            if (block.fields.size() == 5) {
+                result += HexStr(block.fields[0].data) + ", ";
+                result += HexStr(block.fields[1].data) + ", ";
+                uint32_t depth = 0, expiry = 0;
+                for (size_t i = 0; i < block.fields[2].data.size() && i < 4; ++i)
+                    depth |= static_cast<uint32_t>(block.fields[2].data[i]) << (8 * i);
+                for (size_t i = 0; i < block.fields[3].data.size() && i < 4; ++i)
+                    expiry |= static_cast<uint32_t>(block.fields[3].data[i]) << (8 * i);
+                result += std::to_string(depth) + ", ";
+                result += std::to_string(expiry) + ", ";
+                result += HexStr(block.fields[4].data);
+            }
             result += ")";
             return result;
         }

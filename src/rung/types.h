@@ -97,6 +97,11 @@ enum class RungBlockType : uint16_t {
     P2TR_LEGACY          = 0x0906, //!< P2TR key-path wrapped: PUBKEY_COMMIT + SCHEME → PUBKEY + SIGNATURE
     P2TR_SCRIPT_LEGACY   = 0x0907, //!< P2TR script-path wrapped: HASH256 + PUBKEY_COMMIT → PREIMAGE (inner) + inner witness
 
+    // QABI family — Quantum Atomic Batch Input / Output
+    QABI_PRIME         = 0x0A01, //!< Priming state transition: verifies auth chain preimage + covenant-mutates (committed_root, committed_depth, committed_expiry)
+    QABI_SPEND         = 0x0A02, //!< Batch spend: verifies primed state, expiry, spend preimage, root match, identity, full output-set match, FALCON QABO sig
+    // 0x0A03, 0x0A04 reserved for future QABI-family members
+
     // PLC family
     HYSTERESIS_FEE   = 0x0601, //!< Fee hysteresis band
     HYSTERESIS_VALUE = 0x0602, //!< Value hysteresis band
@@ -211,6 +216,9 @@ inline bool IsKnownBlockType(uint16_t b)
     case RungBlockType::P2WSH_LEGACY:
     case RungBlockType::P2TR_LEGACY:
     case RungBlockType::P2TR_SCRIPT_LEGACY:
+    // QABI family
+    case RungBlockType::QABI_PRIME:
+    case RungBlockType::QABI_SPEND:
         return true;
     // Explicitly rejected: removed block types
     case RungBlockType::RESERVED_0201:
@@ -353,6 +361,8 @@ inline std::string BlockTypeName(RungBlockType type)
     case RungBlockType::P2WSH_LEGACY:     return "P2WSH_LEGACY";
     case RungBlockType::P2TR_LEGACY:      return "P2TR_LEGACY";
     case RungBlockType::P2TR_SCRIPT_LEGACY: return "P2TR_SCRIPT_LEGACY";
+    case RungBlockType::QABI_PRIME:         return "QABI_PRIME";
+    case RungBlockType::QABI_SPEND:         return "QABI_SPEND";
     }
     return "UNKNOWN";
 }
@@ -1146,6 +1156,47 @@ inline constexpr ImplicitFieldLayout MUSIG_THRESHOLD_WITNESS = SIG_WITNESS;
 /** CLTV_SIG witness: [PUBKEY(var), SIGNATURE(var), NUMERIC(varint)] */
 inline constexpr ImplicitFieldLayout CLTV_SIG_WITNESS = TIMELOCKED_SIG_WITNESS;
 
+// -- QABI family layouts --
+
+/** QABI_PRIME witness:
+ *    [0] HASH256(new_committed_root)       — 32 B
+ *    [1] NUMERIC(prime_depth)               — varint
+ *    [2] NUMERIC(new_committed_expiry)      — varint
+ *    [3] PREIMAGE(prime_preimage)           — 32 B */
+inline constexpr ImplicitFieldLayout QABI_PRIME_WITNESS = {4, {
+    {RungDataType::HASH256, 32},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::PREIMAGE, 32},
+}};
+
+/** QABI_SPEND conditions (committed at UTXO creation):
+ *    [0] HASH256(auth_tip)          — 32 B, immutable hash-chain tip
+ *    [1] HASH256(committed_root)    — 32 B, current primed batch root (0 if unprimed)
+ *    [2] NUMERIC(committed_depth)   — varint, depth of last consumed preimage
+ *    [3] NUMERIC(committed_expiry)  — varint, max spend height
+ *    [4] PUBKEY_COMMIT(owner_id)    — 32 B, SHA256(owner's Rung 0 FALCON pubkey) */
+inline constexpr ImplicitFieldLayout QABI_SPEND_CONDITIONS = {5, {
+    {RungDataType::HASH256, 32},
+    {RungDataType::HASH256, 32},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::PUBKEY_COMMIT, 32},
+}};
+
+/** QABI_SPEND witness (conditions + revealed spend preimage):
+ *    [0..4] — same as QABI_SPEND_CONDITIONS (verified via Merkle proof)
+ *    [5]    PREIMAGE(spend_preimage) — 32 B, witness-revealed preimage
+ *                                        at depth committed_depth+1 */
+inline constexpr ImplicitFieldLayout QABI_SPEND_WITNESS = {6, {
+    {RungDataType::HASH256, 32},
+    {RungDataType::HASH256, 32},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::NUMERIC, 0},
+    {RungDataType::PUBKEY_COMMIT, 32},
+    {RungDataType::PREIMAGE, 32},
+}};
+
 /** Lookup implicit field layout for a block type and serialization context.
  *  Returns NO_IMPLICIT if no implicit table exists. */
 inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t ctx)
@@ -1224,6 +1275,9 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::P2WSH_LEGACY:     return P2WSH_LEGACY_CONDITIONS;
         case RungBlockType::P2TR_LEGACY:      return SIG_CONDITIONS;
         case RungBlockType::P2TR_SCRIPT_LEGACY: return P2TR_SCRIPT_LEGACY_CONDITIONS;
+        // QABI family
+        case RungBlockType::QABI_SPEND:       return QABI_SPEND_CONDITIONS;
+        // QABI_PRIME has no committed fields (pure witness-driven) — NO_IMPLICIT
         default: return NO_IMPLICIT;
         }
     } else {
@@ -1250,6 +1304,9 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::P2WPKH_LEGACY:    return SIG_WITNESS;
         case RungBlockType::P2TR_LEGACY:      return SIG_WITNESS;
         // P2SH, P2WSH, P2TR_SCRIPT: no implicit witness (variable inner conditions)
+        // QABI family
+        case RungBlockType::QABI_PRIME:       return QABI_PRIME_WITNESS;
+        case RungBlockType::QABI_SPEND:       return QABI_SPEND_WITNESS;
         default: return NO_IMPLICIT;
         }
     }
@@ -1361,6 +1418,9 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::P2WSH_LEGACY, "P2WSH_LEGACY", true, true, false, 0, &P2WSH_LEGACY_CONDITIONS, nullptr, true},
         {RungBlockType::P2TR_LEGACY, "P2TR_LEGACY", true, false, true, 1, &SIG_CONDITIONS, &SIG_WITNESS, false},
         {RungBlockType::P2TR_SCRIPT_LEGACY, "P2TR_SCRIPT_LEGACY", true, false, true, 1, &P2TR_SCRIPT_LEGACY_CONDITIONS, nullptr, true},
+        // QABI family
+        {RungBlockType::QABI_PRIME, "QABI_PRIME", true, false, false, 0, nullptr, &QABI_PRIME_WITNESS, false},
+        {RungBlockType::QABI_SPEND, "QABI_SPEND", true, false, false, 0, &QABI_SPEND_CONDITIONS, &QABI_SPEND_WITNESS, false},
     };
     static const size_t N_DESCRIPTORS = sizeof(BLOCK_DESCRIPTORS) / sizeof(BLOCK_DESCRIPTORS[0]);
     for (size_t i = 0; i < N_DESCRIPTORS; ++i) {

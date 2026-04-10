@@ -221,8 +221,12 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - CompactSize n_outputs
  * - int64_t nValue[] (8 bytes per output — value only, no scriptPubKey)
  * - per-input witness stacks
+ * - CompactSize creation_proof_len
+ * - unsigned char creation_proof[]
+ * - CompactSize qabi_block_len
+ * - unsigned char qabi_block[]              (QABIO: tx-level batch block)
  * - CompactSize aggregated_sig_len
- * - unsigned char aggregated_sig[]
+ * - unsigned char aggregated_sig[]          (QABIO: FALCON-512 coordinator sig, exactly 666 B when present)
  * - uint32_t nLockTime
  *
  * On deserialization, TX_MLSC outputs are inflated to CTxOut(value, 0xDF + root)
@@ -239,6 +243,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vout.clear();
     tx.conditions_root.SetNull();
     tx.creation_proof.clear();
+    tx.qabi_block.clear();
     tx.aggregated_sig.clear();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
     s >> tx.vin;
@@ -284,7 +289,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         }
     }
     if (flags == 0x02) {
-        /* TX_MLSC: read per-input witnesses + creation proof + aggregated signature */
+        /* TX_MLSC: read per-input witnesses + creation proof + qabi_block + aggregated signature */
         flags = 0;
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness.stack;
@@ -297,10 +302,18 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         if (cp_len > 0) {
             s.read(MakeWritableByteSpan(tx.creation_proof));
         }
-        /* Read aggregated signature (half-aggregation).
-         * Max: 32 bytes (single aggregated s value). */
+        /* Read QABI tx-level block (QABIO batch data, empty for non-QABIO txs).
+         * Hard cap: 256 KB (consensus) — soft cap 64 KB enforced at relay policy. */
+        uint64_t qb_len = ReadCompactSize(s);
+        if (qb_len > 262144) throw std::ios_base::failure("qabi_block too large");
+        tx.qabi_block.resize(qb_len);
+        if (qb_len > 0) {
+            s.read(MakeWritableByteSpan(tx.qabi_block));
+        }
+        /* Read aggregated signature (QABIO: coordinator's FALCON-512 sig over SIGHASH_QABO).
+         * Max: 666 bytes exactly when present (FALCON-512 sig size), or 0 when absent. */
         uint64_t agg_len = ReadCompactSize(s);
-        if (agg_len > 32) throw std::ios_base::failure("aggregated_sig too large");
+        if (agg_len > 666) throw std::ios_base::failure("aggregated_sig too large");
         tx.aggregated_sig.resize(agg_len);
         if (agg_len > 0) {
             s.read(MakeWritableByteSpan(tx.aggregated_sig));
@@ -350,13 +363,17 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
         s << tx.vout;
     }
     if (flags == 0x02) {
-        /* TX_MLSC: per-input witnesses + creation proof + aggregated sig */
+        /* TX_MLSC: per-input witnesses + creation proof + qabi_block + aggregated sig */
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s << tx.vin[i].scriptWitness.stack;
         }
         WriteCompactSize(s, tx.creation_proof.size());
         if (!tx.creation_proof.empty()) {
             s.write(MakeByteSpan(tx.creation_proof));
+        }
+        WriteCompactSize(s, tx.qabi_block.size());
+        if (!tx.qabi_block.empty()) {
+            s.write(MakeByteSpan(tx.qabi_block));
         }
         WriteCompactSize(s, tx.aggregated_sig.size());
         if (!tx.aggregated_sig.empty()) {
@@ -404,7 +421,8 @@ public:
     // Ladder Script: shared conditions root and witness-carried proofs.
     const uint256 conditions_root;
     const std::vector<uint8_t> creation_proof;  //!< Leaf hashes proving conditions_root (required for 3+ outputs)
-    const std::vector<uint8_t> aggregated_sig;  //!< Reserved (always empty, wire format compat)
+    const std::vector<uint8_t> qabi_block;      //!< QABIO: serialised QABIBlock (tx-level batch data); empty for non-QABIO txs
+    const std::vector<uint8_t> aggregated_sig;  //!< QABIO: FALCON-512 coordinator sig over SIGHASH_QABO; empty for non-QABIO txs
 
 private:
     /** Memory only. */
@@ -479,12 +497,14 @@ struct CMutableTransaction
     uint32_t version;
     uint32_t nLockTime;
 
-    // Ladder Script: shared conditions root and aggregated signature.
-    // On wire: conditions_root between inputs and outputs, aggregated_sig after witnesses.
+    // Ladder Script: shared conditions root and tx-level QABIO fields.
+    // On wire: conditions_root between inputs and outputs; creation_proof, qabi_block,
+    // and aggregated_sig after per-input witnesses, in that order.
     // In memory: vout inflated to CTxOut(value, 0xDF + conditions_root) for compatibility.
     uint256 conditions_root;
     std::vector<uint8_t> creation_proof;
-    std::vector<uint8_t> aggregated_sig;
+    std::vector<uint8_t> qabi_block;      //!< QABIO: serialised QABIBlock (tx-level batch data)
+    std::vector<uint8_t> aggregated_sig;  //!< QABIO: FALCON-512 coordinator sig over SIGHASH_QABO
 
     explicit CMutableTransaction();
     explicit CMutableTransaction(const CTransaction& tx);
