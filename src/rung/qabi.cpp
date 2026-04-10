@@ -326,10 +326,15 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block)
 uint256 ComputeSighashQABO(const CTransaction& tx)
 {
     // See qabi.h for the full coverage decision. Summary: covers tx intent
-    // (version, vin, vout, conditions_root, qabi_block, nLockTime) but excludes
-    // aggregated_sig (chicken-and-egg) and per-input witnesses (each input's
-    // preimage is independently validated against the UTXO's committed
-    // auth_tip at the evaluator layer).
+    // (version, vin, vout, conditions_root, qabi_block, nLockTime) AND the
+    // per-input witness stacks. Excludes only tx.aggregated_sig itself
+    // (chicken-and-egg) and tx.creation_proof.
+    //
+    // Per-input witness coverage added in Phase 18 as defence-in-depth
+    // against byte-level witness malleability: a third party cannot modify
+    // the witness bytes of any primed input (LadderWitness framing, spend
+    // preimage, Merkle proofs, extra stack padding) without invalidating
+    // the coordinator's FALCON signature.
     CSHA256 hasher;
 
     // Version
@@ -362,6 +367,21 @@ uint256 ComputeSighashQABO(const CTransaction& tx)
     hasher.Write(reinterpret_cast<const uint8_t*>(&qb_size), sizeof(qb_size));
     if (!tx.qabi_block.empty()) {
         hasher.Write(tx.qabi_block.data(), tx.qabi_block.size());
+    }
+
+    // Per-input witness stacks (closes byte-level witness malleability).
+    // For each input, we hash: stack_count || (for each element: length || bytes).
+    // Length-prefixing prevents boundary-ambiguity attacks.
+    for (const auto& in : tx.vin) {
+        uint64_t stack_count = in.scriptWitness.stack.size();
+        hasher.Write(reinterpret_cast<const uint8_t*>(&stack_count), sizeof(stack_count));
+        for (const auto& element : in.scriptWitness.stack) {
+            uint64_t elem_size = element.size();
+            hasher.Write(reinterpret_cast<const uint8_t*>(&elem_size), sizeof(elem_size));
+            if (!element.empty()) {
+                hasher.Write(element.data(), element.size());
+            }
+        }
     }
 
     // nLockTime

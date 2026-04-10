@@ -164,18 +164,18 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
  *    - tx.qabi_block (the tx-level QABIBlock bytes, with length prefix)
  *    - tx.nLockTime
  *
+ *  Covered (Phase 18 update):
+ *    - per-input scriptWitness.stack contents (stack element count and
+ *      bytes of every element). Closes byte-level witness malleability:
+ *      a third party cannot modify LadderWitness framing, spend preimages,
+ *      Merkle proofs, or extra stack padding without invalidating the
+ *      coordinator's FALCON signature.
+ *
  *  Excluded (and why):
  *    - tx.aggregated_sig: chicken-and-egg — the sig signs the hash, the hash
  *      cannot depend on the sig.
  *    - tx.creation_proof: not consensus-relevant for the batch authorisation;
  *      it proves output structure, which is already bound via tx.vout.
- *    - per-input witness stacks (including spend preimages): deliberately
- *      excluded. Each QABI_SPEND input's witness is independently validated
- *      by its own evaluator against the UTXO's committed auth_tip. An
- *      attacker cannot substitute a forged preimage (they don't hold
- *      auth_seed), so witness malleation is prevented at the eval layer
- *      rather than at the sighash layer. This matches the "sighash covers
- *      only intent, per-input checks cover authorisation" pattern.
  *
  *  The same sighash is produced for every input in the tx — the coordinator
  *  signs once, every primed input's QABI_SPEND evaluator verifies against

@@ -12872,6 +12872,32 @@ BOOST_AUTO_TEST_CASE(sighash_qabo_changes_on_vout_mutation)
     BOOST_CHECK(ComputeSighashQABO(CTransaction(mtx1)) != ComputeSighashQABO(CTransaction(mtx2)));
 }
 
+BOOST_AUTO_TEST_CASE(sighash_qabo_covers_per_input_witness)
+{
+    // Phase 18 refinement: SIGHASH_QABO must cover per-input scriptWitness
+    // stacks, so a third party cannot modify witness bytes (padding, framing,
+    // element content) without invalidating the coordinator's signature.
+    QABIBlock block = MakeValidQABIBlock();
+    auto sig = std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0x55);
+
+    auto mtx1 = MakeTxWithQABIBlock(SerializeQABIBlock(block), sig);
+    // Add a witness stack element to input 0.
+    mtx1.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+
+    auto mtx2 = mtx1;
+    // Mutate the witness bytes: change the added element.
+    mtx2.vin[0].scriptWitness.stack.back() = std::vector<uint8_t>{0xBA, 0xDC, 0x0D, 0xE5};
+
+    uint256 h1 = ComputeSighashQABO(CTransaction(mtx1));
+    uint256 h2 = ComputeSighashQABO(CTransaction(mtx2));
+    BOOST_CHECK(h1 != h2);
+
+    // Also: adding an extra empty stack element (padding) must change the hash.
+    auto mtx3 = mtx1;
+    mtx3.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>{});
+    BOOST_CHECK(ComputeSighashQABO(CTransaction(mtx3)) != h1);
+}
+
 // ============================================================================
 // End-to-end: full QABI_SPEND evaluator test with real FALCON signatures
 // ============================================================================
