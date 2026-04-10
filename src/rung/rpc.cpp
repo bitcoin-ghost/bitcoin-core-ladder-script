@@ -3764,6 +3764,94 @@ static RPCHelpMan qabi_authchain()
     };
 }
 
+static RPCHelpMan qabi_signqabo()
+{
+    return RPCHelpMan{
+        "qabi_signqabo",
+        "Coordinator-side signing operation for a QABIO batch tx. Takes an\n"
+        "unsigned TX_MLSC v4 tx (with tx.qabi_block populated but\n"
+        "tx.aggregated_sig empty or placeholder) and the coordinator's FALCON-512\n"
+        "private key, computes SIGHASH_QABO over the tx, signs the hash, and\n"
+        "returns a new tx hex with tx.aggregated_sig set to the resulting\n"
+        "FALCON-512 signature.\n"
+        "\n"
+        "Inputs:\n"
+        "  - hex_tx: unsigned (or partially signed) TX_MLSC v4 tx hex\n"
+        "  - privkey: coordinator's FALCON-512 private key (hex)\n"
+        "\n"
+        "Output: signed tx hex with aggregated_sig = FALCON(privkey, SIGHASH_QABO(tx))\n"
+        "\n"
+        "Requires liboqs support for FALCON-512 signing.\n",
+        {
+            {"hex_tx", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "The unsigned TX_MLSC v4 transaction hex"},
+            {"privkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Coordinator's FALCON-512 private key (hex)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "hex", "Signed tx hex (aggregated_sig populated)"},
+            {RPCResult::Type::STR_HEX, "sighash", "The SIGHASH_QABO that was signed"},
+            {RPCResult::Type::NUM, "sig_size", "Size of the FALCON signature in bytes"},
+        }},
+        RPCExamples{HelpExampleCli("qabi_signqabo", "\"<tx hex>\" \"<falcon privkey hex>\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        if (!rung::HasPQSupport()) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR,
+                "qabi_signqabo requires liboqs support (not compiled in)");
+        }
+
+        CMutableTransaction mtx;
+        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"), true)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "tx decode failed");
+        }
+        if (mtx.qabi_block.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "tx.qabi_block is empty — not a QABIO batch tx");
+        }
+
+        auto privkey = ParseHex(self.Arg<std::string>("privkey"));
+        if (privkey.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "empty privkey");
+        }
+
+        // Zero out aggregated_sig before computing the sighash — SIGHASH_QABO
+        // deliberately excludes it (chicken-and-egg) so the hash is the same
+        // regardless of what's currently in that field.
+        mtx.aggregated_sig.clear();
+
+        uint256 sighash = rung::ComputeSighashQABO(CTransaction(mtx));
+
+        std::vector<uint8_t> sig;
+        if (!rung::SignPQ(rung::RungScheme::FALCON512,
+                           std::span<const uint8_t>(privkey),
+                           std::span<const uint8_t>(sighash.begin(), 32),
+                           sig)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "FALCON-512 signing failed");
+        }
+
+        // Pad to exactly 666 bytes (consensus cap) — liboqs FALCON signatures
+        // are variable-length ≤666 bytes. Zero-pad any shorter result.
+        if (sig.size() > rung::QABI_AGGREGATED_SIG_MAX) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR,
+                "FALCON signature exceeds consensus cap");
+        }
+        sig.resize(rung::QABI_AGGREGATED_SIG_MAX, 0x00);
+        mtx.aggregated_sig = sig;
+
+        // Re-serialise the signed tx.
+        DataStream ss;
+        ss << TX_WITH_WITNESS(CTransaction(mtx));
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("hex", HexStr(ss));
+        result.pushKV("sighash", sighash.GetHex());
+        result.pushKV("sig_size", static_cast<uint64_t>(sig.size()));
+        return result;
+    },
+    };
+}
+
 static RPCHelpMan qabi_sighash()
 {
     return RPCHelpMan{
@@ -3822,6 +3910,7 @@ void RegisterRungRPCCommands(CRPCTable& t)
         {"rung", &qabi_blockinfo},
         {"rung", &qabi_authchain},
         {"rung", &qabi_sighash},
+        {"rung", &qabi_signqabo},
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);
