@@ -13160,4 +13160,277 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::UNSATISFIED));
 }
 
+// ============================================================================
+// Failure-mode tests — isolate each QABI_SPEND consensus check
+// ============================================================================
+
+struct QABISpendSetup {
+    static constexpr size_t CHAIN_LENGTH = 50;
+    static constexpr int64_t PRIME_DEPTH = 10;
+    static constexpr int64_t SPEND_DEPTH = PRIME_DEPTH + 1;
+    static constexpr uint32_t EXPIRY_HEIGHT = 1000;
+    static constexpr int32_t  TEST_BLOCK_HEIGHT = 500;
+
+    std::vector<std::array<uint8_t, 32>> chain;
+    std::vector<uint8_t> coord_pk;
+    std::vector<uint8_t> coord_sk;
+    uint256 owner_id;
+    QABIBlock block;
+    uint256 committed_root;
+    CMutableTransaction mtx;
+    RungBlock spend_block;
+};
+
+// Build a fresh happy-path setup. Returns false only if PQ support is missing.
+static bool BuildQABISpendHappyPath(QABISpendSetup& s)
+{
+    if (!HasPQSupport()) return false;
+
+    s.chain.assign(QABISpendSetup::CHAIN_LENGTH + 1, {});
+    for (size_t i = 0; i < 32; ++i) s.chain[0][i] = static_cast<uint8_t>(i * 11 + 3);
+    for (size_t i = 1; i <= QABISpendSetup::CHAIN_LENGTH; ++i) {
+        CSHA256().Write(s.chain[i - 1].data(), 32).Finalize(s.chain[i].data());
+    }
+    const auto& auth_tip = s.chain[QABISpendSetup::CHAIN_LENGTH];
+    const auto& spend_preimage = s.chain[QABISpendSetup::CHAIN_LENGTH - QABISpendSetup::SPEND_DEPTH];
+
+    if (!GeneratePQKeypair(RungScheme::FALCON512, s.coord_pk, s.coord_sk)) return false;
+
+    for (size_t i = 0; i < 32; ++i) s.owner_id.data()[i] = static_cast<uint8_t>(0x80 + (i & 0x0F));
+
+    s.block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(s.block.batch_id.data(), 0x6B, 32);
+    s.block.coordinator_pubkey = s.coord_pk;
+    s.block.prime_expiry_height = QABISpendSetup::EXPIRY_HEIGHT;
+    {
+        QABIEntry e;
+        e.participant_id = s.owner_id;
+        e.contribution = 100000;
+        e.destination_index = 0;
+        s.block.entries.push_back(e);
+    }
+    {
+        CTxOut out;
+        out.nValue = 99000;
+        out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0xBB);
+        s.block.outputs.push_back(out);
+    }
+    auto block_bytes = SerializeQABIBlock(s.block);
+    s.committed_root = ComputeQABIRoot(block_bytes);
+
+    s.mtx.version = CTransaction::RUNG_TX_VERSION;
+    s.mtx.nLockTime = 0;
+    s.mtx.conditions_root.SetNull();
+    s.mtx.qabi_block = block_bytes;
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    s.mtx.vin.push_back(in);
+    s.mtx.vout.push_back(s.block.outputs[0]);
+    s.mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+
+    uint256 sighash = ComputeSighashQABO(CTransaction(s.mtx));
+    std::vector<uint8_t> sig;
+    if (!SignPQ(RungScheme::FALCON512,
+                std::span<const uint8_t>(s.coord_sk),
+                std::span<const uint8_t>(sighash.begin(), 32),
+                sig)) {
+        return false;
+    }
+    if (sig.size() < QABI_AGGREGATED_SIG_MAX) sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+    s.mtx.aggregated_sig = sig;
+
+    // Build the spend RungBlock with the same 6-field layout as QABI_SPEND expects.
+    s.spend_block.type = RungBlockType::QABI_SPEND;
+    s.spend_block.inverted = false;
+    s.spend_block.fields.clear();
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(auth_tip.begin(), auth_tip.end());
+        s.spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(s.committed_root.data(), s.committed_root.data() + 32);
+        s.spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(QABISpendSetup::PRIME_DEPTH));
+        s.spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        uint32_t e = QABISpendSetup::EXPIRY_HEIGHT;
+        f.data.push_back(static_cast<uint8_t>(e & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 24) & 0xFF));
+        s.spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::PUBKEY_COMMIT;
+        f.data.assign(s.owner_id.data(), s.owner_id.data() + 32);
+        s.spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::PREIMAGE;
+        f.data.assign(spend_preimage.begin(), spend_preimage.end());
+        s.spend_block.fields.push_back(f);
+    }
+    return true;
+}
+
+static EvalResult EvalSetup(const QABISpendSetup& s)
+{
+    CTransaction tx(s.mtx);
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.block_height = QABISpendSetup::TEST_BLOCK_HEIGHT;
+
+    PrecomputedTransactionData txdata;
+    CMutableTransaction mtx_copy = s.mtx;
+    MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+    ScriptExecutionData execdata;
+
+    return EvalBlock(s.spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_happy_path_sanity)
+{
+    // Sanity: the helper reproduces the happy-path behaviour.
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) {
+        BOOST_TEST_MESSAGE("skipping: PQ support not available");
+        return;
+    }
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::SATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check1_unprimed)
+{
+    // Check 1: committed_root == 0 → UNSATISFIED (UTXO not primed).
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+    std::memset(s.spend_block.fields[1].data.data(), 0, 32);
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check3_bad_preimage)
+{
+    // Check 3: spend_preimage at wrong depth → UNSATISFIED.
+    // Replace with the priming-depth preimage (one shallower).
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+    const auto& bad = s.chain[QABISpendSetup::CHAIN_LENGTH - QABISpendSetup::PRIME_DEPTH];
+    s.spend_block.fields[5].data.assign(bad.begin(), bad.end());
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check4_root_mismatch)
+{
+    // Check 4: spend_block.committed_root != SHA256(tx.qabi_block).
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+    s.spend_block.fields[1].data[0] ^= 0xFF;  // flip a byte
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check5_malformed_block)
+{
+    // Check 5: tx.qabi_block hashes correctly but doesn't parse. We create
+    // garbage bytes, set committed_root = SHA256(garbage), replace
+    // tx.qabi_block with the garbage, and re-sign.
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+
+    std::vector<uint8_t> garbage(100, 0xDE);
+    unsigned char h[CSHA256::OUTPUT_SIZE];
+    CSHA256().Write(garbage.data(), garbage.size()).Finalize(h);
+    s.spend_block.fields[1].data.assign(h, h + 32);
+    s.mtx.qabi_block = garbage;
+
+    // Re-sign: tx.qabi_block changed, so sighash changed.
+    s.mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+    uint256 sighash = ComputeSighashQABO(CTransaction(s.mtx));
+    std::vector<uint8_t> sig;
+    BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                         std::span<const uint8_t>(s.coord_sk),
+                         std::span<const uint8_t>(sighash.begin(), 32),
+                         sig));
+    if (sig.size() < QABI_AGGREGATED_SIG_MAX) sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+    s.mtx.aggregated_sig = sig;
+
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check6_expiry_binding_mismatch)
+{
+    // Check 6: spend_block's committed_expiry field ≠ block.prime_expiry_height.
+    // Set the field to a value that still beats check 2 (> block_height).
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+
+    // Rewrite the NUMERIC committed_expiry field to (EXPIRY_HEIGHT + 100).
+    uint32_t bogus = QABISpendSetup::EXPIRY_HEIGHT + 100;
+    s.spend_block.fields[3].data.clear();
+    s.spend_block.fields[3].data.push_back(static_cast<uint8_t>(bogus & 0xFF));
+    s.spend_block.fields[3].data.push_back(static_cast<uint8_t>((bogus >> 8) & 0xFF));
+    s.spend_block.fields[3].data.push_back(static_cast<uint8_t>((bogus >> 16) & 0xFF));
+    s.spend_block.fields[3].data.push_back(static_cast<uint8_t>((bogus >> 24) & 0xFF));
+
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check7_identity_not_in_entries)
+{
+    // Check 7: spend_block's owner_pubkey_hash doesn't appear in
+    // block.entries[*].participant_id.
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+    s.spend_block.fields[4].data[0] ^= 0xFF;
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check8_output_set_mismatch)
+{
+    // Check 8: tx.vout differs from block.outputs. We mutate tx.vout, then
+    // re-sign so checks 4–7 and 9 all still pass and only check 8 fires.
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+
+    s.mtx.vout[0].nValue = 88888;  // different from block.outputs[0].nValue
+
+    s.mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+    uint256 sighash = ComputeSighashQABO(CTransaction(s.mtx));
+    std::vector<uint8_t> sig;
+    BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                         std::span<const uint8_t>(s.coord_sk),
+                         std::span<const uint8_t>(sighash.begin(), 32),
+                         sig));
+    if (sig.size() < QABI_AGGREGATED_SIG_MAX) sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+    s.mtx.aggregated_sig = sig;
+
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_check9_bad_falcon_sig)
+{
+    // Check 9: corrupt tx.aggregated_sig.
+    QABISpendSetup s;
+    if (!BuildQABISpendHappyPath(s)) return;
+    for (auto& b : s.mtx.aggregated_sig) b ^= 0x5A;
+    BOOST_CHECK_EQUAL(static_cast<int>(EvalSetup(s)),
+                      static_cast<int>(EvalResult::UNSATISFIED));
+}
+
 BOOST_AUTO_TEST_SUITE_END()
