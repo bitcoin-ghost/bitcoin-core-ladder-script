@@ -195,11 +195,15 @@ uint256 ComputeQABIRoot(const QABIBlock& block)
     return ComputeQABIRoot(SerializeQABIBlock(block));
 }
 
-/* ---------------- SIGHASH_QABO (Phase 4 interim) ---------------- */
+/* ---------------- SIGHASH_QABO ---------------- */
 
 uint256 ComputeSighashQABO(const CTransaction& tx)
 {
-    // Phase 4 interim. Phase 9 will refine this.
+    // See qabi.h for the full coverage decision. Summary: covers tx intent
+    // (version, vin, vout, conditions_root, qabi_block, nLockTime) but excludes
+    // aggregated_sig (chicken-and-egg) and per-input witnesses (each input's
+    // preimage is independently validated against the UTXO's committed
+    // auth_tip at the evaluator layer).
     CSHA256 hasher;
 
     // Version

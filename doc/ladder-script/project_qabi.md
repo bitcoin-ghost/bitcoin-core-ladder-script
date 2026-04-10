@@ -657,7 +657,7 @@ Raise the `aggregated_sig` cap from 32 to exactly 666 (FALCON-512 sig size).
 
 ## 13. Open questions
 
-1. **SIGHASH_QABO scope:** should per-input witnesses (spend preimages) be covered by the sighash, or excluded? Covering prevents witness malleation but requires the coordinator to collect all preimages before signing. Decision in Phase 9.
+1. **SIGHASH_QABO scope:** ~~open~~ **decided**: per-input witnesses (spend preimages) are EXCLUDED from the sighash. Each input's preimage is independently validated by its own `QABI_SPEND` evaluator against the UTXO's committed `auth_tip`. An attacker cannot substitute a forged preimage (they don't hold `auth_seed`), so witness malleation is prevented at the eval layer rather than at the sighash layer. SIGHASH_QABO covers: version, vin (prevouts + sequences), vout (values + scripts), conditions_root, qabi_block (length-prefixed), nLockTime. Excludes: aggregated_sig, creation_proof, per-input witnesses. See `ComputeSighashQABO` in `src/rung/qabi.cpp`.
 
 2. **Covenant primitive:** does `RECURSE_MODIFIED` support mutating three fields (`committed_root`, `committed_depth`, `committed_expiry`) simultaneously while preserving everything else? Or do we need a `QABI_PRIME`-specific covenant path? Decision in Phase 5.
 

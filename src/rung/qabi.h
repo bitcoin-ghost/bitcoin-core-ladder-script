@@ -99,14 +99,30 @@ uint256 ComputeQABIRoot(const QABIBlock& block);
 /** Compute SIGHASH_QABO — the sighash used for the coordinator's FALCON QABO
  *  signature on a QABIO batch tx.
  *
- *  Phase 4 interim implementation: flat hash over version + vin outpoints +
- *  vout + conditions_root + qabi_block + nLockTime. Deliberately EXCLUDES
- *  tx.aggregated_sig (chicken-and-egg). Per-input witnesses are also currently
- *  excluded; Phase 9 will refine coverage to close any witness malleation gap.
+ *  Covered:
+ *    - tx.version
+ *    - tx.vin (prevout hash, prevout index, nSequence — in order)
+ *    - tx.vout (value, scriptPubKey — in order)
+ *    - tx.conditions_root
+ *    - tx.qabi_block (the tx-level QABIBlock bytes, with length prefix)
+ *    - tx.nLockTime
+ *
+ *  Excluded (and why):
+ *    - tx.aggregated_sig: chicken-and-egg — the sig signs the hash, the hash
+ *      cannot depend on the sig.
+ *    - tx.creation_proof: not consensus-relevant for the batch authorisation;
+ *      it proves output structure, which is already bound via tx.vout.
+ *    - per-input witness stacks (including spend preimages): deliberately
+ *      excluded. Each QABI_SPEND input's witness is independently validated
+ *      by its own evaluator against the UTXO's committed auth_tip. An
+ *      attacker cannot substitute a forged preimage (they don't hold
+ *      auth_seed), so witness malleation is prevented at the eval layer
+ *      rather than at the sighash layer. This matches the "sighash covers
+ *      only intent, per-input checks cover authorisation" pattern.
  *
  *  The same sighash is produced for every input in the tx — the coordinator
- *  signs once, every primed input's QABI_SPEND evaluator verifies against the
- *  same hash. */
+ *  signs once, every primed input's QABI_SPEND evaluator verifies against
+ *  the same hash. */
 uint256 ComputeSighashQABO(const CTransaction& tx);
 
 } // namespace rung
