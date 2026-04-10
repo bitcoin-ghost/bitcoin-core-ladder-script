@@ -1,9 +1,14 @@
 # QABIO — Quantum Atomic Batch Input / Output
 
-**Status:** Draft (design locked, pending implementation)
+**Status:** Implemented and tested on the `QABIO` branch
 **Date:** 2026-04-10
 **Branch:** QABIO
 **Goal:** Enable N independent parties to batch their rung_tx UTXOs into a single transaction authorised by ONE post-quantum signature, natively inside the rung_tx format, without anchors, escrow, commitment transactions, or pre-registration.
+
+> **Related docs:**
+> - `bip-qabio.md` — BIP-format adaptation of this spec, ready to merge into the main Ladder Script BIP (`BIP-XXXX.md`) as a subsection.
+> - Reference implementation: `src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp` (EvalQABIPrimeBlock / EvalQABISpendBlock), `src/rung/policy.cpp` (RBD helpers), `src/validation.cpp` (RBD mempool integration), `src/rung/rpc.cpp` (5 QABI JSON-RPC commands), `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens).
+> - Tests: `src/test/rung_tests.cpp` (53 cases in `qabi_tests` suite), `test/functional/feature_qabi.py` (12 Python functional test cases).
 
 ---
 

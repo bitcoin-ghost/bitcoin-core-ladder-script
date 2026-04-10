@@ -1,15 +1,39 @@
+<!--
+  INTEGRATION STATUS
+  ==================
+  This file is a standalone QABIO specification in BIP format, intended
+  to be merged into the main BIP-XXXX.md (the Ladder Script BIP) as a
+  new section once that file's current in-flight edits are committed.
+
+  QABIO is not a separate BIP with its own number — it is an extension
+  to the Ladder Script proposal and should appear inside BIP-XXXX.md as
+  a subsection (e.g., "Extension: QABIO — Quantum Atomic Batch Input /
+  Output"). The content below is structured to drop directly into
+  BIP-XXXX.md with minimal reshaping:
+
+    1. The top-of-file BIP header block is dropped on integration
+       (replaced by a subsection heading in the host BIP).
+    2. The "Abstract" becomes an introductory paragraph for the
+       subsection.
+    3. "Specification" through "Test Vectors" map directly to
+       subsections of the host BIP's QABIO section.
+    4. "Reference Implementation" and "Copyright" are absorbed into
+       the host BIP's existing equivalents.
+
+  The canonical design doc remains doc/ladder-script/project_qabi.md
+  (693 lines, fully up to date). This bip-qabio.md is the BIP-format
+  adaptation for eventual integration into the Ladder Script BIP.
+-->
+
 <pre>
-  BIP: XXXX
   Layer: Consensus (soft fork)
   Title: QABIO — Quantum Atomic Batch Input / Output
   Author: Defenwycke &lt;defenwycke@icloud.com&gt;
-  Comments-Summary: No comments yet
-  Comments-URI: https://github.com/bitcoin/bips/wiki/Comments:BIP-XXXX
-  Status: Draft
-  Type: Standards Track
+  Status: Draft (to be merged into Ladder Script BIP)
+  Type: Extension to BIP-RUNG / Ladder Script
   Created: 2026-04-10
   License: BSD-2-Clause
-  Requires: BIP-RUNG (Ladder Script, TX_MLSC, RUNG_TX_VERSION=4)
+  Depends-On: BIP-RUNG (Ladder Script, TX_MLSC, RUNG_TX_VERSION=4)
 </pre>
 
 ## Abstract
