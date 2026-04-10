@@ -98,10 +98,9 @@ enum class RungBlockType : uint16_t {
     P2TR_SCRIPT_LEGACY   = 0x0907, //!< P2TR script-path wrapped: HASH256 + PUBKEY_COMMIT → PREIMAGE (inner) + inner witness
 
     // QABI family — Quantum Atomic Batch Input / Output
-    QABI_COND_RELAY    = 0x0A01, //!< Chain A priming state: verifies preimage + updates committed_QABI_ROOT via covenant
-    QABI_CONSENT_RELAY = 0x0A02, //!< Chain B spend consent: verifies participant's Chain B preimage against tip commitment
-    QABI_BLOCK_CHECK   = 0x0A03, //!< Root match: verifies tx-level QABI_BLOCK hashes to UTXO's committed_QABI_ROOT
-    QABO               = 0x0A04, //!< Quantum Atomic Batch Output: verifies tx.aggregated_sig is a valid FALCON sig from QABI_BLOCK.coordinator_pubkey
+    QABI_PRIME         = 0x0A01, //!< Priming state transition: verifies auth chain preimage + covenant-mutates (committed_root, committed_depth, committed_expiry)
+    QABI_SPEND         = 0x0A02, //!< Batch spend: verifies primed state, expiry, spend preimage, root match, identity, full output-set match, FALCON QABO sig
+    // 0x0A03, 0x0A04 reserved for future QABI-family members
 
     // PLC family
     HYSTERESIS_FEE   = 0x0601, //!< Fee hysteresis band
@@ -218,10 +217,8 @@ inline bool IsKnownBlockType(uint16_t b)
     case RungBlockType::P2TR_LEGACY:
     case RungBlockType::P2TR_SCRIPT_LEGACY:
     // QABI family
-    case RungBlockType::QABI_COND_RELAY:
-    case RungBlockType::QABI_CONSENT_RELAY:
-    case RungBlockType::QABI_BLOCK_CHECK:
-    case RungBlockType::QABO:
+    case RungBlockType::QABI_PRIME:
+    case RungBlockType::QABI_SPEND:
         return true;
     // Explicitly rejected: removed block types
     case RungBlockType::RESERVED_0201:
@@ -364,10 +361,8 @@ inline std::string BlockTypeName(RungBlockType type)
     case RungBlockType::P2WSH_LEGACY:     return "P2WSH_LEGACY";
     case RungBlockType::P2TR_LEGACY:      return "P2TR_LEGACY";
     case RungBlockType::P2TR_SCRIPT_LEGACY: return "P2TR_SCRIPT_LEGACY";
-    case RungBlockType::QABI_COND_RELAY:    return "QABI_COND_RELAY";
-    case RungBlockType::QABI_CONSENT_RELAY: return "QABI_CONSENT_RELAY";
-    case RungBlockType::QABI_BLOCK_CHECK:   return "QABI_BLOCK_CHECK";
-    case RungBlockType::QABO:               return "QABO";
+    case RungBlockType::QABI_PRIME:         return "QABI_PRIME";
+    case RungBlockType::QABI_SPEND:         return "QABI_SPEND";
     }
     return "UNKNOWN";
 }
