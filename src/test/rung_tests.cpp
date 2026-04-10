@@ -12872,4 +12872,292 @@ BOOST_AUTO_TEST_CASE(sighash_qabo_changes_on_vout_mutation)
     BOOST_CHECK(ComputeSighashQABO(CTransaction(mtx1)) != ComputeSighashQABO(CTransaction(mtx2)));
 }
 
+// ============================================================================
+// End-to-end: full QABI_SPEND evaluator test with real FALCON signatures
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
+{
+    if (!HasPQSupport()) {
+        BOOST_TEST_MESSAGE("skipping: PQ support (liboqs) not compiled in");
+        return;
+    }
+
+    // Build the hash chain. Short chain (50 depths) to keep the test fast.
+    // chain[0] = auth_seed (secret); chain[N] = auth_tip (public commitment).
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t PRIME_DEPTH = 10;
+    constexpr int64_t SPEND_DEPTH = PRIME_DEPTH + 1;
+    constexpr uint32_t EXPIRY_HEIGHT = 1000;
+    constexpr int32_t  TEST_BLOCK_HEIGHT = 500;
+
+    std::vector<std::array<uint8_t, 32>> chain(CHAIN_LENGTH + 1);
+    // Deterministic auth_seed for test reproducibility.
+    for (size_t i = 0; i < 32; ++i) chain[0][i] = static_cast<uint8_t>(i * 3 + 7);
+    for (size_t i = 1; i <= CHAIN_LENGTH; ++i) {
+        CSHA256().Write(chain[i - 1].data(), 32).Finalize(chain[i].data());
+    }
+
+    // auth_tip = chain[CHAIN_LENGTH] (depth 0 from the tip, but we measure
+    // depth from the tip backwards, so revealing h_{N-d} is depth d).
+    // Convention: chain[N-d] is the preimage at depth d.
+    // H^d(chain[N-d]) == chain[N] == auth_tip.
+    const auto& auth_tip = chain[CHAIN_LENGTH];
+
+    // spend_preimage at depth PRIME_DEPTH+1 = chain[N - (PRIME_DEPTH+1)].
+    const auto& spend_preimage = chain[CHAIN_LENGTH - SPEND_DEPTH];
+
+    // Generate a FALCON coordinator keypair.
+    std::vector<uint8_t> coord_pk, coord_sk;
+    BOOST_REQUIRE(GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk));
+    BOOST_REQUIRE_EQUAL(coord_pk.size(), QABI_COORDINATOR_PUBKEY_SIZE);
+
+    // Owner identity: arbitrary 32-byte commitment (SHA256 of some pubkey).
+    uint256 owner_id;
+    for (size_t i = 0; i < 32; ++i) owner_id.data()[i] = static_cast<uint8_t>(0xE0 + (i & 0x0F));
+
+    // Build the QABIBlock.
+    QABIBlock block;
+    block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(block.batch_id.data(), 0x5A, 32);
+    block.coordinator_pubkey = coord_pk;
+    block.prime_expiry_height = EXPIRY_HEIGHT;
+    {
+        QABIEntry e;
+        e.participant_id = owner_id;
+        e.contribution = 100000;
+        e.destination_index = 0;
+        block.entries.push_back(e);
+    }
+    {
+        CTxOut out;
+        out.nValue = 99000;
+        out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0x7F);
+        block.outputs.push_back(out);
+    }
+    auto block_bytes = SerializeQABIBlock(block);
+    uint256 committed_root = ComputeQABIRoot(block_bytes);
+
+    // Build the tx — vout must match block.outputs bit-exact per check 8.
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+    mtx.qabi_block = block_bytes;
+
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    mtx.vout.push_back(block.outputs[0]);  // exact copy
+
+    // Sign SIGHASH_QABO with the coordinator's FALCON key.
+    // Placeholder tx.aggregated_sig of the expected length while we compute
+    // the sighash; ComputeSighashQABO deliberately excludes aggregated_sig
+    // so its value does not affect the hash.
+    mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+    uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
+
+    std::vector<uint8_t> sig;
+    BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                         std::span<const uint8_t>(coord_sk),
+                         std::span<const uint8_t>(sighash.begin(), 32),
+                         sig));
+    // Pad or truncate to the consensus-enforced exact FALCON-512 size.
+    // Real FALCON-512 signatures are ≤666 B; liboqs returns variable length.
+    if (sig.size() < QABI_AGGREGATED_SIG_MAX) {
+        sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+    }
+    BOOST_REQUIRE_EQUAL(sig.size(), QABI_AGGREGATED_SIG_MAX);
+    mtx.aggregated_sig = sig;
+
+    CTransaction tx(mtx);
+
+    // Build a QABI_SPEND RungBlock with the committed state + spend_preimage.
+    RungBlock spend_block;
+    spend_block.type = RungBlockType::QABI_SPEND;
+    spend_block.inverted = false;
+
+    // Field 0: HASH256 auth_tip
+    {
+        RungField f;
+        f.type = RungDataType::HASH256;
+        f.data.assign(auth_tip.begin(), auth_tip.end());
+        spend_block.fields.push_back(f);
+    }
+    // Field 1: HASH256 committed_root
+    {
+        RungField f;
+        f.type = RungDataType::HASH256;
+        f.data.assign(committed_root.data(), committed_root.data() + 32);
+        spend_block.fields.push_back(f);
+    }
+    // Field 2: NUMERIC committed_depth
+    {
+        RungField f;
+        f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(PRIME_DEPTH));
+        spend_block.fields.push_back(f);
+    }
+    // Field 3: NUMERIC committed_expiry
+    {
+        RungField f;
+        f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(EXPIRY_HEIGHT & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 24) & 0xFF));
+        spend_block.fields.push_back(f);
+    }
+    // Field 4: PUBKEY_COMMIT owner_pubkey_hash
+    {
+        RungField f;
+        f.type = RungDataType::PUBKEY_COMMIT;
+        f.data.assign(owner_id.data(), owner_id.data() + 32);
+        spend_block.fields.push_back(f);
+    }
+    // Field 5: PREIMAGE spend_preimage
+    {
+        RungField f;
+        f.type = RungDataType::PREIMAGE;
+        f.data.assign(spend_preimage.begin(), spend_preimage.end());
+        spend_block.fields.push_back(f);
+    }
+
+    // Minimal RungEvalContext — only the fields QABI_SPEND actually touches.
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.block_height = TEST_BLOCK_HEIGHT;
+
+    // Dummy checker and execdata (QABI_SPEND doesn't use them).
+    PrecomputedTransactionData txdata;
+    MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
+    ScriptExecutionData execdata;
+
+    // Evaluate via the public dispatch so the full path is exercised.
+    EvalResult result = EvalBlock(spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::SATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
+{
+    if (!HasPQSupport()) {
+        BOOST_TEST_MESSAGE("skipping: PQ support (liboqs) not compiled in");
+        return;
+    }
+
+    // This test exercises check 2 (expiry window). We intentionally set the
+    // test block_height GREATER than committed_expiry; every other field is
+    // constructed identically to the happy path.
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t PRIME_DEPTH = 5;
+    constexpr int64_t SPEND_DEPTH = PRIME_DEPTH + 1;
+    constexpr uint32_t EXPIRY_HEIGHT = 100;
+    constexpr int32_t  TEST_BLOCK_HEIGHT = 500;  // past expiry
+
+    std::vector<std::array<uint8_t, 32>> chain(CHAIN_LENGTH + 1);
+    for (size_t i = 0; i < 32; ++i) chain[0][i] = static_cast<uint8_t>(i * 5 + 1);
+    for (size_t i = 1; i <= CHAIN_LENGTH; ++i) {
+        CSHA256().Write(chain[i - 1].data(), 32).Finalize(chain[i].data());
+    }
+    const auto& auth_tip = chain[CHAIN_LENGTH];
+    const auto& spend_preimage = chain[CHAIN_LENGTH - SPEND_DEPTH];
+
+    std::vector<uint8_t> coord_pk, coord_sk;
+    BOOST_REQUIRE(GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk));
+
+    uint256 owner_id;
+    for (size_t i = 0; i < 32; ++i) owner_id.data()[i] = static_cast<uint8_t>(0x10 + i);
+
+    QABIBlock block;
+    block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(block.batch_id.data(), 0x3C, 32);
+    block.coordinator_pubkey = coord_pk;
+    block.prime_expiry_height = EXPIRY_HEIGHT;
+    QABIEntry e;
+    e.participant_id = owner_id;
+    e.contribution = 50000;
+    e.destination_index = 0;
+    block.entries.push_back(e);
+    CTxOut oout;
+    oout.nValue = 49000;
+    oout.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0x42);
+    block.outputs.push_back(oout);
+
+    auto block_bytes = SerializeQABIBlock(block);
+    uint256 committed_root = ComputeQABIRoot(block_bytes);
+
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+    mtx.qabi_block = block_bytes;
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    mtx.vout.push_back(block.outputs[0]);
+    mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+
+    uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
+    std::vector<uint8_t> sig;
+    BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                         std::span<const uint8_t>(coord_sk),
+                         std::span<const uint8_t>(sighash.begin(), 32),
+                         sig));
+    if (sig.size() < QABI_AGGREGATED_SIG_MAX) sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+    mtx.aggregated_sig = sig;
+    CTransaction tx(mtx);
+
+    RungBlock spend_block;
+    spend_block.type = RungBlockType::QABI_SPEND;
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(auth_tip.begin(), auth_tip.end());
+        spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(committed_root.data(), committed_root.data() + 32);
+        spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(PRIME_DEPTH));
+        spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(EXPIRY_HEIGHT & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((EXPIRY_HEIGHT >> 24) & 0xFF));
+        spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::PUBKEY_COMMIT;
+        f.data.assign(owner_id.data(), owner_id.data() + 32);
+        spend_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::PREIMAGE;
+        f.data.assign(spend_preimage.begin(), spend_preimage.end());
+        spend_block.fields.push_back(f);
+    }
+
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.block_height = TEST_BLOCK_HEIGHT;
+
+    PrecomputedTransactionData txdata;
+    MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
+    ScriptExecutionData execdata;
+
+    EvalResult result = EvalBlock(spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    // Check 2 (expiry) fails because TEST_BLOCK_HEIGHT > EXPIRY_HEIGHT.
+    BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::UNSATISFIED));
+}
+
 BOOST_AUTO_TEST_SUITE_END()
