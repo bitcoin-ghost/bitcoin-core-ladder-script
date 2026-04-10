@@ -13433,4 +13433,226 @@ BOOST_AUTO_TEST_CASE(qabi_spend_check9_bad_falcon_sig)
                       static_cast<int>(EvalResult::UNSATISFIED));
 }
 
+// ============================================================================
+// RBD (Replace-By-Depth) mempool policy — real ladder witness tests
+// ============================================================================
+
+// Build a minimal priming tx that contains a QABI_PRIME block at the given
+// prime_depth, spending a specified prevout. The QABI_PRIME block's other
+// three witness fields (new_committed_root, new_committed_expiry,
+// prime_preimage) are filled with test values — they don't need to be valid
+// for the RBD policy check which only reads the prime_depth field.
+static CMutableTransaction MakePrimingTx(const COutPoint& prevout, int64_t prime_depth)
+{
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+
+    CTxIn in;
+    in.prevout = prevout;
+    in.nSequence = 0xFFFFFFFF;
+
+    // Build a LadderWitness with a QABI_PRIME block in Rung 0.
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock prime_block;
+    prime_block.type = RungBlockType::QABI_PRIME;
+    prime_block.inverted = false;
+
+    // Field 0: HASH256 new_committed_root (test-value)
+    {
+        RungField f;
+        f.type = RungDataType::HASH256;
+        f.data.assign(32, 0x44);
+        prime_block.fields.push_back(f);
+    }
+    // Field 1: NUMERIC prime_depth — this is what RBD reads.
+    {
+        RungField f;
+        f.type = RungDataType::NUMERIC;
+        // Serialise a small positive int in little-endian, up to 8 bytes.
+        uint64_t v = static_cast<uint64_t>(prime_depth);
+        do {
+            f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+            v >>= 8;
+        } while (v != 0);
+        prime_block.fields.push_back(f);
+    }
+    // Field 2: NUMERIC new_committed_expiry (test-value, 4-byte LE)
+    {
+        RungField f;
+        f.type = RungDataType::NUMERIC;
+        uint32_t e = 5000;
+        f.data.push_back(static_cast<uint8_t>(e & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 24) & 0xFF));
+        prime_block.fields.push_back(f);
+    }
+    // Field 3: PREIMAGE prime_preimage (test-value)
+    {
+        RungField f;
+        f.type = RungDataType::PREIMAGE;
+        f.data.assign(32, 0x77);
+        prime_block.fields.push_back(f);
+    }
+
+    rung.blocks.push_back(prime_block);
+    ladder.rungs.push_back(rung);
+
+    auto witness_bytes = SerializeLadderWitness(ladder);
+    in.scriptWitness.stack.push_back(witness_bytes);
+
+    mtx.vin.push_back(in);
+
+    // Minimal output so the tx is well-formed (TX_MLSC standard relay).
+    CTxOut out;
+    out.nValue = 10000;
+    out.scriptPubKey = CScript();
+    out.scriptPubKey.push_back(0xDF);
+    for (int i = 0; i < 32; ++i) out.scriptPubKey.push_back(0x01);
+    mtx.vout.push_back(out);
+
+    return mtx;
+}
+
+// Build a non-priming (regular SIG-only) tx for negative RBD tests.
+static CMutableTransaction MakeNonPrimingTx(const COutPoint& prevout)
+{
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+
+    CTxIn in;
+    in.prevout = prevout;
+    in.nSequence = 0xFFFFFFFF;
+
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock sig_block;
+    sig_block.type = RungBlockType::SIG;
+    sig_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    sig_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    rung.blocks.push_back(sig_block);
+    ladder.rungs.push_back(rung);
+
+    auto witness_bytes = SerializeLadderWitness(ladder);
+    in.scriptWitness.stack.push_back(witness_bytes);
+    mtx.vin.push_back(in);
+
+    CTxOut out;
+    out.nValue = 10000;
+    out.scriptPubKey = CScript();
+    out.scriptPubKey.push_back(0xDF);
+    for (int i = 0; i < 32; ++i) out.scriptPubKey.push_back(0x02);
+    mtx.vout.push_back(out);
+
+    return mtx;
+}
+
+static COutPoint MakeTestOutpoint(uint8_t seed, uint32_t n)
+{
+    uint256 h;
+    for (size_t i = 0; i < 32; ++i) h.data()[i] = static_cast<uint8_t>(seed + i);
+    return COutPoint(Txid::FromUint256(h), n);
+}
+
+BOOST_AUTO_TEST_CASE(rbd_detects_priming_tx)
+{
+    auto outpoint = MakeTestOutpoint(0xA0, 0);
+    auto priming = MakePrimingTx(outpoint, 5);
+    auto regular = MakeNonPrimingTx(outpoint);
+
+    BOOST_CHECK(IsQABIPrimingTx(CTransaction(priming)));
+    BOOST_CHECK(!IsQABIPrimingTx(CTransaction(regular)));
+}
+
+BOOST_AUTO_TEST_CASE(rbd_extracts_prime_depth)
+{
+    auto outpoint = MakeTestOutpoint(0xA1, 0);
+    auto priming = MakePrimingTx(outpoint, 42);
+
+    int64_t depth = 0;
+    BOOST_CHECK(ExtractQABIPrimeDepth(CTransaction(priming), 0, depth));
+    BOOST_CHECK_EQUAL(depth, 42);
+}
+
+BOOST_AUTO_TEST_CASE(rbd_extracts_from_non_priming_fails)
+{
+    auto outpoint = MakeTestOutpoint(0xA2, 0);
+    auto regular = MakeNonPrimingTx(outpoint);
+
+    int64_t depth = 0;
+    BOOST_CHECK(!ExtractQABIPrimeDepth(CTransaction(regular), 0, depth));
+}
+
+BOOST_AUTO_TEST_CASE(rbd_accepts_deeper_replacement)
+{
+    auto outpoint = MakeTestOutpoint(0xB0, 0);
+    auto old_tx = MakePrimingTx(outpoint, 5);
+    auto new_tx = MakePrimingTx(outpoint, 7);
+
+    std::string reason;
+    BOOST_CHECK(IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK(reason.empty());
+}
+
+BOOST_AUTO_TEST_CASE(rbd_rejects_same_depth)
+{
+    auto outpoint = MakeTestOutpoint(0xB1, 0);
+    auto old_tx = MakePrimingTx(outpoint, 5);
+    auto new_tx = MakePrimingTx(outpoint, 5);
+
+    std::string reason;
+    BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK_EQUAL(reason, "rbd-depth-not-deeper");
+}
+
+BOOST_AUTO_TEST_CASE(rbd_rejects_shallower_replacement)
+{
+    auto outpoint = MakeTestOutpoint(0xB2, 0);
+    auto old_tx = MakePrimingTx(outpoint, 10);
+    auto new_tx = MakePrimingTx(outpoint, 3);
+
+    std::string reason;
+    BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK_EQUAL(reason, "rbd-depth-not-deeper");
+}
+
+BOOST_AUTO_TEST_CASE(rbd_rejects_different_prevouts)
+{
+    auto outpoint_a = MakeTestOutpoint(0xB3, 0);
+    auto outpoint_b = MakeTestOutpoint(0xB4, 0);
+    auto old_tx = MakePrimingTx(outpoint_a, 5);
+    auto new_tx = MakePrimingTx(outpoint_b, 7);
+
+    std::string reason;
+    BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK_EQUAL(reason, "rbd-no-shared-primed-inputs");
+}
+
+BOOST_AUTO_TEST_CASE(rbd_rejects_non_priming_old_tx)
+{
+    auto outpoint = MakeTestOutpoint(0xB5, 0);
+    auto old_tx = MakeNonPrimingTx(outpoint);
+    auto new_tx = MakePrimingTx(outpoint, 7);
+
+    std::string reason;
+    BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK_EQUAL(reason, "rbd-old-not-priming");
+}
+
+BOOST_AUTO_TEST_CASE(rbd_rejects_non_priming_new_tx)
+{
+    auto outpoint = MakeTestOutpoint(0xB6, 0);
+    auto old_tx = MakePrimingTx(outpoint, 5);
+    auto new_tx = MakeNonPrimingTx(outpoint);
+
+    std::string reason;
+    BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
+    BOOST_CHECK_EQUAL(reason, "rbd-new-not-priming");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
