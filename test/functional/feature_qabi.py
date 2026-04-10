@@ -100,6 +100,8 @@ class QabiTest(BitcoinTestFramework):
         self.test_sighash_determinism()
         self.test_signqabo_rejects_non_qabio_tx()
         self.test_signqabo_full_flow()
+        self.test_signrungtx_qabi_prime_witness()
+        self.test_signrungtx_qabi_prime_with_auth_seed_derivation()
 
         self.log.info("All QABI functional tests passed!")
 
@@ -436,6 +438,192 @@ class QabiTest(BitcoinTestFramework):
         buf += struct.pack('<I', 0)
 
         return bytes(buf).hex()
+
+    # ------------------------------------------------------------------
+    # signrungtx integration: QABI_PRIME witness construction
+    # ------------------------------------------------------------------
+
+    def _build_priming_tx_skeleton(self) -> str:
+        """Build a minimal TX_MLSC v4 priming tx skeleton: one input (the
+        unprimed UTXO being spent), one output (the primed UTXO). The
+        conditions_root is non-zero so the serialiser takes the MLSC path."""
+        import struct
+
+        def compact_size(n: int) -> bytes:
+            if n < 0xfd:
+                return bytes([n])
+            elif n < 0x10000:
+                return b'\xfd' + struct.pack('<H', n)
+            elif n < 0x100000000:
+                return b'\xfe' + struct.pack('<I', n)
+            else:
+                return b'\xff' + struct.pack('<Q', n)
+
+        buf = bytearray()
+        buf += struct.pack('<I', 4)              # version = 4
+        buf += b'\x00'                            # dummy
+        buf += b'\x02'                            # flags = 0x02 (TX_MLSC)
+
+        # vin: 1 input (placeholder prevout)
+        buf += compact_size(1)
+        buf += b'\x11' * 32                      # prevout.hash
+        buf += struct.pack('<I', 0)              # prevout.n
+        buf += compact_size(0)                    # scriptSig
+        buf += struct.pack('<I', 0xFFFFFFFF)     # nSequence
+
+        # conditions_root (non-zero — forces MLSC serialiser path)
+        buf += b'\x22' * 32
+
+        # n_outputs
+        buf += compact_size(1)
+        buf += struct.pack('<q', 99000)           # 99k sats (1k fee)
+
+        # per-input witness stacks (1 input, empty — signrungtx will populate)
+        buf += compact_size(0)
+
+        # creation_proof empty
+        buf += compact_size(0)
+        # qabi_block empty
+        buf += compact_size(0)
+        # aggregated_sig empty
+        buf += compact_size(0)
+        # nLockTime
+        buf += struct.pack('<I', 0)
+
+        return bytes(buf).hex()
+
+    def test_signrungtx_qabi_prime_witness(self):
+        """Verify signrungtx can construct a QABI_PRIME witness when given
+        a pre-derived prime_preimage (the direct form without auth_seed
+        derivation)."""
+        self.log.info("Testing signrungtx with QABI_PRIME block spec...")
+
+        tx_hex = self._build_priming_tx_skeleton()
+
+        # Owner identity: 32-byte commitment (would be SHA256(FALCON pk) in
+        # a real UTXO). For this test any stable value works.
+        owner_id = "33" * 32
+        new_root = "44" * 32
+        prime_preimage = "55" * 32
+
+        # Conditions spec for the input UTXO: one rung containing a
+        # QABI_PRIME block with no condition fields.
+        conditions = [
+            {"blocks": [{"type": "QABI_PRIME", "fields": []}]},
+        ]
+
+        # The input must look MLSC. We provide a fake scriptPubKey starting
+        # with 0xDF. signrungtx will use this + the conditions we provide
+        # rather than trying to look up the real UTXO.
+        fake_spk = "df" + "22" * 32  # matches conditions_root above
+
+        signers = [{
+            "input": 0,
+            "rung": 0,
+            "blocks": [{
+                "type": "QABI_PRIME",
+                "new_committed_root": new_root,
+                "prime_depth": 7,
+                "new_committed_expiry": 10000,
+                "prime_preimage": prime_preimage,
+            }],
+            "conditions": conditions,
+        }]
+        spent_outputs = [{
+            "amount": "0.001",    # 100k sats
+            "scriptPubKey": fake_spk,
+        }]
+
+        result = self.node.signrungtx(tx_hex, signers, spent_outputs)
+        assert "hex" in result
+        assert "complete" in result
+        self.log.info(f"  signrungtx returned tx ({len(result['hex']) // 2} bytes), "
+                      f"complete={result['complete']}")
+
+        # Decode the witness via parseladder on the first input's stack[0].
+        # Extract the LadderWitness bytes from the signed tx. Easiest way:
+        # use decoderawtransaction and read the witness stack.
+        decoded = self.node.decoderawtransaction(result["hex"])
+        assert_equal(len(decoded["vin"]), 1)
+        witness_stack = decoded["vin"][0]["txinwitness"]
+        assert_greater_than(len(witness_stack), 0)
+
+        ladder_bytes_hex = witness_stack[0]
+        ladder = self.node.decoderung(ladder_bytes_hex)
+        assert_equal(ladder["num_rungs"], 1)
+        assert_equal(len(ladder["rungs"][0]["blocks"]), 1)
+
+        block = ladder["rungs"][0]["blocks"][0]
+        assert_equal(block["type"], "QABI_PRIME")
+        assert_equal(len(block["fields"]), 4)
+
+        # Verify field types and ordering match the QABI_PRIME_WITNESS layout.
+        assert_equal(block["fields"][0]["type"], "HASH256")
+        assert_equal(block["fields"][1]["type"], "NUMERIC")
+        assert_equal(block["fields"][2]["type"], "NUMERIC")
+        assert_equal(block["fields"][3]["type"], "PREIMAGE")
+
+        # new_committed_root field matches what we passed in.
+        assert_equal(block["fields"][0]["hex"], new_root)
+        # prime_preimage matches what we passed in.
+        assert_equal(block["fields"][3]["hex"], prime_preimage)
+        self.log.info("  QABI_PRIME witness fields correct")
+
+    def test_signrungtx_qabi_prime_with_auth_seed_derivation(self):
+        """Verify signrungtx can derive the prime_preimage internally when
+        given auth_seed + chain_length instead of a pre-computed preimage."""
+        self.log.info("Testing signrungtx QABI_PRIME with auth_seed derivation...")
+
+        tx_hex = self._build_priming_tx_skeleton()
+
+        auth_seed = "88" * 32
+        chain_length = 100
+        prime_depth = 15
+
+        # First, derive the expected preimage via qabi_authchain.
+        # qabi_authchain returns preimage in uint256 display order (reversed).
+        # decoderung reports raw field bytes in in-memory order. Reverse the
+        # expected hex so we compare like for like.
+        expected = self.node.qabi_authchain(auth_seed, chain_length, prime_depth)
+        expected_preimage_hex = rpc_hex_to_bytes(expected["preimage"]).hex()
+
+        new_root = "66" * 32
+        fake_spk = "df" + "22" * 32
+
+        conditions = [
+            {"blocks": [{"type": "QABI_PRIME", "fields": []}]},
+        ]
+
+        signers = [{
+            "input": 0,
+            "rung": 0,
+            "blocks": [{
+                "type": "QABI_PRIME",
+                "new_committed_root": new_root,
+                "prime_depth": prime_depth,
+                "new_committed_expiry": 2000,
+                "auth_seed": auth_seed,
+                "chain_length": chain_length,
+            }],
+            "conditions": conditions,
+        }]
+        spent_outputs = [{
+            "amount": "0.001",
+            "scriptPubKey": fake_spk,
+        }]
+
+        result = self.node.signrungtx(tx_hex, signers, spent_outputs)
+        decoded = self.node.decoderawtransaction(result["hex"])
+        witness_stack = decoded["vin"][0]["txinwitness"]
+        ladder = self.node.decoderung(witness_stack[0])
+
+        block = ladder["rungs"][0]["blocks"][0]
+        assert_equal(block["type"], "QABI_PRIME")
+
+        # The derived preimage in the witness must match what qabi_authchain
+        # returns — same hash chain, same seed, same depth.
+        assert_equal(block["fields"][3]["hex"], expected_preimage_hex)
+        self.log.info("  Derived preimage matches qabi_authchain output")
 
 
 if __name__ == "__main__":

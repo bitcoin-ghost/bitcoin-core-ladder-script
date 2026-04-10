@@ -248,6 +248,9 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
     if (name == "P2TR_SCRIPT_LEGACY") { out = RungBlockType::P2TR_SCRIPT_LEGACY; return true; }
     // Utility family
     if (name == "DATA_RETURN")        { out = RungBlockType::DATA_RETURN; return true; }
+    // QABI family
+    if (name == "QABI_PRIME")         { out = RungBlockType::QABI_PRIME; return true; }
+    if (name == "QABI_SPEND")         { out = RungBlockType::QABI_SPEND; return true; }
     // Backward compat aliases
     if (name == "HASHLOCK") {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
