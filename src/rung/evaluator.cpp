@@ -2967,8 +2967,12 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
     if (qabi_spend == nullptr) return EvalResult::UNSATISFIED;
 
     // -- Read current state from QABI_SPEND -----------------------------
-
-    if (qabi_spend->fields.size() != 6) return EvalResult::ERROR;
+    //
+    // input_conditions carries CONDITIONS-context blocks. QABI_SPEND in
+    // conditions context has 5 fields (auth_tip, committed_root,
+    // committed_depth, committed_expiry, owner_id) — the witness-only
+    // PREIMAGE spend_preimage is not in the committed tree.
+    if (qabi_spend->fields.size() != 5) return EvalResult::ERROR;
     auto spend_hashes = FindAllFields(*qabi_spend, RungDataType::HASH256);
     auto spend_nums   = FindAllFields(*qabi_spend, RungDataType::NUMERIC);
     if (spend_hashes.size() != 2 || spend_nums.size() != 2) return EvalResult::ERROR;

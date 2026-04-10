@@ -13794,6 +13794,316 @@ BOOST_AUTO_TEST_CASE(build_qabi_spend_block_shape)
     BOOST_CHECK(MatchesImplicitLayout(b, layout));
 }
 
+// ============================================================================
+// Prime-then-spend end-to-end: exercise QABI_PRIME covenant with real
+// conditions tree construction, then reuse the primed state in QABI_SPEND.
+// ============================================================================
+
+// Test helper: compute the TX_MLSC conditions_root from a RungConditions using
+// the same BuildCPRung-style path that EvalQABIPrimeBlock uses internally.
+// Must produce the identical root the evaluator computes for the output UTXO.
+static uint256 TestComputeConditionsRoot(
+    const RungConditions& conditions,
+    const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys)
+{
+    std::vector<CreationProofRung> cp_rungs;
+    for (size_t r = 0; r < conditions.rungs.size(); ++r) {
+        CreationProofRung cp_rung;
+        for (const auto& block : conditions.rungs[r].blocks) {
+            cp_rung.blocks.push_back({
+                static_cast<uint16_t>(block.type),
+                static_cast<uint8_t>(block.inverted ? 1 : 0)
+            });
+        }
+        cp_rung.coil = conditions.coil;
+        std::vector<std::vector<uint8_t>> rpks;
+        if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
+        cp_rung.value_commitment = ComputeValueCommitment(conditions.rungs[r], rpks);
+        cp_rungs.push_back(std::move(cp_rung));
+    }
+    return ComputeTxMLSCRoot(cp_rungs);
+}
+
+// Build a CONDITIONS-context QABI_SPEND RungBlock (5 fields, no spend_preimage).
+static RungBlock MakeConditionsQABISpendBlock(const uint256& auth_tip,
+                                               const uint256& committed_root,
+                                               int64_t committed_depth,
+                                               uint32_t committed_expiry,
+                                               const uint256& owner_id)
+{
+    RungBlock b;
+    b.type = RungBlockType::QABI_SPEND;
+    b.inverted = false;
+    // [0] HASH256 auth_tip
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(auth_tip.data(), auth_tip.data() + 32);
+        b.fields.push_back(f);
+    }
+    // [1] HASH256 committed_root
+    {
+        RungField f; f.type = RungDataType::HASH256;
+        f.data.assign(committed_root.data(), committed_root.data() + 32);
+        b.fields.push_back(f);
+    }
+    // [2] NUMERIC committed_depth (canonical 4-byte LE to match deserializer output)
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        uint32_t v = static_cast<uint32_t>(committed_depth);
+        f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+        b.fields.push_back(f);
+    }
+    // [3] NUMERIC committed_expiry
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        f.data.push_back(static_cast<uint8_t>(committed_expiry & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((committed_expiry >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((committed_expiry >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((committed_expiry >> 24) & 0xFF));
+        b.fields.push_back(f);
+    }
+    // [4] PUBKEY_COMMIT owner_id
+    {
+        RungField f; f.type = RungDataType::PUBKEY_COMMIT;
+        f.data.assign(owner_id.data(), owner_id.data() + 32);
+        b.fields.push_back(f);
+    }
+    return b;
+}
+
+// Build a QABI_PRIME witness RungBlock (4 fields).
+static RungBlock MakeWitnessQABIPrimeBlock(const uint256& new_root,
+                                            int64_t prime_depth,
+                                            uint32_t new_expiry,
+                                            std::span<const uint8_t> prime_preimage)
+{
+    return BuildQABIPrimeBlock(new_root, prime_depth, new_expiry, prime_preimage);
+}
+
+BOOST_AUTO_TEST_CASE(qabi_prime_end_to_end_happy_path)
+{
+    // Build the auth chain.
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t INITIAL_DEPTH = 0;
+    constexpr int64_t PRIME_DEPTH = 10;
+    constexpr uint32_t NEW_EXPIRY = 2000;
+
+    std::vector<uint8_t> seed(32);
+    for (size_t i = 0; i < 32; ++i) seed[i] = static_cast<uint8_t>(i * 7 + 11);
+
+    uint256 auth_tip = ComputeAuthChainTip(std::span<const uint8_t>(seed), CHAIN_LENGTH);
+    uint256 prime_preimage_u256;
+    BOOST_REQUIRE(ComputeAuthChainPreimageAt(
+        std::span<const uint8_t>(seed), CHAIN_LENGTH, PRIME_DEPTH, prime_preimage_u256));
+
+    // Owner identity — deterministic 32-byte commitment.
+    uint256 owner_id;
+    for (size_t i = 0; i < 32; ++i) owner_id.data()[i] = static_cast<uint8_t>(0xAA + (i & 0x07));
+
+    // Compose the new committed_root we want to prime to. This can be any
+    // 32-byte value — it represents SHA256 of some future QABIBlock. For this
+    // test we use a fixed hash; the covenant doesn't care about its semantic
+    // meaning, only that it matches between the witness field and the output
+    // UTXO's committed state.
+    uint256 new_committed_root;
+    for (size_t i = 0; i < 32; ++i) new_committed_root.data()[i] = static_cast<uint8_t>(0x11 * i);
+
+    // Build the input UTXO's conditions tree.
+    //   Rung 0: empty (placeholder — we don't exercise it)
+    //   Rung 1: QABI_PRIME (conditions context: 0 fields)
+    //   Rung 2: QABI_SPEND (conditions context: 5 fields with initial state)
+    uint256 initial_committed_root;  // zero — UTXO is unprimed
+    initial_committed_root.SetNull();
+
+    RungConditions input_conditions;
+    // Default coil (unused by the test but required by the conditions tree).
+    input_conditions.coil.coil_type = RungCoilType::UNLOCK;
+    input_conditions.coil.attestation = RungAttestationMode::INLINE;
+    input_conditions.coil.scheme = RungScheme::FALCON512;
+    input_conditions.coil.output_index = 0;
+
+    // Rung 0 — placeholder SIG block (not fired in this test).
+    {
+        Rung rung0;
+        RungBlock sig_block;
+        sig_block.type = RungBlockType::SIG;
+        sig_block.fields.push_back({RungDataType::SCHEME,
+                                      std::vector<uint8_t>{static_cast<uint8_t>(RungScheme::FALCON512)}});
+        rung0.blocks.push_back(sig_block);
+        input_conditions.rungs.push_back(rung0);
+    }
+    // Rung 1 — QABI_PRIME (no fields committed).
+    {
+        Rung rung1;
+        RungBlock prime_block;
+        prime_block.type = RungBlockType::QABI_PRIME;
+        rung1.blocks.push_back(prime_block);
+        input_conditions.rungs.push_back(rung1);
+    }
+    // Rung 2 — QABI_SPEND with initial (unprimed) state.
+    {
+        Rung rung2;
+        rung2.blocks.push_back(MakeConditionsQABISpendBlock(
+            auth_tip, initial_committed_root, INITIAL_DEPTH, 0, owner_id));
+        input_conditions.rungs.push_back(rung2);
+    }
+
+    // Rung pubkey lists (empty for each rung — SIG is key-consuming but
+    // pubkeys would be folded via merkle_pub_key; we use an empty list so the
+    // ComputeValueCommitment is well-defined).
+    std::vector<std::vector<std::vector<uint8_t>>> rung_pubkeys;
+    rung_pubkeys.resize(input_conditions.rungs.size());
+    // Rung 0 needs one pubkey for SIG
+    std::vector<uint8_t> dummy_pk(33, 0x02);
+    rung_pubkeys[0].push_back(dummy_pk);
+
+    // Build the OUTPUT UTXO's conditions tree: identical to input except the
+    // QABI_SPEND block in Rung 2 has mutated committed_root/depth/expiry.
+    RungConditions output_conditions = input_conditions;
+    output_conditions.rungs[2].blocks[0] = MakeConditionsQABISpendBlock(
+        auth_tip, new_committed_root, PRIME_DEPTH, NEW_EXPIRY, owner_id);
+
+    uint256 output_root = TestComputeConditionsRoot(output_conditions, rung_pubkeys);
+
+    // Build the priming tx: one input (prevout of the unprimed UTXO), one
+    // output (the primed UTXO with the mutated conditions_root).
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();  // not used in this test path
+
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+
+    CTxOut out;
+    out.nValue = 100000;
+    out.scriptPubKey = CreateMLSCScript(output_root);
+    mtx.vout.push_back(out);
+
+    // Build the QABI_PRIME witness RungBlock (4 witness-only fields).
+    std::vector<uint8_t> prime_preimage_bytes(
+        prime_preimage_u256.data(), prime_preimage_u256.data() + 32);
+    RungBlock prime_block = MakeWitnessQABIPrimeBlock(
+        new_committed_root, PRIME_DEPTH, NEW_EXPIRY,
+        std::span<const uint8_t>(prime_preimage_bytes));
+
+    // Set up RungEvalContext.
+    CTransaction tx(mtx);
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.block_height = 500;
+    ctx.spending_output = &tx.vout[0];
+    ctx.input_conditions = &input_conditions;
+    ctx.rung_pubkeys = &rung_pubkeys;
+
+    PrecomputedTransactionData txdata;
+    CMutableTransaction mtx_copy = mtx;
+    MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+    ScriptExecutionData execdata;
+
+    EvalResult result = EvalBlock(prime_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::SATISFIED));
+}
+
+BOOST_AUTO_TEST_CASE(qabi_prime_rejects_shallow_depth)
+{
+    // Same setup as the happy path but with prime_depth == committed_depth
+    // (must be strictly greater — monotonic progression check 3).
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t COMMITTED_DEPTH = 10;  // already at 10
+    constexpr int64_t PRIME_DEPTH = 10;       // not deeper — should reject
+    constexpr uint32_t NEW_EXPIRY = 2000;
+
+    std::vector<uint8_t> seed(32);
+    for (size_t i = 0; i < 32; ++i) seed[i] = static_cast<uint8_t>(i * 13 + 5);
+    uint256 auth_tip = ComputeAuthChainTip(std::span<const uint8_t>(seed), CHAIN_LENGTH);
+    uint256 prime_preimage_u256;
+    BOOST_REQUIRE(ComputeAuthChainPreimageAt(
+        std::span<const uint8_t>(seed), CHAIN_LENGTH, PRIME_DEPTH, prime_preimage_u256));
+
+    uint256 owner_id;
+    for (size_t i = 0; i < 32; ++i) owner_id.data()[i] = 0x77;
+
+    uint256 old_committed_root;
+    for (size_t i = 0; i < 32; ++i) old_committed_root.data()[i] = 0x22;
+    uint256 new_committed_root;
+    for (size_t i = 0; i < 32; ++i) new_committed_root.data()[i] = 0x33;
+
+    RungConditions input_conditions;
+    input_conditions.coil.coil_type = RungCoilType::UNLOCK;
+    input_conditions.coil.attestation = RungAttestationMode::INLINE;
+    input_conditions.coil.scheme = RungScheme::FALCON512;
+
+    Rung rung0;
+    RungBlock sig_block;
+    sig_block.type = RungBlockType::SIG;
+    sig_block.fields.push_back({RungDataType::SCHEME,
+                                  std::vector<uint8_t>{static_cast<uint8_t>(RungScheme::FALCON512)}});
+    rung0.blocks.push_back(sig_block);
+    input_conditions.rungs.push_back(rung0);
+
+    Rung rung1;
+    RungBlock prime_block_cond;
+    prime_block_cond.type = RungBlockType::QABI_PRIME;
+    rung1.blocks.push_back(prime_block_cond);
+    input_conditions.rungs.push_back(rung1);
+
+    Rung rung2;
+    rung2.blocks.push_back(MakeConditionsQABISpendBlock(
+        auth_tip, old_committed_root, COMMITTED_DEPTH, 1000, owner_id));
+    input_conditions.rungs.push_back(rung2);
+
+    std::vector<std::vector<std::vector<uint8_t>>> rung_pubkeys;
+    rung_pubkeys.resize(3);
+    std::vector<uint8_t> dummy_pk(33, 0x02);
+    rung_pubkeys[0].push_back(dummy_pk);
+
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+    CTxIn tin;
+    tin.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    tin.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(tin);
+
+    CTxOut out;
+    out.nValue = 50000;
+    uint256 dummy_output_root;
+    out.scriptPubKey = CreateMLSCScript(dummy_output_root);  // doesn't matter
+    mtx.vout.push_back(out);
+
+    std::vector<uint8_t> prime_preimage_bytes(
+        prime_preimage_u256.data(), prime_preimage_u256.data() + 32);
+    RungBlock prime_block = MakeWitnessQABIPrimeBlock(
+        new_committed_root, PRIME_DEPTH, NEW_EXPIRY,
+        std::span<const uint8_t>(prime_preimage_bytes));
+
+    CTransaction tx(mtx);
+    RungEvalContext ctx;
+    ctx.tx = &tx;
+    ctx.input_index = 0;
+    ctx.block_height = 500;
+    ctx.spending_output = &tx.vout[0];
+    ctx.input_conditions = &input_conditions;
+    ctx.rung_pubkeys = &rung_pubkeys;
+
+    PrecomputedTransactionData txdata;
+    CMutableTransaction mtx_copy = mtx;
+    MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+    ScriptExecutionData execdata;
+
+    EvalResult result = EvalBlock(prime_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    // Check 3 (monotonic depth) rejects: prime_depth must be > committed_depth.
+    BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::UNSATISFIED));
+}
+
 BOOST_AUTO_TEST_CASE(serialize_single_block_witness_roundtrip)
 {
     uint256 root;
