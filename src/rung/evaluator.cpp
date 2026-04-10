@@ -2882,6 +2882,36 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
 }
 
 // ============================================================================
+// QABI family — stubs (Phase 3 skeleton; real logic arrives in Phase 4 / 5)
+// ============================================================================
+
+/** QABI_PRIME stub — priming state transition.
+ *  Phase 3: returns UNSATISFIED so primed UTXOs cannot be created until the
+ *  real evaluator lands in Phase 5. This keeps the enum wired end-to-end
+ *  without letting half-implemented logic accept anything. */
+static EvalResult EvalQABIPrimeBlock(const RungBlock& /*block*/,
+                                      const BaseSignatureChecker& /*checker*/,
+                                      SigVersion /*sigversion*/,
+                                      ScriptExecutionData& /*execdata*/,
+                                      const RungEvalContext& /*ctx*/)
+{
+    return EvalResult::UNSATISFIED;
+}
+
+/** QABI_SPEND stub — batch spend authorisation.
+ *  Phase 3: returns UNSATISFIED so QABIO txs cannot execute until the real
+ *  evaluator lands in Phase 4 (root match, identity check, full output-set
+ *  match, FALCON QABO verification). */
+static EvalResult EvalQABISpendBlock(const RungBlock& /*block*/,
+                                      const BaseSignatureChecker& /*checker*/,
+                                      SigVersion /*sigversion*/,
+                                      ScriptExecutionData& /*execdata*/,
+                                      const RungEvalContext& /*ctx*/)
+{
+    return EvalResult::UNSATISFIED;
+}
+
+// ============================================================================
 // Block dispatch
 // ============================================================================
 
@@ -3097,6 +3127,13 @@ EvalResult EvalBlock(const RungBlock& block,
         // DATA_RETURN is unspendable — if we reach evaluation, the output should
         // never have been spent. Return ERROR to make the transaction invalid.
         raw = EvalResult::ERROR;
+        break;
+    // QABI family (Phase 3 stubs; real logic in Phases 4–5)
+    case RungBlockType::QABI_PRIME:
+        raw = EvalQABIPrimeBlock(block, checker, sigversion, execdata, ctx);
+        break;
+    case RungBlockType::QABI_SPEND:
+        raw = EvalQABISpendBlock(block, checker, sigversion, execdata, ctx);
         break;
     default:
         raw = EvalResult::UNKNOWN_BLOCK_TYPE;
