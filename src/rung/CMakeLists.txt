@@ -17,6 +17,7 @@ add_library(bitcoin_rung STATIC EXCLUDE_FROM_ALL
   rpc.cpp
   pq_verify.cpp
   descriptor.cpp
+  qabi.cpp
 )
 
 target_include_directories(bitcoin_rung
