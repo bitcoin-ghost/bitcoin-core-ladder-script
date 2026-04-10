@@ -13682,6 +13682,177 @@ BOOST_AUTO_TEST_CASE(rbd_rejects_non_priming_new_tx)
 }
 
 // ============================================================================
+// RBD mempool integration contract — exercise the multi-conflict decision
+// path that MemPoolAccept::ReplacementChecks uses when deciding whether to
+// apply RBD or fall through to fee-based RBF.
+// ============================================================================
+
+// Build a priming tx with multiple inputs, each carrying a QABI_PRIME witness
+// at the same prime_depth. Used to test scenarios where a new tx conflicts
+// with multiple mempool entries.
+static CMutableTransaction MakeMultiInputPrimingTx(
+    const std::vector<COutPoint>& prevouts, int64_t prime_depth)
+{
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+
+    // Build the LadderWitness once and reuse across inputs.
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock prime_block;
+    prime_block.type = RungBlockType::QABI_PRIME;
+    {
+        RungField f; f.type = RungDataType::HASH256; f.data.assign(32, 0x55);
+        prime_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        uint64_t v = static_cast<uint64_t>(prime_depth);
+        do { f.data.push_back(static_cast<uint8_t>(v & 0xFF)); v >>= 8; } while (v != 0);
+        prime_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::NUMERIC;
+        uint32_t e = 3000;
+        f.data.push_back(static_cast<uint8_t>(e & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 8) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 16) & 0xFF));
+        f.data.push_back(static_cast<uint8_t>((e >> 24) & 0xFF));
+        prime_block.fields.push_back(f);
+    }
+    {
+        RungField f; f.type = RungDataType::PREIMAGE; f.data.assign(32, 0x66);
+        prime_block.fields.push_back(f);
+    }
+    rung.blocks.push_back(prime_block);
+    ladder.rungs.push_back(rung);
+    auto witness_bytes = SerializeLadderWitness(ladder);
+
+    for (const auto& prevout : prevouts) {
+        CTxIn in;
+        in.prevout = prevout;
+        in.nSequence = 0xFFFFFFFF;
+        in.scriptWitness.stack.push_back(witness_bytes);
+        mtx.vin.push_back(in);
+    }
+
+    CTxOut out;
+    out.nValue = 10000;
+    out.scriptPubKey = CScript();
+    out.scriptPubKey.push_back(0xDF);
+    for (int i = 0; i < 32; ++i) out.scriptPubKey.push_back(0x10);
+    mtx.vout.push_back(out);
+
+    return mtx;
+}
+
+// Simulate the decision that MemPoolAccept::ReplacementChecks makes given
+// a new tx and a set of conflicting txs. Returns:
+//   "rbd-accept"        — all conflicts are priming and RBD accepts
+//   "rbd-reject:<rsn>"  — all conflicts are priming but RBD rejects (reason)
+//   "fallback-rbf"      — RBD does not apply, fee-based RBF must decide
+static std::string SimulateMempoolRBDDecision(const CTransaction& new_tx,
+                                               const std::vector<CTransactionRef>& conflicts)
+{
+    if (conflicts.empty()) return "fallback-rbf";
+    if (!IsQABIPrimingTx(new_tx)) return "fallback-rbf";
+    for (const auto& c : conflicts) {
+        if (!IsQABIPrimingTx(*c)) return "fallback-rbf";
+    }
+    for (const auto& c : conflicts) {
+        std::string reason;
+        if (!IsValidRBDReplacement(new_tx, *c, reason)) {
+            return "rbd-reject:" + reason;
+        }
+    }
+    return "rbd-accept";
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_single_conflict_accept)
+{
+    auto op = MakeTestOutpoint(0xD0, 0);
+    auto old_tx = MakePrimingTx(op, 5);
+    auto new_tx = MakePrimingTx(op, 9);
+
+    std::vector<CTransactionRef> conflicts{MakeTransactionRef(old_tx)};
+    BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "rbd-accept");
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_multi_conflict_all_priming_accept)
+{
+    // Two conflicts, both priming, both at depth 5. New tx at depth 10 across
+    // both prevouts → RBD accepts.
+    auto op_a = MakeTestOutpoint(0xD1, 0);
+    auto op_b = MakeTestOutpoint(0xD2, 0);
+
+    auto old_a = MakePrimingTx(op_a, 5);
+    auto old_b = MakePrimingTx(op_b, 5);
+    auto new_tx = MakeMultiInputPrimingTx({op_a, op_b}, 10);
+
+    std::vector<CTransactionRef> conflicts{
+        MakeTransactionRef(old_a), MakeTransactionRef(old_b)};
+    BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "rbd-accept");
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_multi_conflict_mixed_falls_through)
+{
+    // One priming conflict, one non-priming conflict. Mixed case must fall
+    // through to standard RBF — RBD does not apply.
+    auto op_a = MakeTestOutpoint(0xD3, 0);
+    auto op_b = MakeTestOutpoint(0xD4, 0);
+
+    auto priming_conflict = MakePrimingTx(op_a, 5);
+    auto regular_conflict = MakeNonPrimingTx(op_b);
+    auto new_tx = MakeMultiInputPrimingTx({op_a, op_b}, 10);
+
+    std::vector<CTransactionRef> conflicts{
+        MakeTransactionRef(priming_conflict), MakeTransactionRef(regular_conflict)};
+    BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "fallback-rbf");
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_multi_conflict_partial_reject)
+{
+    // Two priming conflicts. One is shallower than new_tx (would accept),
+    // the other is at the same depth (would reject). RBD must reject the
+    // whole batch — cannot accept a partial replacement.
+    auto op_a = MakeTestOutpoint(0xD5, 0);
+    auto op_b = MakeTestOutpoint(0xD6, 0);
+
+    auto old_a = MakePrimingTx(op_a, 5);   // shallower
+    auto old_b = MakePrimingTx(op_b, 10);  // same depth as new_tx
+    auto new_tx = MakeMultiInputPrimingTx({op_a, op_b}, 10);
+
+    std::vector<CTransactionRef> conflicts{
+        MakeTransactionRef(old_a), MakeTransactionRef(old_b)};
+    auto result = SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts);
+    BOOST_CHECK_EQUAL(result, "rbd-reject:rbd-depth-not-deeper");
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_new_tx_non_priming_falls_through)
+{
+    // New tx is non-priming but a conflict is priming. Must fall through
+    // to RBF — RBD cannot be applied.
+    auto op = MakeTestOutpoint(0xD7, 0);
+    auto old_tx = MakePrimingTx(op, 5);
+    auto new_tx = MakeNonPrimingTx(op);
+
+    std::vector<CTransactionRef> conflicts{MakeTransactionRef(old_tx)};
+    BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "fallback-rbf");
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rbd_contract_empty_conflicts_falls_through)
+{
+    // No conflicts at all — not a replacement scenario. Must fall through.
+    auto op = MakeTestOutpoint(0xD8, 0);
+    auto new_tx = MakePrimingTx(op, 5);
+
+    std::vector<CTransactionRef> conflicts;
+    BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "fallback-rbf");
+}
+
+// ============================================================================
 // Wallet / builder helpers
 // ============================================================================
 
