@@ -1688,6 +1688,102 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         }
         break;
     }
+    case RungBlockType::QABI_PRIME: {
+        // QABI priming witness: 4 fields in the exact order the evaluator
+        // expects (matching QABI_PRIME_WITNESS implicit layout):
+        //   [0] HASH256  new_committed_root
+        //   [1] NUMERIC  prime_depth
+        //   [2] NUMERIC  new_committed_expiry
+        //   [3] PREIMAGE prime_preimage
+        //
+        // The caller provides:
+        //   new_committed_root   (hex, 32 bytes)
+        //   prime_depth          (int)
+        //   new_committed_expiry (int)
+        //   And either:
+        //     prime_preimage     (hex, 32 bytes — pre-derived), or
+        //     auth_seed + chain_length (hex + int — for in-RPC derivation)
+        //
+        // Convenience: supplying auth_seed + chain_length lets the wallet
+        // pass its secret and have the preimage derived server-side.
+        if (!block_spec.exists("new_committed_root")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires new_committed_root hex");
+        }
+        auto new_root = ParseHex(block_spec["new_committed_root"].get_str());
+        if (new_root.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "new_committed_root must be exactly 32 bytes");
+        }
+        if (!block_spec.exists("prime_depth")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_PRIME requires prime_depth");
+        }
+        int64_t prime_depth = block_spec["prime_depth"].getInt<int64_t>();
+        if (prime_depth <= 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "prime_depth must be > 0");
+        }
+        if (!block_spec.exists("new_committed_expiry")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires new_committed_expiry");
+        }
+        int64_t new_expiry = block_spec["new_committed_expiry"].getInt<int64_t>();
+        if (new_expiry < 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "new_committed_expiry must be >= 0");
+        }
+
+        // Derive or accept the preimage.
+        std::vector<uint8_t> preimage_bytes;
+        if (block_spec.exists("prime_preimage")) {
+            preimage_bytes = ParseHex(block_spec["prime_preimage"].get_str());
+            if (preimage_bytes.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "prime_preimage must be exactly 32 bytes");
+            }
+        } else if (block_spec.exists("auth_seed") && block_spec.exists("chain_length")) {
+            auto seed = ParseHex(block_spec["auth_seed"].get_str());
+            if (seed.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "auth_seed must be exactly 32 bytes");
+            }
+            uint32_t chain_length = block_spec["chain_length"].getInt<uint32_t>();
+            uint256 preimage_u256;
+            if (!rung::ComputeAuthChainPreimageAt(
+                    std::span<const uint8_t>(seed), chain_length,
+                    static_cast<uint32_t>(prime_depth), preimage_u256)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "failed to derive preimage (bad depth or chain length)");
+            }
+            preimage_bytes.assign(preimage_u256.data(), preimage_u256.data() + 32);
+        } else {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_PRIME requires either prime_preimage OR (auth_seed + chain_length)");
+        }
+
+        // Assemble the 4 witness fields in exact layout order.
+        block.fields.push_back({RungDataType::HASH256, new_root});
+        {
+            RungField f;
+            f.type = RungDataType::NUMERIC;
+            uint32_t v = static_cast<uint32_t>(prime_depth);
+            f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+            block.fields.push_back(f);
+        }
+        {
+            RungField f;
+            f.type = RungDataType::NUMERIC;
+            uint32_t v = static_cast<uint32_t>(new_expiry);
+            f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+            f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+            block.fields.push_back(f);
+        }
+        block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
+        break;
+    }
     default: {
         // Blocks without specific signing logic: auto-populate witness fields.
         // For key-consuming blocks (ANCHOR_CHANNEL, VAULT_LOCK, PLC blocks with pubkeys),
