@@ -12649,3 +12649,227 @@ BOOST_AUTO_TEST_CASE(ladder_tap_different_tags)
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+// ============================================================================
+// QABI — Quantum Atomic Batch Input / Output
+// ============================================================================
+
+#include <rung/qabi.h>
+
+BOOST_FIXTURE_TEST_SUITE(qabi_tests, BasicTestingSetup)
+
+// Helper: construct a minimal valid QABIBlock for testing.
+static QABIBlock MakeValidQABIBlock()
+{
+    QABIBlock block;
+    block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(block.batch_id.begin(), 0xA1, 32);
+    block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xB2);
+    block.prime_expiry_height = 12345;
+
+    QABIEntry e;
+    std::memset(e.participant_id.begin(), 0xC3, 32);
+    e.contribution = 100000;
+    e.destination_index = 0;
+    block.entries.push_back(e);
+
+    CTxOut out;
+    out.nValue = 99000;
+    out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0xD4);
+    block.outputs.push_back(out);
+
+    return block;
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_serialize_roundtrip)
+{
+    QABIBlock original = MakeValidQABIBlock();
+    auto bytes = SerializeQABIBlock(original);
+    BOOST_CHECK(!bytes.empty());
+
+    std::string err;
+    auto parsed_opt = ParseQABIBlock(bytes, err);
+    BOOST_REQUIRE_MESSAGE(parsed_opt.has_value(), "parse failed: " << err);
+    const QABIBlock& p = *parsed_opt;
+
+    BOOST_CHECK_EQUAL(p.version, original.version);
+    BOOST_CHECK(p.batch_id == original.batch_id);
+    BOOST_CHECK(p.coordinator_pubkey == original.coordinator_pubkey);
+    BOOST_CHECK_EQUAL(p.prime_expiry_height, original.prime_expiry_height);
+    BOOST_REQUIRE_EQUAL(p.entries.size(), original.entries.size());
+    BOOST_CHECK(p.entries[0].participant_id == original.entries[0].participant_id);
+    BOOST_CHECK_EQUAL(p.entries[0].contribution, original.entries[0].contribution);
+    BOOST_CHECK_EQUAL(p.entries[0].destination_index, original.entries[0].destination_index);
+    BOOST_REQUIRE_EQUAL(p.outputs.size(), original.outputs.size());
+    BOOST_CHECK_EQUAL(p.outputs[0].nValue, original.outputs[0].nValue);
+    BOOST_CHECK(p.outputs[0].scriptPubKey == original.outputs[0].scriptPubKey);
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_empty)
+{
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock({}, err).has_value());
+    BOOST_CHECK(!err.empty());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_oversized)
+{
+    std::vector<uint8_t> huge(QABI_BLOCK_MAX_HARD + 1, 0x00);
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(huge, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_bad_version)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    auto bytes = SerializeQABIBlock(b);
+    bytes[0] = 0x99;  // version byte
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(bytes, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_trailing_data)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    auto bytes = SerializeQABIBlock(b);
+    bytes.push_back(0xFF);  // one extra byte
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(bytes, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_bad_pubkey_size)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    b.coordinator_pubkey.assign(100, 0x00);  // wrong size
+    auto bytes = SerializeQABIBlock(b);
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(bytes, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_out_of_range_dest_index)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    b.entries[0].destination_index = 99;  // only 1 output exists
+    auto bytes = SerializeQABIBlock(b);
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(bytes, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_negative_contribution)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    b.entries[0].contribution = -1;
+    auto bytes = SerializeQABIBlock(b);
+    std::string err;
+    BOOST_CHECK(!ParseQABIBlock(bytes, err).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(qabi_root_deterministic)
+{
+    QABIBlock b = MakeValidQABIBlock();
+    uint256 r1 = ComputeQABIRoot(b);
+    uint256 r2 = ComputeQABIRoot(b);
+    BOOST_CHECK(r1 == r2);
+}
+
+BOOST_AUTO_TEST_CASE(qabi_root_mutation_sensitivity)
+{
+    QABIBlock b1 = MakeValidQABIBlock();
+    uint256 r_orig = ComputeQABIRoot(b1);
+
+    QABIBlock b2 = b1;
+    b2.prime_expiry_height += 1;
+    BOOST_CHECK(ComputeQABIRoot(b2) != r_orig);
+
+    QABIBlock b3 = b1;
+    std::memset(b3.batch_id.begin(), 0xFF, 32);
+    BOOST_CHECK(ComputeQABIRoot(b3) != r_orig);
+
+    QABIBlock b4 = b1;
+    b4.entries[0].contribution += 1;
+    BOOST_CHECK(ComputeQABIRoot(b4) != r_orig);
+
+    QABIBlock b5 = b1;
+    b5.outputs[0].nValue += 1;
+    BOOST_CHECK(ComputeQABIRoot(b5) != r_orig);
+}
+
+// Helper: build a minimal CTransaction carrying a qabi_block payload.
+static CMutableTransaction MakeTxWithQABIBlock(const std::vector<uint8_t>& qabi_block_bytes,
+                                                const std::vector<uint8_t>& agg_sig)
+{
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+    mtx.qabi_block = qabi_block_bytes;
+    mtx.aggregated_sig = agg_sig;
+
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+
+    CTxOut out;
+    out.nValue = 50000;
+    out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0xEE);
+    mtx.vout.push_back(out);
+
+    return mtx;
+}
+
+BOOST_AUTO_TEST_CASE(sighash_qabo_deterministic)
+{
+    QABIBlock block = MakeValidQABIBlock();
+    auto block_bytes = SerializeQABIBlock(block);
+    auto mtx = MakeTxWithQABIBlock(block_bytes, std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0x77));
+    CTransaction tx1(mtx);
+    CTransaction tx2(mtx);
+
+    uint256 h1 = ComputeSighashQABO(tx1);
+    uint256 h2 = ComputeSighashQABO(tx2);
+    BOOST_CHECK(h1 == h2);
+}
+
+BOOST_AUTO_TEST_CASE(sighash_qabo_changes_on_qabi_block_mutation)
+{
+    QABIBlock block1 = MakeValidQABIBlock();
+    QABIBlock block2 = block1;
+    block2.prime_expiry_height += 1;
+
+    auto sig = std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0x77);
+    auto mtx1 = MakeTxWithQABIBlock(SerializeQABIBlock(block1), sig);
+    auto mtx2 = MakeTxWithQABIBlock(SerializeQABIBlock(block2), sig);
+
+    uint256 h1 = ComputeSighashQABO(CTransaction(mtx1));
+    uint256 h2 = ComputeSighashQABO(CTransaction(mtx2));
+    BOOST_CHECK(h1 != h2);
+}
+
+BOOST_AUTO_TEST_CASE(sighash_qabo_ignores_aggregated_sig)
+{
+    QABIBlock block = MakeValidQABIBlock();
+    auto block_bytes = SerializeQABIBlock(block);
+
+    auto mtx1 = MakeTxWithQABIBlock(block_bytes, std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0x11));
+    auto mtx2 = MakeTxWithQABIBlock(block_bytes, std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0xEE));
+
+    uint256 h1 = ComputeSighashQABO(CTransaction(mtx1));
+    uint256 h2 = ComputeSighashQABO(CTransaction(mtx2));
+    // Sighash deliberately excludes tx.aggregated_sig to avoid chicken-and-egg.
+    BOOST_CHECK(h1 == h2);
+}
+
+BOOST_AUTO_TEST_CASE(sighash_qabo_changes_on_vout_mutation)
+{
+    QABIBlock block = MakeValidQABIBlock();
+    auto sig = std::vector<uint8_t>(QABI_AGGREGATED_SIG_MAX, 0x33);
+
+    auto mtx1 = MakeTxWithQABIBlock(SerializeQABIBlock(block), sig);
+    auto mtx2 = mtx1;
+    mtx2.vout[0].nValue += 1;
+
+    BOOST_CHECK(ComputeSighashQABO(CTransaction(mtx1)) != ComputeSighashQABO(CTransaction(mtx2)));
+}
+
+BOOST_AUTO_TEST_SUITE_END()
