@@ -3,6 +3,8 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <rung/qabi.h>
+#include <rung/serialize.h>
+#include <rung/types.h>
 
 #include <crypto/sha256.h>
 #include <hash.h>
@@ -15,6 +17,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -193,6 +196,129 @@ uint256 ComputeQABIRoot(const std::vector<uint8_t>& serialised_block_bytes)
 uint256 ComputeQABIRoot(const QABIBlock& block)
 {
     return ComputeQABIRoot(SerializeQABIBlock(block));
+}
+
+/* ---------------- Wallet / builder helpers ---------------- */
+
+uint256 ComputeAuthChainTip(std::span<const uint8_t> auth_seed, uint32_t chain_length)
+{
+    unsigned char current[CSHA256::OUTPUT_SIZE];
+    if (auth_seed.size() != 32) {
+        // Spec requires 32-byte seed. Return zero on misuse rather than throwing —
+        // caller should verify seed size at a higher layer.
+        return uint256::ZERO;
+    }
+    std::memcpy(current, auth_seed.data(), 32);
+    for (uint32_t i = 0; i < chain_length; ++i) {
+        unsigned char next[CSHA256::OUTPUT_SIZE];
+        CSHA256().Write(current, 32).Finalize(next);
+        std::memcpy(current, next, 32);
+    }
+    uint256 out;
+    std::memcpy(out.data(), current, 32);
+    return out;
+}
+
+bool ComputeAuthChainPreimageAt(std::span<const uint8_t> auth_seed,
+                                 uint32_t chain_length,
+                                 uint32_t depth,
+                                 uint256& preimage_out)
+{
+    if (auth_seed.size() != 32) return false;
+    if (depth > chain_length) return false;
+
+    // depth d ⇒ reveal h_{N-d} ⇒ apply SHA-256 (N-d) times starting from seed.
+    unsigned char current[CSHA256::OUTPUT_SIZE];
+    std::memcpy(current, auth_seed.data(), 32);
+    const uint32_t iterations = chain_length - depth;
+    for (uint32_t i = 0; i < iterations; ++i) {
+        unsigned char next[CSHA256::OUTPUT_SIZE];
+        CSHA256().Write(current, 32).Finalize(next);
+        std::memcpy(current, next, 32);
+    }
+    std::memcpy(preimage_out.data(), current, 32);
+    return true;
+}
+
+static RungField MakeNumericField(int64_t value)
+{
+    RungField f;
+    f.type = RungDataType::NUMERIC;
+    // Store canonical 4-byte LE form — matches what the deserializer produces
+    // and what the evaluator's ReadNumeric expects.
+    uint32_t v = static_cast<uint32_t>(value);
+    f.data.push_back(static_cast<uint8_t>(v & 0xFF));
+    f.data.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    f.data.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+    f.data.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+    return f;
+}
+
+static RungField MakeHash256Field(const uint256& h)
+{
+    RungField f;
+    f.type = RungDataType::HASH256;
+    f.data.assign(h.data(), h.data() + 32);
+    return f;
+}
+
+static RungField MakePubkeyCommitField(const uint256& h)
+{
+    RungField f;
+    f.type = RungDataType::PUBKEY_COMMIT;
+    f.data.assign(h.data(), h.data() + 32);
+    return f;
+}
+
+static RungField MakePreimageField(std::span<const uint8_t> bytes)
+{
+    RungField f;
+    f.type = RungDataType::PREIMAGE;
+    f.data.assign(bytes.begin(), bytes.end());
+    return f;
+}
+
+RungBlock BuildQABIPrimeBlock(const uint256& new_committed_root,
+                               int64_t prime_depth,
+                               uint32_t new_committed_expiry,
+                               std::span<const uint8_t> prime_preimage)
+{
+    RungBlock block;
+    block.type = RungBlockType::QABI_PRIME;
+    block.inverted = false;
+    block.fields.push_back(MakeHash256Field(new_committed_root));
+    block.fields.push_back(MakeNumericField(prime_depth));
+    block.fields.push_back(MakeNumericField(static_cast<int64_t>(new_committed_expiry)));
+    block.fields.push_back(MakePreimageField(prime_preimage));
+    return block;
+}
+
+RungBlock BuildQABISpendBlock(const uint256& auth_tip,
+                               const uint256& committed_root,
+                               int64_t committed_depth,
+                               uint32_t committed_expiry,
+                               const uint256& owner_id,
+                               std::span<const uint8_t> spend_preimage)
+{
+    RungBlock block;
+    block.type = RungBlockType::QABI_SPEND;
+    block.inverted = false;
+    block.fields.push_back(MakeHash256Field(auth_tip));
+    block.fields.push_back(MakeHash256Field(committed_root));
+    block.fields.push_back(MakeNumericField(committed_depth));
+    block.fields.push_back(MakeNumericField(static_cast<int64_t>(committed_expiry)));
+    block.fields.push_back(MakePubkeyCommitField(owner_id));
+    block.fields.push_back(MakePreimageField(spend_preimage));
+    return block;
+}
+
+std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block)
+{
+    LadderWitness ladder;
+    Rung rung;
+    rung.blocks.push_back(block);
+    ladder.rungs.push_back(rung);
+    return SerializeLadderWitness(ladder);
 }
 
 /* ---------------- SIGHASH_QABO ---------------- */

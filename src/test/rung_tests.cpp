@@ -13655,4 +13655,161 @@ BOOST_AUTO_TEST_CASE(rbd_rejects_non_priming_new_tx)
     BOOST_CHECK_EQUAL(reason, "rbd-new-not-priming");
 }
 
+// ============================================================================
+// Wallet / builder helpers
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(auth_chain_tip_matches_manual)
+{
+    std::vector<uint8_t> seed(32, 0x42);
+    constexpr uint32_t N = 20;
+
+    // Manual computation
+    unsigned char current[32];
+    std::memcpy(current, seed.data(), 32);
+    for (uint32_t i = 0; i < N; ++i) {
+        unsigned char next[32];
+        CSHA256().Write(current, 32).Finalize(next);
+        std::memcpy(current, next, 32);
+    }
+    uint256 expected;
+    std::memcpy(expected.data(), current, 32);
+
+    uint256 via_helper = ComputeAuthChainTip(std::span<const uint8_t>(seed), N);
+    BOOST_CHECK(via_helper == expected);
+}
+
+BOOST_AUTO_TEST_CASE(auth_chain_preimage_roundtrip)
+{
+    std::vector<uint8_t> seed(32, 0x99);
+    constexpr uint32_t N = 30;
+    uint256 tip = ComputeAuthChainTip(std::span<const uint8_t>(seed), N);
+
+    // For each depth d in [0..N], H^d(preimage_at_d) should equal tip.
+    for (uint32_t d = 0; d <= N; ++d) {
+        uint256 preimage;
+        BOOST_REQUIRE(ComputeAuthChainPreimageAt(
+            std::span<const uint8_t>(seed), N, d, preimage));
+
+        unsigned char current[32];
+        std::memcpy(current, preimage.data(), 32);
+        for (uint32_t i = 0; i < d; ++i) {
+            unsigned char next[32];
+            CSHA256().Write(current, 32).Finalize(next);
+            std::memcpy(current, next, 32);
+        }
+        uint256 hashed;
+        std::memcpy(hashed.data(), current, 32);
+        BOOST_CHECK_MESSAGE(hashed == tip,
+                            "depth " << d << " preimage does not hash to tip");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(auth_chain_rejects_bad_seed_size)
+{
+    std::vector<uint8_t> bad_seed(16, 0x00);  // wrong size
+    uint256 preimage;
+    BOOST_CHECK(!ComputeAuthChainPreimageAt(
+        std::span<const uint8_t>(bad_seed), 10, 5, preimage));
+}
+
+BOOST_AUTO_TEST_CASE(auth_chain_rejects_depth_out_of_range)
+{
+    std::vector<uint8_t> seed(32, 0x00);
+    uint256 preimage;
+    BOOST_CHECK(!ComputeAuthChainPreimageAt(
+        std::span<const uint8_t>(seed), 10, 11, preimage));
+}
+
+BOOST_AUTO_TEST_CASE(build_qabi_prime_block_shape)
+{
+    uint256 new_root;
+    std::memset(new_root.data(), 0xAB, 32);
+    std::vector<uint8_t> preimage(32, 0xCD);
+
+    RungBlock b = BuildQABIPrimeBlock(new_root, 42, 999, std::span<const uint8_t>(preimage));
+
+    BOOST_CHECK(b.type == RungBlockType::QABI_PRIME);
+    BOOST_CHECK(!b.inverted);
+    BOOST_REQUIRE_EQUAL(b.fields.size(), 4u);
+    BOOST_CHECK(b.fields[0].type == RungDataType::HASH256);
+    BOOST_CHECK_EQUAL(b.fields[0].data.size(), 32u);
+    BOOST_CHECK(b.fields[1].type == RungDataType::NUMERIC);
+    BOOST_CHECK(b.fields[2].type == RungDataType::NUMERIC);
+    BOOST_CHECK(b.fields[3].type == RungDataType::PREIMAGE);
+    BOOST_CHECK_EQUAL(b.fields[3].data.size(), 32u);
+
+    // Matches the implicit layout so the serializer can use it.
+    const auto& layout = GetImplicitLayout(RungBlockType::QABI_PRIME, 0);
+    BOOST_CHECK(MatchesImplicitLayout(b, layout));
+}
+
+BOOST_AUTO_TEST_CASE(build_qabi_spend_block_shape)
+{
+    uint256 tip, root, owner;
+    std::memset(tip.data(), 0x11, 32);
+    std::memset(root.data(), 0x22, 32);
+    std::memset(owner.data(), 0x33, 32);
+    std::vector<uint8_t> preimage(32, 0x44);
+
+    RungBlock b = BuildQABISpendBlock(tip, root, 10, 500, owner,
+                                       std::span<const uint8_t>(preimage));
+
+    BOOST_CHECK(b.type == RungBlockType::QABI_SPEND);
+    BOOST_REQUIRE_EQUAL(b.fields.size(), 6u);
+    BOOST_CHECK(b.fields[0].type == RungDataType::HASH256);        // auth_tip
+    BOOST_CHECK(b.fields[1].type == RungDataType::HASH256);        // committed_root
+    BOOST_CHECK(b.fields[2].type == RungDataType::NUMERIC);        // committed_depth
+    BOOST_CHECK(b.fields[3].type == RungDataType::NUMERIC);        // committed_expiry
+    BOOST_CHECK(b.fields[4].type == RungDataType::PUBKEY_COMMIT);  // owner_id
+    BOOST_CHECK(b.fields[5].type == RungDataType::PREIMAGE);       // spend_preimage
+
+    const auto& layout = GetImplicitLayout(RungBlockType::QABI_SPEND, 0);
+    BOOST_CHECK(MatchesImplicitLayout(b, layout));
+}
+
+BOOST_AUTO_TEST_CASE(serialize_single_block_witness_roundtrip)
+{
+    uint256 root;
+    std::memset(root.data(), 0x77, 32);
+    std::vector<uint8_t> preimage(32, 0x88);
+
+    RungBlock original = BuildQABIPrimeBlock(root, 7, 12345,
+                                              std::span<const uint8_t>(preimage));
+    auto bytes = SerializeSingleBlockWitness(original);
+    BOOST_CHECK(!bytes.empty());
+
+    LadderWitness ladder;
+    std::string err;
+    BOOST_REQUIRE_MESSAGE(DeserializeLadderWitness(bytes, ladder, err),
+                          "deserialize failed: " << err);
+    BOOST_REQUIRE_EQUAL(ladder.rungs.size(), 1u);
+    BOOST_REQUIRE_EQUAL(ladder.rungs[0].blocks.size(), 1u);
+    const auto& decoded = ladder.rungs[0].blocks[0];
+    BOOST_CHECK(decoded.type == RungBlockType::QABI_PRIME);
+    BOOST_REQUIRE_EQUAL(decoded.fields.size(), 4u);
+
+    // Verify the helper pipeline produces a witness that the RBD extractor
+    // can read correctly — sanity check the full round trip.
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    mtx.conditions_root.SetNull();
+    CTxIn in;
+    in.prevout = MakeTestOutpoint(0xCC, 0);
+    in.nSequence = 0xFFFFFFFF;
+    in.scriptWitness.stack.push_back(bytes);
+    mtx.vin.push_back(in);
+    CTxOut out;
+    out.nValue = 10000;
+    out.scriptPubKey = CScript();
+    out.scriptPubKey.push_back(0xDF);
+    for (int i = 0; i < 32; ++i) out.scriptPubKey.push_back(0x99);
+    mtx.vout.push_back(out);
+
+    int64_t depth = 0;
+    BOOST_CHECK(ExtractQABIPrimeDepth(CTransaction(mtx), 0, depth));
+    BOOST_CHECK_EQUAL(depth, 7);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

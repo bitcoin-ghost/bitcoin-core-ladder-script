@@ -6,11 +6,13 @@
 #define BITCOIN_RUNG_QABI_H
 
 #include <primitives/transaction.h>
+#include <rung/types.h>
 #include <uint256.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -95,6 +97,61 @@ uint256 ComputeQABIRoot(const std::vector<uint8_t>& serialised_block_bytes);
 /** Convenience: serialise then hash. Equivalent to
  *  ComputeQABIRoot(SerializeQABIBlock(block)). */
 uint256 ComputeQABIRoot(const QABIBlock& block);
+
+/* ---------------- Wallet / builder helpers ---------------- */
+
+/** Compute the public tip of a UTXO's auth hash chain.
+ *  auth_tip = H^chain_length(auth_seed), where H is SHA-256.
+ *  This is the value committed into the UTXO's QABI_SPEND block at creation. */
+uint256 ComputeAuthChainTip(std::span<const uint8_t> auth_seed, uint32_t chain_length);
+
+/** Compute the preimage at a given depth along the auth chain.
+ *  Depth d means: owner reveals a value P such that H^d(P) == auth_tip.
+ *  Depth 0 is the tip itself (useless — public). Depth chain_length is the
+ *  seed (maximum reveal). The returned value goes into the witness stack of
+ *  priming or QABIO txs.
+ *
+ *  Returns false if depth > chain_length. */
+bool ComputeAuthChainPreimageAt(std::span<const uint8_t> auth_seed,
+                                 uint32_t chain_length,
+                                 uint32_t depth,
+                                 uint256& preimage_out);
+
+/** Build a QABI_PRIME RungBlock with the 4 witness-only fields in the exact
+ *  order expected by the evaluator and the QABI_PRIME_WITNESS implicit layout:
+ *    [0] HASH256  new_committed_root
+ *    [1] NUMERIC  prime_depth
+ *    [2] NUMERIC  new_committed_expiry
+ *    [3] PREIMAGE prime_preimage
+ */
+RungBlock BuildQABIPrimeBlock(const uint256& new_committed_root,
+                               int64_t prime_depth,
+                               uint32_t new_committed_expiry,
+                               std::span<const uint8_t> prime_preimage);
+
+/** Build a QABI_SPEND RungBlock with the 6 fields in the exact order expected
+ *  by the evaluator and the QABI_SPEND_WITNESS implicit layout:
+ *    [0] HASH256       auth_tip
+ *    [1] HASH256       committed_root
+ *    [2] NUMERIC       committed_depth
+ *    [3] NUMERIC       committed_expiry
+ *    [4] PUBKEY_COMMIT owner_id
+ *    [5] PREIMAGE      spend_preimage
+ */
+RungBlock BuildQABISpendBlock(const uint256& auth_tip,
+                               const uint256& committed_root,
+                               int64_t committed_depth,
+                               uint32_t committed_expiry,
+                               const uint256& owner_id,
+                               std::span<const uint8_t> spend_preimage);
+
+/** Serialise a single-block LadderWitness (one rung, one block) to raw bytes
+ *  suitable for placement in CTxIn::scriptWitness::stack. Used for both
+ *  priming tx witnesses (block type QABI_PRIME) and QABIO tx witnesses
+ *  (block type QABI_SPEND). */
+std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
+
+/* ---------------- Sighash ---------------- */
 
 /** Compute SIGHASH_QABO — the sighash used for the coordinator's FALCON QABO
  *  signature on a QABIO batch tx.
