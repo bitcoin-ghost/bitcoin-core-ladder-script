@@ -78,6 +78,25 @@ namespace rung {
  *    p2pk(@pk) | p2pkh(@pk) | p2wpkh(@pk) | p2tr(@pk)
  *    p2sh(inner_hex) | p2wsh(inner_hex) | p2tr_script(inner_hex)
  *
+ *  QABI family (Quantum Atomic Batch Input / Output):
+ *    qabi_prime()
+ *        Priming marker — no committed fields. Typically placed in
+ *        Rung 1 of a QABI-enabled UTXO to gate priming spends.
+ *    qabi_spend(auth_tip_hex, committed_root_hex, depth, expiry, owner_id_hex)
+ *        Batch-spend state. Fields are committed at UTXO creation:
+ *          auth_tip_hex       — H^N(auth_seed), the hash chain tip (32 B)
+ *          committed_root_hex — currently-primed batch root, 0 if unprimed (32 B)
+ *          depth              — committed_depth varint
+ *          expiry             — committed_expiry u32
+ *          owner_id_hex       — SHA256(Rung 0 FALCON pubkey), identity (32 B)
+ *        Typically placed in Rung 2 of a QABI-enabled UTXO.
+ *
+ *  A full QABI-enabled UTXO descriptor composes the three rungs:
+ *    ladder(or(sig(@alice, falcon512), qabi_prime(),
+ *              qabi_spend(<auth_tip>, 000...00, 0, 0, <owner_id>)))
+ *
+ *  See doc/ladder-script/project_qabi.md for the full QABIO spec.
+ *
  *  Scheme names: schnorr, ecdsa, falcon512, falcon1024, dilithium3, sphincs_sha
  *
  *  @param[in]  desc     Descriptor string
