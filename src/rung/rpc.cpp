@@ -268,10 +268,7 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
 static bool ParseDataType(const std::string& name, RungDataType& out)
 {
     if (name == "PUBKEY")        { out = RungDataType::PUBKEY; return true; }
-    if (name == "PUBKEY_COMMIT") {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-            "PUBKEY_COMMIT is no longer a condition field. Pubkeys are folded into the Merkle leaf. Use PUBKEY instead.");
-    }
+    if (name == "PUBKEY_COMMIT") { out = RungDataType::PUBKEY_COMMIT; return true; }
     if (name == "HASH256")       { out = RungDataType::HASH256; return true; }
     if (name == "HASH160")       { out = RungDataType::HASH160; return true; }
     if (name == "PREIMAGE")      { out = RungDataType::PREIMAGE; return true; }
@@ -340,10 +337,24 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                     block.type != RungBlockType::TAGGED_HASH &&
                     block.type != RungBlockType::ACCUMULATOR &&
                     block.type != RungBlockType::COSIGN &&
-                    block.type != RungBlockType::OUTPUT_CHECK) {
+                    block.type != RungBlockType::OUTPUT_CHECK &&
+                    // QABI_SPEND carries auth_tip and committed_root as external
+                    // commitments — the user provides them directly, not as
+                    // preimages.
+                    block.type != RungBlockType::QABI_SPEND) {
                     throw JSONRPCError(RPC_INVALID_PARAMETER,
                         "Use PREIMAGE instead of HASH256 for " + type_str +
                         "; the node computes the hash commitment automatically");
+                }
+            }
+            // PUBKEY_COMMIT: normally not a condition field (pubkeys are folded
+            // into Merkle leaves via merkle_pub_key). Exception: QABI_SPEND
+            // carries owner_id as an explicit 32-byte commitment.
+            if (field.type == RungDataType::PUBKEY_COMMIT) {
+                if (block.type != RungBlockType::QABI_SPEND) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        "PUBKEY_COMMIT is only allowed in QABI_SPEND conditions; "
+                        "other blocks fold pubkeys into the Merkle leaf — use PUBKEY instead.");
                 }
             }
         }
@@ -398,8 +409,17 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
             continue;
         }
         if (conditions_only && !rung::IsConditionDataType(field.type)) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER,
-                "Data type " + ftype_str + " not allowed in conditions (witness-only)");
+            // QABI_SPEND bypass: its conditions layout legitimately carries
+            // PUBKEY_COMMIT as an explicit owner identity commitment. The
+            // consensus deserialiser accepts it via the implicit layout path
+            // (QABI_SPEND_CONDITIONS), so we accept it here too.
+            const bool qabi_spend_pubkey_commit =
+                block.type == RungBlockType::QABI_SPEND &&
+                field.type == RungDataType::PUBKEY_COMMIT;
+            if (!qabi_spend_pubkey_commit) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "Data type " + ftype_str + " not allowed in conditions (witness-only)");
+            }
         }
         block.fields.push_back(std::move(field));
     }
@@ -3393,6 +3413,10 @@ static RPCHelpMan createtxmlsc()
             },
             {"locktime", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Transaction nLockTime (default 0)"},
             {"internal_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "32-byte x-only internal pubkey for key-path spending. When provided, conditions_root is tweaked."},
+            {"qabi_block", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED,
+                "Optional serialised QABIBlock bytes (hex). Present iff this is a QABIO batch tx. "
+                "When non-empty, tx.qabi_block is populated, which marks the tx as a QABIO carrier. "
+                "Use qabi_buildblock to construct the serialised bytes."},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::STR_HEX, "hex", "The unsigned TX_MLSC transaction hex"},
@@ -3593,6 +3617,27 @@ static RPCHelpMan createtxmlsc()
     mlsc_spk.insert(mlsc_spk.end(), mtx.conditions_root.begin(), mtx.conditions_root.end());
     for (auto& out : mtx.vout) {
         out.scriptPubKey = mlsc_spk;
+    }
+
+    // QABIO: optional qabi_block tx-level field. When set, this tx is a
+    // QABIO batch carrier and the coordinator will later sign via
+    // qabi_signqabo (which populates tx.aggregated_sig).
+    if (!request.params[5].isNull()) {
+        auto qb_bytes = ParseHex(request.params[5].get_str());
+        if (qb_bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "qabi_block exceeds QABI_BLOCK_MAX_HARD");
+        }
+        // Strict parse check: the bytes must be a well-formed QABIBlock.
+        if (!qb_bytes.empty()) {
+            std::string parse_err;
+            auto parsed = rung::ParseQABIBlock(qb_bytes, parse_err);
+            if (!parsed) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "qabi_block parse failed: " + parse_err);
+            }
+        }
+        mtx.qabi_block = std::move(qb_bytes);
     }
 
     UniValue result(UniValue::VOBJ);
