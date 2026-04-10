@@ -45,6 +45,7 @@ QABI_RPCS = [
     "qabi_blockinfo",
     "qabi_authchain",
     "qabi_sighash",
+    "qabi_signqabo",
 ]
 
 QABI_COORDINATOR_PUBKEY_SIZE = 897  # FALCON-512 pk size
@@ -97,6 +98,8 @@ class QabiTest(BitcoinTestFramework):
         self.test_buildblock_rejects_bad_destination_index()
         self.test_blockinfo_rejects_malformed()
         self.test_sighash_determinism()
+        self.test_signqabo_rejects_non_qabio_tx()
+        self.test_signqabo_full_flow()
 
         self.log.info("All QABI functional tests passed!")
 
@@ -281,6 +284,158 @@ class QabiTest(BitcoinTestFramework):
         sighash_result2 = self.node.qabi_sighash(tx_hex)
         assert_equal(sighash_result["sighash"], sighash_result2["sighash"])
         self.log.info(f"  sighash={sighash_result['sighash'][:16]}... (deterministic)")
+
+    def test_signqabo_rejects_non_qabio_tx(self):
+        self.log.info("Testing qabi_signqabo rejects non-QABIO txs...")
+        kp = self.node.generatepqkeypair("FALCON512")
+        privkey = kp["privkey"]
+
+        # A normal (non-QABIO) TX_MLSC v4 tx has no qabi_block field, so the
+        # RPC should reject it.
+        from test_framework.wallet import MiniWallet
+        wallet = MiniWallet(self.node)
+        self.generate(wallet, 10)  # ensure funds on top of earlier blocks
+
+        utxo = wallet.get_utxo()
+        tx_result = self.node.createtxmlsc(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [0.0001],
+            [{
+                "output_index": 0,
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [{"type": "SCHEME", "hex": "01"}],
+                }],
+            }],
+        )
+        non_qabio_hex = tx_result["hex"]
+
+        assert_raises_rpc_error(-8, "tx.qabi_block is empty",
+                                 self.node.qabi_signqabo, non_qabio_hex, privkey)
+        self.log.info("  Non-QABIO tx correctly rejected")
+
+    def test_signqabo_full_flow(self):
+        """Full coordinator signing flow via RPCs:
+        generate FALCON keypair → build QABIBlock → construct raw v4 tx with
+        qabi_block populated → qabi_signqabo → verify signed tx has a 666-byte
+        aggregated_sig and consistent sighash."""
+        self.log.info("Testing qabi_signqabo full signing flow...")
+
+        # 1. Generate FALCON-512 coordinator keypair via RPC.
+        kp = self.node.generatepqkeypair("FALCON512")
+        coordinator_pubkey = kp["pubkey"]
+        coordinator_privkey = kp["privkey"]
+        assert_equal(len(coordinator_pubkey), 2 * QABI_COORDINATOR_PUBKEY_SIZE)
+
+        # 2. Build a QABIBlock with this coordinator pubkey.
+        participant_id = "77" * 32
+        destination_script = "0014" + "22" * 20
+        built = self.node.qabi_buildblock(
+            coordinator_pubkey,
+            5000,                 # prime_expiry_height
+            "aa" * 32,            # batch_id
+            [{
+                "participant_id": participant_id,
+                "contribution": "0.0001",
+                "destination_index": 0,
+            }],
+            [{
+                "amount": "0.00009",
+                "script_pubkey": destination_script,
+            }],
+        )
+        qabi_block_hex = built["qabi_block"]
+        self.log.info(f"  built QABIBlock: {built['size']} bytes")
+
+        # 3. Construct a minimal TX_MLSC v4 tx carrying the qabi_block. We
+        #    build the wire format by hand since createtxmlsc doesn't accept
+        #    a qabi_block parameter today.
+        tx_hex = self._build_minimal_qabio_tx_hex(qabi_block_hex)
+
+        # 4. Call qabi_signqabo to sign.
+        signed = self.node.qabi_signqabo(tx_hex, coordinator_privkey)
+        assert "hex" in signed
+        assert "sighash" in signed
+        assert "sig_size" in signed
+        assert_equal(signed["sig_size"], 666)  # QABI_AGGREGATED_SIG_MAX
+        self.log.info(f"  signed tx: sighash={signed['sighash'][:16]}..., "
+                      f"sig_size={signed['sig_size']}")
+
+        # 5. Verify the sighash is stable pre- and post-signing (aggregated_sig
+        #    is excluded from the hash by design).
+        unsigned_sighash = self.node.qabi_sighash(tx_hex)["sighash"]
+        assert_equal(signed["sighash"], unsigned_sighash)
+
+        signed_sighash_again = self.node.qabi_sighash(signed["hex"])["sighash"]
+        assert_equal(signed["sighash"], signed_sighash_again)
+        self.log.info("  Sighash stable pre- and post-signing")
+
+        # 6. Re-signing with a different key must produce a different signature
+        #    but the same sighash.
+        kp2 = self.node.generatepqkeypair("FALCON512")
+        signed2 = self.node.qabi_signqabo(tx_hex, kp2["privkey"])
+        assert_equal(signed2["sighash"], signed["sighash"])
+        assert signed2["hex"] != signed["hex"], \
+            "Different coordinator keys should produce different signatures"
+        self.log.info("  Different key → different sig, same sighash")
+
+    def _build_minimal_qabio_tx_hex(self, qabi_block_hex: str) -> str:
+        """Construct a minimal TX_MLSC v4 tx hex with the given qabi_block
+        field populated. Bypasses createtxmlsc because that RPC doesn't
+        currently accept a qabi_block argument — this is a hand-rolled wire
+        serialisation matching the format in src/primitives/transaction.h."""
+        import struct
+
+        def compact_size(n: int) -> bytes:
+            if n < 0xfd:
+                return bytes([n])
+            elif n < 0x10000:
+                return b'\xfd' + struct.pack('<H', n)
+            elif n < 0x100000000:
+                return b'\xfe' + struct.pack('<I', n)
+            else:
+                return b'\xff' + struct.pack('<Q', n)
+
+        qabi_block_bytes = bytes.fromhex(qabi_block_hex)
+
+        buf = bytearray()
+        buf += struct.pack('<I', 4)              # version = 4 (RUNG_TX_VERSION)
+        buf += b'\x00'                            # dummy
+        buf += b'\x02'                            # flags = 0x02 (TX_MLSC)
+
+        # vin: 1 input with a zero prevout (placeholder carrier).
+        buf += compact_size(1)
+        buf += b'\x00' * 32                      # prevout.hash
+        buf += struct.pack('<I', 0)              # prevout.n
+        buf += compact_size(0)                    # scriptSig (empty for MLSC)
+        buf += struct.pack('<I', 0xFFFFFFFF)     # nSequence
+
+        # TX_MLSC: conditions_root (32 bytes) + n_outputs + per-output values.
+        # NOTE: conditions_root MUST be non-zero, otherwise uint256::IsNull()
+        # returns true and the serialiser takes the non-MLSC path on
+        # re-encoding, dropping qabi_block and aggregated_sig. Use a
+        # non-zero placeholder for this test.
+        buf += b'\x01' * 32
+        buf += compact_size(1)                    # n_outputs
+        buf += struct.pack('<q', 9000)            # output value (int64 LE)
+
+        # per-input witness stacks (1 input, empty stack)
+        buf += compact_size(0)
+
+        # creation_proof (empty)
+        buf += compact_size(0)
+
+        # qabi_block
+        buf += compact_size(len(qabi_block_bytes))
+        buf += qabi_block_bytes
+
+        # aggregated_sig — empty (qabi_signqabo will populate)
+        buf += compact_size(0)
+
+        # nLockTime
+        buf += struct.pack('<I', 0)
+
+        return bytes(buf).hex()
 
 
 if __name__ == "__main__":
