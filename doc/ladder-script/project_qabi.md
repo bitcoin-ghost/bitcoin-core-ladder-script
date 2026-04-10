@@ -1,8 +1,9 @@
-# QABI — Quantum Atomic Batch Input
+# QABIO — Quantum Atomic Batch Input / Output
 
-**Status:** Draft (design iteration)
+**Status:** Draft (design locked, pending implementation)
 **Date:** 2026-04-10
-**Goal:** Enable N independent parties to batch their UTXOs into a single transaction authorised by ONE post-quantum signature, trustlessly, without per-input PQ signatures.
+**Branch:** QABIO
+**Goal:** Enable N independent parties to batch their rung_tx UTXOs into a single transaction authorised by ONE post-quantum signature, natively inside the rung_tx format, without anchors, escrow, commitment transactions, or pre-registration.
 
 ---
 
@@ -10,78 +11,81 @@
 
 ### Goals
 
-1. **Aggregation**: N independent parties' UTXOs spent together under ONE quantum signature
-2. **PQ-safe**: every component in the critical path is either hash-based or FALCON (no classical crypto exposed to quantum attack)
-3. **Trustless**: no pre-commitment to coordinators at UTXO creation, no trusted parties
-4. **Flexible**: user chooses their coordinator, batch, and recipients at spend time
-5. **Non-leaking**: revealing consent material cannot be used to steal funds
-6. **Retry-able**: failed batches don't burn the UTXO; user can retry with a new batch/coordinator
-7. **Compact**: significantly smaller witness than per-input FALCON
-8. **Zero creation cost**: no extra on-chain bytes at UTXO creation vs standard TX_MLSC
-9. **Ubiquitous**: enabled by default on every `rung_tx`
+1. **Aggregation** — N independent parties' UTXOs spent together under ONE FALCON signature
+2. **PQ-safe** — every component in the critical path is either hash-based or FALCON
+3. **Native** — no separate commitment tx, no anchor UTXO, no dust; built directly into the rung_tx format
+4. **Trustless** — no pre-commitment to coordinators at UTXO creation; participants pick their coordinator at spend time
+5. **Non-leaking** — revealing consent material cannot be used to steal funds
+6. **Retry-able** — failed batches don't burn UTXOs; participants re-prime or sweep via Rung 0
+7. **Compact** — significantly smaller witness than per-input FALCON
+8. **Zero creation cost** — no extra on-chain bytes at UTXO creation vs standard TX_MLSC
+9. **Default-capable** — every rung_tx UTXO can participate in QABIO batches without opt-in
+10. **Atomic** — both execution atomic (all inputs succeed or tx fails) and compositional atomic (no subset of a primed batch can execute)
+11. **Time-bounded** — every batch has a consensus-enforced expiry; stale primings cannot be exploited indefinitely
 
 ### Non-goals
 
-1. **Fully passive security**: no requirement that user must be online 24/7. But a user with a live wallet during priming is protected better than an offline user.
-2. **Protection against 51% mining attackers**: a majority attacker can grief anyone in any protocol. QABI inherits Bitcoin's security assumptions.
-3. **Anonymity**: QABI is not a mixer. Participants' identities are visible in the QABI_BLOCK to other participants (not on-chain).
+1. **Fully passive security** — participants should be online once per batch window (to reveal their spend preimage), but not continuously
+2. **Protection against 51% mining attackers** — QABIO inherits Bitcoin's security assumptions
+3. **Anonymity** — QABIO is not a mixer; participant identities are visible to other participants in the `QABIBlock`, though not to the wider network until the QABIO tx lands
 
 ---
 
-## 2. Definitions
+## 2. Definitions / glossary
 
 | Term | Meaning |
 |---|---|
-| **Chain A** | Hash chain used for PRIMING the UTXO (committing it to a specific batch) |
-| **Chain B** | Hash chain used for CONSENTING to a specific spend (final authorisation) |
-| **QABI_ROOT** | Merkle root of the QABI_BLOCK; commits to the exact batch composition |
-| **QABI_BLOCK** | Structured data describing all participants, conditions, and the batch ID |
-| **QABO** | Quantum Atomic Batch Output signature — a single FALCON signature over the sighash that authorises the whole batch |
-| **Coordinator** | The party that builds the QABI_BLOCK and produces the QABO signature. Can be a participant. |
-| **Priming** | Covenant transaction that commits a UTXO to a specific QABI_ROOT |
-| **RBD** | Replace-By-Depth — mempool policy where deeper Chain A reveals replace shallower ones for conflicting priming txs |
-| **Rung 0** | Self-spend rung using the owner's FALCON key (escape hatch) |
-| **Rung QABI** | Batch spend rung |
+| **QABI** | Quantum Atomic Batch Input — the UTXO-side framework (priming, state, per-input checks) |
+| **QABIO** | Quantum Atomic Batch Input/Output — a rung_tx that executes a batch (has `tx.qabi_block` and `tx.aggregated_sig` populated, with primed inputs) |
+| **QABO** | Quantum Atomic Batch Output signature — the tx-level FALCON signature from the coordinator authorising the whole batch |
+| **Auth chain** | The single hash chain per UTXO used for both priming and spending authorisation |
+| **auth_seed** | Per-UTXO secret seed `mk`, held by the wallet, used to derive the auth chain |
+| **auth_tip** | `H^N(auth_seed)` — the public commitment point of the auth chain; set once at UTXO creation and immutable |
+| **Priming** | The covenant spend that writes `committed_root`, `committed_depth`, and `committed_expiry` into a UTXO's state via a `QABI_PRIME` block |
+| **Compositional atomicity** | The invariant that no strict subset of a primed batch can execute; any change to participants/outputs/expiry/coordinator forces a full re-prime cycle |
+| **Depth** | Position along the auth chain, counted from the tip. Depth `d` means revealing `H^{N-d}(auth_seed)`. Deeper = closer to the seed = harder to predict |
+| **RBD** | Replace-By-Depth — mempool policy giving the deepest valid priming tx priority over conflicting shallower ones |
+| **Rung 0** | The UTXO's owner-FALCON escape-hatch spend path, always available |
+| **Rung 1** | The priming spend path (`QABI_PRIME` block) |
+| **Rung 2** | The batch spend path (`QABI_SPEND` block) |
+| **QABIBlock** | The tx-level structured data describing the batch (participants, amounts, outputs, coordinator, expiry) |
+| **QABI_ROOT** | `SHA256(serialised QABIBlock)` — the value Alice commits to when she primes |
 
 ---
 
-## 3. UTXO structure (at creation)
+## 3. UTXO structure (default in every rung_tx output)
 
-Every `rung_tx` output with QABI enabled has the following committed structure (Merkle-committed in `conditions_root`, zero on-chain bytes beyond the standard 33-byte TX_MLSC scriptPubKey).
+Every rung_tx UTXO includes QABI machinery by default as part of its conditions tree. Zero extra on-chain bytes at creation — everything lives inside the 33-byte TX_MLSC scriptPubKey via Merkle commitment.
 
-### Wallet state (off-chain)
-
-```
-mk_A        — master seed for Chain A (priming chain), 32 B
-mk_B        — master seed for Chain B (consent chain), 32 B
-falcon_sk   — FALCON private key for Rung 0 self-spend
-current_A_depth — tracks which Chain A depth was last used
-current_B_depth — tracks which Chain B depth was last used
-```
-
-### UTXO conditions (Merkle-committed)
+### Wallet state (off-chain, per-UTXO)
 
 ```
-Relay 0: QABI_CONDITIONS_RELAY
-  Conditions: 
-    H^N_A(mk_A)                      — Chain A tip commitment
-    committed_QABI_ROOT (initially 0 — unprimed)
-    creation_block_height           — for time-lock computation
-  
-Relay 1: QABI_CONSENT_RELAY
-  Conditions:
-    H^N_B(mk_B)                      — Chain B tip commitment
-
-Rung 0: self-spend
-  [SIG(falcon_pubkey, FALCON_512)]
-
-Rung QABI: batch spend
-  relay_refs = [0, 1]                 — both relays must be satisfied
-  [QABI_BLOCK_CHECK]                  — verifies tx QABI_BLOCK hashes to committed QABI_ROOT
-  [QABO_CHECK]                        — verifies tx.aggregated_sig is valid FALCON over sighash
+auth_seed            — 32 B secret, the hash chain seed (mk)
+auth_chain_length    — u32, default 20,000 depths
+next_depth           — counter tracking the next depth to consume
+falcon_sk            — FALCON-512 private key for Rung 0 escape hatch
 ```
 
-**On-chain cost at creation: 33 bytes** (same as any TX_MLSC output). All the above is committed via the Merkle root.
+### On-chain state (committed in conditions_root)
+
+```
+QABI_STATE_RELAY (Merkle-committed, 4 fields):
+  auth_tip           (32 B, immutable — H^N(auth_seed), set once at UTXO creation)
+  committed_root     (32 B, mutable via priming — 0 if unprimed)
+  committed_depth    (varint, mutable via priming — depth of last-consumed preimage)
+  committed_expiry   (u32,   mutable via priming — max block height for QABI_SPEND)
+
+Rung 0 (self-spend, always available):
+  [SIG(owner_falcon_pubkey, FALCON_512)]
+
+Rung 1 (priming path — fires in a priming tx):
+  [QABI_PRIME]
+
+Rung 2 (batch spend path — fires in a QABIO tx):
+  [QABI_SPEND]
+```
+
+**On-chain cost at creation: 33 bytes.** Same as any TX_MLSC output. The QABI state, rungs, and relay all live inside the Merkle-committed conditions tree.
 
 ---
 
@@ -90,405 +94,507 @@ Rung QABI: batch spend
 ```
          L1                                                       L2
          ┆                                                         ┆
+ RELAY 0: QABI_STATE_RELAY                                          ┆
          ┆                                                         ┆
- RELAY 0: QABI_CONDITIONS_RELAY                                     ┆
-         ┆                                                         ┆
-         ├──[Chain A preimage valid + depth check]──────(QCONDR)────┤
-         ┆                                                         ┆
- RELAY 1: QABI_CONSENT_RELAY                                        ┆
-         ┆                                                         ┆
-         ├──[Chain B preimage valid]────────────────────(QCONSR)────┤
+         ├──[state fields, no contacts — pure data]─────────────────┤
          ┆                                                         ┆
  RUNG 0: Self-spend                                                 ┆
          ┆                                                         ┆
-         ├──[FALCON SIG @alice]──────────────────────────(SPEND_0)──┤
+         ├──[FALCON SIG @owner]──────────────────────────(SPEND_0)──┤
          ┆                                                         ┆
- RUNG QABI: Batch spend                                             ┆
+ RUNG 1: Priming                                                    ┆
          ┆                                                         ┆
-         ├──[QCONDR]─[QCONSR]─[ROOT_MATCH]─[QABO]────────(SPEND_Q)──┤
+         ├──[QABI_PRIME]─────────────────────────────────(SPEND_P)──┤
+         ┆                                                         ┆
+ RUNG 2: Batch spend                                                ┆
+         ┆                                                         ┆
+         ├──[QABI_SPEND]─────────────────────────────────(SPEND_Q)──┤
          ┆                                                         ┆
 ```
 
-All four contacts of RUNG QABI must close for `SPEND_Q` to fire:
-- **QCONDR**: Chain A reveal is valid at current block height depth
-- **QCONSR**: Chain B reveal is valid (Alice's explicit consent to this spend)
-- **ROOT_MATCH**: tx's `QABI_BLOCK` hashes to the UTXO's committed `QABI_ROOT`
-- **QABO**: tx's `aggregated_sig` contains a valid FALCON signature over the sighash
+Exactly one rung fires per spend:
+- **`SPEND_0`** — owner sweeps the UTXO via FALCON sig (opt-out / escape hatch)
+- **`SPEND_P`** — owner primes the UTXO, rewriting the committed state fields via a covenant
+- **`SPEND_Q`** — the UTXO is consumed as part of a QABIO batch tx
 
 ---
 
-## 5. Phase 1 — Commitment tx
+## 5. Phase 1 — Priming
 
 ### Purpose
 
-Publicly anchor the batch structure on-chain before any priming happens. This provides the single authoritative source of truth for `QABI_ROOT` and prevents coordinators from showing inconsistent blocks to different participants.
+Commit the UTXO to a specific `QABI_ROOT` and `committed_expiry` via a covenant spend. After priming, the UTXO is **only spendable in a QABIO tx whose `tx.qabi_block` hashes to this root, and only before the expiry height**.
 
 ### Flow
 
 ```
-Coordinator's commitment tx:
-  Input:  coordinator pays fees
-  Output: commitment anchor UTXO
-    nValue: 546 sats (dust)
-    scriptPubKey: 0xDF || H(QABI_BLOCK)
-```
-
-Once mined, the anchor UTXO is immutable. The `QABI_BLOCK` it commits to is fixed. Any attempt to "change" the batch requires broadcasting a NEW commitment tx with a new anchor — creating a fresh batch, not modifying the existing one.
-
-**Participants lookup the anchor** to verify the batch structure before priming. Their wallet refuses to prime unless it can confirm the anchor's committed `QABI_BLOCK` matches what the coordinator claimed off-chain.
-
-### Root change semantics
-
-If anything in the batch changes — participants, outputs, amounts, coordinator — a new commitment tx with a new `QABI_BLOCK` must be broadcast, and **every remaining participant must re-prime to the new root**. There is no cheap "just drop a participant" path.
-
-```
-State before change:     Alice, Bob, Carol all primed to R1
-Alice falls out.
-Coordinator broadcasts:  new commitment tx with R2 (Bob + Carol only)
-Bob re-primes R1 → R2    (burns one Chain A depth)
-Carol re-primes R1 → R2  (burns one Chain A depth)
-Only now can the QABIO tx execute.
-```
-
-This is enforced by consensus, not protocol courtesy. The QABIO tx validates each input's `committed_QABI_ROOT` against the tx's `QABI_BLOCK` root. If Bob is still primed to R1 and the coordinator tries to build a tx with R2 (Bob + Carol, no Alice), Bob's per-input root check fails — `R1 ≠ R2` — and the whole tx is invalid.
-
-**Compositional atomicity invariant:** the batch is atomic not only in execution but in composition. No strict subset of a primed batch can execute. Any change to the participant set, outputs, amounts, or coordinator forces a full re-prime cycle across every remaining participant.
-
-**Why this is a feature:** it eliminates the "silently reduced batch" attack class. A coordinator (or a subset of participants) cannot quietly exclude one party and execute the remainder on terms the excluded party wasn't shown. Every composition change is a public, observable event (new commitment tx) and requires active participation (re-priming) from everyone who wants to stay in.
-
-**Cost of a dropout:** one re-prime per remaining participant. This creates strong incentive for coordinators to only broadcast a commitment when confident everyone will follow through, and for participants to stay online and responsive during the priming → spend window.
-
-**Orphaned state:** UTXOs primed to the dead root R1 remain primed to R1. They can never be spent in an R2 batch (composition mismatch). Their owners either re-prime them into a new batch or sweep via Rung 0.
-
-## 6. Phase 2 — Priming
-
-### Purpose
-
-Commit each participant's UTXO to the `QABI_ROOT` from the commitment tx, via a covenant spend. This locks the participant's UTXO to the specific batch composition cryptographically.
-
-### Flow
-
-```
-Alice wants to join batch with QABI_ROOT = R
+Alice wants to join a batch with QABI_ROOT = R and prime_expiry_height = E.
+Her current UTXO state: committed_depth = d_prev, committed_root = r_prev.
 
 Alice's priming tx:
-  Input:  UTXO_1 (Alice's current QABI-enabled UTXO)
-  
-  Witness:
-    - Chain A preimage at current depth d
-    - Merkle proof to QABI_CONDITIONS_RELAY
-    - RECURSE_MODIFIED covenant data (mutation: committed_QABI_ROOT = R)
-  
-  Output: UTXO_1' 
-    - Same scriptPubKey structure
-    - Same Chain A tip (but depth now at d+1 in wallet tracking)
-    - Same Chain B tip
-    - Same FALCON pubkey
-    - committed_QABI_ROOT = R (updated from 0 or previous R')
-    - Same creation_block_height reference (for time-lock continuity)
+  Input:  UTXO_alice (current)
+
+  Witness stack (Rung 1 / QABI_PRIME):
+    prime_preimage        — H^{N-d}(auth_seed) for chosen depth d > d_prev
+    prime_depth           — d (NUMERIC varint)
+    new_committed_root    — R (HASH256)
+    new_committed_expiry  — E (NUMERIC, 4 B)
+
+  Output: UTXO_alice'
+    Same scriptPubKey family (TX_MLSC). The conditions tree is identical to
+    the input except for the three mutable fields in QABI_STATE_RELAY:
+      committed_root    = R
+      committed_depth   = d
+      committed_expiry  = E
+    The immutable auth_tip, Rung 0, Rung 1, Rung 2 are all preserved bit-exact.
 ```
 
-### Chain A depth selection
+### Consensus check (`EvalQABIPrime`)
 
-Alice chooses any depth from her Chain A for a priming attempt. No time-based depth floor is required — RBD handles snipe resistance cryptographically via the depth-war mechanism (see section 9).
+```
+1. H^{prime_depth}(prime_preimage) == auth_tip           (preimage valid)
+2. prime_depth > committed_depth                         (monotonic progression)
+3. covenant: output UTXO's QABI_STATE_RELAY contains exactly
+     (auth_tip          unchanged,
+      committed_root    = new_committed_root,
+      committed_depth   = prime_depth,
+      committed_expiry  = new_committed_expiry)
+4. covenant: all other conditions-tree leaves preserved bit-exact
+```
 
-**Strategy:** Alice's wallet picks a starting depth (e.g., 1) for the first priming attempt. If RBD replacement is needed (an attacker sniped), she bumps to a deeper depth. She can always go one deeper than the attacker because only she holds `mk_A`.
+### Depth accounting
+
+- Priming consumes one depth
+- Spending consumes one more depth (`committed_depth + 1`)
+- Re-priming (after a failed batch, or a snipe recovery) consumes one more depth beyond whatever was previously committed
+- Default `auth_chain_length = 20,000` supports ~10,000 clean batch rounds or ~6,600 fail-retry rounds per UTXO
 
 ### RBD (Replace-By-Depth) mempool policy
 
-If two or more priming transactions spending the same UTXO are in the mempool, the tx with the **deepest Chain A depth** wins. Shallower ones are evicted.
+If multiple priming txs for the same UTXO are in the mempool, the one with the **deepest `prime_depth`** wins:
 
 ```
-Mempool RBD rule:
-  For QABI priming txs spending the same input UTXO:
-    tx2 replaces tx1 if:
-      tx2.chain_a_depth > tx1.chain_a_depth
-      AND both are valid
+For QABI_PRIME transactions spending the same input UTXO:
+  tx2 replaces tx1 if:
+    tx2.prime_depth > tx1.prime_depth
+    AND tx2 is valid
+    AND tx2 meets standard relay requirements
 ```
 
-Tiebreaker (same depth): first-seen.
+**Rationale:** deeper preimages can only be produced by the UTXO owner (one-way hash). RBD gives the owner a cryptographic "last word" over any conflicting priming tx from an attacker who scraped a shallower preimage from the mempool.
 
 ### Priming failure modes
 
-1. **Priming tx drops from mempool (fee issue)**: UTXO unchanged. Alice rebroadcasts with higher fee. No depth change needed.
-2. **Priming snipe (non-mining attacker)**: RBD defeats this. Alice bumps to a deeper preimage the attacker cannot produce.
-3. **Priming snipe (mining attacker)**: A miner can force their own priming tx into a block they mine, committing UTXO to a malicious root. Alice recovers by re-priming at the next block — her new priming has a deeper depth and spends the (now-malicious) primed UTXO to create a new one with her good root.
-4. **Mid-batch re-priming**: because QABI_BLOCK commits to participant identity (not outpoint), re-priming doesn't invalidate the batch. Alice just reports her new outpoint to the coordinator, who updates the batch tx inputs.
+1. **Priming tx drops from mempool (low fee):** UTXO unchanged. Rebroadcast with higher fee.
+2. **Non-mining snipe:** attacker scrapes the mempool preimage. RBD defeats this — Alice bumps to a deeper depth.
+3. **Mining snipe:** attacker mines a block containing their own priming tx at the same depth with a malicious root. Alice's UTXO is briefly primed to the wrong root but is still safe — the attacker cannot build a `QABIO` tx spending it without the **deeper** spend preimage, which only Alice has. Alice recovers by re-priming at depth > current committed_depth.
 
 ---
 
-## 7. Phase 3 — QABIO batch spend
+## 6. Phase 2 — QABIO batch spend
 
 ### Purpose
 
-Spend all primed UTXOs atomically in a single transaction authorised by one FALCON signature.
+Spend all primed UTXOs atomically in a single rung_tx authorised by ONE coordinator FALCON-512 signature.
 
 ### Flow
 
 ```
-QABIO batch tx:
+Coordinator collects spend preimages from all participants (off-chain, over a
+secure channel). Once all preimages are gathered, coordinator builds:
+
+QABIO rung_tx:
   Inputs:
-    Commitment anchor UTXO (consumed here)
-    UTXO_alice (primed to R)
-    UTXO_bob   (primed to R)
-    UTXO_carol (primed to R)
+    UTXO_alice   (primed to R, committed_depth = d_A, committed_expiry = E)
+    UTXO_bob     (primed to R, committed_depth = d_B, committed_expiry = E)
+    UTXO_carol   (primed to R, committed_depth = d_C, committed_expiry = E)
     ...
-  
-  Witness per primed input:
-    - Chain B preimage (participant's consent to the spend)
-    - Merkle proofs for rung + relays
-    - Reference to the tx-level QABI_BLOCK
-  
-  Witness for commitment anchor input:
-    - Proof that anchor's committed H(QABI_BLOCK) matches the tx's QABI_BLOCK
-  
-  Tx-level data:
-    QABI_BLOCK (included once, every primed input references it)
-    tx.aggregated_sig: FALCON signature over sighash (this IS the QABO sig)
-  
+    [optionally] coordinator fee UTXO — unprimed, spent via its own Rung 0
+
   Outputs:
-    Per-participant destinations as defined in QABI_BLOCK
-    (each output is a standard TX_MLSC output with fresh QABI-enabled structure)
+    Exactly block.outputs (bit-exact, same order, same values, same scripts)
+
+  Witness per primed input (Rung 2 / QABI_SPEND):
+    spend_preimage   — H^{N-(committed_depth+1)}(auth_seed) for this UTXO
+
+  Witness for coordinator fee input (if any):
+    Rung 0 FALCON sig, normal self-spend
+
+  Tx-level fields:
+    tx.qabi_block       — serialised QABIBlock bytes
+    tx.aggregated_sig   — FALCON-512 sig by coordinator over SIGHASH_QABO
 ```
 
-**Atomicity guarantee (execution):** the single QABIO tx either executes fully or not at all. Every primed input's root check must pass against the same tx-level QABI_BLOCK, ensuring all participants are primed to the same root. The commitment anchor consumption proves the batch was publicly committed to.
-
-**Atomicity guarantee (composition):** no subset of a primed batch can execute. Because `QABI_BLOCK` commits to the full participant set and output list, any attempt to build a QABIO tx with fewer (or different) participants yields a different root. Every remaining primed input's `committed_QABI_ROOT` still points to the original root and fails the per-input root check. To proceed with a changed composition, a new commitment tx must be broadcast and every participant in the new set must re-prime. See Section 5 "Root change semantics".
-
-### Evaluator logic for Rung QABI
+### Consensus check (`EvalQABISpend`, runs per primed input)
 
 ```
-eval_rung_qabi(ctx):
-    # Step 1: Check QABI_CONDITIONS_RELAY (QCONDR coil)
-    #         The coil was energised during priming; we're just confirming state.
-    if ctx.utxo.committed_QABI_ROOT == 0:
-        return UNSATISFIED  # UTXO not primed
-    
-    # Step 2: Check QABI_CONSENT_RELAY (QCONSR coil)
-    chain_b_preimage = ctx.witness.chain_b_preimage
-    chain_b_depth = ctx.witness.chain_b_depth
-    expected_tip = ctx.utxo.chain_b_tip_commitment
-    if hash_n_times(chain_b_preimage, chain_b_depth) != expected_tip:
-        return UNSATISFIED
-    
-    # Step 3: Check ROOT_MATCH (tx QABI_BLOCK matches committed root)
-    tx_qabi_block = ctx.witness.qabi_block
-    computed_root = merkle_root(tx_qabi_block.entries)
-    if computed_root != ctx.utxo.committed_QABI_ROOT:
-        return UNSATISFIED
-    
-    # Step 4: Check identity — UTXO's Rung 0 FALCON pubkey must be in the block
-    my_falcon_pk = ctx.utxo.rung_0.falcon_pubkey
-    my_id = H(my_falcon_pk)
-    if my_id not in [e.participant_id for e in tx_qabi_block.entries]:
-        return UNSATISFIED
-    
-    # Step 5: Check QABO FALCON sig
-    qabo_sig = ctx.tx.aggregated_sig
-    qabo_pubkey = tx_qabi_block.coordinator_pubkey
-    if not falcon_verify(qabo_pubkey, ctx.sighash, qabo_sig):
-        return UNSATISFIED
-    
-    return SATISFIED
+1. committed_root != 0                                    (UTXO is primed)
+
+2. current_block_height <= committed_expiry               (batch not expired)
+
+3. H^{committed_depth + 1}(spend_preimage) == auth_tip    (spend preimage valid)
+
+4. SHA256(tx.qabi_block) == committed_root                (root match)
+
+5. block = ParseQABIBlock(tx.qabi_block)
+   block != nullptr                                       (block parses, well-formed)
+
+6. block.prime_expiry_height == committed_expiry          (expiry match)
+
+7. my_id = SHA256(this UTXO's Rung 0 falcon_pubkey)
+   entry = block.entries.find(participant_id == my_id)
+   entry != null                                          (identity present)
+
+8. tx.outputs.size() == block.outputs.size()
+   for i in 0 .. block.outputs.size():
+     tx.outputs[i] == block.outputs[i]                    (FULL output set match —
+                                                           no extras, no reorder,
+                                                           no substitution; closes
+                                                           the coordinator-skim hole)
+
+9. FalconVerify(
+     pubkey  = block.coordinator_pubkey,
+     message = ComputeSighashQABO(tx),
+     sig     = tx.aggregated_sig) == VALID                (QABO sig valid)
 ```
 
-### Atomicity
+All nine checks must pass for each primed input. If any input fails, the whole tx is invalid. **Atomicity by construction.**
 
-All input Rung QABI evaluations must succeed simultaneously for the tx to be valid. If any one fails, the whole tx is rejected. Since all inputs reference the same `QABI_ROOT` (enforced by the root match check on each input), they all commit to the same QABI_BLOCK, and therefore the same outputs. The batch is atomic by construction.
+### Atomicity guarantees
+
+**Execution atomicity:** the single QABIO tx either executes fully or not at all — standard transaction semantics.
+
+**Compositional atomicity:** no strict subset of a primed batch can execute. Because `QABIBlock` commits to the full participant set, expiry, and output list, any attempt to build a QABIO tx with a different composition yields a different `QABI_ROOT`. Every primed input would then fail its per-input root match check. To proceed with a changed composition, a new block with a new root must be agreed, and **every remaining participant must re-prime** (consuming one more auth chain depth each). See §11 Attack 6 for the worked example.
+
+### Why coordinators can't skim
+
+Even with all participants' spend preimages in hand, the coordinator cannot siphon value:
+
+- Check 8 enforces `tx.outputs` to **exactly match** `block.outputs` — no extra "coordinator fee" output can be added, no reordering, no value substitution
+- Coordinators who want to collect a fee must include themselves as an entry in `block.outputs` with a stated amount, visible to all participants at block-review time
+- Any implicit remainder from `sum(inputs) - sum(block.outputs)` is paid as a miner fee (standard tx validity)
 
 ---
 
-## 7. QABI_BLOCK structure
-
-**Design note:** QABI_BLOCK commits to STABLE batch content (identities, amounts, destinations, coordinator) and NOT to per-UTXO outpoints. This lets participants re-prime without invalidating the block.
+## 7. QABIBlock structure
 
 ```
-QABI_BLOCK {
-    batch_id: 32 bytes (unique per batch attempt)
-    coordinator_pubkey: FALCON pubkey of the coordinator
-    
-    entries: list of participant rows {
-        participant_id:    H(falcon_pubkey) — stable identity from Rung 0
-        amount:            int64 (value being contributed)
-        destination_index: varint (which output is their destination)
+QABIBlock {
+    version:               u8     (0x01 for v1)
+    batch_id:              u256   (32 B random, unique per batch attempt)
+    coordinator_pubkey:    bytes  (897 B, FALCON-512 pk)
+    prime_expiry_height:   u32    (max block height at which QABI_SPEND may fire)
+
+    entries: vector<QABIEntry> {
+        participant_id:    u256   (32 B, = SHA256(participant's Rung 0 falcon pk))
+        contribution:      i64    (sats this participant puts in)
+        destination_index: varint (index into outputs[])
     }
-    
-    outputs: list of destinations {
-        amount: int64
-        script_pubkey: variable length
+
+    outputs: vector<CTxOut> {
+        amount:            i64    (sats)
+        script_pubkey:     bytes  (variable)
     }
 }
 
-QABI_ROOT = merkle_root(serialized QABI_BLOCK fields)
+QABI_ROOT = SHA256(canonical_serialise(QABIBlock))
 ```
 
-**Identity binding:** at spend time, each input's Rung QABI evaluator reads its own Rung 0 FALCON pubkey hash and verifies that hash appears in the block's `entries[*].participant_id` list. This proves the UTXO belongs to a participant without committing to an outpoint.
+### Design notes
 
-**Re-priming preserves identity:** when Alice re-primes, the new UTXO inherits the same FALCON pubkey from Rung 0. The QABI_BLOCK doesn't need to change — only the coordinator's off-chain mapping of "Alice → current outpoint" needs updating.
+- **Identity binding** — `participant_id` is the hash of the Rung 0 FALCON pubkey. This is stable across re-primings: Alice can re-prime to the same root using a new UTXO (created from a previous Rung 0 sweep) as long as her FALCON key is the same. The block's `entries` list does not need to be rewritten for re-primings.
+- **Version byte** — reserved for future variants (e.g., a Merkle-commit version for very large batches, or a privacy-extended version). v1 is flat `SHA256(bytes)`.
+- **Coordinator pubkey in-line** — carried inside the block (897 B) so every input's QABO check can read it without extra lookups.
+- **prime_expiry_height in-block** — commits the expiry to the root. Changing the expiry changes the root, forcing a re-prime — which is the desired behaviour.
+- **Canonical serialisation** — field order is fixed, integers are little-endian, varints use Bitcoin's standard `CompactSize`. A single bit difference in serialisation means a different `QABI_ROOT`, so every implementation must agree.
+
+### Size estimate
+
+```
+Header:
+  version              1 B
+  batch_id             32 B
+  coordinator_pubkey   897 B
+  prime_expiry_height  4 B
+                       ─────
+                       934 B
+
+Per entry:  32 (id) + 8 (contribution) + 1-5 (dest_index) = ~41 B
+Per output: 8 (value) + 1 + 25-35 (script) = ~34-44 B
+
+For N = 100 participants with standard P2WPKH destinations:
+  Header:   934 B
+  Entries:  100 × 41 = 4100 B
+  Outputs:  100 × 40 = 4000 B
+  Framing:  ~50 B
+  Total:    ~9 KB
+
+For N = 500:
+  Header:   934 B
+  Entries:  ~20500 B
+  Outputs:  ~20000 B
+  Total:    ~42 KB
+```
+
+### Size caps
+
+- **Soft cap (standard relay):** `QABI_BLOCK_MAX_SOFT = 65536` (64 KB) — supports ~400-participant batches
+- **Hard cap (consensus):** `QABI_BLOCK_MAX_HARD = 262144` (256 KB) — supports ~1600-participant batches
+- Blocks larger than the soft cap won't relay via standard nodes but can be mined directly
+- Blocks larger than the hard cap are rejected at consensus level
 
 ---
 
-## 8. Size and cost analysis
+## 8. Transaction format
 
-### At creation
+### New tx-level fields
+
+Two fields sit alongside the existing TX_MLSC tx-level fields (`conditions_root`, `creation_proof`, `aggregated_sig`). They are serialised inside the `flags == 0x02` TX_MLSC block in `SerializeTransaction` / `UnserializeTransaction`:
+
+```
+TX_MLSC serialisation (flags == 0x02), after per-input witness stacks:
+  CompactSize creation_proof_len + bytes
+  CompactSize qabi_block_len + bytes          ← NEW
+  CompactSize aggregated_sig_len + bytes      ← CAP RAISED 32 → 666
+```
+
+Both fields are `std::vector<uint8_t>` on `CTransaction` and `CMutableTransaction`:
+
+| Field | Previous state | New state |
+|---|---|---|
+| `qabi_block` | *did not exist* | Optional, empty by default, max 64 KB soft / 256 KB hard |
+| `aggregated_sig` | Reserved (always empty, wire compat), capped at 32 B | Optional, empty by default, capped at exactly 666 B (FALCON-512 sig size) |
+
+### Tx-level rules
+
+```
+If any input has committed_root != 0 (i.e., any primed input):
+  require tx.qabi_block non-empty
+  require ParseQABIBlock(tx.qabi_block) succeeds
+  require tx.aggregated_sig non-empty
+  require tx.aggregated_sig.size() == 666 (FALCON-512 exact)
+
+If no input has committed_root != 0:
+  require tx.qabi_block empty
+  require tx.aggregated_sig empty
+```
+
+### SIGHASH_QABO
+
+New sighash mode for the coordinator's FALCON signature. Covers:
+
+- `version`
+- `vin` (all outpoints, sequences, order)
+- `vout` (all values, scripts, order)
+- `conditions_root`
+- `creation_proof`
+- **`qabi_block`** (critical — without this, block substitution is possible)
+- All per-input witness stacks **except** the witnesses that contain the spend preimages of QABI_SPEND inputs (TBD — may need to include them to prevent witness malleation; decision in Phase 9)
+- `nLockTime`
+
+Excludes:
+
+- `aggregated_sig` itself (chicken-and-egg)
+
+---
+
+## 9. Size and cost analysis
+
+### At UTXO creation
+
 - **33 bytes** (standard TX_MLSC scriptPubKey: `0xDF || conditions_root`)
-- No extra cost for QABI relays, rungs, or chain commitments (all Merkle-committed)
+- Zero extra cost for QABI state relay, Rung 1, Rung 2 — all Merkle-committed
 
 ### Per priming attempt
-- **~300 bytes** (one covenant tx per priming)
-- Chain A preimage: 32 B
-- Merkle proof to relay: ~100 B
-- RECURSE_MODIFIED mutation data: ~50 B
-- Tx overhead: ~100 B
 
-### Per batch spend (100 inputs)
+```
+Rung 1 witness:
+  prime_preimage:            32 B
+  prime_depth:               1-5 B (varint)
+  new_committed_root:        32 B
+  new_committed_expiry:      4 B
+  Merkle proofs (rung+relay): ~100 B
+  Tx framing + input/output:  ~150 B
+                              ─────
+  ~320 B per priming tx
+```
+
+### Per QABIO batch spend (100-input batch)
+
 ```
 Per-input witness (amortised):
-  Chain B preimage:        32 B
-  Merkle proofs:           ~100 B
-  QABI_BLOCK entry:        ~72 B
-  
-Shared across tx:
-  QABI_BLOCK metadata:     ~100 B
-  Coordinator pubkey:      ~900 B (FALCON pubkey)
-  FALCON QABO sig:         666 B
-  
-Total for 100 inputs:     ~22 KB witness
+  spend_preimage:              32 B
+  Merkle proofs:               ~100 B
+  Tx framing:                  ~20 B
+                               ─────
+  ~150 B × 100 = 15 KB
+
+Tx-level (shared):
+  qabi_block (serialised):     ~9 KB
+  aggregated_sig (FALCON-512): 666 B
+                               ─────
+  ~10 KB
+
+Total witness: ~25 KB
 ```
 
-**Compared to per-input FALCON (100 × 666 B = 66.6 KB):**
-- QABI batch: ~22 KB
-- Saving: ~67%
+### Comparison vs per-input FALCON
 
-For larger batches (500 inputs), the saving grows because the FALCON sig is fixed.
+```
+Per-input FALCON (hypothetical):
+  100 × (666 B sig + 897 B pubkey) = ~156 KB
+
+QABIO batch: ~25 KB
+
+Saving: ~84%
+```
+
+Saving grows with batch size because the FALCON sig and pubkey are tx-level constants.
 
 ---
 
-## 9. Mempool policies
+## 10. Mempool policies
 
-### RBD — Replace-By-Depth
+### RBD (Replace-By-Depth)
 
 ```
-For QABI priming transactions:
-  A new priming tx T2 replaces an existing priming tx T1 if:
+For QABI_PRIME transactions:
+  A new priming tx T2 replaces existing priming tx T1 in the mempool if:
     - T2 spends the same UTXO as T1
-    - T2.chain_a_depth > T1.chain_a_depth
+    - T2.prime_depth > T1.prime_depth
     - T2 is valid
-    - T2 meets standard relay requirements (min fee, weight, etc.)
+    - T2 meets standard relay requirements
 ```
 
-**Rationale:** Deeper preimages can only be produced by the UTXO owner (one-way hash property). RBD gives the owner a cryptographic "last word" over any conflicting priming tx.
+**Rationale:** deeper preimages can only be produced by the UTXO owner (one-way hash property). RBD is the mempool-level expression of this cryptographic asymmetry.
 
 ### Standard RBF coexistence
 
-RBD operates alongside standard RBF. For priming txs, deeper depth takes precedence. For batch spend txs, RBF applies normally (fee-based replacement).
+For QABIO spend txs (not priming txs), standard RBF applies normally — higher fee replaces lower fee. RBD is orthogonal and only affects `QABI_PRIME` txs.
 
 ---
 
-## 10. Security analysis
+## 11. Security analysis
 
-### Attack 1: Spend-time sniping (leaked Chain B)
+### Attack 1 — Spend-time preimage leakage
 
-**Scenario:** Batch tx broadcasts, Chain B preimages are visible in mempool. Tx drops. Attacker grabs preimages.
+**Scenario:** QABIO tx is broadcast, every primed input's spend preimage is now publicly visible in the mempool.
 
-**Defense:** The primed UTXO requires `tx.QABI_BLOCK.root == committed_QABI_ROOT`. Attacker would need to construct a tx with the same QABI_BLOCK (which locks outputs). Any change to outputs changes the root, breaking the commitment. Attacker cannot steal.
+**Defence:** The primed UTXO requires `tx.qabi_block` to hash to its `committed_root`. A changed block yields a changed hash, breaking the root match. An attacker rebroadcasting Alice's preimage with a different tx would need to reconstruct the same block (same entries, same outputs, same expiry, same coordinator pubkey) — which is Alice's intended tx. Replay of the intended batch is not theft.
 
-**Residual risk:** Attacker can rebroadcast Alice's exact tx, but this isn't theft — it just executes Alice's intended batch.
+**Residual risk:** none.
 
-### Attack 2: Priming-time sniping (leaked Chain A, non-mining attacker)
+### Attack 2 — Priming snipe by non-mining attacker
 
-**Scenario:** Alice's priming tx in mempool. Attacker grabs Chain A preimage.
+**Scenario:** Alice broadcasts priming at depth `d`. Attacker scrapes the preimage from the mempool and broadcasts a conflicting priming at the same depth with `committed_root = R_evil`.
 
-**Defense:** RBD mempool policy. Alice bumps to a deeper Chain A preimage. Attacker cannot counter (they cannot produce deeper preimages without `mk_A`).
+**Defence:** RBD mempool policy. Alice rebroadcasts at depth `d+1`. The attacker cannot produce deeper preimages (one-way hash) and Alice wins the depth war.
 
-**Residual risk:** None. Alice always wins the depth war.
+**Residual risk:** none.
 
-### Attack 3: Priming-time sniping (mining attacker)
+### Attack 3 — Priming snipe by mining attacker
 
-**Scenario:** Mining attacker includes their own shallow priming tx directly in a block they mine, bypassing RBD mempool policy.
+**Scenario:** Mining attacker `M` includes a priming tx for Alice's UTXO at depth `d` in a block `M` mines, with `committed_root = R_evil`. This bypasses RBD.
 
-**Defense:** Time-locked Chain A. Next block, required depth advances. Alice re-primes with fresh deeper preimage. Attacker's stale hash is rejected.
+**Defence:** Alice's UTXO is briefly primed to `R_evil` but `M` cannot execute the attack: spending this UTXO in a QABIO tx requires revealing the spend preimage at depth `d+1`, which only Alice has. `M` has depth `d` but cannot compute depth `d+1` from it. Alice re-primes at depth `d+1` with the correct root, restoring her intended state. The attacker has wasted a block.
 
-**Residual risk:** A persistent mining attacker controlling every block can continuously grief Alice. This requires 51%+ mining power applied to one user, which is economically irrational (no profit, infinite cost).
+**Residual risk:** a 51%+ mining attacker targeting one user persistently — economically irrational (zero profit, infinite cost).
 
-### Attack 4: Chain exhaustion (DoS by repeated grief)
+### Attack 4 — Coordinator colludes with mining attacker
 
-**Scenario:** Attacker repeatedly snipes Alice's primings, burning her Chain A depths.
+**Scenario:** Evil coordinator `C` wants to steal Alice's UTXO. `C` colludes with mining attacker `M`. `M` snipes Alice's priming to `committed_root = R_evil` where `R_evil = SHA256(B_evil)` and `B_evil` sends Alice's funds to `C`.
 
-**Defense:** Chain A length is wallet-chosen, typically 10,000+. Burning a depth per attack means 10,000 attacks before exhaustion. Each attack costs the attacker a priming tx fee. Economically irrational for the attacker.
+**Defence:** Same as Attack 3. The spend still requires Alice's depth `d+1` preimage. `C` and `M` cannot produce it. Attack fails unless `C` also has Alice's spend preimage — which she only reveals to `C` after verifying that her own priming stuck and not `M`'s. Alice's wallet checks "is my UTXO currently committed to my intended root?" before revealing the spend preimage.
 
-**Residual risk:** With infinite attacker budget, Alice's chain eventually exhausts. She sweeps via Rung 0 and creates a new QABI-enabled UTXO.
+**Residual risk:** Alice must wait a few blocks of confirmation before releasing the spend preimage to verify no reorg displacement. Standard confirmation discipline.
 
-### Attack 5: Malicious coordinator
+### Attack 5 — Coordinator output skim
 
-**Scenario:** Coordinator builds a QABI_BLOCK with outputs Alice didn't agree to.
+**Scenario:** Coordinator builds a valid QABIO tx with all participants' destinations listed correctly in `block.outputs`, but adds an extra output to themselves beyond what the block specifies. Participants thought the remainder went to miners; coordinator pockets it instead.
 
-**Defense:** Alice verifies the QABI_BLOCK before priming. If the outputs are wrong, she refuses to prime. Without Alice's priming, the batch cannot execute Alice's UTXO.
+**Defence:** Check 8 of `EvalQABISpend` enforces `tx.outputs == block.outputs` bit-exact (full output set match, no extras allowed). Any extra output is rejected. Coordinators who want a fee must explicitly include themselves as an entry in `block.outputs`, visible to participants at block-review time.
 
-**Residual risk:** Alice must validate the block pre-priming. This is a UX requirement, not a cryptographic one.
+**Residual risk:** none.
 
-### Attack 6: Participant abandonment
+### Attack 6 — Participant dropout forces re-prime cycle
 
-**Scenario:** Alice primes, then abandons (doesn't reveal Chain B or goes offline). Other participants cannot complete the original batch.
+**Scenario:** Alice primes, then refuses to reveal her spend preimage (or goes offline). The batch cannot execute with the original composition (her input has no spend preimage).
 
-**Defense:** The batch tx requires Chain B preimages from every participant in the `QABI_BLOCK`. Without Alice's Chain B reveal, the original batch (root R1) cannot execute. The compositional atomicity invariant then kicks in: the coordinator cannot quietly drop Alice and execute an Alice-less subset of R1, because Bob and Carol's UTXOs are still `committed_QABI_ROOT = R1`, and any tx with a different composition has a different root.
+**Defence:** Coordinator builds a new `QABIBlock` with a new `QABI_ROOT` excluding Alice. **Every remaining participant must re-prime** to the new root (compositional atomicity) — Bob and Carol each burn one more auth chain depth. Alice's primed UTXO remains locked to the dead root until she re-primes to another batch or Rung-0-sweeps.
 
-**Recovery path:**
-1. Coordinator broadcasts a new commitment tx with R2 (Alice excluded, possibly with a replacement participant).
-2. Bob and Carol each re-prime from R1 → R2, burning one Chain A depth each.
-3. The QABIO tx executes against R2.
+**Residual risk:** one re-prime per remaining participant per dropout. Chain length of 20,000 absorbs many rounds. Social cost (delay, re-coordination) is real but bounded.
 
-**Residual risk:** One burned Chain A depth per remaining participant, per abandonment event. Chain A is typically 10,000+ depths, so the economic cost is trivial but the social cost (delay, re-coordination) is real. This creates the right incentive pressure: coordinators must vet participants, and participants have a reason not to abandon.
+### Attack 7 — Batch expiry lapse
 
-**What Alice cannot do:** Alice cannot grief by abandoning repeatedly across multiple commitments, because each new commitment explicitly lists participants — the coordinator simply stops including her. Her only remaining options are to fully participate, or to sweep her primed UTXO via Rung 0 (which confirms her exit publicly).
+**Scenario:** The coordinator delays broadcasting the QABIO tx until after `prime_expiry_height` passes.
 
-### Attack 7: Double-spend via Rung 0
+**Defence:** `EvalQABISpend` check 2 rejects any spend at `current_height > committed_expiry`. The batch cannot execute. Participants can re-prime into a new batch or Rung-0-sweep. The expiry is committed inside the block (via `prime_expiry_height`), so all participants agreed to the deadline when they primed.
+
+**Residual risk:** priming effort wasted if the expiry lapses. Mitigated by setting realistic expiry windows (e.g., 144 blocks = ~1 day).
+
+### Attack 8 — Block substitution at mining time
+
+**Scenario:** A miner sees a valid QABIO tx with `tx.qabi_block = B1` in the mempool and tries to substitute `B2` in their block.
+
+**Defence:** `SIGHASH_QABO` covers `tx.qabi_block`. Changing the block changes the sighash, invalidates the FALCON sig, tx is rejected.
+
+**Residual risk:** none.
+
+### Attack 9 — Malformed or oversized block
+
+**Scenario:** Coordinator broadcasts a tx with `tx.qabi_block` that is 512 MB of garbage, or structurally invalid.
+
+**Defence:** Hard cap `QABI_BLOCK_MAX_HARD` rejects oversized blocks at consensus. `ParseQABIBlock` strict validation rejects structurally invalid blocks at consensus check time. Tx fails before any real work is done.
+
+**Residual risk:** none.
+
+### Attack 10 — Double-spend via Rung 0
 
 **Scenario:** Alice primes, then sweeps her UTXO via Rung 0 before the batch executes.
 
-**Defense:** Both the primed spend and Rung 0 spend reference the same UTXO. Only one can confirm. If Rung 0 wins, the batch tx becomes invalid. This is Alice's choice — she's opting out of the batch.
+**Defence:** The primed UTXO and the Rung 0 sweep reference the same UTXO. Only one can confirm. If Rung 0 wins, the batch tx becomes invalid (missing input). Alice has exercised her escape hatch — this is a feature, not an attack. Other participants must re-prime (Attack 6 applies).
 
-**Residual risk:** Other participants waste fees on primings. Standard coordination problem.
+**Residual risk:** wasted priming effort for other participants. Standard coordination problem.
 
-### Attack 8: Collusion between coordinator and participant
+### Attack 11 — Participant ID collision
 
-**Scenario:** Coordinator and a participant collude to steal another participant's funds.
+**Scenario:** Two participants have the same `H(FALCON pubkey)` = same `participant_id`.
 
-**Defense:** Each participant's UTXO is independently primed to their chosen QABI_ROOT. If the colluders construct a malicious block, the victim's UTXO must already be primed to that block's root — which the victim wouldn't do unless deceived.
+**Defence:** 256-bit SHA256 collision is computationally infeasible. If two participants really share a key, they're the same entity.
 
-**Residual risk:** Social engineering the victim into priming to a malicious root. This is an out-of-band problem, not a cryptographic one.
+**Residual risk:** none.
 
-### Attack 9: Reorg affecting priming
+### Attack 12 — Phantom input
 
-**Scenario:** Alice's priming tx is confirmed in block H, but a reorg causes block H to be replaced.
+**Scenario:** Coordinator includes Alice's primed UTXO plus a stolen-but-primed UTXO belonging to attacker `X` in the batch.
 
-**Defense:** After the reorg, Alice's UTXO state reverts. Alice re-primes. Standard Bitcoin reorg handling.
+**Defence:** Each input's identity check requires its own Rung 0 FALCON pubkey hash to appear in `block.entries`. `X`'s UTXO either (a) isn't primed to `committed_root` (its own state mismatches), or (b) is primed but `X`'s identity isn't in the block. Either way, the attack fails.
 
-**Residual risk:** If the batch tx also confirmed and gets reorged, the funds are still safe — they revert to primed state. If the reorg is deep enough to revert multiple blocks, standard Bitcoin reorg risks apply.
+**Residual risk:** none.
 
----
+### Attack 13 — Chain exhaustion DoS
 
-## 11. Open questions / things to verify
+**Scenario:** Persistent attacker repeatedly snipes Alice's primings, burning auth chain depths until exhausted.
 
-1. **Covenant mechanics**: Does `RECURSE_MODIFIED` support mutating a single committed field (the `committed_QABI_ROOT`) while preserving all other conditions? Needs verification against current Ladder Script code.
+**Defence:** Default chain length 20,000 depths. Each attack costs the attacker a priming tx fee. 20,000 attacks to exhaust Alice's chain. If exhausted, Alice sweeps via Rung 0 and creates a new QABI-enabled UTXO with a fresh chain.
 
-2. **Coordinator pubkey commitment**: Should the UTXO also commit to the coordinator's FALCON pubkey during priming? Currently the pubkey is in the QABI_BLOCK, which is bound to the root. Seems sufficient but worth verifying.
+**Residual risk:** accepted; economic cost to attacker dwarfs damage.
 
-3. **Chain B necessity**: If the root commitment alone prevents spend-time theft, is Chain B redundant? Current design keeps Chain B as an explicit "abandonment" mechanism (Alice can choose not to reveal Chain B to prevent spend). Could be simplified to just Chain A + root commitment.
+### Attack 14 — Off-chain coordinator shows inconsistent blocks to different participants
 
-4. **QABI_BLOCK serialization**: Precise format, ordering, and hashing needs to be specified so that independent implementations produce the same root.
+**Scenario:** Coordinator shows Alice `B1` and Bob `B2`. Alice primes to `SHA256(B1)`, Bob primes to `SHA256(B2)`. Coordinator cannot assemble a single QABIO tx that satisfies both.
 
-5. **RBD consensus implications**: RBD is a mempool policy, not a consensus rule. If different nodes implement it differently, what are the effects on block propagation and reorg behaviour?
+**Defence:** Compositional atomicity. Any QABIO tx carries one `tx.qabi_block`. If it's `B1`, Bob's input fails; if it's `B2`, Alice's input fails. Neither can execute. Participants discover the inconsistency when the QABIO tx fails to materialise; they compare notes off-chain.
 
-6. **Fee handling**: Who pays priming fees? Each participant pays their own. Who pays batch fees? Deducted proportionally from inputs? Specified in QABI_BLOCK?
+**Residual risk:** participants burn priming fees before discovering the inconsistency (this is the one real UX regression vs. a design with a pre-priming commitment anchor). Accepted for v1 — grief, not theft.
 
-7. **Max participants per batch**: Practical limit imposed by tx size (4 MB standard, more with blocks). ~1000 participants per batch is realistic.
+### Attack 15 — Reorg affecting priming
 
-8. **Chain length defaults**: Chain A at 10,000 depths? Chain B at 1 depth (single-use per primed state)? Worth tuning based on expected usage.
+**Scenario:** Alice's priming confirms in block H, which is then reorged away.
 
-9. **Integration with TX_MLSC**: Current TX_MLSC has specific rules about `conditions_root` and Merkle tree structure. The QABI relays and rungs need to fit cleanly into this existing structure.
+**Defence:** Standard Bitcoin reorg handling. Alice re-primes in the new chain. If the reorg is deep enough to also revert the QABIO tx, funds still revert to the primed state and Alice can recover.
 
-10. **Rung 0 escape hatch UX**: If a user needs to abandon a primed UTXO, Rung 0 lets them sweep it. But the user must know to do this. Wallet UX should make this automatic on batch abandonment.
+**Residual risk:** standard Bitcoin reorg risks.
 
 ---
 
@@ -497,47 +603,91 @@ RBD operates alongside standard RBF. For priming txs, deeper depth takes precede
 ### New block types (in `src/rung/types.h`)
 
 ```cpp
-// New family 0x0Axx — QABI
-QABI_COND_RELAY    = 0x0A01, // QABI conditions relay (Chain A priming state)
-QABI_CONSENT_RELAY = 0x0A02, // QABI consent relay (Chain B spend consent)
-QABI_BLOCK_CHECK   = 0x0A03, // Verifies tx QABI_BLOCK hashes to committed_QABI_ROOT
-QABO               = 0x0A04, // Verifies tx.aggregated_sig is valid FALCON
+QABI_PRIME = 0x0A01,   // Priming state transition
+QABI_SPEND = 0x0A02,   // Batch spend authorisation
+// 0x0A03, 0x0A04 reserved for future QABI family members
 ```
 
-Slot family `0x0Axx` is currently unallocated in the existing `RungBlockType` enum (families in use: signature `0x00xx`, timelock `0x01xx`, hash `0x02xx`, covenant `0x03xx`, recursion `0x04xx`, anchor `0x05xx`, PLC `0x06xx`, compound `0x07xx`, governance `0x08xx`, legacy `0x09xx`). QABI gets its own family.
+### New tx-level field
+
+Add `qabi_block: std::vector<uint8_t>` to `CTransaction` and `CMutableTransaction`, serialised inside the TX_MLSC path alongside `creation_proof` and `aggregated_sig`.
+
+Raise the `aggregated_sig` cap from 32 to exactly 666 (FALCON-512 sig size).
+
+### New files
+
+- **`src/rung/qabi.h`** — `QABIBlock` struct, `QABIEntry` struct, forward declarations
+- **`src/rung/qabi.cpp`** — `SerializeQABIBlock`, `ParseQABIBlock`, `ComputeQABIRoot`
 
 ### New consensus rules
 
-1. `RECURSE_MODIFIED` extended (or a new recursion type) to support mutation of the `committed_QABI_ROOT` field
-2. `QABI_BLOCK` serialization and hashing
-3. `tx.aggregated_sig` parsing for FALCON signature
-4. Chain A depth computation from block height
+1. Tx-level: if any input has `committed_root != 0`, require `tx.qabi_block` non-empty and parseable, `tx.aggregated_sig` exactly 666 B
+2. `EvalQABIPrime` — the 4 checks described in §5
+3. `EvalQABISpend` — the 9 checks described in §6
+4. `ComputeSighashQABO` — covers everything except `aggregated_sig` itself
 
 ### New mempool policy
 
-1. RBD replacement rule for QABI priming txs
+- **`POLICY_QABI_RBD`** — Replace-By-Depth for `QABI_PRIME` transactions
 
 ### Wallet requirements
 
-1. Chain A and Chain B master seed storage
+1. Auth seed storage (one per QABI-enabled UTXO)
 2. Depth tracking per UTXO
-3. Priming tx construction with correct depth for current block
-4. QABI_BLOCK construction and verification before priming
-5. Automatic Rung 0 sweep on batch abandonment
+3. Priming tx construction with correct depth, covenant mutation fields
+4. QABIBlock verification before priming
+5. Spend preimage reveal to coordinator (off-chain, over authenticated channel)
+6. Automatic Rung 0 sweep prompt on batch abandonment or expiry
 
 ### Test coverage
 
-1. Happy path: 2-party, 5-party, 100-party batches
-2. Priming snipe (non-mining attacker) — RBD successfully defeats
-3. Priming snipe (mining attacker) — Alice recovers at next block
-4. Spend snipe — cryptographically impossible
-5. Chain exhaustion — Alice sweeps via Rung 0
-6. Coordinator refusal — participants recover
-7. Reorg handling
-8. Mempool eviction recovery
+1. Happy path: 2-party, 10-party, 100-party batches
+2. Priming snipe (non-mining) — RBD defeats
+3. Priming snipe (mining) — Alice recovers at next block
+4. Spend preimage leak — cryptographically safe
+5. Expired batch — rejected
+6. Coordinator skim (extra output) — rejected by check 8
+7. Participant dropout — compositional atomicity forces re-prime
+8. Rung 0 sweep during live batch — participants re-prime
+9. Reorg handling
+10. Oversized block — rejected
+11. Malformed block — rejected
 
 ---
 
-## Status
+## 13. Open questions
 
-This is a design draft. **Hole-poking required before implementation.** See Section 10 for current security analysis; real review needed to find what I've missed.
+1. **SIGHASH_QABO scope:** should per-input witnesses (spend preimages) be covered by the sighash, or excluded? Covering prevents witness malleation but requires the coordinator to collect all preimages before signing. Decision in Phase 9.
+
+2. **Covenant primitive:** does `RECURSE_MODIFIED` support mutating three fields (`committed_root`, `committed_depth`, `committed_expiry`) simultaneously while preserving everything else? Or do we need a `QABI_PRIME`-specific covenant path? Decision in Phase 5.
+
+3. **Priming tx fee source:** each participant pays their own priming tx fee. No shared fee accounting needed.
+
+4. **Wallet UX for spend-preimage release:** when should a wallet auto-release the spend preimage to the coordinator? Options: after N confirmations of its own priming tx, after user manual confirmation, after a wallet-policy timer. Probably a wallet-side decision, not a consensus one.
+
+5. **Max participants per batch:** practical limit from `QABI_BLOCK_MAX_HARD` is ~1600. Beyond that, batches would need a future `version 0x02` block format with Merkle-committed entries. Deferred.
+
+6. **Integration with existing RECURSE_MODIFIED tests and covenant validation code:** needs careful review at Phase 5 implementation time.
+
+---
+
+## 14. Status
+
+Design locked as of this revision. Implementation proceeding on the `QABIO` branch across phases:
+
+| Phase | Subject | Status |
+|---|---|---|
+| 0 | Commit design doc | ✅ |
+| 1 | Reserve enum slots (anchor-era names) | ✅ |
+| 1c | Rename enum entries to QABI_PRIME / QABI_SPEND | pending |
+| 2 | QABIBlock struct + serialisation + tx format | pending |
+| 3 | Evaluator stubs | pending |
+| 4 | `EvalQABISpend` real implementation | pending |
+| 5 | `EvalQABIPrime` real implementation | pending |
+| 8 | Wire tx-level aggregated_sig (raise cap) | pending |
+| 9 | Define SIGHASH_QABO | pending |
+| 10 | RBD mempool policy | pending |
+| 11 | Unit tests per evaluator | pending |
+| 12 | End-to-end 2-party batch integration test | pending |
+
+**Hole-poking complete.** See §11 Attack 5 (coordinator skim, closed by check 8) and §11 Attack 14 (off-chain inconsistency, accepted for v1). No unresolved vulnerabilities known at design level.
