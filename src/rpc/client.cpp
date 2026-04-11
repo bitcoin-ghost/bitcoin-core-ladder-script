@@ -314,6 +314,22 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "stop", 0, "wait" },
     { "addnode", 2, "v2transport" },
     { "addconnection", 2, "v2transport" },
+    // Ladder Script + QABIO RPCs. Without these entries, bitcoin-cli
+    // forwards numeric / array / object args as JSON strings and the
+    // server-side type check rejects them with "JSON value of type
+    // string is not of expected type number". Covers every non-string
+    // positional arg of the ladder RPCs as currently declared.
+    { "createtxmlsc", 0, "inputs" },
+    { "createtxmlsc", 1, "amounts" },
+    { "createtxmlsc", 2, "rungs" },
+    { "createtxmlsc", 3, "locktime" },
+    { "signrungtx", 1, "signers" },
+    { "signrungtx", 2, "spent_outputs" },
+    { "qabi_authchain", 1, "chain_length" },
+    { "qabi_authchain", 2, "depth" },
+    { "qabi_buildblock", 1, "prime_expiry_height" },
+    { "qabi_buildblock", 3, "entries" },
+    { "qabi_buildblock", 4, "outputs" },
 };
 // clang-format on
 
