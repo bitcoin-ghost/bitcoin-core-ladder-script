@@ -109,6 +109,7 @@ class QabiTest(BitcoinTestFramework):
         self.test_decode_qabio_tx_preserves_fields()
         self.test_mine_real_qabi_utxo()
         self.test_mine_qabi_prime_lifecycle()
+        self.test_mine_qabi_escape_after_prime()
         self.test_qabi_reorg_survival()
 
         self.log.info("All QABI functional tests passed!")
@@ -1154,12 +1155,22 @@ class QabiTest(BitcoinTestFramework):
 
     def _qabi_conditions_for_createtxmlsc(
             self, auth_tip_bytes_hex, committed_root_hex,
-            committed_depth, committed_expiry, owner_id_hex):
+            committed_depth, committed_expiry, owner_id_hex,
+            sig_pk_compressed_hex=None):
         """3-rung [SIG, QABI_PRIME, QABI_SPEND] tree in createtxmlsc
-        shape. createtxmlsc accepts rung-level `pubkeys` as 32-byte
-        x-only and canonicalises to 33-byte compressed (0x02 prefix)
-        before folding into the leaf.
+        shape.
+
+        The SIG rung's pubkey can be supplied in 33-byte compressed
+        form via `sig_pk_compressed_hex`. createtxmlsc keeps
+        already-compressed pubkeys verbatim, so any real secp256k1
+        keypair (regardless of Y parity) works correctly here. When
+        the parameter is omitted, the test falls back to the
+        deterministic placeholder that exercises only the leaf-
+        hashing + covenant plumbing (not the ability to actually
+        produce a valid SIG witness).
         """
+        if sig_pk_compressed_hex is None:
+            sig_pk_compressed_hex = self._MINED_SIG_PK_COMPRESSED_HEX
         return [
             {
                 "output_index": 0,
@@ -1167,7 +1178,7 @@ class QabiTest(BitcoinTestFramework):
                     "type": "SIG",
                     "fields": [{"type": "SCHEME", "hex": "01"}],
                 }],
-                "pubkeys": [self._MINED_SIG_PK_XONLY_HEX],
+                "pubkeys": [sig_pk_compressed_hex],
             },
             {
                 "output_index": 0,
@@ -1194,14 +1205,18 @@ class QabiTest(BitcoinTestFramework):
 
     def _qabi_conditions_for_signrungtx(
             self, auth_tip_bytes_hex, committed_root_hex,
-            committed_depth, committed_expiry, owner_id_hex):
+            committed_depth, committed_expiry, owner_id_hex,
+            sig_pk_compressed_hex=None):
         """Same 3-rung tree in signrungtx shape. signrungtx's
         ParseConditionsSpec reads pubkeys from block-level PUBKEY
         fields (stripped from fields and collected into rung_pks by
         ParseBlockSpec), so the SIG rung carries a PUBKEY field in
-        the already-compressed 33-byte form that createtxmlsc
-        canonicalised to.
+        33-byte compressed form. Must match the value supplied to
+        createtxmlsc exactly or the Merkle leaf won't reconstruct
+        to the same hash.
         """
+        if sig_pk_compressed_hex is None:
+            sig_pk_compressed_hex = self._MINED_SIG_PK_COMPRESSED_HEX
         return [
             {
                 "blocks": [{
@@ -1209,7 +1224,7 @@ class QabiTest(BitcoinTestFramework):
                     "fields": [
                         {"type": "SCHEME", "hex": "01"},
                         {"type": "PUBKEY",
-                         "hex": self._MINED_SIG_PK_COMPRESSED_HEX},
+                         "hex": sig_pk_compressed_hex},
                     ],
                 }],
             },
@@ -1233,15 +1248,19 @@ class QabiTest(BitcoinTestFramework):
         ]
 
     def _create_and_mine_qabi_utxo(self, wallet, auth_seed, chain_length,
-                                    owner_id_hex=None):
+                                    owner_id_hex=None,
+                                    sig_pk_compressed_hex=None):
         """Fund and mine a fresh QABI-conditioned UTXO. Returns a dict
         with everything downstream tests need to spend it via
         signrungtx: txid, vout, value (sats), scriptPubKey, conditions
         tree (signrungtx shape), auth_tip, owner_id.
 
         Extracted from test_mine_real_qabi_utxo so that later tests
-        (priming, reorg) can reuse the exact same setup without code
-        duplication.
+        (priming, reorg, escape) can reuse the exact same setup
+        without code duplication. Tests that need to actually
+        exercise a valid SIG witness (e.g. the escape-rung test)
+        pass a real 33-byte compressed pubkey via
+        `sig_pk_compressed_hex`.
         """
         from test_framework.wallet import MiniWallet
         from test_framework.messages import tx_from_hex
@@ -1264,6 +1283,7 @@ class QabiTest(BitcoinTestFramework):
             committed_depth=0,
             committed_expiry=0,
             owner_id_hex=owner_id_hex,
+            sig_pk_compressed_hex=sig_pk_compressed_hex,
         )
 
         create_result = self.node.createtxmlsc(
@@ -1294,12 +1314,14 @@ class QabiTest(BitcoinTestFramework):
             "auth_seed": auth_seed,
             "chain_length": chain_length,
             "owner_id_hex": owner_id_hex,
+            "sig_pk_compressed_hex": sig_pk_compressed_hex,
             "conditions_signrungtx": self._qabi_conditions_for_signrungtx(
                 auth_tip_bytes_hex=auth_tip_bytes_hex,
                 committed_root_hex="00" * 32,
                 committed_depth=0,
                 committed_expiry=0,
                 owner_id_hex=owner_id_hex,
+                sig_pk_compressed_hex=sig_pk_compressed_hex,
             ),
             "conditions_root_initial": create_result["conditions_root"],
         }
@@ -1421,6 +1443,246 @@ class QabiTest(BitcoinTestFramework):
             f"  Step 5: primed QABI UTXO confirmed on chain: "
             f"{primed_chain_spk[:18]}... ({primed_out['value']} BTC)")
         self.log.info("  Full mined QABI_PRIME lifecycle: SUCCESS")
+
+    def test_mine_qabi_escape_after_prime(self):
+        """End-to-end mined escape lifecycle: create a QABI UTXO whose
+        SIG rung is bound to a real secp256k1 keypair, prime it via
+        the QABI_PRIME covenant, then simulate the coordinator going
+        dark by never running QABI_SPEND and instead sweeping the
+        PRIMED UTXO back to a wallet address using a signed spend of
+        the SIG escape rung (rung 0).
+
+        This is the load-bearing safety test for the whole QABIO
+        design: if the coordinator vanishes after a participant has
+        primed, the participant must still be able to recover their
+        funds via the SIG escape hatch. The primed UTXO's rung 0
+        (SIG) has the same content as the unprimed UTXO's rung 0 —
+        only rung 2 (QABI_SPEND) mutates under priming — so spending
+        rung 0 should work on either the pre- or post-prime UTXO
+        with the same witness.
+
+        Verifies:
+          - The participant's real-key SIG rung round-trips through
+            createtxmlsc's Merkle-leaf construction (proving the
+            leaf recomputed at consensus time matches the committed
+            leaf from creation time bit-exact).
+          - signrungtx produces a SIG witness using the raw privkey.
+          - The escape tx mines in successfully under the full
+            consensus pipeline — the primed UTXO gets consumed, the
+            sweep output lands on the wallet, funds are recovered.
+        """
+        self.log.info("Testing QABI escape-rung sweep after priming "
+                       "(coordinator-bails scenario)...")
+
+        from test_framework.key import ECKey
+        from test_framework.wallet_util import bytes_to_wif
+        from test_framework.wallet import MiniWallet
+        from test_framework.messages import tx_from_hex
+        from decimal import Decimal
+
+        # Step 0: generate a real keypair for the escape. The pubkey
+        # is folded into the leaf at creation; the privkey (WIF) is
+        # passed to signrungtx to produce the SIG witness.
+        eckey = ECKey()
+        eckey.generate()
+        privkey_bytes = eckey.get_bytes()
+        privkey_wif = bytes_to_wif(privkey_bytes, compressed=True)
+        pubkey_bytes = eckey.get_pubkey().get_bytes()
+        assert len(pubkey_bytes) == 33, \
+            f"expected 33-byte compressed pubkey, got {len(pubkey_bytes)}"
+        pubkey_hex = pubkey_bytes.hex()
+        self.log.info(
+            f"  Step 0: generated escape keypair "
+            f"(pubkey={pubkey_hex[:16]}...)")
+
+        # Step 1: create + mine the QABI UTXO with the real SIG pubkey.
+        wallet = MiniWallet(self.node)
+        auth_seed = "e5" * 32
+        chain_length = 50
+
+        initial = self._create_and_mine_qabi_utxo(
+            wallet, auth_seed, chain_length,
+            sig_pk_compressed_hex=pubkey_hex,
+        )
+        self.log.info(
+            f"  Step 1: initial QABI UTXO mined: "
+            f"{initial['txid']}:{initial['vout']} "
+            f"({initial['value_btc']} BTC)")
+
+        # Step 2: prime it (coordinator is still "active" at this
+        # point — priming is the participant's responsibility).
+        prime_depth = 10
+        new_committed_root_hex = "aa" * 32
+        new_committed_expiry = 1000
+
+        primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+            auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
+            committed_root_hex=new_committed_root_hex,
+            committed_depth=prime_depth,
+            committed_expiry=new_committed_expiry,
+            owner_id_hex=initial["owner_id_hex"],
+            sig_pk_compressed_hex=pubkey_hex,
+        )
+
+        primed_amount = float(initial["value_btc"] - Decimal("0.0001"))
+        priming_tx = self.node.createtxmlsc(
+            [{"txid": initial["txid"], "vout": initial["vout"]}],
+            [primed_amount],
+            primed_conditions_create,
+        )
+        priming_hex = priming_tx["hex"]
+        primed_spk_predicted = priming_tx["scriptPubKey"]
+
+        spent_outputs_for_priming = [{
+            "amount": str(initial["value_btc"]),
+            "scriptPubKey": initial["scriptPubKey"],
+        }]
+        priming_signers = [{
+            "input": 0,
+            "rung": 1,   # QABI_PRIME
+            "blocks": [{
+                "type": "QABI_PRIME",
+                "new_committed_root": new_committed_root_hex,
+                "prime_depth": prime_depth,
+                "new_committed_expiry": new_committed_expiry,
+                "auth_seed": auth_seed,
+                "chain_length": chain_length,
+            }],
+            "conditions": initial["conditions_signrungtx"],
+        }]
+        signed_priming = self.node.signrungtx(
+            priming_hex, priming_signers, spent_outputs_for_priming)
+        assert signed_priming["complete"]
+        priming_txid = self.node.sendrawtransaction(signed_priming["hex"])
+        self.generate(self.node, 1)
+
+        # Confirm the primed UTXO landed on chain with the expected
+        # scriptPubKey — this is the same check the prime-lifecycle
+        # test makes, repeated here so a failure localises cleanly.
+        primed_out = self.node.gettxout(priming_txid, 0)
+        assert primed_out is not None
+        primed_chain_spk = primed_out["scriptPubKey"]["hex"]
+        assert primed_chain_spk == primed_spk_predicted
+        primed_value_btc = Decimal(str(primed_out["value"]))
+        self.log.info(
+            f"  Step 2: priming tx mined: {priming_txid}, primed "
+            f"UTXO at {priming_txid[:16]}.../0 "
+            f"({primed_value_btc} BTC)")
+
+        # Step 3: the coordinator has now "gone dark" — no QABI_SPEND
+        # tx is ever submitted. The participant wants their funds
+        # back. They sweep the primed UTXO via the SIG rung (rung 0).
+
+        # Build the escape tx via createtxmlsc. Consensus requires
+        # every v4 tx's outputs to be MLSC (ValidateRungOutputs
+        # rejects anything else with `rung-non-mlsc-output`), so
+        # funds cannot leave Ladder Script in a single tx. The
+        # correct escape target is a FRESH MLSC UTXO with a simple
+        # 1-rung [SIG(participant_key)] tree — the participant still
+        # controls the funds via the same private key that signed
+        # the escape itself, and can chain-spend the recovered UTXO
+        # normally later. This is the real-world "coordinator bails,
+        # participant sweeps" flow: primed + coordinator-hostage →
+        # simple SIG-only + participant-controlled.
+        escape_sweep_amount = float(
+            round(primed_value_btc - Decimal("0.0001"), 8))
+        escape_conditions = [{
+            "output_index": 0,
+            "blocks": [{
+                "type": "SIG",
+                "fields": [{"type": "SCHEME", "hex": "01"}],
+            }],
+            "pubkeys": [pubkey_hex],
+        }]
+        escape_template = self.node.createtxmlsc(
+            [{"txid": priming_txid, "vout": 0}],
+            [escape_sweep_amount],
+            escape_conditions,
+        )
+        escape_unsigned = escape_template["hex"]
+        escape_target_spk = escape_template["scriptPubKey"]
+        assert_equal(escape_template["n_rungs"], 1)
+        self.log.info(
+            f"  Step 3: escape skeleton built "
+            f"({len(escape_unsigned) // 2} bytes, target spk="
+            f"{escape_target_spk[:18]}... — fresh 1-rung SIG-only "
+            f"MLSC UTXO)")
+
+        # Step 4: sign the SIG rung (rung 0) via signrungtx with the
+        # participant's private key. The conditions passed are the
+        # PRIMED tree (rung 2 has mutated committed_root/depth/
+        # expiry), because that's what's committed in the UTXO we
+        # are spending. Rung 0 (SIG) is unchanged from the initial
+        # tree, so the Merkle leaf for rung 0 is byte-identical,
+        # but we still have to pass the primed-tree conditions so
+        # Merkle-root reconstruction on consensus matches the
+        # on-chain committed root.
+        primed_conditions_sign = self._qabi_conditions_for_signrungtx(
+            auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
+            committed_root_hex=new_committed_root_hex,
+            committed_depth=prime_depth,
+            committed_expiry=new_committed_expiry,
+            owner_id_hex=initial["owner_id_hex"],
+            sig_pk_compressed_hex=pubkey_hex,
+        )
+        spent_outputs_for_escape = [{
+            "amount": str(primed_value_btc),
+            "scriptPubKey": primed_chain_spk,
+        }]
+        escape_signers = [{
+            "input": 0,
+            "rung": 0,    # SIG escape rung
+            "blocks": [{
+                "type": "SIG",
+                "privkey": privkey_wif,
+            }],
+            "conditions": primed_conditions_sign,
+        }]
+        signed_escape = self.node.signrungtx(
+            escape_unsigned, escape_signers, spent_outputs_for_escape)
+        assert signed_escape["complete"], \
+            f"signrungtx must produce a complete SIG witness: {signed_escape}"
+        signed_escape_hex = signed_escape["hex"]
+        self.log.info(
+            f"  Step 4: SIG escape witness built "
+            f"({len(signed_escape_hex) // 2} bytes)")
+
+        # Step 5: broadcast + mine.
+        escape_txid = self.node.sendrawtransaction(signed_escape_hex)
+        self.generate(self.node, 1)
+        self.log.info(f"  Step 5: escape tx mined: {escape_txid}")
+
+        # Step 6: verify the primed UTXO is gone and the fresh
+        # SIG-only UTXO is visible on chain under participant
+        # control. This is the point at which the participant has
+        # successfully recovered — they now hold a single-rung MLSC
+        # UTXO whose only spend path is SIG(their own key).
+        primed_still = self.node.gettxout(priming_txid, 0)
+        assert primed_still is None, \
+            "primed UTXO must be spent by the escape tx"
+
+        escape_out = self.node.gettxout(escape_txid, 0)
+        assert escape_out is not None, \
+            "escape sweep output must be in the UTXO set"
+        sweep_spk = escape_out["scriptPubKey"]["hex"]
+        assert sweep_spk.startswith("df"), \
+            f"escape target must be an MLSC UTXO, got {sweep_spk[:18]}"
+        assert sweep_spk == escape_target_spk, \
+            ("escape target scriptPubKey on chain must match the "
+             "createtxmlsc-predicted value bit-exact")
+        assert sweep_spk != primed_chain_spk, \
+            ("escape target must differ from the primed UTXO (else "
+             "the SIG rung produced the same tree, meaning the "
+             "covenant mutation didn't happen)")
+        self.log.info(
+            f"  Step 6: fresh SIG-only MLSC UTXO on chain "
+            f"({escape_out['value']} BTC at {sweep_spk[:18]}..., "
+            f"controlled by the escape keypair)")
+        self.log.info(
+            "  QABIO escape-after-prime lifecycle: SUCCESS "
+            "(participant recovered funds via SIG rung after "
+            "coordinator bailed — funds now sit at a simple "
+            "1-rung SIG MLSC UTXO under participant control)")
 
     def test_qabi_reorg_survival(self):
         """Reorg survival: mine a QABI UTXO creation tx, invalidate the
