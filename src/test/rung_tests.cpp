@@ -15447,6 +15447,115 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
                         << falcon_savings_us << " us");
 }
 
+BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
+{
+    // Sweep benchmark across N ∈ {10, 50, 100, 500, 1000, 2000}. For each
+    // N, runs the evaluator loop twice (cache disabled / cache enabled)
+    // and prints a single-row summary. Lets us see how per-input cost
+    // scales and confirms the O(N²)→O(N) identity scan fix holds at
+    // larger sizes.
+    if (!HasPQSupport()) return;
+
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t PRIME_DEPTH = 10;
+    constexpr uint32_t EXPIRY = 1000;
+
+    const std::vector<size_t> sizes = {10, 50, 100, 500, 1000, 2000};
+
+    BOOST_TEST_MESSAGE("QABO sig cache benchmark sweep:");
+    BOOST_TEST_MESSAGE("  N       | uncached us | cached us   | us/in (u) | us/in (c) | speedup");
+    BOOST_TEST_MESSAGE("  --------+-------------+-------------+-----------+-----------+--------");
+
+    for (size_t N : sizes) {
+        auto participants = BuildScaleParticipants(N, CHAIN_LENGTH, PRIME_DEPTH);
+        std::vector<uint8_t> coord_pk, coord_sk;
+        BOOST_REQUIRE(GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk));
+
+        QABIBlock block = BuildScaleQABIBlock(participants, coord_pk, EXPIRY);
+        auto block_bytes = SerializeQABIBlock(block);
+        uint256 committed_root = ComputeQABIRoot(block_bytes);
+
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        mtx.conditions_root.SetNull();
+        mtx.qabi_block = block_bytes;
+        for (size_t p = 0; p < N; ++p) {
+            CTxIn tin;
+            uint256 h; std::memset(h.begin(), static_cast<uint8_t>(p), 32);
+            tin.prevout = COutPoint(Txid::FromUint256(h), 0);
+            tin.nSequence = 0xFFFFFFFF;
+            mtx.vin.push_back(tin);
+        }
+        for (const auto& sp : participants) mtx.vout.push_back(sp.destination);
+        mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+        uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
+        std::vector<uint8_t> sig;
+        BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                             std::span<const uint8_t>(coord_sk),
+                             std::span<const uint8_t>(sighash.begin(), 32), sig));
+        if (sig.size() < QABI_AGGREGATED_SIG_MAX) sig.resize(QABI_AGGREGATED_SIG_MAX, 0x00);
+        mtx.aggregated_sig = sig;
+        CTransaction tx(mtx);
+
+        std::vector<RungBlock> spend_blocks;
+        spend_blocks.reserve(N);
+        for (size_t p = 0; p < N; ++p) {
+            uint256 auth_tip;
+            std::memcpy(auth_tip.begin(), participants[p].chain[CHAIN_LENGTH].data(), 32);
+            spend_blocks.push_back(BuildScaleSpendBlock(
+                participants[p], auth_tip, committed_root, PRIME_DEPTH, EXPIRY));
+        }
+
+        CMutableTransaction mtx_copy = mtx;
+        PrecomputedTransactionData txdata;
+        MutableTransactionSignatureChecker checker(
+            &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        ScriptExecutionData execdata;
+
+        auto run_batch = [&](QABOSigCache* cache) {
+            for (size_t p = 0; p < N; ++p) {
+                RungEvalContext ctx;
+                ctx.tx = &tx;
+                ctx.input_index = static_cast<uint32_t>(p);
+                ctx.block_height = 500;
+                ctx.qabo_sig_cache = cache;
+                EvalResult result = EvalBlock(spend_blocks[p], checker,
+                                               SigVersion::TAPSCRIPT, execdata, ctx, 0);
+                BOOST_REQUIRE(result == EvalResult::SATISFIED);
+            }
+        };
+
+        auto t1_start = std::chrono::steady_clock::now();
+        run_batch(nullptr);
+        auto t1_end = std::chrono::steady_clock::now();
+        auto uncached_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            t1_end - t1_start).count();
+
+        QABOSigCache cache;
+        auto t2_start = std::chrono::steady_clock::now();
+        run_batch(&cache);
+        auto t2_end = std::chrono::steady_clock::now();
+        auto cached_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            t2_end - t2_start).count();
+
+        BOOST_CHECK_EQUAL(cache.size(), 1u);
+
+        char row[256];
+        std::snprintf(row, sizeof(row),
+                      "  %-7zu | %-11lld | %-11lld | %-9.1f | %-9.1f | %.2fx",
+                      N,
+                      static_cast<long long>(uncached_us),
+                      static_cast<long long>(cached_us),
+                      uncached_us / static_cast<double>(N),
+                      cached_us / static_cast<double>(N),
+                      cached_us > 0
+                          ? uncached_us / static_cast<double>(cached_us)
+                          : 0.0);
+        BOOST_TEST_MESSAGE(row);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
 {
     // The big win: a 100-input batch with the cache pays 1 FALCON verify,
