@@ -146,8 +146,11 @@ def main():
         owner_id_hex=OWNER_ID,
     )
 
+    # Amounts are rounded to 8 decimals to strip IEEE-754 drift that
+    # would otherwise push the value past satoshi precision and cause
+    # createtxmlsc to reject with "Invalid amount".
     fee = 0.001
-    create_amount = float(utxo["amount"]) - fee
+    create_amount = round(float(utxo["amount"]) - fee, 8)
     creation_template = rpc(
         "createtxmlsc",
         [{"txid": utxo["txid"], "vout": utxo["vout"]}],
@@ -189,7 +192,7 @@ def main():
         committed_expiry=NEW_EXPIRY,
         owner_id_hex=OWNER_ID,
     )
-    primed_amount = float(qabi_value) - fee
+    primed_amount = round(float(qabi_value) - fee, 8)
     priming_template = rpc(
         "createtxmlsc",
         [{"txid": creation_txid, "vout": 0}],
