@@ -1015,23 +1015,14 @@ class QabiTest(BitcoinTestFramework):
         assert spk_hex.startswith("df"), f"Expected MLSC output, got {spk_hex[:4]}"
 
         # Sign the funding input via MiniWallet (it's a taproot input).
-        try:
-            tx = tx_from_hex(unsigned_hex)
-            wallet.sign_tx(tx)
-            signed_hex = tx.serialize().hex()
-        except Exception as e:
-            self.log.info(f"  MiniWallet sign_tx failed (known integration limitation): {e}")
-            self.log.info("  SKIP: real-broadcast path needs MiniWallet QABI-aware signing")
-            return
+        # The Python framework's CTransaction understands TX_MLSC format,
+        # so tx_from_hex + wallet.sign_tx + tx.serialize round-trip
+        # through the QABIO fields without dropping them.
+        tx = tx_from_hex(unsigned_hex)
+        wallet.sign_tx(tx)
+        signed_hex = tx.serialize().hex()
 
-        # Attempt to broadcast.
-        try:
-            txid = self.node.sendrawtransaction(signed_hex)
-        except Exception as e:
-            self.log.info(f"  sendrawtransaction failed: {e}")
-            self.log.info("  SKIP: real-broadcast blocked — documenting as known gap")
-            return
-
+        txid = self.node.sendrawtransaction(signed_hex)
         self.log.info(f"  Broadcast txid: {txid}")
 
         # Mine it in.

@@ -593,7 +593,21 @@ class CTxWitness:
 
 
 class CTransaction:
-    __slots__ = ("nLockTime", "version", "vin", "vout", "wit")
+    __slots__ = ("nLockTime", "version", "vin", "vout", "wit",
+                 "conditions_root", "creation_proof",
+                 "qabi_block", "aggregated_sig")
+
+    # Ladder Script TX_MLSC format:
+    #   version == 4 + non-zero conditions_root selects TX_MLSC wire format.
+    #   vout carries the per-output value only; scriptPubKey is an in-memory
+    #   inflation of 0xDF || conditions_root so existing tooling (weight /
+    #   txid computation) works unchanged. QABI fields (qabi_block,
+    #   aggregated_sig) and creation_proof ride in the witness envelope.
+    RUNG_TX_VERSION = 4
+    _TX_MLSC_FLAG = 0x02
+    _TX_MLSC_CP_MAX = 8065        # 252 leaves * 32 + 1 byte count
+    _TX_MLSC_QB_MAX = 262144      # 256 KB consensus cap
+    _TX_MLSC_AGG_MAX = 666        # FALCON-512 signature size
 
     def __init__(self, tx=None):
         if tx is None:
@@ -602,34 +616,93 @@ class CTransaction:
             self.vout = []
             self.wit = CTxWitness()
             self.nLockTime = 0
+            self.conditions_root = b"\x00" * 32
+            self.creation_proof = b""
+            self.qabi_block = b""
+            self.aggregated_sig = b""
         else:
             self.version = tx.version
             self.vin = copy.deepcopy(tx.vin)
             self.vout = copy.deepcopy(tx.vout)
             self.nLockTime = tx.nLockTime
             self.wit = copy.deepcopy(tx.wit)
+            self.conditions_root = getattr(tx, "conditions_root", b"\x00" * 32)
+            self.creation_proof = getattr(tx, "creation_proof", b"")
+            self.qabi_block = getattr(tx, "qabi_block", b"")
+            self.aggregated_sig = getattr(tx, "aggregated_sig", b"")
+
+    def is_tx_mlsc(self):
+        return (self.version == self.RUNG_TX_VERSION
+                and self.conditions_root != b"\x00" * 32
+                and len(self.conditions_root) == 32)
 
     def deserialize(self, f):
         self.version = int.from_bytes(f.read(4), "little")
         self.vin = deser_vector(f, CTxIn)
+        self.conditions_root = b"\x00" * 32
+        self.creation_proof = b""
+        self.qabi_block = b""
+        self.aggregated_sig = b""
         flags = 0
         if len(self.vin) == 0:
             flags = int.from_bytes(f.read(1), "little")
+            if flags == 0x03:
+                raise ValueError("Invalid transaction flag combination 0x03")
             # Not sure why flags can't be zero, but this
             # matches the implementation in bitcoind
-            if (flags != 0):
+            if flags != 0:
                 self.vin = deser_vector(f, CTxIn)
-                self.vout = deser_vector(f, CTxOut)
+                if (flags == self._TX_MLSC_FLAG
+                        and self.version == self.RUNG_TX_VERSION):
+                    # TX_MLSC: conditions_root + value-only outputs.
+                    # Inflate each vout's scriptPubKey to 0xDF||conditions_root
+                    # so downstream tools (txid, weight) work unchanged.
+                    self.conditions_root = f.read(32)
+                    n_outputs = deser_compact_size(f)
+                    mlsc_spk = b"\xdf" + self.conditions_root
+                    self.vout = []
+                    for _ in range(n_outputs):
+                        out = CTxOut()
+                        out.nValue = int.from_bytes(f.read(8), "little", signed=True)
+                        out.scriptPubKey = mlsc_spk
+                        self.vout.append(out)
+                else:
+                    self.vout = deser_vector(f, CTxOut)
         else:
             self.vout = deser_vector(f, CTxOut)
-        if flags != 0:
+        if flags & 1:
             self.wit.vtxinwit = [CTxInWitness() for _ in range(len(self.vin))]
             self.wit.deserialize(f)
         else:
             self.wit = CTxWitness()
+        if flags == self._TX_MLSC_FLAG:
+            flags = 0
+            # Per-input witness stacks, then creation_proof, qabi_block,
+            # and aggregated_sig (QABIO coordinator signature).
+            self.wit.vtxinwit = [CTxInWitness() for _ in range(len(self.vin))]
+            for i in range(len(self.vin)):
+                self.wit.vtxinwit[i].scriptWitness.stack = deser_string_vector(f)
+            cp_len = deser_compact_size(f)
+            if cp_len > self._TX_MLSC_CP_MAX:
+                raise ValueError(f"creation_proof too large: {cp_len}")
+            self.creation_proof = f.read(cp_len) if cp_len else b""
+            qb_len = deser_compact_size(f)
+            if qb_len > self._TX_MLSC_QB_MAX:
+                raise ValueError(f"qabi_block too large: {qb_len}")
+            self.qabi_block = f.read(qb_len) if qb_len else b""
+            agg_len = deser_compact_size(f)
+            if agg_len > self._TX_MLSC_AGG_MAX:
+                raise ValueError(f"aggregated_sig too large: {agg_len}")
+            self.aggregated_sig = f.read(agg_len) if agg_len else b""
+        if flags:
+            raise ValueError(f"Unknown transaction optional data flag: {flags}")
         self.nLockTime = int.from_bytes(f.read(4), "little")
 
     def serialize_without_witness(self):
+        # C++ is_tx_mlsc requires fAllowWitness, so the stripped form always
+        # uses the standard vin+vout+locktime layout. The in-memory vout
+        # already carries the inflated 0xDF||conditions_root scriptPubKey,
+        # so txid hashing matches the node's computation.
         r = b""
         r += self.version.to_bytes(4, "little")
         r += ser_vector(self.vin)
@@ -639,8 +712,11 @@ class CTransaction:
 
     # Only serialize with witness when explicitly called for
     def serialize_with_witness(self):
+        is_mlsc = self.is_tx_mlsc()
         flags = 0
-        if not self.wit.is_null():
+        if is_mlsc:
+            flags = self._TX_MLSC_FLAG
+        elif not self.wit.is_null():
             flags |= 1
         r = b""
         r += self.version.to_bytes(4, "little")
@@ -649,8 +725,29 @@ class CTransaction:
             r += ser_vector(dummy)
             r += flags.to_bytes(1, "little")
         r += ser_vector(self.vin)
-        r += ser_vector(self.vout)
-        if flags & 1:
+        if is_mlsc:
+            r += self.conditions_root
+            r += ser_compact_size(len(self.vout))
+            for out in self.vout:
+                r += out.nValue.to_bytes(8, "little", signed=True)
+        else:
+            r += ser_vector(self.vout)
+        if is_mlsc:
+            # Per-input witnesses — stack-per-input, no outer vector length
+            # (CTxWitness.serialize already omits it).
+            if len(self.wit.vtxinwit) != len(self.vin):
+                self.wit.vtxinwit = self.wit.vtxinwit[:len(self.vin)]
+                for _ in range(len(self.wit.vtxinwit), len(self.vin)):
+                    self.wit.vtxinwit.append(CTxInWitness())
+            for i in range(len(self.vin)):
+                r += ser_string_vector(self.wit.vtxinwit[i].scriptWitness.stack)
+            r += ser_compact_size(len(self.creation_proof))
+            r += self.creation_proof
+            r += ser_compact_size(len(self.qabi_block))
+            r += self.qabi_block
+            r += ser_compact_size(len(self.aggregated_sig))
+            r += self.aggregated_sig
+        elif flags & 1:
             if (len(self.wit.vtxinwit) != len(self.vin)):
                 # vtxinwit must have the same length as vin
                 self.wit.vtxinwit = self.wit.vtxinwit[:len(self.vin)]
