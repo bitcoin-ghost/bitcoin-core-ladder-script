@@ -15573,7 +15573,7 @@ BOOST_AUTO_TEST_CASE(qabi_tx_size_sweep)
     constexpr int64_t PRIME_DEPTH = 10;
     constexpr uint32_t EXPIRY = 1000;
 
-    const std::vector<size_t> sizes = {1, 10, 50, 100, 500, 1000};
+    const std::vector<size_t> sizes = {1, 10, 50, 100, 500, 1000, 2000, 3000};
 
     BOOST_TEST_MESSAGE("QABIO batch-spend tx size sweep (FALCON-512):");
     BOOST_TEST_MESSAGE("  N      | qabi_blk | agg_sig | wit/in | tx bytes  | vsize     | B/input");
