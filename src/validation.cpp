@@ -2168,12 +2168,31 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             }
             cache_ptr = &local_cache;
         }
-        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr);
+        // QABIO: per-tx FALCON sig verify cache. All primed inputs of a
+        // QABIO tx share the same (sighash, sig, pubkey), so the verify
+        // only needs to run once. Snapshot the thread-safe cache, pass a
+        // local copy to VerifyRungTx, then merge any new entries back.
+        rung::QABOSigCache local_qabo_cache;
+        rung::QABOSigCache* qabo_cache_ptr = nullptr;
+        if (m_qabo_sig_cache) {
+            {
+                LOCK(m_qabo_sig_cache->mutex);
+                local_qabo_cache = m_qabo_sig_cache->cache;
+            }
+            qabo_cache_ptr = &local_qabo_cache;
+        }
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr);
         // Write back any new cache entries
         if (m_shared_tree_cache && cache_ptr) {
             LOCK(m_shared_tree_cache->mutex);
             for (const auto& [k, v] : local_cache) {
                 m_shared_tree_cache->cache.emplace(k, v);
+            }
+        }
+        if (m_qabo_sig_cache && qabo_cache_ptr) {
+            LOCK(m_qabo_sig_cache->mutex);
+            for (const auto& [k, v] : local_qabo_cache) {
+                m_qabo_sig_cache->cache.emplace(k, v);
             }
         }
         if (ok) {

@@ -3139,32 +3139,149 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         return EvalResult::UNSATISFIED;
     }
 
-    // -- Check 4: root match --------------------------------------------
+    // -- Checks 4 + 5 + 8 + 9 are cacheable (tx-level, not per-input) ---
+    //
+    // Four of the nine checks depend only on tx-level state:
+    //   (4) SHA256(tx.qabi_block) == committed_root
+    //   (5) ParseQABIBlock(tx.qabi_block)
+    //   (8) tx.vout bit-exact equal to parsed.outputs
+    //   (9) FalconVerify(coordinator_pubkey, sighash, aggregated_sig)
+    //
+    // Per-input checks 1, 2, 3, 6, 7 must still run for every input
+    // (primed state, expiry, preimage, expiry binding, identity match).
+    //
+    // Cache key is sighash — constant within a single tx.
 
     if (ctx.tx->qabi_block.empty()) return EvalResult::UNSATISFIED;
-    unsigned char qabi_root_hash[CSHA256::OUTPUT_SIZE];
-    CSHA256()
-        .Write(ctx.tx->qabi_block.data(), ctx.tx->qabi_block.size())
-        .Finalize(qabi_root_hash);
-    if (std::memcmp(qabi_root_hash, committed_root_field->data.data(), 32) != 0) {
+
+    uint256 sighash = rung::ComputeSighashQABO(*ctx.tx);
+
+    const rung::QABIBlock* parsed_ptr = nullptr;
+    const uint8_t* qabi_root_hash_ptr = nullptr;
+    uint256 fresh_root_hash;
+    std::shared_ptr<const rung::QABIBlock> fresh_parsed;
+    bool sig_ok = false;
+    bool vout_matches_outputs = false;
+    bool need_tx_level_checks = true;
+
+    if (ctx.qabo_sig_cache != nullptr) {
+        auto it = ctx.qabo_sig_cache->find(sighash);
+        if (it != ctx.qabo_sig_cache->end()) {
+            // Cache HIT: read the pre-computed tx-level results.
+            // If any tx-level check failed (bad parse, wrong sig,
+            // vout mismatch), the cached entry reflects that and we
+            // short-circuit without re-running any expensive work.
+            if (!it->second.sig_ok || !it->second.parsed ||
+                !it->second.vout_matches_outputs) {
+                return EvalResult::UNSATISFIED;
+            }
+            parsed_ptr = it->second.parsed.get();
+            qabi_root_hash_ptr = it->second.computed_root.begin();
+            sig_ok = it->second.sig_ok;
+            vout_matches_outputs = it->second.vout_matches_outputs;
+            need_tx_level_checks = false;
+        }
+    }
+
+    auto cache_failure = [&](const uint256& root,
+                              std::shared_ptr<const rung::QABIBlock> p,
+                              bool sig, bool vout_ok) {
+        if (ctx.qabo_sig_cache != nullptr) {
+            QABOVerifiedEntry neg;
+            neg.sig_ok = sig;
+            neg.computed_root = root;
+            neg.parsed = std::move(p);
+            neg.vout_matches_outputs = vout_ok;
+            ctx.qabo_sig_cache->emplace(sighash, std::move(neg));
+        }
+    };
+
+    if (need_tx_level_checks) {
+        // Cache MISS — run the four tx-level checks and populate the
+        // cache. All failure paths still populate the cache (with a
+        // negative result) so subsequent inputs short-circuit.
+
+        // Check 4: SHA256 of qabi_block.
+        CSHA256()
+            .Write(ctx.tx->qabi_block.data(), ctx.tx->qabi_block.size())
+            .Finalize(fresh_root_hash.begin());
+        qabi_root_hash_ptr = fresh_root_hash.begin();
+
+        // Check 5: parse the block.
+        std::string parse_err;
+        auto parsed_opt = rung::ParseQABIBlock(ctx.tx->qabi_block, parse_err);
+        if (!parsed_opt) {
+            cache_failure(fresh_root_hash, nullptr, false, false);
+            return EvalResult::UNSATISFIED;
+        }
+        fresh_parsed = std::make_shared<const rung::QABIBlock>(std::move(*parsed_opt));
+        parsed_ptr = fresh_parsed.get();
+
+        // Check 8: tx.vout bit-exact equal to parsed.outputs.
+        vout_matches_outputs = true;
+        if (ctx.tx->vout.size() != parsed_ptr->outputs.size()) {
+            vout_matches_outputs = false;
+        } else {
+            for (size_t i = 0; i < parsed_ptr->outputs.size(); ++i) {
+                if (ctx.tx->vout[i].nValue != parsed_ptr->outputs[i].nValue ||
+                    ctx.tx->vout[i].scriptPubKey != parsed_ptr->outputs[i].scriptPubKey) {
+                    vout_matches_outputs = false;
+                    break;
+                }
+            }
+        }
+        if (!vout_matches_outputs) {
+            cache_failure(fresh_root_hash, fresh_parsed, false, false);
+            return EvalResult::UNSATISFIED;
+        }
+
+        // Check 9: FALCON verify.
+        if (ctx.tx->aggregated_sig.size() != rung::QABI_AGGREGATED_SIG_MAX) {
+            cache_failure(fresh_root_hash, fresh_parsed, false, true);
+            return EvalResult::UNSATISFIED;
+        }
+        if (parsed_ptr->coordinator_pubkey.size() != rung::QABI_COORDINATOR_PUBKEY_SIZE) {
+            cache_failure(fresh_root_hash, fresh_parsed, false, true);
+            return EvalResult::UNSATISFIED;
+        }
+        sig_ok = rung::VerifyPQSignature(
+            rung::RungScheme::FALCON512,
+            std::span<const uint8_t>(ctx.tx->aggregated_sig.data(), ctx.tx->aggregated_sig.size()),
+            std::span<const uint8_t>(sighash.begin(), 32),
+            std::span<const uint8_t>(parsed_ptr->coordinator_pubkey.data(),
+                                      parsed_ptr->coordinator_pubkey.size()));
+
+        // Populate the cache. Even on sig_ok == false we cache it so
+        // subsequent inputs short-circuit.
+        if (ctx.qabo_sig_cache != nullptr) {
+            QABOVerifiedEntry entry;
+            entry.sig_ok = sig_ok;
+            entry.computed_root = fresh_root_hash;
+            entry.parsed = fresh_parsed;
+            entry.vout_matches_outputs = vout_matches_outputs;
+            ctx.qabo_sig_cache->emplace(sighash, std::move(entry));
+        }
+
+        if (!sig_ok) return EvalResult::UNSATISFIED;
+    }
+
+    // ---- Per-input checks (always run, never cached) ------------------
+
+    // Check 4: verify the cached/computed qabi_block hash matches this
+    // input's committed_root (which is per-input committed state).
+    if (std::memcmp(qabi_root_hash_ptr, committed_root_field->data.data(), 32) != 0) {
         return EvalResult::UNSATISFIED;
     }
 
-    // -- Check 5: block parses as well-formed ---------------------------
+    const rung::QABIBlock& parsed = *parsed_ptr;
 
-    std::string parse_err;
-    auto parsed_opt = rung::ParseQABIBlock(ctx.tx->qabi_block, parse_err);
-    if (!parsed_opt) return EvalResult::UNSATISFIED;
-    const rung::QABIBlock& parsed = *parsed_opt;
-
-    // -- Check 6: expiry binding ----------------------------------------
-
+    // Check 6: expiry binding — this input's committed_expiry must match
+    // block.prime_expiry_height.
     if (static_cast<int64_t>(parsed.prime_expiry_height) != committed_expiry) {
         return EvalResult::UNSATISFIED;
     }
 
-    // -- Check 7: identity in block -------------------------------------
-
+    // Check 7: this input's owner_id must appear in block.entries.
     uint256 my_id;
     std::memcpy(my_id.begin(), commit_field->data.data(), 32);
     bool identity_found = false;
@@ -3176,29 +3293,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     }
     if (!identity_found) return EvalResult::UNSATISFIED;
 
-    // -- Check 8: full output-set match (closes coordinator-skim hole) --
-
-    if (ctx.tx->vout.size() != parsed.outputs.size()) return EvalResult::UNSATISFIED;
-    for (size_t i = 0; i < parsed.outputs.size(); ++i) {
-        if (ctx.tx->vout[i].nValue != parsed.outputs[i].nValue) return EvalResult::UNSATISFIED;
-        if (ctx.tx->vout[i].scriptPubKey != parsed.outputs[i].scriptPubKey) return EvalResult::UNSATISFIED;
-    }
-
-    // -- Check 9: QABO FALCON sig verification --------------------------
-
-    if (ctx.tx->aggregated_sig.size() != rung::QABI_AGGREGATED_SIG_MAX) {
-        return EvalResult::UNSATISFIED;
-    }
-    if (parsed.coordinator_pubkey.size() != rung::QABI_COORDINATOR_PUBKEY_SIZE) {
-        return EvalResult::UNSATISFIED;
-    }
-
-    uint256 sighash = rung::ComputeSighashQABO(*ctx.tx);
-    const bool sig_ok = rung::VerifyPQSignature(
-        rung::RungScheme::FALCON512,
-        std::span<const uint8_t>(ctx.tx->aggregated_sig.data(), ctx.tx->aggregated_sig.size()),
-        std::span<const uint8_t>(sighash.begin(), 32),
-        std::span<const uint8_t>(parsed.coordinator_pubkey.data(), parsed.coordinator_pubkey.size()));
+    // Final sig check (respects cached or fresh result).
     if (!sig_ok) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
@@ -3867,7 +3962,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   const PrecomputedTransactionData& txdata,
                   ScriptError* serror,
                   int32_t block_height,
-                  SharedTreeCache* shared_cache)
+                  SharedTreeCache* shared_cache,
+                  QABOSigCache* qabo_sig_cache)
 {
     if (nIn >= tx.vin.size()) {
         if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
@@ -4337,6 +4433,9 @@ bool VerifyRungTx(const CTransaction& tx,
     if (txdata.m_spent_outputs_ready) {
         eval_ctx.spent_outputs = &txdata.m_spent_outputs;
     }
+    // Plumb the QABO sig cache through so QABI_SPEND can short-circuit
+    // duplicate FALCON verifications across primed inputs of the same tx.
+    eval_ctx.qabo_sig_cache = qabo_sig_cache;
 
     LadderWitness eval_ladder;
     ScriptExecutionData execdata;

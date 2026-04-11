@@ -349,6 +349,15 @@ struct ThreadSafeSharedTreeCache {
     }
 };
 
+/** Thread-safe per-tx wrapper for QABOSigCache (QABIO FALCON verify cache).
+ *  All inputs of a single QABIO tx share the same SIGHASH_QABO and the
+ *  same coordinator FALCON signature, so the verify only needs to be
+ *  performed once per tx. */
+struct ThreadSafeQABOSigCache {
+    mutable Mutex mutex;
+    rung::QABOSigCache cache GUARDED_BY(mutex);
+};
+
 class CScriptCheck
 {
 private:
@@ -361,10 +370,11 @@ private:
     SignatureCache* m_signature_cache;
     int32_t m_block_height{0}; //!< Ladder Script: block height for timelock evaluation
     std::shared_ptr<ThreadSafeSharedTreeCache> m_shared_tree_cache; //!< Ladder Script: same-source proof sharing
+    std::shared_ptr<ThreadSafeQABOSigCache> m_qabo_sig_cache;       //!< QABIO: per-tx FALCON sig verify cache
 
 public:
-    CScriptCheck(const CTxOut& outIn, const CTransaction& txToIn, SignatureCache& signature_cache, unsigned int nInIn, unsigned int nFlagsIn, bool cacheIn, PrecomputedTransactionData* txdataIn, int32_t block_height = 0, std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache = nullptr) :
-        m_tx_out(outIn), ptxTo(&txToIn), nIn(nInIn), nFlags(nFlagsIn), cacheStore(cacheIn), txdata(txdataIn), m_signature_cache(&signature_cache), m_block_height(block_height), m_shared_tree_cache(std::move(shared_tree_cache)) { }
+    CScriptCheck(const CTxOut& outIn, const CTransaction& txToIn, SignatureCache& signature_cache, unsigned int nInIn, unsigned int nFlagsIn, bool cacheIn, PrecomputedTransactionData* txdataIn, int32_t block_height = 0, std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache = nullptr, std::shared_ptr<ThreadSafeQABOSigCache> qabo_sig_cache = nullptr) :
+        m_tx_out(outIn), ptxTo(&txToIn), nIn(nInIn), nFlags(nFlagsIn), cacheStore(cacheIn), txdata(txdataIn), m_signature_cache(&signature_cache), m_block_height(block_height), m_shared_tree_cache(std::move(shared_tree_cache)), m_qabo_sig_cache(std::move(qabo_sig_cache)) { }
 
     CScriptCheck(const CScriptCheck&) = delete;
     CScriptCheck& operator=(const CScriptCheck&) = delete;
