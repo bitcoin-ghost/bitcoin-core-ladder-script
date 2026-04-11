@@ -15,6 +15,7 @@
 #include <crypto/sha256.h>
 #include <hash.h>
 #include <key.h>
+#include <policy/policy.h>
 #include <pubkey.h>
 #include <script/interpreter.h>
 #include <script/script.h>
@@ -15552,6 +15553,146 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
                       cached_us > 0
                           ? uncached_us / static_cast<double>(cached_us)
                           : 0.0);
+        BOOST_TEST_MESSAGE(row);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(qabi_tx_size_sweep)
+{
+    // Empirical on-wire size of a QABIO batch-spend tx at various
+    // participant counts. Builds a realistic QABI_SPEND tx with every
+    // per-input witness fully populated (LadderWitness carrying the
+    // QABI_SPEND block + MLSCProof with a 1-rung reveal) so the
+    // serialised bytes match what a real primed batch on the wire
+    // would look like. Prints a single-row summary per N so the
+    // contribution of qabi_block, aggregated_sig, per-input witness,
+    // and overall tx size can be read off directly.
+    if (!HasPQSupport()) return;
+
+    constexpr size_t CHAIN_LENGTH = 50;
+    constexpr int64_t PRIME_DEPTH = 10;
+    constexpr uint32_t EXPIRY = 1000;
+
+    const std::vector<size_t> sizes = {1, 10, 50, 100, 500, 1000};
+
+    BOOST_TEST_MESSAGE("QABIO batch-spend tx size sweep (FALCON-512):");
+    BOOST_TEST_MESSAGE("  N      | qabi_blk | agg_sig | wit/in | tx bytes  | vsize     | B/input");
+    BOOST_TEST_MESSAGE("  -------+----------+---------+--------+-----------+-----------+--------");
+
+    for (size_t N : sizes) {
+        auto participants = BuildScaleParticipants(N, CHAIN_LENGTH, PRIME_DEPTH);
+        std::vector<uint8_t> coord_pk, coord_sk;
+        BOOST_REQUIRE(GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk));
+
+        QABIBlock block = BuildScaleQABIBlock(participants, coord_pk, EXPIRY);
+        auto block_bytes = SerializeQABIBlock(block);
+        // Skip N values that exceed the 256 KB hard cap — the consensus
+        // rule would reject these at validation time.
+        if (block_bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
+            char row[256];
+            std::snprintf(row, sizeof(row),
+                          "  %-6zu | SKIP (qabi_block %zu B > hard cap %zu B)",
+                          N, block_bytes.size(), rung::QABI_BLOCK_MAX_HARD);
+            BOOST_TEST_MESSAGE(row);
+            continue;
+        }
+        uint256 committed_root = ComputeQABIRoot(block_bytes);
+
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        // A non-null conditions_root forces the serializer into the
+        // TX_MLSC wire format (flag 0x02), which is the only format
+        // that actually writes qabi_block / aggregated_sig / creation_
+        // proof to the output stream. The chosen value doesn't affect
+        // size — we only care that is_tx_mlsc == true at serialize
+        // time so the measurement matches what a real batch-spend tx
+        // on the wire would look like.
+        std::fill(mtx.conditions_root.begin(), mtx.conditions_root.end(), 0x11);
+        mtx.qabi_block = block_bytes;
+
+        for (size_t p = 0; p < N; ++p) {
+            CTxIn tin;
+            uint256 h; std::memset(h.begin(), static_cast<uint8_t>(p), 32);
+            tin.prevout = COutPoint(Txid::FromUint256(h), 0);
+            tin.nSequence = 0xFFFFFFFF;
+            mtx.vin.push_back(tin);
+        }
+        for (const auto& sp : participants) mtx.vout.push_back(sp.destination);
+
+        // Realistic coordinator signature — 666 bytes FALCON-512.
+        mtx.aggregated_sig.assign(rung::QABI_AGGREGATED_SIG_MAX, 0x00);
+        uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
+        std::vector<uint8_t> sig;
+        BOOST_REQUIRE(SignPQ(RungScheme::FALCON512,
+                             std::span<const uint8_t>(coord_sk),
+                             std::span<const uint8_t>(sighash.begin(), 32), sig));
+        if (sig.size() < rung::QABI_AGGREGATED_SIG_MAX) {
+            sig.resize(rung::QABI_AGGREGATED_SIG_MAX, 0x00);
+        }
+        mtx.aggregated_sig = sig;
+
+        // Populate the per-input witness stacks with realistic bytes:
+        //   stack[0] = SerializeLadderWitness( {rung 0 = QABI_SPEND block} )
+        //   stack[1] = SerializeMLSCProof( 1-rung tree, MERKLE_PATH mode,
+        //              empty proof_hashes, no mutation targets )
+        //
+        // The MLSC proof here is the minimum-realistic shape for a
+        // batch-spend: 1-rung tree (just the QABI_SPEND rung being
+        // spent). A 2-rung+ tree would add mutation-target rungs
+        // (and pubkeys) on top; we measure the lower bound here.
+        size_t wit_bytes_per_input = 0;
+        for (size_t p = 0; p < N; ++p) {
+            uint256 auth_tip;
+            std::memcpy(auth_tip.begin(), participants[p].chain[CHAIN_LENGTH].data(), 32);
+            rung::RungBlock spend_block = BuildScaleSpendBlock(
+                participants[p], auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
+
+            rung::LadderWitness lw;
+            rung::Rung r;
+            r.blocks.push_back(spend_block);
+            lw.rungs.push_back(r);
+            lw.coil.output_index = 0;
+            auto lw_bytes = rung::SerializeLadderWitness(lw, rung::SerializationContext::WITNESS);
+
+            rung::MLSCProof proof;
+            proof.total_rungs  = 1;
+            proof.total_relays = 0;
+            proof.rung_index   = 0;
+            proof.revealed_rung = r;
+            proof.proof_mode   = rung::MLSCProofMode::MERKLE_PATH;
+            auto proof_bytes = rung::SerializeMLSCProof(proof);
+
+            mtx.vin[p].scriptWitness.stack.clear();
+            mtx.vin[p].scriptWitness.stack.push_back(lw_bytes);
+            mtx.vin[p].scriptWitness.stack.push_back(proof_bytes);
+
+            // Snapshot the per-input witness bytes (including stack
+            // framing) from the first input — they're all the same
+            // shape so one sample is enough.
+            if (p == 0) {
+                DataStream ss;
+                ss << mtx.vin[0].scriptWitness.stack;
+                wit_bytes_per_input = ss.size();
+            }
+        }
+
+        CTransaction tx(mtx);
+        DataStream full_tx;
+        full_tx << TX_WITH_WITNESS(tx);
+        size_t tx_bytes = full_tx.size();
+        size_t vsize    = GetVirtualTransactionSize(tx);
+
+        char row[256];
+        std::snprintf(row, sizeof(row),
+                      "  %-6zu | %-8zu | %-7zu | %-6zu | %-9zu | %-9zu | %.1f",
+                      N,
+                      block_bytes.size(),
+                      sig.size(),
+                      wit_bytes_per_input,
+                      tx_bytes,
+                      vsize,
+                      static_cast<double>(tx_bytes) / N);
         BOOST_TEST_MESSAGE(row);
     }
 }
