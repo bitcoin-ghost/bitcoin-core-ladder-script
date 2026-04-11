@@ -835,7 +835,11 @@ BOOST_AUTO_TEST_CASE(test_IsStandard)
     t.version = 0;
     CheckIsNotStandard(t, "version");
 
-    t.version = TX_MAX_STANDARD_VERSION + 1;
+    // Note: TX_MAX_STANDARD_VERSION + 1 is RUNG_TX_VERSION (4) in this fork,
+    // which takes the IsStandardRungTx path rather than the version-range
+    // check. Use TX_MAX_STANDARD_VERSION + 2 (= 5) to test the version range
+    // rejection without colliding with the v4 special case.
+    t.version = TX_MAX_STANDARD_VERSION + 2;
     CheckIsNotStandard(t, "version");
 
     // Allowed version

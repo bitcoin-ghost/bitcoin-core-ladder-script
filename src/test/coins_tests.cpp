@@ -539,8 +539,11 @@ BOOST_AUTO_TEST_CASE(ccoins_serialization)
     BOOST_CHECK_EQUAL(cc2.out.nValue, 110397);
     BOOST_CHECK_EQUAL(HexStr(cc2.out.scriptPubKey), HexStr(GetScriptForDestination(PKHash(uint160("8c988f1a4a4de2161e0f50aac7f17e7f9555caa4"_hex_u8)))));
 
-    // Smallest possible example
-    DataStream ss3{"000006"_hex};
+    // Smallest possible example (empty scriptPubKey)
+    // Note: this fork bumped nSpecialScripts from 6 to 7 to add MLSC at
+    // slot 6, so a direct-length empty script is encoded as nSize = 0+7 = 7
+    // (was 0+6 = 6 upstream).
+    DataStream ss3{"000007"_hex};
     Coin cc3;
     ss3 >> cc3;
     BOOST_CHECK_EQUAL(cc3.fCoinBase, false);
@@ -548,8 +551,20 @@ BOOST_AUTO_TEST_CASE(ccoins_serialization)
     BOOST_CHECK_EQUAL(cc3.out.nValue, 0);
     BOOST_CHECK_EQUAL(cc3.out.scriptPubKey.size(), 0U);
 
+    // MLSC special form: nSize = 6 → scriptPubKey = [0xDF] (root recovered
+    // from block database at spend time, not stored per-coin).
+    DataStream ss3_mlsc{"000006"_hex};
+    Coin cc3_mlsc;
+    ss3_mlsc >> cc3_mlsc;
+    BOOST_CHECK_EQUAL(cc3_mlsc.fCoinBase, false);
+    BOOST_CHECK_EQUAL(cc3_mlsc.nHeight, 0U);
+    BOOST_CHECK_EQUAL(cc3_mlsc.out.nValue, 0);
+    BOOST_CHECK_EQUAL(cc3_mlsc.out.scriptPubKey.size(), 1U);
+    BOOST_CHECK_EQUAL(cc3_mlsc.out.scriptPubKey[0], 0xDF);
+
     // scriptPubKey that ends beyond the end of the stream
-    DataStream ss4{"000007"_hex};
+    // Direct length 1 → nSize = 1+7 = 8 (was 1+6 = 7 upstream).
+    DataStream ss4{"000008"_hex};
     try {
         Coin cc4;
         ss4 >> cc4;
