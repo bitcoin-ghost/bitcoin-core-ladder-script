@@ -1135,28 +1135,40 @@ class QabiTest(BitcoinTestFramework):
     # ------------------------------------------------------------------
 
     # Mined-lifecycle conditions tree:
-    #   rung 0: QABI_PRIME (covenant entry for priming state transitions)
-    #   rung 1: QABI_SPEND (committed state: auth_tip, committed_root,
+    #   rung 0: SIG escape hatch (participant can sweep with their own key)
+    #   rung 1: QABI_PRIME (covenant entry for priming state transitions)
+    #   rung 2: QABI_SPEND (committed state: auth_tip, committed_root,
     #           committed_depth, committed_expiry, owner_id)
     #
-    # No SIG rung in these tests — QABI_PRIME + QABI_SPEND are the only
-    # spend paths needed to exercise the mined priming lifecycle. Both
-    # rungs are built with empty rung-level pubkey lists so the Merkle
-    # leaves use value_commitment = SHA256(fields || []) on both the
-    # createtxmlsc side and the signrungtx side without any pubkey-
-    # format canonicalisation to worry about. The covenant recomputation
-    # inside EvalQABIPrimeBlock then matches bit-exact on consensus.
+    # The SIG rung is the realistic deployment shape for a QABIO UTXO —
+    # without it the participant would be hostage to the coordinator
+    # for the whole primed window. It has a pubkey folded into its
+    # Merkle leaf, which is what exercises the new MLSCMutationTarget
+    # inline pubkey payload: when priming spends rung 1, signrungtx has
+    # to reveal rung 0 (SIG) and rung 2 (QABI_SPEND) as mutation
+    # targets, and the SIG rung's pubkey must travel with it so
+    # consensus can recompute that leaf bit-exact.
+    _MINED_SIG_PK_XONLY_HEX = "00" * 32
+    _MINED_SIG_PK_COMPRESSED_HEX = "02" + "00" * 32
     _MINED_OWNER_ID = "c5" * 32
 
     def _qabi_conditions_for_createtxmlsc(
             self, auth_tip_bytes_hex, committed_root_hex,
             committed_depth, committed_expiry, owner_id_hex):
-        """2-rung [QABI_PRIME, QABI_SPEND] tree in createtxmlsc shape.
-        QABI_SPEND fields are laid out in the exact order the evaluator
-        expects for a conditions-context block: auth_tip, committed_root,
-        committed_depth (u32 LE), committed_expiry (u32 LE), owner_id.
+        """3-rung [SIG, QABI_PRIME, QABI_SPEND] tree in createtxmlsc
+        shape. createtxmlsc accepts rung-level `pubkeys` as 32-byte
+        x-only and canonicalises to 33-byte compressed (0x02 prefix)
+        before folding into the leaf.
         """
         return [
+            {
+                "output_index": 0,
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [{"type": "SCHEME", "hex": "01"}],
+                }],
+                "pubkeys": [self._MINED_SIG_PK_XONLY_HEX],
+            },
             {
                 "output_index": 0,
                 "blocks": [{"type": "QABI_PRIME", "fields": []}],
@@ -1183,8 +1195,24 @@ class QabiTest(BitcoinTestFramework):
     def _qabi_conditions_for_signrungtx(
             self, auth_tip_bytes_hex, committed_root_hex,
             committed_depth, committed_expiry, owner_id_hex):
-        """Same 2-rung tree in signrungtx shape (no output_index)."""
+        """Same 3-rung tree in signrungtx shape. signrungtx's
+        ParseConditionsSpec reads pubkeys from block-level PUBKEY
+        fields (stripped from fields and collected into rung_pks by
+        ParseBlockSpec), so the SIG rung carries a PUBKEY field in
+        the already-compressed 33-byte form that createtxmlsc
+        canonicalised to.
+        """
         return [
+            {
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [
+                        {"type": "SCHEME", "hex": "01"},
+                        {"type": "PUBKEY",
+                         "hex": self._MINED_SIG_PK_COMPRESSED_HEX},
+                    ],
+                }],
+            },
             {"blocks": [{"type": "QABI_PRIME", "fields": []}]},
             {
                 "blocks": [{
@@ -1243,7 +1271,7 @@ class QabiTest(BitcoinTestFramework):
             [float(output_amount)],
             conditions_create,
         )
-        assert_equal(create_result["n_rungs"], 2)
+        assert_equal(create_result["n_rungs"], 3)
         unsigned_hex = create_result["hex"]
 
         tx = tx_from_hex(unsigned_hex)
@@ -1350,7 +1378,7 @@ class QabiTest(BitcoinTestFramework):
         }]
         signers = [{
             "input": 0,
-            "rung": 0,
+            "rung": 1,   # QABI_PRIME at index 1 in [SIG, QABI_PRIME, QABI_SPEND]
             "blocks": [{
                 "type": "QABI_PRIME",
                 "new_committed_root": new_committed_root_hex,

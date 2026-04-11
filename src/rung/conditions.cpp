@@ -660,12 +660,14 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             }
             proof.revealed_mutation_targets.resize(n_targets);
             for (uint64_t mt = 0; mt < n_targets; ++mt) {
+                auto& target = proof.revealed_mutation_targets[mt];
+
                 uint64_t mt_idx = ReadCompactSize(ss);
                 if (mt_idx >= total_rungs) {
                     error = "MLSC proof mutation target index out of range";
                     return false;
                 }
-                proof.revealed_mutation_targets[mt].first = static_cast<uint16_t>(mt_idx);
+                target.idx = static_cast<uint16_t>(mt_idx);
 
                 // Deserialize mutation target rung blocks
                 uint64_t mt_blocks = ReadCompactSize(ss);
@@ -673,11 +675,10 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC proof mutation target block count invalid";
                     return false;
                 }
-                Rung& mt_rung = proof.revealed_mutation_targets[mt].second;
-                mt_rung.blocks.resize(mt_blocks);
+                target.rung.blocks.resize(mt_blocks);
                 for (uint64_t mb = 0; mb < mt_blocks; ++mb) {
                     std::string block_error;
-                    if (!DeserializeBlock(ss, mt_rung.blocks[mb], cond_ctx, block_error)) {
+                    if (!DeserializeBlock(ss, target.rung.blocks[mb], cond_ctx, block_error)) {
                         error = "MLSC proof mutation target: " + block_error;
                         return false;
                     }
@@ -689,9 +690,34 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC proof mutation target too many relay_refs";
                     return false;
                 }
-                mt_rung.relay_refs.resize(mt_refs);
+                target.rung.relay_refs.resize(mt_refs);
                 for (uint64_t mr = 0; mr < mt_refs; ++mr) {
-                    mt_rung.relay_refs[mr] = static_cast<uint16_t>(ReadCompactSize(ss));
+                    target.rung.relay_refs[mr] = static_cast<uint16_t>(ReadCompactSize(ss));
+                }
+
+                // Per-rung pubkey list. Matches the pubkey set folded
+                // into the leaf at creation time so consensus can
+                // recompute the leaf hash bit-exact. Empty for rungs
+                // with no key-consuming blocks.
+                uint64_t mt_n_pubkeys = ReadCompactSize(ss);
+                // Hard cap: 16 pubkeys per rung (same as MAX_BLOCKS_PER_RUNG).
+                if (mt_n_pubkeys > MAX_BLOCKS_PER_RUNG) {
+                    error = "MLSC proof mutation target too many pubkeys";
+                    return false;
+                }
+                target.pubkeys.resize(mt_n_pubkeys);
+                for (uint64_t pk = 0; pk < mt_n_pubkeys; ++pk) {
+                    uint64_t pk_len = ReadCompactSize(ss);
+                    // Max pubkey size: FALCON-1024 at 1793 bytes.
+                    if (pk_len > 1952) {
+                        error = "MLSC proof mutation target pubkey too large: " +
+                                std::to_string(pk_len);
+                        return false;
+                    }
+                    target.pubkeys[pk].resize(pk_len);
+                    if (pk_len > 0) {
+                        ss.read(MakeWritableByteSpan(target.pubkeys[pk]));
+                    }
                 }
             }
         }
@@ -753,13 +779,32 @@ std::vector<uint8_t> SerializeMLSCProof(const MLSCProof& proof)
         ss.write(MakeByteSpan(hash));
     }
 
-    // Serialize revealed mutation targets (optional trailing field)
+    // Serialize revealed mutation targets (optional trailing field).
+    // Wire layout per target:
+    //   idx (CompactSize)
+    //   [SerializeRungBlocks: block_count, blocks, relay_ref_count, relay_refs]
+    //   pubkey_count (CompactSize)
+    //   [pubkey_len (CompactSize) + pubkey_bytes] * pubkey_count
+    //
+    // The pubkey list is the per-rung pubkey set folded into the
+    // Merkle leaf at creation time. Consensus uses it to recompute
+    // the leaf bit-exact when running covenant root comparisons on
+    // the rung the mutation target reveals. Required for rungs with
+    // SIG/key-consuming blocks; empty for QABI_SPEND/QABI_PRIME.
     if (!proof.revealed_mutation_targets.empty()) {
         WriteCompactSize(ss, proof.revealed_mutation_targets.size());
-        for (const auto& [mt_idx, mt_rung] : proof.revealed_mutation_targets) {
-            WriteCompactSize(ss, mt_idx);
-            auto mt_bytes = SerializeRungBlocks(mt_rung, SerializationContext::CONDITIONS);
+        for (const auto& target : proof.revealed_mutation_targets) {
+            WriteCompactSize(ss, target.idx);
+            auto mt_bytes = SerializeRungBlocks(target.rung, SerializationContext::CONDITIONS);
             ss.write(MakeByteSpan(mt_bytes));
+
+            WriteCompactSize(ss, target.pubkeys.size());
+            for (const auto& pk : target.pubkeys) {
+                WriteCompactSize(ss, pk.size());
+                if (!pk.empty()) {
+                    ss.write(MakeByteSpan(pk));
+                }
+            }
         }
     }
 
@@ -775,8 +820,11 @@ bool VerifyMLSCProof(const MLSCProof& proof,
                      const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys,
                      std::string& error,
                      MLSCVerifiedLeaves* verified_out,
-                     const std::vector<std::vector<std::vector<uint8_t>>>& mutation_target_pubkeys)
+                     const std::vector<std::vector<std::vector<uint8_t>>>& /*mutation_target_pubkeys_unused*/)
 {
+    // The mutation_target_pubkeys parameter is retained for ABI
+    // compatibility but is no longer consulted — pubkey data now
+    // travels inline inside each MLSCMutationTarget.
     // SHARED mode must be handled by the caller (evaluator) — not this function
     if (proof.proof_mode == MLSCProofMode::SHARED) {
         error = "SHARED proof mode must be resolved by the caller";
@@ -853,22 +901,20 @@ bool VerifyMLSCProof(const MLSCProof& proof,
     }
 
     // Verify mutation target leaves: for each revealed mutation target,
-    // compute its leaf and check it matches the leaf at that rung index.
-    for (size_t mt = 0; mt < proof.revealed_mutation_targets.size(); ++mt) {
-        const auto& [target_idx, target_rung] = proof.revealed_mutation_targets[mt];
-        if (target_idx >= proof.total_rungs) {
-            error = "mutation target rung_index out of range: " + std::to_string(target_idx);
+    // compute its leaf (using the inline pubkey list) and check it
+    // matches the leaf at that rung index.
+    for (const auto& target : proof.revealed_mutation_targets) {
+        if (target.idx >= proof.total_rungs) {
+            error = "mutation target rung_index out of range: " + std::to_string(target.idx);
             return false;
         }
-        if (target_idx == proof.rung_index) {
-            error = "mutation target same as revealed rung: " + std::to_string(target_idx);
+        if (target.idx == proof.rung_index) {
+            error = "mutation target same as revealed rung: " + std::to_string(target.idx);
             return false;
         }
-        const auto& mt_pks = (mt < mutation_target_pubkeys.size()) ?
-            mutation_target_pubkeys[mt] : std::vector<std::vector<uint8_t>>{};
-        uint256 target_leaf = ComputeRungLeaf(target_rung, mt_pks);
-        if (target_leaf != leaves[target_idx]) {
-            error = "mutation target leaf mismatch at rung " + std::to_string(target_idx);
+        uint256 target_leaf = ComputeRungLeaf(target.rung, target.pubkeys);
+        if (target_leaf != leaves[target.idx]) {
+            error = "mutation target leaf mismatch at rung " + std::to_string(target.idx);
             return false;
         }
     }

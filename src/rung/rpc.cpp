@@ -2314,12 +2314,17 @@ static RPCHelpMan signrungtx()
                     uint32_t rung_idx_val = read_numeric(*numerics[base]);
                     if (rung_idx_val != target_rung && rung_idx_val < conditions.rungs.size()) {
                         bool already_added = false;
-                        for (const auto& [mt_idx, _] : mlsc_proof.revealed_mutation_targets) {
-                            if (mt_idx == rung_idx_val) { already_added = true; break; }
+                        for (const auto& target : mlsc_proof.revealed_mutation_targets) {
+                            if (target.idx == rung_idx_val) { already_added = true; break; }
                         }
                         if (!already_added) {
-                            mlsc_proof.revealed_mutation_targets.push_back(
-                                {static_cast<uint16_t>(rung_idx_val), conditions.rungs[rung_idx_val]});
+                            rung::MLSCMutationTarget mt;
+                            mt.idx = static_cast<uint16_t>(rung_idx_val);
+                            mt.rung = conditions.rungs[rung_idx_val];
+                            if (rung_idx_val < rung_pubkeys2.size()) {
+                                mt.pubkeys = rung_pubkeys2[rung_idx_val];
+                            }
+                            mlsc_proof.revealed_mutation_targets.push_back(std::move(mt));
                         }
                     }
                 }
@@ -2330,9 +2335,9 @@ static RPCHelpMan signrungtx()
             // recomputes its MLSC root, comparing against the output
             // UTXO's committed root. That rebuild needs full tree
             // visibility — every rung's content plus its pubkey list.
-            // Reveal every non-target rung as a mutation target so
-            // VerifyRungTx can place them in ctx.input_conditions at
-            // their real indices.
+            // Reveal every non-target rung as a mutation target with
+            // its pubkey set inline so consensus can recompute leaf
+            // hashes for SIG (or any other key-consuming) rungs.
             bool target_has_qabi_prime = false;
             for (const auto& blk : conditions.rungs[target_rung].blocks) {
                 if (blk.type == rung::RungBlockType::QABI_PRIME) {
@@ -2344,12 +2349,17 @@ static RPCHelpMan signrungtx()
                 for (uint16_t r = 0; r < conditions.rungs.size(); ++r) {
                     if (r == target_rung) continue;
                     bool already_added = false;
-                    for (const auto& [mt_idx, _] : mlsc_proof.revealed_mutation_targets) {
-                        if (mt_idx == r) { already_added = true; break; }
+                    for (const auto& target : mlsc_proof.revealed_mutation_targets) {
+                        if (target.idx == r) { already_added = true; break; }
                     }
                     if (!already_added) {
-                        mlsc_proof.revealed_mutation_targets.push_back(
-                            {r, conditions.rungs[r]});
+                        rung::MLSCMutationTarget mt;
+                        mt.idx = r;
+                        mt.rung = conditions.rungs[r];
+                        if (r < rung_pubkeys2.size()) {
+                            mt.pubkeys = rung_pubkeys2[r];
+                        }
+                        mlsc_proof.revealed_mutation_targets.push_back(std::move(mt));
                     }
                 }
             }

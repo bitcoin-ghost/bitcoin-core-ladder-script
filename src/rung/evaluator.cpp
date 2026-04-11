@@ -1252,15 +1252,15 @@ static EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
             // Cross-rung mutation: find in revealed_mutation_targets
             if (!ctx.mlsc_proof) return EvalResult::UNSATISFIED;
             bool found = false;
-            for (const auto& [mt_idx, mt_rung] : ctx.mlsc_proof->revealed_mutation_targets) {
-                if (mt_idx == static_cast<uint16_t>(m.rung_idx)) {
-                    mutated_rung = mt_rung;
+            for (const auto& target : ctx.mlsc_proof->revealed_mutation_targets) {
+                if (target.idx == static_cast<uint16_t>(m.rung_idx)) {
+                    mutated_rung = target.rung;
+                    rung_pks = target.pubkeys;
                     found = true;
                     break;
                 }
             }
             if (!found) return EvalResult::UNSATISFIED;
-            // Cross-rung mutation targets don't carry witness pubkeys
         }
 
         // Apply the mutation
@@ -3041,18 +3041,19 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
         !ctx.input_conditions->rungs.empty()) {
         full_tree.rungs[ctx.mlsc_proof->rung_index] = ctx.input_conditions->rungs[0];
     }
-    // Overlay mutation-target rungs at their own real indices.
-    for (const auto& [mt_idx, mt_rung] : ctx.mlsc_proof->revealed_mutation_targets) {
-        if (mt_idx < full_tree.rungs.size()) {
-            full_tree.rungs[mt_idx] = mt_rung;
-        }
-    }
-
-    // Per-rung pubkeys for the full tree. Revealed rung sits at its
-    // real index; mutation targets default to empty (they don't carry
-    // witness pubkeys in the current MLSC proof format).
+    // Overlay mutation-target rungs + their pubkeys at their real
+    // indices. The pubkey list travels inside each MLSCMutationTarget
+    // (required for rungs with SIG/key-consuming blocks so the
+    // consensus-time leaf hash matches bit-exact).
     std::vector<std::vector<std::vector<uint8_t>>> full_pks;
     full_pks.resize(ctx.mlsc_proof->total_rungs);
+    for (const auto& target : ctx.mlsc_proof->revealed_mutation_targets) {
+        if (target.idx < full_tree.rungs.size()) {
+            full_tree.rungs[target.idx] = target.rung;
+            full_pks[target.idx] = target.pubkeys;
+        }
+    }
+    // Revealed rung sits at its real index.
     if (ctx.rung_pubkeys && !ctx.rung_pubkeys->empty() &&
         ctx.mlsc_proof->rung_index < full_pks.size()) {
         full_pks[ctx.mlsc_proof->rung_index] = (*ctx.rung_pubkeys)[0];
@@ -4350,13 +4351,8 @@ bool VerifyRungTx(const CTransaction& tx,
             }
         }
 
-        // Extract pubkeys for mutation targets (cross-rung mutations)
-        std::vector<std::vector<std::vector<uint8_t>>> mutation_target_pks;
-        for (size_t i = 0; i < mlsc_proof.revealed_mutation_targets.size(); ++i) {
-            // Mutation target pubkeys come from the witness — find matching relay/rung
-            // For now, mutation targets don't carry witness pubkeys (conditions-only blocks)
-            mutation_target_pks.push_back({});
-        }
+        // Mutation target pubkeys now travel inline inside each
+        // MLSCMutationTarget — no parallel vector needed here.
 
         // Verify Merkle proof: TX_MLSC leaf = TaggedHash(template || value_commitment)
         std::string verify_error;

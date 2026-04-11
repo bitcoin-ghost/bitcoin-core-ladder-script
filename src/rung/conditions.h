@@ -202,6 +202,24 @@ enum class MLSCProofMode : uint8_t {
     SHARED      = 0x02,  //!< References another input's proof from the same source tx
 };
 
+/** A revealed cross-rung mutation target — carries the full content of
+ *  another rung in the original conditions tree. Covenant blocks that
+ *  need to reason about the whole tree (QABI_PRIME's check 5, cross-
+ *  rung RECURSE_MODIFIED mutations) use this to access rungs other
+ *  than the one being spent.
+ *
+ *  `pubkeys` carries the same per-rung pubkey list that was folded
+ *  into the leaf at creation time. Required for any rung with
+ *  key-consuming blocks (SIG, etc.) — without it the consensus-time
+ *  leaf recomputation would produce a different hash than the real
+ *  tree and covenant checks would fail. Empty for rungs with no
+ *  key-consuming blocks (e.g. QABI_SPEND, QABI_PRIME). */
+struct MLSCMutationTarget {
+    uint16_t idx;
+    Rung rung;
+    std::vector<std::vector<uint8_t>> pubkeys;
+};
+
 /** MLSC spending proof — revealed conditions + Merkle proof hashes.
  *  Carried in witness stack[1] when spending an MLSC (0xDF) output. */
 struct MLSCProof {
@@ -213,7 +231,7 @@ struct MLSCProof {
     std::vector<uint256> proof_hashes; //!< FULL_LEAVES: unrevealed leaf hashes. MERKLE_PATH: sibling hashes from leaf to root. SHARED: empty.
     MLSCProofMode proof_mode{MLSCProofMode::FULL_LEAVES}; //!< Proof format
     uint16_t shared_source_input{0}; //!< SHARED mode: input index carrying the full proof for the same source tx
-    std::vector<std::pair<uint16_t, Rung>> revealed_mutation_targets; //!< (rung_index, condition blocks) for cross-rung mutation targets (optional, backward-compatible)
+    std::vector<MLSCMutationTarget> revealed_mutation_targets; //!< Cross-rung mutation targets with full content + pubkeys
 };
 
 /** Deserialize an MLSC proof from witness stack element bytes. */
