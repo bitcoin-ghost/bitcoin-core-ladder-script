@@ -14,10 +14,12 @@
 #include <consensus/amount.h>
 #include <primitives/transaction_identifier.h>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
 #include <uint256.h>
+#include <unordered_set>
 
 class CTransaction;
 class CTxOut;
@@ -62,6 +64,25 @@ public:
 
 struct QABIBlock;  // fwd decl — full definition in rung/qabi.h
 
+/** Hash functor for uint256 values inside unordered containers.
+ *
+ *  SaltedUint256Hasher has const members, which disables move-assignment
+ *  and prevents its use as a hasher for std::unordered_set fields inside
+ *  move-assignable containers. This trivial hasher has no state, so it
+ *  supports all the assignment operations we need.
+ *
+ *  uint256 values used in QABI are themselves SHA-256 digests
+ *  (participant_id = SHA256(pubkey), etc.) so their bytes are already
+ *  uniformly distributed. Reading the first 8 bytes directly gives a
+ *  perfectly good hash with zero CPU cost. */
+struct QABIUint256Hasher {
+    size_t operator()(const uint256& h) const noexcept {
+        size_t out;
+        std::memcpy(&out, h.data(), sizeof(out));
+        return out;
+    }
+};
+
 /** Per-tx cached state for a QABIO batch verification.
  *
  *  Within a single QABIO tx, every primed input checks the SAME tx-level
@@ -91,6 +112,12 @@ struct QABOVerifiedEntry {
     uint256 computed_root;                        //!< SHA256 of tx.qabi_block
     std::shared_ptr<const QABIBlock> parsed;      //!< ParseQABIBlock result
     bool vout_matches_outputs{false};             //!< tx.vout == parsed.outputs
+    //! Hash-indexed set of block.entries[*].participant_id values. Built
+    //! once per tx during the cache-miss path so check 7 (identity
+    //! lookup) becomes O(1) per input instead of O(N). Shared across
+    //! readers via the enclosing shared_ptr on parsed. Collapses total
+    //! identity-check work from O(N²) to O(N) per QABIO tx.
+    std::unordered_set<uint256, QABIUint256Hasher> entries_set;
 };
 
 /** Per-tx cache of verified QABIO state, keyed by sighash. */

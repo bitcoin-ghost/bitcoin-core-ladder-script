@@ -3163,6 +3163,11 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     bool sig_ok = false;
     bool vout_matches_outputs = false;
     bool need_tx_level_checks = true;
+    // Pointer to the hash-indexed participant_id set for check 7. On
+    // cache hit, borrows the set stored in the cache entry. On cache
+    // miss, points to a fresh set built during the block parse below.
+    const std::unordered_set<uint256, QABIUint256Hasher>* entries_set_ptr = nullptr;
+    std::unordered_set<uint256, QABIUint256Hasher> fresh_entries_set;
 
     if (ctx.qabo_sig_cache != nullptr) {
         auto it = ctx.qabo_sig_cache->find(sighash);
@@ -3179,6 +3184,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
             qabi_root_hash_ptr = it->second.computed_root.begin();
             sig_ok = it->second.sig_ok;
             vout_matches_outputs = it->second.vout_matches_outputs;
+            entries_set_ptr = &it->second.entries_set;
             need_tx_level_checks = false;
         }
     }
@@ -3217,6 +3223,16 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         fresh_parsed = std::make_shared<const rung::QABIBlock>(std::move(*parsed_opt));
         parsed_ptr = fresh_parsed.get();
 
+        // Build the hash-indexed participant_id set. Single O(N) pass
+        // over parsed.entries now; subsequent inputs get O(1) lookups
+        // instead of O(N) linear scans, collapsing check 7's total
+        // work from O(N²) to O(N) per QABIO tx.
+        fresh_entries_set.reserve(parsed_ptr->entries.size());
+        for (const auto& e : parsed_ptr->entries) {
+            fresh_entries_set.insert(e.participant_id);
+        }
+        entries_set_ptr = &fresh_entries_set;
+
         // Check 8: tx.vout bit-exact equal to parsed.outputs.
         vout_matches_outputs = true;
         if (ctx.tx->vout.size() != parsed_ptr->outputs.size()) {
@@ -3252,14 +3268,22 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
                                       parsed_ptr->coordinator_pubkey.size()));
 
         // Populate the cache. Even on sig_ok == false we cache it so
-        // subsequent inputs short-circuit.
+        // subsequent inputs short-circuit. Move the hash-indexed set
+        // into the cached entry so subsequent inputs borrow it.
         if (ctx.qabo_sig_cache != nullptr) {
             QABOVerifiedEntry entry;
             entry.sig_ok = sig_ok;
             entry.computed_root = fresh_root_hash;
             entry.parsed = fresh_parsed;
             entry.vout_matches_outputs = vout_matches_outputs;
-            ctx.qabo_sig_cache->emplace(sighash, std::move(entry));
+            entry.entries_set = std::move(fresh_entries_set);
+            auto [it_inserted, was_inserted] =
+                ctx.qabo_sig_cache->emplace(sighash, std::move(entry));
+            // After the move, re-point entries_set_ptr at the cached
+            // copy since fresh_entries_set is now empty.
+            if (was_inserted) {
+                entries_set_ptr = &it_inserted->second.entries_set;
+            }
         }
 
         if (!sig_ok) return EvalResult::UNSATISFIED;
@@ -3282,16 +3306,26 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     }
 
     // Check 7: this input's owner_id must appear in block.entries.
+    // Uses the hash-indexed set built once per tx (during cache-miss
+    // parse) — O(1) lookup instead of O(N) linear scan. Total identity-
+    // check work across all inputs drops from O(N²) to O(N).
     uint256 my_id;
     std::memcpy(my_id.begin(), commit_field->data.data(), 32);
-    bool identity_found = false;
-    for (const auto& e : parsed.entries) {
-        if (e.participant_id == my_id) {
-            identity_found = true;
-            break;
+    if (entries_set_ptr != nullptr) {
+        if (entries_set_ptr->count(my_id) == 0) return EvalResult::UNSATISFIED;
+    } else {
+        // Fallback: no set available (shouldn't happen in practice —
+        // set is built during cache-miss regardless of whether the
+        // cache pointer is non-null). Scan linearly just in case.
+        bool identity_found = false;
+        for (const auto& e : parsed.entries) {
+            if (e.participant_id == my_id) {
+                identity_found = true;
+                break;
+            }
         }
+        if (!identity_found) return EvalResult::UNSATISFIED;
     }
-    if (!identity_found) return EvalResult::UNSATISFIED;
 
     // Final sig check (respects cached or fresh result).
     if (!sig_ok) return EvalResult::UNSATISFIED;
