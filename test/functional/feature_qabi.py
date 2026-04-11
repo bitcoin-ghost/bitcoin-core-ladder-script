@@ -108,6 +108,8 @@ class QabiTest(BitcoinTestFramework):
         self.test_testmempoolaccept_rejects_fake_qabio_tx()
         self.test_decode_qabio_tx_preserves_fields()
         self.test_mine_real_qabi_utxo()
+        self.test_mine_qabi_prime_gap_documented()
+        self.test_qabi_reorg_survival()
 
         self.log.info("All QABI functional tests passed!")
 
@@ -1127,6 +1129,389 @@ class QabiTest(BitcoinTestFramework):
         # returns — same hash chain, same seed, same depth.
         assert_equal(block["fields"][3]["hex"], expected_preimage_hex)
         self.log.info("  Derived preimage matches qabi_authchain output")
+
+    # ------------------------------------------------------------------
+    # Mined QABI lifecycle helpers + tests (prime + reorg)
+    # ------------------------------------------------------------------
+
+    # SIG rung placeholder pubkey used in the mined-lifecycle tests. Its
+    # specific value doesn't matter for consensus — the SIG rung is not
+    # the rung being spent in these tests (rung 1 = QABI_PRIME is). What
+    # matters is that the INPUT and OUTPUT conditions trees both use the
+    # same pubkey so the Merkle-lattice root matches under mutation.
+    #
+    # createtxmlsc accepts rung-level `pubkeys` as 32-byte x-only and
+    # prepends 0x02 to canonicalise to a 33-byte compressed form before
+    # folding it into the leaf. signrungtx's ParseConditionsSpec reads
+    # pubkeys from block-level PUBKEY fields without that conversion,
+    # so we keep two forms here and feed the appropriate one to each RPC
+    # to ensure the Merkle roots match on both sides.
+    _MINED_SIG_PK_XONLY_HEX = "00" * 32
+    _MINED_SIG_PK_COMPRESSED_HEX = "02" + "00" * 32
+    _MINED_OWNER_ID = "c5" * 32
+
+    def _qabi_conditions_for_createtxmlsc(
+            self, auth_tip_bytes_hex, committed_root_hex,
+            committed_depth, committed_expiry, owner_id_hex):
+        """Build the 3-rung conditions tree (SIG, QABI_PRIME, QABI_SPEND)
+        in the format createtxmlsc's conditions parameter accepts
+        (each rung carries output_index). The QABI_SPEND fields are laid
+        out in the exact order the evaluator expects for a conditions-
+        context block: auth_tip, committed_root, committed_depth (u32 LE),
+        committed_expiry (u32 LE), owner_id.
+        """
+        return [
+            {
+                "output_index": 0,
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [{"type": "SCHEME", "hex": "01"}],
+                }],
+                "pubkeys": [self._MINED_SIG_PK_XONLY_HEX],
+            },
+            {
+                "output_index": 0,
+                "blocks": [{"type": "QABI_PRIME", "fields": []}],
+            },
+            {
+                "output_index": 0,
+                "blocks": [{
+                    "type": "QABI_SPEND",
+                    "fields": [
+                        {"type": "HASH256",
+                         "hex": auth_tip_bytes_hex},
+                        {"type": "HASH256",
+                         "hex": committed_root_hex},
+                        {"type": "NUMERIC",
+                         "hex": self._u32_le_hex(committed_depth)},
+                        {"type": "NUMERIC",
+                         "hex": self._u32_le_hex(committed_expiry)},
+                        {"type": "PUBKEY_COMMIT", "hex": owner_id_hex},
+                    ],
+                }],
+            },
+        ]
+
+    def _qabi_conditions_for_signrungtx(
+            self, auth_tip_bytes_hex, committed_root_hex,
+            committed_depth, committed_expiry, owner_id_hex):
+        """Mirror of the createtxmlsc conditions, but in the shape
+        signrungtx's per-signer conditions parameter accepts — no
+        output_index, but pubkeys still carried at the rung level so
+        the Merkle root computation matches the original creation.
+        """
+        return [
+            {
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [
+                        {"type": "SCHEME", "hex": "01"},
+                        # PUBKEY in a conditions SIG block is stripped
+                        # from fields and collected into rung_pks for
+                        # the Merkle leaf — matches the 33-byte
+                        # compressed form createtxmlsc canonicalised to.
+                        {"type": "PUBKEY",
+                         "hex": self._MINED_SIG_PK_COMPRESSED_HEX},
+                    ],
+                }],
+            },
+            {"blocks": [{"type": "QABI_PRIME", "fields": []}]},
+            {
+                "blocks": [{
+                    "type": "QABI_SPEND",
+                    "fields": [
+                        {"type": "HASH256",
+                         "hex": auth_tip_bytes_hex},
+                        {"type": "HASH256",
+                         "hex": committed_root_hex},
+                        {"type": "NUMERIC",
+                         "hex": self._u32_le_hex(committed_depth)},
+                        {"type": "NUMERIC",
+                         "hex": self._u32_le_hex(committed_expiry)},
+                        {"type": "PUBKEY_COMMIT", "hex": owner_id_hex},
+                    ],
+                }],
+            },
+        ]
+
+    def _create_and_mine_qabi_utxo(self, wallet, auth_seed, chain_length,
+                                    owner_id_hex=None):
+        """Fund and mine a fresh QABI-conditioned UTXO. Returns a dict
+        with everything downstream tests need to spend it via
+        signrungtx: txid, vout, value (sats), scriptPubKey, conditions
+        tree (signrungtx shape), auth_tip, owner_id.
+
+        Extracted from test_mine_real_qabi_utxo so that later tests
+        (priming, reorg) can reuse the exact same setup without code
+        duplication.
+        """
+        from test_framework.wallet import MiniWallet
+        from test_framework.messages import tx_from_hex
+        from decimal import Decimal
+
+        if owner_id_hex is None:
+            owner_id_hex = self._MINED_OWNER_ID
+
+        self.generate(wallet, 2)
+        utxo = wallet.get_utxo()
+        output_amount = Decimal(str(utxo["value"])) - Decimal("0.001")
+        assert output_amount > 0, "funding UTXO too small for QABI output"
+
+        auth_tip = self.node.qabi_authchain(auth_seed, chain_length)["auth_tip"]
+        auth_tip_bytes_hex = rpc_hex_to_bytes(auth_tip).hex()
+
+        conditions_create = self._qabi_conditions_for_createtxmlsc(
+            auth_tip_bytes_hex=auth_tip_bytes_hex,
+            committed_root_hex="00" * 32,
+            committed_depth=0,
+            committed_expiry=0,
+            owner_id_hex=owner_id_hex,
+        )
+
+        create_result = self.node.createtxmlsc(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [float(output_amount)],
+            conditions_create,
+        )
+        assert_equal(create_result["n_rungs"], 3)
+        unsigned_hex = create_result["hex"]
+
+        tx = tx_from_hex(unsigned_hex)
+        wallet.sign_tx(tx)
+        signed_hex = tx.serialize().hex()
+        txid = self.node.sendrawtransaction(signed_hex)
+        self.generate(self.node, 1)
+
+        tx_out = self.node.gettxout(txid, 0)
+        assert tx_out is not None
+        spk = tx_out["scriptPubKey"]["hex"]
+        assert spk.startswith("df")
+
+        return {
+            "txid": txid,
+            "vout": 0,
+            "value_btc": Decimal(str(tx_out["value"])),
+            "scriptPubKey": spk,
+            "auth_tip_bytes_hex": auth_tip_bytes_hex,
+            "auth_seed": auth_seed,
+            "chain_length": chain_length,
+            "owner_id_hex": owner_id_hex,
+            "conditions_signrungtx": self._qabi_conditions_for_signrungtx(
+                auth_tip_bytes_hex=auth_tip_bytes_hex,
+                committed_root_hex="00" * 32,
+                committed_depth=0,
+                committed_expiry=0,
+                owner_id_hex=owner_id_hex,
+            ),
+            "conditions_root_initial": create_result["conditions_root"],
+        }
+
+    def test_mine_qabi_prime_gap_documented(self):
+        """Documented architectural gap: mined QABI_PRIME is NOT yet
+        end-to-end functional. This test walks as far as the signing
+        path allows, broadcasts, and asserts consensus rejects with
+        the expected reason — locking in the boundary of what currently
+        works so regressions on the sign path are caught while the
+        follow-up consensus plumbing is still pending.
+
+        The gap: EvalQABIPrimeBlock's covenant check (check 5) rebuilds
+        a mutated conditions tree and recomputes its MLSC root to
+        compare against the output UTXO's committed root. That rebuild
+        needs the FULL input conditions tree — every rung's content
+        plus its pubkey list. MLSC's MERKLE_PATH proof mode reveals
+        only the target rung (QABI_PRIME here) and leaves all other
+        rungs as sibling leaf hashes. The QABI_SPEND rung that carries
+        the committed state is therefore invisible at consensus time,
+        so check 5 (and the block-type search that precedes it) cannot
+        run.
+
+        Follow-up required (tracked for a dedicated branch):
+          1. signrungtx: when spending a rung containing QABI_PRIME,
+             add the QABI_SPEND rung (and any other rungs needed to
+             recompute the root) to `revealed_mutation_targets`.
+          2. VerifyRungTx: after pushing `revealed_rung`, also place
+             each `revealed_mutation_targets` entry into
+             `conditions.rungs` at its correct index so
+             EvalQABIPrimeBlock can search across the real tree.
+          3. Transport per-rung pubkeys for mutation targets (or
+             require the non-target rungs to have empty pubkey lists)
+             so the recomputed MLSC root matches bit-exact.
+
+        Until those three are wired up, this test serves as the
+        regression guard for the signing half of the path.
+        """
+        self.log.info(
+            "Testing QABI_PRIME sign-path (mined-lifecycle gap documented)...")
+
+        from test_framework.wallet import MiniWallet
+        from decimal import Decimal
+
+        wallet = MiniWallet(self.node)
+        auth_seed = "b1" * 32
+        chain_length = 50
+
+        initial = self._create_and_mine_qabi_utxo(wallet, auth_seed, chain_length)
+        self.log.info(
+            f"  Initial QABI UTXO mined: "
+            f"{initial['txid']}:{initial['vout']} ({initial['value_btc']} BTC)")
+
+        prime_depth = 10
+        new_committed_root_hex = "77" * 32
+        new_committed_expiry = 500
+
+        primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+            auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
+            committed_root_hex=new_committed_root_hex,
+            committed_depth=prime_depth,
+            committed_expiry=new_committed_expiry,
+            owner_id_hex=initial["owner_id_hex"],
+        )
+
+        primed_amount = float(initial["value_btc"] - Decimal("0.0001"))
+        priming_tx = self.node.createtxmlsc(
+            [{"txid": initial["txid"], "vout": initial["vout"]}],
+            [primed_amount],
+            primed_conditions_create,
+        )
+        priming_hex = priming_tx["hex"]
+        primed_spk = priming_tx["scriptPubKey"]
+        assert primed_spk.startswith("df")
+        assert primed_spk != initial["scriptPubKey"], \
+            "mutated tree must produce a different output scriptPubKey"
+        self.log.info(
+            f"  Priming tx skeleton built "
+            f"({len(priming_hex) // 2} bytes, primed spk differs — "
+            f"covenant target computed)")
+
+        spent_outputs = [{
+            "amount": str(initial["value_btc"]),
+            "scriptPubKey": initial["scriptPubKey"],
+        }]
+        signers = [{
+            "input": 0,
+            "rung": 1,
+            "blocks": [{
+                "type": "QABI_PRIME",
+                "new_committed_root": new_committed_root_hex,
+                "prime_depth": prime_depth,
+                "new_committed_expiry": new_committed_expiry,
+                "auth_seed": auth_seed,
+                "chain_length": chain_length,
+            }],
+            "conditions": initial["conditions_signrungtx"],
+        }]
+
+        # Sign-path guard: signrungtx must succeed and return a complete
+        # witness. This is the boundary of what's already working.
+        signed = self.node.signrungtx(priming_hex, signers, spent_outputs)
+        assert signed["complete"], \
+            f"signrungtx must produce a complete QABI_PRIME witness: {signed}"
+        signed_hex = signed["hex"]
+        self.log.info(
+            f"  QABI_PRIME witness built OK via signrungtx "
+            f"({len(signed_hex) // 2} bytes signed tx)")
+
+        # Broadcast-path guard: consensus must reject, and the reason
+        # must be a script-verify failure (not a wire-format error, and
+        # not an unexpected 'missing-inputs' etc.). If this ever starts
+        # succeeding, it means someone fixed the plumbing — at which
+        # point this test should be converted into the real happy-path
+        # mined lifecycle test (the code above is already the full
+        # pipeline).
+        try:
+            self.node.sendrawtransaction(signed_hex)
+        except Exception as e:
+            err = str(e)
+            assert "mempool-script-verify-flag-failed" in err, \
+                f"expected script-verify failure, got: {err}"
+            self.log.info(
+                "  Consensus rejects as expected (gap documented): "
+                "covenant check needs full-tree reveal in MLSC proof")
+            self.log.info(
+                "  KNOWN GAP: mined QABI_PRIME lifecycle blocked on "
+                "signrungtx + VerifyRungTx plumbing for full-tree reveal "
+                "of QABI_SPEND via revealed_mutation_targets")
+            return
+
+        # If we got here, someone fixed the gap. Fail loudly so the
+        # maintainer remembers to promote this test to a real happy-path
+        # lifecycle test.
+        raise AssertionError(
+            "QABI_PRIME broadcast unexpectedly succeeded — the mined "
+            "lifecycle gap has been closed. Promote this test to the "
+            "full happy-path lifecycle assertions (spent input, primed "
+            "UTXO present, scriptPubKey matches predicted primed spk).")
+
+    def test_qabi_reorg_survival(self):
+        """Reorg survival: mine a QABI UTXO creation tx, invalidate the
+        block containing it, verify the tx re-enters the mempool, then
+        mine a fresh block and verify the tx is reconfirmed at a new
+        block hash with the same QABI UTXO landing in the UTXO set.
+        """
+        self.log.info("Testing QABI tx reorg survival...")
+
+        from test_framework.wallet import MiniWallet
+
+        wallet = MiniWallet(self.node)
+        auth_seed = "d4" * 32
+        chain_length = 25
+
+        initial = self._create_and_mine_qabi_utxo(wallet, auth_seed, chain_length)
+        txid = initial["txid"]
+        # Block containing the QABI tx is the tip right after creation.
+        original_block_hash = self.node.getbestblockhash()
+        original_block_info = self.node.getblock(original_block_hash)
+        assert txid in original_block_info["tx"], \
+            "QABI tx must be in the mined block before we invalidate it"
+        self.log.info(
+            f"  Initial mine: tx {txid} in block {original_block_hash[:16]}...")
+
+        # Invalidate the block. The QABI tx must drop back into mempool
+        # (the mempool must accept it again — proves the TX_MLSC wire
+        # format parses correctly from the disconnected block).
+        self.node.invalidateblock(original_block_hash)
+        mempool = self.node.getrawmempool()
+        assert txid in mempool, \
+            f"QABI tx must re-enter mempool after invalidateblock, mempool={mempool}"
+        self.log.info(
+            f"  After invalidateblock: tx back in mempool "
+            f"(mempool size={len(mempool)})")
+
+        # Send a filler tx to guarantee the re-mined block has a
+        # different merkle root, and therefore a different block hash.
+        # Without this, on regtest the node picks the same nonce and
+        # produces an identical block header, which AcceptBlock then
+        # rejects as `duplicate-invalid` because the original hash is
+        # still in the block index marked invalid.
+        filler_txid = wallet.send_self_transfer(from_node=self.node)["txid"]
+        mempool_after_filler = self.node.getrawmempool()
+        assert txid in mempool_after_filler, \
+            "QABI tx must still be in mempool after filler tx"
+        assert filler_txid in mempool_after_filler, \
+            "filler tx must be in mempool"
+        self.log.info(
+            f"  Added filler tx {filler_txid[:16]}... to distinguish "
+            f"merkle root (mempool size={len(mempool_after_filler)})")
+
+        # Mine a fresh block. The new block must contain the QABI tx
+        # at a different block hash than before.
+        new_hashes = self.generate(self.node, 1)
+        new_block_hash = new_hashes[0]
+        assert new_block_hash != original_block_hash, \
+            "generated block after reorg must have a new hash"
+        new_block_info = self.node.getblock(new_block_hash)
+        assert txid in new_block_info["tx"], \
+            "QABI tx must be re-confirmed in the fresh block"
+
+        # UTXO must exist at the new confirmation.
+        tx_out = self.node.gettxout(txid, 0)
+        assert tx_out is not None, \
+            "QABI UTXO must be in the UTXO set after reorg re-mining"
+        assert tx_out["scriptPubKey"]["hex"].startswith("df")
+        self.log.info(
+            f"  After re-mine: tx in new block {new_block_hash[:16]}..., "
+            f"UTXO confirmed ({tx_out['value']} BTC)")
+        self.log.info("  QABI tx reorg survival: SUCCESS")
 
 
 if __name__ == "__main__":
