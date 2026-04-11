@@ -164,12 +164,24 @@ static bool GenerateBlock(ChainstateManager& chainman, CBlock&& block, uint64_t&
 static UniValue generateBlocks(ChainstateManager& chainman, Mining& miner, const CScript& coinbase_output_script, int nGenerate, uint64_t nMaxTries)
 {
     UniValue blockHashes(UniValue::VARR);
+    const int nInitial = nGenerate;
     while (nGenerate > 0 && !chainman.m_interrupt) {
         std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({ .coinbase_output_script = coinbase_output_script }));
         CHECK_NONFATAL(block_template);
 
         std::shared_ptr<const CBlock> block_out;
         if (!GenerateBlock(chainman, block_template->getBlock(), nMaxTries, block_out, /*process_new_block=*/true)) {
+            // nMaxTries is decremented per-nonce-attempt across all blocks
+            // in this call. On chains with non-trivial difficulty (signet,
+            // testnet3/4, mainnet) it is common for the shared budget to
+            // run out partway through a multi-block request — the caller
+            // sees fewer block hashes than requested with no error. Log
+            // the early exit so the symptom is visible to operators.
+            const int mined = static_cast<int>(blockHashes.size());
+            LogPrintf("generatetoaddress: maxtries exhausted after %d of %d "
+                      "blocks (nMaxTries is a shared budget; raise it or "
+                      "request fewer blocks per call)\n",
+                      mined, nInitial);
             break;
         }
 
@@ -268,7 +280,12 @@ static RPCHelpMan generatetoaddress()
          {
              {"nblocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated."},
              {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address to send the newly generated bitcoin to."},
-             {"maxtries", RPCArg::Type::NUM, RPCArg::Default{DEFAULT_MAX_TRIES}, "How many iterations to try."},
+             {"maxtries", RPCArg::Type::NUM, RPCArg::Default{DEFAULT_MAX_TRIES},
+              "Shared nonce-attempt budget across all requested blocks (not per block). "
+              "On chains harder than regtest the default is usually exhausted "
+              "before all blocks are mined; the result array returns however "
+              "many blocks the budget allowed. If mining fewer blocks than "
+              "requested is a problem, call one block at a time or raise this."},
          },
          RPCResult{
              RPCResult::Type::ARR, "", "hashes of blocks generated",
