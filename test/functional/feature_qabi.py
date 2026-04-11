@@ -108,7 +108,7 @@ class QabiTest(BitcoinTestFramework):
         self.test_testmempoolaccept_rejects_fake_qabio_tx()
         self.test_decode_qabio_tx_preserves_fields()
         self.test_mine_real_qabi_utxo()
-        self.test_mine_qabi_prime_gap_documented()
+        self.test_mine_qabi_prime_lifecycle()
         self.test_qabi_reorg_survival()
 
         self.log.info("All QABI functional tests passed!")
@@ -1134,41 +1134,29 @@ class QabiTest(BitcoinTestFramework):
     # Mined QABI lifecycle helpers + tests (prime + reorg)
     # ------------------------------------------------------------------
 
-    # SIG rung placeholder pubkey used in the mined-lifecycle tests. Its
-    # specific value doesn't matter for consensus — the SIG rung is not
-    # the rung being spent in these tests (rung 1 = QABI_PRIME is). What
-    # matters is that the INPUT and OUTPUT conditions trees both use the
-    # same pubkey so the Merkle-lattice root matches under mutation.
+    # Mined-lifecycle conditions tree:
+    #   rung 0: QABI_PRIME (covenant entry for priming state transitions)
+    #   rung 1: QABI_SPEND (committed state: auth_tip, committed_root,
+    #           committed_depth, committed_expiry, owner_id)
     #
-    # createtxmlsc accepts rung-level `pubkeys` as 32-byte x-only and
-    # prepends 0x02 to canonicalise to a 33-byte compressed form before
-    # folding it into the leaf. signrungtx's ParseConditionsSpec reads
-    # pubkeys from block-level PUBKEY fields without that conversion,
-    # so we keep two forms here and feed the appropriate one to each RPC
-    # to ensure the Merkle roots match on both sides.
-    _MINED_SIG_PK_XONLY_HEX = "00" * 32
-    _MINED_SIG_PK_COMPRESSED_HEX = "02" + "00" * 32
+    # No SIG rung in these tests — QABI_PRIME + QABI_SPEND are the only
+    # spend paths needed to exercise the mined priming lifecycle. Both
+    # rungs are built with empty rung-level pubkey lists so the Merkle
+    # leaves use value_commitment = SHA256(fields || []) on both the
+    # createtxmlsc side and the signrungtx side without any pubkey-
+    # format canonicalisation to worry about. The covenant recomputation
+    # inside EvalQABIPrimeBlock then matches bit-exact on consensus.
     _MINED_OWNER_ID = "c5" * 32
 
     def _qabi_conditions_for_createtxmlsc(
             self, auth_tip_bytes_hex, committed_root_hex,
             committed_depth, committed_expiry, owner_id_hex):
-        """Build the 3-rung conditions tree (SIG, QABI_PRIME, QABI_SPEND)
-        in the format createtxmlsc's conditions parameter accepts
-        (each rung carries output_index). The QABI_SPEND fields are laid
-        out in the exact order the evaluator expects for a conditions-
-        context block: auth_tip, committed_root, committed_depth (u32 LE),
-        committed_expiry (u32 LE), owner_id.
+        """2-rung [QABI_PRIME, QABI_SPEND] tree in createtxmlsc shape.
+        QABI_SPEND fields are laid out in the exact order the evaluator
+        expects for a conditions-context block: auth_tip, committed_root,
+        committed_depth (u32 LE), committed_expiry (u32 LE), owner_id.
         """
         return [
-            {
-                "output_index": 0,
-                "blocks": [{
-                    "type": "SIG",
-                    "fields": [{"type": "SCHEME", "hex": "01"}],
-                }],
-                "pubkeys": [self._MINED_SIG_PK_XONLY_HEX],
-            },
             {
                 "output_index": 0,
                 "blocks": [{"type": "QABI_PRIME", "fields": []}],
@@ -1195,26 +1183,8 @@ class QabiTest(BitcoinTestFramework):
     def _qabi_conditions_for_signrungtx(
             self, auth_tip_bytes_hex, committed_root_hex,
             committed_depth, committed_expiry, owner_id_hex):
-        """Mirror of the createtxmlsc conditions, but in the shape
-        signrungtx's per-signer conditions parameter accepts — no
-        output_index, but pubkeys still carried at the rung level so
-        the Merkle root computation matches the original creation.
-        """
+        """Same 2-rung tree in signrungtx shape (no output_index)."""
         return [
-            {
-                "blocks": [{
-                    "type": "SIG",
-                    "fields": [
-                        {"type": "SCHEME", "hex": "01"},
-                        # PUBKEY in a conditions SIG block is stripped
-                        # from fields and collected into rung_pks for
-                        # the Merkle leaf — matches the 33-byte
-                        # compressed form createtxmlsc canonicalised to.
-                        {"type": "PUBKEY",
-                         "hex": self._MINED_SIG_PK_COMPRESSED_HEX},
-                    ],
-                }],
-            },
             {"blocks": [{"type": "QABI_PRIME", "fields": []}]},
             {
                 "blocks": [{
@@ -1273,7 +1243,7 @@ class QabiTest(BitcoinTestFramework):
             [float(output_amount)],
             conditions_create,
         )
-        assert_equal(create_result["n_rungs"], 3)
+        assert_equal(create_result["n_rungs"], 2)
         unsigned_hex = create_result["hex"]
 
         tx = tx_from_hex(unsigned_hex)
@@ -1306,42 +1276,25 @@ class QabiTest(BitcoinTestFramework):
             "conditions_root_initial": create_result["conditions_root"],
         }
 
-    def test_mine_qabi_prime_gap_documented(self):
-        """Documented architectural gap: mined QABI_PRIME is NOT yet
-        end-to-end functional. This test walks as far as the signing
-        path allows, broadcasts, and asserts consensus rejects with
-        the expected reason — locking in the boundary of what currently
-        works so regressions on the sign path are caught while the
-        follow-up consensus plumbing is still pending.
+    def test_mine_qabi_prime_lifecycle(self):
+        """End-to-end mined priming lifecycle. Creates a fresh QABI
+        UTXO on regtest, constructs a priming tx that spends it via
+        the QABI_PRIME rung, broadcasts and mines the priming tx, and
+        verifies the original UTXO is spent while the primed UTXO
+        lands in the UTXO set with a *different* scriptPubKey whose
+        committed root matches what createtxmlsc predicted for the
+        mutated conditions tree.
 
-        The gap: EvalQABIPrimeBlock's covenant check (check 5) rebuilds
-        a mutated conditions tree and recomputes its MLSC root to
-        compare against the output UTXO's committed root. That rebuild
-        needs the FULL input conditions tree — every rung's content
-        plus its pubkey list. MLSC's MERKLE_PATH proof mode reveals
-        only the target rung (QABI_PRIME here) and leaves all other
-        rungs as sibling leaf hashes. The QABI_SPEND rung that carries
-        the committed state is therefore invisible at consensus time,
-        so check 5 (and the block-type search that precedes it) cannot
-        run.
+        Exercises the full covenant path:
 
-        Follow-up required (tracked for a dedicated branch):
-          1. signrungtx: when spending a rung containing QABI_PRIME,
-             add the QABI_SPEND rung (and any other rungs needed to
-             recompute the root) to `revealed_mutation_targets`.
-          2. VerifyRungTx: after pushing `revealed_rung`, also place
-             each `revealed_mutation_targets` entry into
-             `conditions.rungs` at its correct index so
-             EvalQABIPrimeBlock can search across the real tree.
-          3. Transport per-rung pubkeys for mutation targets (or
-             require the non-target rungs to have empty pubkey lists)
-             so the recomputed MLSC root matches bit-exact.
-
-        Until those three are wired up, this test serves as the
-        regression guard for the signing half of the path.
+          signrungtx adds the QABI_SPEND rung to the MLSC proof's
+          `revealed_mutation_targets` so EvalQABIPrimeBlock can read
+          the current committed state. VerifyRungTx places each
+          revealed rung at its real index inside
+          ctx.input_conditions->rungs so the covenant check's root
+          recomputation sees the full 2-rung tree bit-exact.
         """
-        self.log.info(
-            "Testing QABI_PRIME sign-path (mined-lifecycle gap documented)...")
+        self.log.info("Testing full mined QABI_PRIME priming lifecycle...")
 
         from test_framework.wallet import MiniWallet
         from decimal import Decimal
@@ -1352,13 +1305,16 @@ class QabiTest(BitcoinTestFramework):
 
         initial = self._create_and_mine_qabi_utxo(wallet, auth_seed, chain_length)
         self.log.info(
-            f"  Initial QABI UTXO mined: "
-            f"{initial['txid']}:{initial['vout']} ({initial['value_btc']} BTC)")
+            f"  Step 1: initial QABI UTXO mined: "
+            f"{initial['txid']}:{initial['vout']} ({initial['value_btc']} BTC), "
+            f"spk={initial['scriptPubKey'][:18]}...")
 
         prime_depth = 10
         new_committed_root_hex = "77" * 32
         new_committed_expiry = 500
 
+        # Build the primed conditions tree — same 2 rungs, but the
+        # QABI_SPEND block's committed_root/depth/expiry are mutated.
         primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
             auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
             committed_root_hex=new_committed_root_hex,
@@ -1374,22 +1330,27 @@ class QabiTest(BitcoinTestFramework):
             primed_conditions_create,
         )
         priming_hex = priming_tx["hex"]
+        primed_conditions_root = priming_tx["conditions_root"]
         primed_spk = priming_tx["scriptPubKey"]
         assert primed_spk.startswith("df")
         assert primed_spk != initial["scriptPubKey"], \
             "mutated tree must produce a different output scriptPubKey"
         self.log.info(
-            f"  Priming tx skeleton built "
-            f"({len(priming_hex) // 2} bytes, primed spk differs — "
-            f"covenant target computed)")
+            f"  Step 2: priming tx skeleton built "
+            f"({len(priming_hex) // 2} bytes, primed conditions_root="
+            f"{primed_conditions_root[:16]}...)")
 
+        # Sign input 0 via signrungtx. In the 2-rung tree, QABI_PRIME
+        # is at rung index 0. signrungtx plumbs the QABI_SPEND rung
+        # into the MLSC proof's mutation targets so the consensus
+        # evaluator can read the committed state.
         spent_outputs = [{
             "amount": str(initial["value_btc"]),
             "scriptPubKey": initial["scriptPubKey"],
         }]
         signers = [{
             "input": 0,
-            "rung": 1,
+            "rung": 0,
             "blocks": [{
                 "type": "QABI_PRIME",
                 "new_committed_root": new_committed_root_hex,
@@ -1401,46 +1362,37 @@ class QabiTest(BitcoinTestFramework):
             "conditions": initial["conditions_signrungtx"],
         }]
 
-        # Sign-path guard: signrungtx must succeed and return a complete
-        # witness. This is the boundary of what's already working.
         signed = self.node.signrungtx(priming_hex, signers, spent_outputs)
         assert signed["complete"], \
             f"signrungtx must produce a complete QABI_PRIME witness: {signed}"
         signed_hex = signed["hex"]
         self.log.info(
-            f"  QABI_PRIME witness built OK via signrungtx "
+            f"  Step 3: QABI_PRIME witness built "
             f"({len(signed_hex) // 2} bytes signed tx)")
 
-        # Broadcast-path guard: consensus must reject, and the reason
-        # must be a script-verify failure (not a wire-format error, and
-        # not an unexpected 'missing-inputs' etc.). If this ever starts
-        # succeeding, it means someone fixed the plumbing — at which
-        # point this test should be converted into the real happy-path
-        # mined lifecycle test (the code above is already the full
-        # pipeline).
-        try:
-            self.node.sendrawtransaction(signed_hex)
-        except Exception as e:
-            err = str(e)
-            assert "mempool-script-verify-flag-failed" in err, \
-                f"expected script-verify failure, got: {err}"
-            self.log.info(
-                "  Consensus rejects as expected (gap documented): "
-                "covenant check needs full-tree reveal in MLSC proof")
-            self.log.info(
-                "  KNOWN GAP: mined QABI_PRIME lifecycle blocked on "
-                "signrungtx + VerifyRungTx plumbing for full-tree reveal "
-                "of QABI_SPEND via revealed_mutation_targets")
-            return
+        # Broadcast + mine.
+        priming_txid = self.node.sendrawtransaction(signed_hex)
+        self.generate(self.node, 1)
+        self.log.info(f"  Step 4: priming tx mined: {priming_txid}")
 
-        # If we got here, someone fixed the gap. Fail loudly so the
-        # maintainer remembers to promote this test to a real happy-path
-        # lifecycle test.
-        raise AssertionError(
-            "QABI_PRIME broadcast unexpectedly succeeded — the mined "
-            "lifecycle gap has been closed. Promote this test to the "
-            "full happy-path lifecycle assertions (spent input, primed "
-            "UTXO present, scriptPubKey matches predicted primed spk).")
+        # Original UTXO must be spent; primed UTXO must exist.
+        spent = self.node.gettxout(initial["txid"], initial["vout"])
+        assert spent is None, "initial QABI UTXO must be spent after priming"
+
+        primed_out = self.node.gettxout(priming_txid, 0)
+        assert primed_out is not None, \
+            "primed QABI UTXO must be in the UTXO set"
+        primed_chain_spk = primed_out["scriptPubKey"]["hex"]
+        assert primed_chain_spk.startswith("df")
+        assert primed_chain_spk != initial["scriptPubKey"], \
+            "mined primed UTXO scriptPubKey must differ from the original"
+        assert primed_chain_spk == primed_spk, \
+            ("mined primed UTXO scriptPubKey must match the "
+             "createtxmlsc-predicted primed scriptPubKey")
+        self.log.info(
+            f"  Step 5: primed QABI UTXO confirmed on chain: "
+            f"{primed_chain_spk[:18]}... ({primed_out['value']} BTC)")
+        self.log.info("  Full mined QABI_PRIME lifecycle: SUCCESS")
 
     def test_qabi_reorg_survival(self):
         """Reorg survival: mine a QABI UTXO creation tx, invalidate the

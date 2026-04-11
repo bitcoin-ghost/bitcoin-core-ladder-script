@@ -300,11 +300,25 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
             }
             RungDataType dtype = static_cast<RungDataType>(data_type_byte);
 
-            // CONDITIONS context: reject witness-only data types
+            // CONDITIONS context: reject witness-only data types.
+            // QABI_SPEND carves out PUBKEY_COMMIT at the 5th field
+            // (owner_id = SHA256(FALCON pk)) — it's a 32-byte
+            // commitment, not a writable field, and the rule in
+            // ParseBlockSpec at the RPC layer explicitly allows it
+            // for QABI_SPEND only. Mirror that carve-out here so the
+            // on-wire deserialiser accepts the same blocks the RPC
+            // layer produces (needed for MLSC proof mutation targets
+            // that reveal a QABI_SPEND rung to the QABI_PRIME
+            // covenant check).
             if (ctx == static_cast<uint8_t>(SerializationContext::CONDITIONS) &&
                 !IsConditionDataType(dtype)) {
-                error = "witness-only data type in conditions: " + DataTypeName(dtype);
-                return false;
+                const bool qabi_spend_pubkey_commit_ok =
+                    block_out.type == RungBlockType::QABI_SPEND &&
+                    dtype == RungDataType::PUBKEY_COMMIT;
+                if (!qabi_spend_pubkey_commit_ok) {
+                    error = "witness-only data type in conditions: " + DataTypeName(dtype);
+                    return false;
+                }
             }
 
             // ACCUMULATOR: all fields must be HASH256 (root + proof nodes + leaf)

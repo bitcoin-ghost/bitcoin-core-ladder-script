@@ -20,6 +20,7 @@
 #include <secp256k1_schnorrsig.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <map>
 #include <optional>
 
@@ -2941,17 +2942,127 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
         return EvalResult::ERROR;
     }
 
-    // -- Locate the QABI_SPEND block in input_conditions -----------------
+    // -- Locate the QABI_SPEND block ------------------------------------
+    //
+    // QABI_PRIME's covenant check 5 needs the FULL input conditions tree
+    // to recompute the mutated MLSC root. But for MLSC spends the
+    // consensus-time ctx.input_conditions only carries the revealed
+    // rung (1 entry — kept 1:1 with witness_ladder.rungs so the merge
+    // pass works). The QABI_SPEND rung that carries committed state
+    // must be revealed via the MLSC proof's `revealed_mutation_targets`
+    // at sign time (signrungtx does this automatically when spending a
+    // rung that contains QABI_PRIME).
+    //
+    // Build a "full tree" here by taking the revealed rung (placed at
+    // its real index) and overlaying every mutation target at its own
+    // real index. That tree is used for:
+    //   (a) the QABI_SPEND lookup (block-type search across all rungs)
+    //   (b) check 5's covenant root recomputation
+    //
+    // Non-revealed rungs are left as default-empty Rungs; they only
+    // contribute if the spender reveals them as mutation targets.
 
     if (ctx.input_conditions == nullptr || ctx.spending_output == nullptr) {
         return EvalResult::ERROR;
+    }
+    if (ctx.mlsc_proof == nullptr) {
+        // Unit-test fallback: no MLSC proof plumbed. Fall back to the
+        // single-rung input_conditions layout used by unit tests that
+        // build the full tree directly in ctx.
+        RungConditions unit_test_full = *ctx.input_conditions;
+        // Fall through using unit_test_full below.
+        const RungBlock* qabi_spend = nullptr;
+        size_t qabi_spend_rung_idx_ut = 0;
+        size_t qabi_spend_block_idx_ut = 0;
+        for (size_t r = 0; r < unit_test_full.rungs.size(); ++r) {
+            const auto& rung = unit_test_full.rungs[r];
+            for (size_t b = 0; b < rung.blocks.size(); ++b) {
+                if (rung.blocks[b].type == RungBlockType::QABI_SPEND) {
+                    if (qabi_spend != nullptr) return EvalResult::ERROR;
+                    qabi_spend = &rung.blocks[b];
+                    qabi_spend_rung_idx_ut = r;
+                    qabi_spend_block_idx_ut = b;
+                }
+            }
+        }
+        if (qabi_spend == nullptr) return EvalResult::UNSATISFIED;
+        // Run the rest of the checks against unit_test_full. The checks
+        // below are copy-pasted from the mainline path to keep this
+        // fallback self-contained.
+        if (qabi_spend->fields.size() != 5) return EvalResult::ERROR;
+        auto spend_hashes_ut = FindAllFields(*qabi_spend, RungDataType::HASH256);
+        auto spend_nums_ut   = FindAllFields(*qabi_spend, RungDataType::NUMERIC);
+        if (spend_hashes_ut.size() != 2 || spend_nums_ut.size() != 2) return EvalResult::ERROR;
+        if (spend_hashes_ut[0]->data.size() != 32) return EvalResult::ERROR;
+        const RungField* auth_tip_field_ut = spend_hashes_ut[0];
+        auto committed_depth_opt_ut = ReadNumeric(*spend_nums_ut[0]);
+        if (!committed_depth_opt_ut || *committed_depth_opt_ut < 0) return EvalResult::ERROR;
+        const int64_t committed_depth_ut = *committed_depth_opt_ut;
+        if (prime_depth <= committed_depth_ut) return EvalResult::UNSATISFIED;
+        unsigned char current_ut[CSHA256::OUTPUT_SIZE];
+        std::memcpy(current_ut, preimage_field->data.data(), 32);
+        for (int64_t i = 0; i < prime_depth; ++i) {
+            unsigned char next[CSHA256::OUTPUT_SIZE];
+            CSHA256().Write(current_ut, 32).Finalize(next);
+            std::memcpy(current_ut, next, 32);
+        }
+        if (std::memcmp(current_ut, auth_tip_field_ut->data.data(), 32) != 0) {
+            return EvalResult::UNSATISFIED;
+        }
+        RungConditions expected = unit_test_full;
+        Rung& mutated_rung = expected.rungs[qabi_spend_rung_idx_ut];
+        RungBlock& mutated_block = mutated_rung.blocks[qabi_spend_block_idx_ut];
+        std::vector<RungField*> m_hashes, m_nums;
+        for (auto& f : mutated_block.fields) {
+            if (f.type == RungDataType::HASH256) m_hashes.push_back(&f);
+            else if (f.type == RungDataType::NUMERIC) m_nums.push_back(&f);
+        }
+        if (m_hashes.size() != 2 || m_nums.size() != 2) return EvalResult::ERROR;
+        m_hashes[1]->data.assign(new_root_field->data.begin(), new_root_field->data.end());
+        WriteNumericField(*m_nums[0], prime_depth);
+        WriteNumericField(*m_nums[1], new_committed_expiry);
+        std::vector<std::vector<std::vector<uint8_t>>> pks;
+        if (ctx.rung_pubkeys) pks = *ctx.rung_pubkeys;
+        uint256 expected_root = ComputeConditionsRootMLSC(expected, pks);
+        uint256 output_root;
+        if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+            return EvalResult::UNSATISFIED;
+        }
+        if (output_root != expected_root) return EvalResult::UNSATISFIED;
+        return EvalResult::SATISFIED;
+    }
+
+    // Mainline path: reconstruct the full tree from the MLSC proof.
+    RungConditions full_tree;
+    full_tree.coil = ctx.input_conditions->coil;
+    full_tree.rungs.resize(ctx.mlsc_proof->total_rungs);
+    // Place the revealed rung at its real index.
+    if (ctx.mlsc_proof->rung_index < full_tree.rungs.size() &&
+        !ctx.input_conditions->rungs.empty()) {
+        full_tree.rungs[ctx.mlsc_proof->rung_index] = ctx.input_conditions->rungs[0];
+    }
+    // Overlay mutation-target rungs at their own real indices.
+    for (const auto& [mt_idx, mt_rung] : ctx.mlsc_proof->revealed_mutation_targets) {
+        if (mt_idx < full_tree.rungs.size()) {
+            full_tree.rungs[mt_idx] = mt_rung;
+        }
+    }
+
+    // Per-rung pubkeys for the full tree. Revealed rung sits at its
+    // real index; mutation targets default to empty (they don't carry
+    // witness pubkeys in the current MLSC proof format).
+    std::vector<std::vector<std::vector<uint8_t>>> full_pks;
+    full_pks.resize(ctx.mlsc_proof->total_rungs);
+    if (ctx.rung_pubkeys && !ctx.rung_pubkeys->empty() &&
+        ctx.mlsc_proof->rung_index < full_pks.size()) {
+        full_pks[ctx.mlsc_proof->rung_index] = (*ctx.rung_pubkeys)[0];
     }
 
     const RungBlock* qabi_spend = nullptr;
     size_t qabi_spend_rung_idx = 0;
     size_t qabi_spend_block_idx = 0;
-    for (size_t r = 0; r < ctx.input_conditions->rungs.size(); ++r) {
-        const auto& rung = ctx.input_conditions->rungs[r];
+    for (size_t r = 0; r < full_tree.rungs.size(); ++r) {
+        const auto& rung = full_tree.rungs[r];
         for (size_t b = 0; b < rung.blocks.size(); ++b) {
             if (rung.blocks[b].type == RungBlockType::QABI_SPEND) {
                 if (qabi_spend != nullptr) {
@@ -2964,7 +3075,9 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
             }
         }
     }
-    if (qabi_spend == nullptr) return EvalResult::UNSATISFIED;
+    if (qabi_spend == nullptr) {
+        return EvalResult::UNSATISFIED;
+    }
 
     // -- Read current state from QABI_SPEND -----------------------------
     //
@@ -3002,7 +3115,7 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
 
     // -- Check 5: covenant — rebuild with mutated QABI_SPEND state -------
 
-    RungConditions expected = *ctx.input_conditions;
+    RungConditions expected = full_tree;
     Rung& mutated_rung = expected.rungs[qabi_spend_rung_idx];
     RungBlock& mutated_block = mutated_rung.blocks[qabi_spend_block_idx];
 
@@ -3024,10 +3137,8 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
     // Mutate committed_expiry (NUMERIC index 1)
     WriteNumericField(*m_nums[1], new_committed_expiry);
 
-    // Compute expected MLSC root from mutated conditions.
-    std::vector<std::vector<std::vector<uint8_t>>> pks;
-    if (ctx.rung_pubkeys) pks = *ctx.rung_pubkeys;
-    uint256 expected_root = ComputeConditionsRootMLSC(expected, pks);
+    // Compute expected MLSC root from the mutated full tree.
+    uint256 expected_root = ComputeConditionsRootMLSC(expected, full_pks);
 
     // Extract the output's committed conditions_root.
     uint256 output_root;
@@ -4417,7 +4528,11 @@ bool VerifyRungTx(const CTransaction& tx,
             (*shared_cache)[tx.vin[nIn].prevout.hash] = std::move(entry);
         }
 
-        // Build RungConditions from MLSC proof (1 rung + relays + coil)
+        // Build RungConditions from MLSC proof. conditions.rungs is
+        // kept at exactly 1 rung (the revealed one) so it stays 1:1
+        // with witness_ladder.rungs for MergeConditionsAndWitness.
+        // Cross-rung covenant checks (QABI_PRIME) read the full tree
+        // indirectly via ctx.mlsc_proof->revealed_mutation_targets.
         conditions.rungs.push_back(mlsc_proof.revealed_rung);
         conditions.coil = witness_ladder.coil;
         conditions.conditions_root = conditions_root; // For sighash computation
