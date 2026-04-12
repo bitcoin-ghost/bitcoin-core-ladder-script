@@ -1184,16 +1184,13 @@ inline constexpr ImplicitFieldLayout QABI_SPEND_CONDITIONS = {5, {
     {RungDataType::PUBKEY_COMMIT, 32},
 }};
 
-/** QABI_SPEND witness (conditions + revealed spend preimage):
- *    [0..4] — same as QABI_SPEND_CONDITIONS (verified via Merkle proof)
- *    [5]    PREIMAGE(spend_preimage) — 32 B, witness-revealed preimage
- *                                        at depth committed_depth+1 */
-inline constexpr ImplicitFieldLayout QABI_SPEND_WITNESS = {6, {
-    {RungDataType::HASH256, 32},
-    {RungDataType::HASH256, 32},
-    {RungDataType::NUMERIC, 0},
-    {RungDataType::NUMERIC, 0},
-    {RungDataType::PUBKEY_COMMIT, 32},
+/** QABI_SPEND witness (witness-only fields; conditions fields arrive via
+ *    MergeConditionsAndWitness at evaluation time):
+ *    [0]    PREIMAGE(spend_preimage) — 32 B, witness-revealed preimage
+ *                                        at depth committed_depth+1
+ *  After merge with conditions: 5 (conditions) + 1 (witness) = 6 fields,
+ *  matching the evaluator's expected layout. */
+inline constexpr ImplicitFieldLayout QABI_SPEND_WITNESS = {1, {
     {RungDataType::PREIMAGE, 32},
 }};
 

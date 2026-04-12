@@ -1807,6 +1807,63 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
         break;
     }
+    case RungBlockType::QABI_SPEND: {
+        // QABI_SPEND witness: only the spend_preimage goes into the wire-format
+        // witness block. The 5 committed conditions fields live in the conditions
+        // tree and are combined by MergeConditionsAndWitness at evaluation time
+        // (conditions 5 + witness 1 = merged 6 fields, matching the evaluator).
+        //
+        // Caller provides either:
+        //   spend_preimage / preimage  (hex, 32 bytes), or
+        //   auth_seed + chain_length   (in-RPC derivation at committed_depth+1)
+
+        std::vector<uint8_t> preimage_bytes;
+        if (block_spec.exists("spend_preimage")) {
+            preimage_bytes = ParseHex(block_spec["spend_preimage"].get_str());
+        } else if (block_spec.exists("preimage")) {
+            preimage_bytes = ParseHex(block_spec["preimage"].get_str());
+        } else if (block_spec.exists("auth_seed") && block_spec.exists("chain_length")) {
+            // Find committed_depth from conditions tree for derivation.
+            const RungBlock* cond_block = nullptr;
+            for (const auto& rung : conditions.rungs) {
+                for (const auto& cb : rung.blocks) {
+                    if (cb.type == RungBlockType::QABI_SPEND) { cond_block = &cb; break; }
+                }
+                if (cond_block) break;
+            }
+            if (!cond_block || cond_block->fields.size() < 3) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "QABI_SPEND: need QABI_SPEND in conditions to derive preimage");
+            }
+            auto seed = ParseHex(block_spec["auth_seed"].get_str());
+            if (seed.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_SPEND: auth_seed must be 32 bytes");
+            }
+            uint32_t chain_length = block_spec["chain_length"].getInt<uint32_t>();
+            const auto& df = cond_block->fields[2];
+            if (df.data.size() != 4) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_SPEND: bad committed_depth");
+            }
+            uint32_t cd = static_cast<uint32_t>(df.data[0]) |
+                          (static_cast<uint32_t>(df.data[1]) << 8) |
+                          (static_cast<uint32_t>(df.data[2]) << 16) |
+                          (static_cast<uint32_t>(df.data[3]) << 24);
+            uint256 pre;
+            if (!rung::ComputeAuthChainPreimageAt(
+                    std::span<const uint8_t>(seed), chain_length, cd + 1, pre)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_SPEND: preimage derivation failed");
+            }
+            preimage_bytes.assign(pre.data(), pre.data() + 32);
+        } else {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "QABI_SPEND requires spend_preimage/preimage OR (auth_seed + chain_length)");
+        }
+        if (preimage_bytes.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_SPEND: preimage must be 32 bytes");
+        }
+        block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
+        break;
+    }
     default: {
         // Blocks without specific signing logic: auto-populate witness fields.
         // For key-consuming blocks (ANCHOR_CHANNEL, VAULT_LOCK, PLC blocks with pubkeys),
