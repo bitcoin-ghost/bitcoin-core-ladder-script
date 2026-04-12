@@ -1158,6 +1158,14 @@ inline constexpr ImplicitFieldLayout CLTV_SIG_WITNESS = TIMELOCKED_SIG_WITNESS;
 
 // -- QABI family layouts --
 
+// QABIO implicit layouts (BIP-YYYY). Gated on ENABLE_QABIO so the base
+// Ladder Script layer has no QABIO-specific layout baggage when the
+// extension is disabled. The QABI_PRIME / QABI_SPEND enum values and
+// the IsKnownBlockType / ToString entries for them stay unconditional
+// above — this is just the layout data that is meaningless without
+// the evaluator.
+#ifdef ENABLE_QABIO
+
 /** QABI_PRIME witness:
  *    [0] HASH256(new_committed_root)       — 32 B
  *    [1] NUMERIC(prime_depth)               — varint
@@ -1193,6 +1201,8 @@ inline constexpr ImplicitFieldLayout QABI_SPEND_CONDITIONS = {5, {
 inline constexpr ImplicitFieldLayout QABI_SPEND_WITNESS = {1, {
     {RungDataType::PREIMAGE, 32},
 }};
+
+#endif // ENABLE_QABIO
 
 /** Lookup implicit field layout for a block type and serialization context.
  *  Returns NO_IMPLICIT if no implicit table exists. */
@@ -1272,9 +1282,11 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::P2WSH_LEGACY:     return P2WSH_LEGACY_CONDITIONS;
         case RungBlockType::P2TR_LEGACY:      return SIG_CONDITIONS;
         case RungBlockType::P2TR_SCRIPT_LEGACY: return P2TR_SCRIPT_LEGACY_CONDITIONS;
+#ifdef ENABLE_QABIO
         // QABI family
         case RungBlockType::QABI_SPEND:       return QABI_SPEND_CONDITIONS;
         // QABI_PRIME has no committed fields (pure witness-driven) — NO_IMPLICIT
+#endif
         default: return NO_IMPLICIT;
         }
     } else {
@@ -1301,9 +1313,11 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::P2WPKH_LEGACY:    return SIG_WITNESS;
         case RungBlockType::P2TR_LEGACY:      return SIG_WITNESS;
         // P2SH, P2WSH, P2TR_SCRIPT: no implicit witness (variable inner conditions)
+#ifdef ENABLE_QABIO
         // QABI family
         case RungBlockType::QABI_PRIME:       return QABI_PRIME_WITNESS;
         case RungBlockType::QABI_SPEND:       return QABI_SPEND_WITNESS;
+#endif
         default: return NO_IMPLICIT;
         }
     }
@@ -1415,9 +1429,16 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::P2WSH_LEGACY, "P2WSH_LEGACY", true, true, false, 0, &P2WSH_LEGACY_CONDITIONS, nullptr, true},
         {RungBlockType::P2TR_LEGACY, "P2TR_LEGACY", true, false, true, 1, &SIG_CONDITIONS, &SIG_WITNESS, false},
         {RungBlockType::P2TR_SCRIPT_LEGACY, "P2TR_SCRIPT_LEGACY", true, false, true, 1, &P2TR_SCRIPT_LEGACY_CONDITIONS, nullptr, true},
-        // QABI family
+        // QABI family. Entries remain present unconditionally so diagnostic
+        // code (ToString, block dispatch) can still identify the type codes,
+        // but the implicit layout pointers are null when ENABLE_QABIO is off.
+#ifdef ENABLE_QABIO
         {RungBlockType::QABI_PRIME, "QABI_PRIME", true, false, false, 0, nullptr, &QABI_PRIME_WITNESS, false},
         {RungBlockType::QABI_SPEND, "QABI_SPEND", true, false, false, 0, &QABI_SPEND_CONDITIONS, &QABI_SPEND_WITNESS, false},
+#else
+        {RungBlockType::QABI_PRIME, "QABI_PRIME", true, false, false, 0, nullptr, nullptr, false},
+        {RungBlockType::QABI_SPEND, "QABI_SPEND", true, false, false, 0, nullptr, nullptr, false},
+#endif
     };
     static const size_t N_DESCRIPTORS = sizeof(BLOCK_DESCRIPTORS) / sizeof(BLOCK_DESCRIPTORS[0]);
     for (size_t i = 0; i < N_DESCRIPTORS; ++i) {

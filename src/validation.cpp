@@ -2172,6 +2172,7 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         // QABIO tx share the same (sighash, sig, pubkey), so the verify
         // only needs to run once. Snapshot the thread-safe cache, pass a
         // local copy to VerifyRungTx, then merge any new entries back.
+#ifdef ENABLE_QABIO
         rung::QABOSigCache local_qabo_cache;
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
         if (m_qabo_sig_cache) {
@@ -2181,6 +2182,12 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             }
             qabo_cache_ptr = &local_qabo_cache;
         }
+#else
+        // QABIO disabled: VerifyRungTx still accepts the pointer but it
+        // is never read because the evaluator short-circuits QABI_SPEND
+        // to UNSATISFIED before touching the cache.
+        rung::QABOSigCache* qabo_cache_ptr = nullptr;
+#endif
         bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr);
         // Write back any new cache entries
         if (m_shared_tree_cache && cache_ptr) {
@@ -2189,12 +2196,14 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
                 m_shared_tree_cache->cache.emplace(k, v);
             }
         }
+#ifdef ENABLE_QABIO
         if (m_qabo_sig_cache && qabo_cache_ptr) {
             LOCK(m_qabo_sig_cache->mutex);
             for (const auto& [k, v] : local_qabo_cache) {
                 m_qabo_sig_cache->cache.emplace(k, v);
             }
         }
+#endif
         if (ok) {
             return std::nullopt;
         } else {

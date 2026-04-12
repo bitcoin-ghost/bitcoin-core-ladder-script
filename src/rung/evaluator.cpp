@@ -2884,8 +2884,15 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
 }
 
 // ============================================================================
-// QABI family — stubs (Phase 3 skeleton; real logic arrives in Phase 4 / 5)
+// QABI family — BIP-YYYY consensus evaluators
 // ============================================================================
+//
+// Everything from here to the matching `#endif // ENABLE_QABIO` is gated
+// on the ENABLE_QABIO compile flag. When the flag is off, the evaluator
+// dispatch above returns UNSATISFIED for QABI_PRIME and QABI_SPEND block
+// types (the base Ladder Script forward-compatibility rule) and these
+// function definitions are not compiled.
+#ifdef ENABLE_QABIO
 
 /** QABI_PRIME — priming state transition.
  *
@@ -3445,6 +3452,8 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     return EvalResult::SATISFIED;
 }
 
+#endif // ENABLE_QABIO
+
 // ============================================================================
 // Block dispatch
 // ============================================================================
@@ -3662,13 +3671,26 @@ EvalResult EvalBlock(const RungBlock& block,
         // never have been spent. Return ERROR to make the transaction invalid.
         raw = EvalResult::ERROR;
         break;
-    // QABI family (Phase 3 stubs; real logic in Phases 4–5)
+#ifdef ENABLE_QABIO
+    // QABI family — real logic when the extension is compiled in.
     case RungBlockType::QABI_PRIME:
         raw = EvalQABIPrimeBlock(block, checker, sigversion, execdata, ctx);
         break;
     case RungBlockType::QABI_SPEND:
         raw = EvalQABISpendBlock(block, checker, sigversion, execdata, ctx);
         break;
+#else
+    // When QABIO is disabled, the block types are still recognised for
+    // wire-format compatibility (so v4 txs carrying them still
+    // deserialise) but evaluate to UNSATISFIED. This matches the
+    // standard soft-fork forward-compatibility behaviour: old nodes see
+    // QABIO spends as anyone-can-spend at the Ladder Script layer and
+    // the QABI rules never fire.
+    case RungBlockType::QABI_PRIME:
+    case RungBlockType::QABI_SPEND:
+        raw = EvalResult::UNSATISFIED;
+        break;
+#endif
     default:
         raw = EvalResult::UNKNOWN_BLOCK_TYPE;
         break;

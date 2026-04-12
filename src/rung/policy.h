@@ -43,19 +43,30 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason);
  *  separate wiring step.
  */
 
+// QABIO (BIP-YYYY) Replace-By-Depth mempool policy helpers. These
+// signatures are always visible so validation.cpp callers don't need
+// conditional compilation — when ENABLE_QABIO is off, IsQABIPrimingTx
+// always returns false and the RBD path is never taken.
+
 /** Extract the prime_depth from the first QABI_PRIME block found in the
  *  witness of the given input. Returns false if the witness cannot be parsed,
  *  the input has no QABI_PRIME block, or the prime_depth field is malformed.
  *
  *  prime_depth is the second NUMERIC field in the QABI_PRIME block's witness
  *  (order: new_committed_root HASH256, prime_depth NUMERIC, new_committed_expiry
- *  NUMERIC, prime_preimage PREIMAGE). */
+ *  NUMERIC, prime_preimage PREIMAGE).
+ *
+ *  When ENABLE_QABIO is off this helper always returns false. */
 bool ExtractQABIPrimeDepth(const CTransaction& tx,
                             uint32_t input_index,
                             int64_t& depth_out);
 
 /** True iff the given tx contains at least one input whose witness has a
- *  QABI_PRIME block (i.e. this is a priming tx). */
+ *  QABI_PRIME block (i.e. this is a priming tx).
+ *
+ *  When ENABLE_QABIO is off this helper always returns false, which
+ *  cleanly disables the Replace-By-Depth mempool path without any
+ *  call-site conditional compilation. */
 bool IsQABIPrimingTx(const CTransaction& tx);
 
 /** RBD policy check: return true iff new_tx is a valid Replace-By-Depth
@@ -67,7 +78,8 @@ bool IsQABIPrimingTx(const CTransaction& tx);
  *    - For every shared primed input, new_tx's prime_depth > old_tx's prime_depth
  *    - Both witnesses parse cleanly
  *
- *  On failure, `reason` is populated with a machine-readable error tag. */
+ *  On failure, `reason` is populated with a machine-readable error tag.
+ *  When ENABLE_QABIO is off this helper always returns false. */
 bool IsValidRBDReplacement(const CTransaction& new_tx,
                             const CTransaction& old_tx,
                             std::string& reason);

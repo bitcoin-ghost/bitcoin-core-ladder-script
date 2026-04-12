@@ -139,8 +139,16 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 // Output validation is consensus: ValidateRungOutputs in VerifyRungTx.
 
 // ============================================================================
-// QABI Replace-By-Depth (RBD) mempool policy
+// QABI Replace-By-Depth (RBD) mempool policy (BIP-YYYY)
 // ============================================================================
+//
+// Gated on ENABLE_QABIO. When the extension is disabled the three
+// public helpers (ExtractQABIPrimeDepth, IsQABIPrimingTx,
+// IsValidRBDReplacement) are compiled as always-return-false stubs at
+// the bottom of this section, so call sites in validation.cpp don't
+// need conditional compilation — they just see "no tx ever looks like
+// a priming tx" and the RBD path is never taken.
+#ifdef ENABLE_QABIO
 
 /** Read a little-endian NUMERIC field value (local to policy.cpp to avoid
  *  reaching into evaluator.cpp's statics). */
@@ -261,5 +269,26 @@ bool IsValidRBDReplacement(const CTransaction& new_tx,
 
     return true;
 }
+
+#else // !ENABLE_QABIO
+
+// Always-false stubs so validation.cpp RBD checks collapse cleanly when
+// the extension is disabled. No priming tx ever exists from this node's
+// point of view; RBD replacements are never accepted.
+bool ExtractQABIPrimeDepth(const CTransaction& /*tx*/,
+                            uint32_t /*input_index*/,
+                            int64_t& /*depth_out*/) { return false; }
+
+bool IsQABIPrimingTx(const CTransaction& /*tx*/) { return false; }
+
+bool IsValidRBDReplacement(const CTransaction& /*new_tx*/,
+                            const CTransaction& /*old_tx*/,
+                            std::string& reason)
+{
+    reason = "rbd-qabio-disabled";
+    return false;
+}
+
+#endif // ENABLE_QABIO
 
 } // namespace rung

@@ -1,9 +1,19 @@
-// Copyright (c) 2026 The Bitcoin Ghost developers
+// Copyright (c) 2026 The Ladder Script developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
 #ifndef BITCOIN_RUNG_QABI_H
 #define BITCOIN_RUNG_QABI_H
+
+// QABIO (BIP-YYYY) is a separable soft-fork extension to Ladder Script.
+// All types and functions declared in this header are gated on the
+// ENABLE_QABIO compile-time flag. When the flag is off, this header
+// expands to an empty translation unit and any caller that tries to
+// reference a QABIO symbol is caught by the compiler. Every QABIO call
+// site in the rest of the codebase must therefore be wrapped in its
+// own `#ifdef ENABLE_QABIO` guard. See src/rung/CMakeLists.txt for the
+// option definition.
+#ifdef ENABLE_QABIO
 
 #include <primitives/transaction.h>
 #include <rung/types.h>
@@ -183,5 +193,7 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
 uint256 ComputeSighashQABO(const CTransaction& tx);
 
 } // namespace rung
+
+#endif // ENABLE_QABIO
 
 #endif // BITCOIN_RUNG_QABI_H

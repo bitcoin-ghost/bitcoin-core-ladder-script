@@ -62,6 +62,19 @@ public:
     bool ComputeSighash(uint8_t hash_type, uint256& hash_out) const;
 };
 
+// QABIO support types (BIP-YYYY). Gated on ENABLE_QABIO so the base
+// Ladder Script evaluator has no QABIO-specific machinery when the
+// extension is disabled.
+//
+// QABOSigCache is deliberately kept as a complete type in both builds
+// (an empty struct when disabled) so that RungEvalContext's pointer
+// member and VerifyRungTx's parameter keep identical signatures
+// regardless of the flag. Callers pass nullptr when the extension is
+// off, the evaluator's QABIO code paths are all #ifdef'd out, and no
+// QABIO-specific headers (qabi.h, shared_ptr<QABIBlock>, unordered_set)
+// leak into non-QABIO builds.
+#ifdef ENABLE_QABIO
+
 struct QABIBlock;  // fwd decl — full definition in rung/qabi.h
 
 /** Hash functor for uint256 values inside unordered containers.
@@ -122,6 +135,15 @@ struct QABOVerifiedEntry {
 
 /** Per-tx cache of verified QABIO state, keyed by sighash. */
 using QABOSigCache = std::map<uint256, QABOVerifiedEntry>;
+
+#else // ENABLE_QABIO
+
+/** Empty placeholder so RungEvalContext and VerifyRungTx signatures
+ *  stay stable regardless of whether QABIO is compiled in. Callers
+ *  always pass nullptr when the extension is disabled. */
+struct QABOSigCache {};
+
+#endif // ENABLE_QABIO
 
 /** Extended evaluation context for block types that need transaction data.
  *  Provides transaction and amount data needed by covenant, anchor,

@@ -1711,6 +1711,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         }
         break;
     }
+#ifdef ENABLE_QABIO
     case RungBlockType::QABI_PRIME: {
         // QABI priming witness: 4 fields in the exact order the evaluator
         // expects (matching QABI_PRIME_WITNESS implicit layout):
@@ -1864,6 +1865,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
         break;
     }
+#endif // ENABLE_QABIO
     default: {
         // Blocks without specific signing logic: auto-populate witness fields.
         // For key-consuming blocks (ANCHOR_CHANNEL, VAULT_LOCK, PLC blocks with pubkeys),
@@ -2387,6 +2389,7 @@ static RPCHelpMan signrungtx()
                 }
             }
 
+#ifdef ENABLE_QABIO
             // QABI_PRIME cross-rung reveal: the covenant check in
             // EvalQABIPrimeBlock rebuilds a mutated conditions tree and
             // recomputes its MLSC root, comparing against the output
@@ -2420,6 +2423,7 @@ static RPCHelpMan signrungtx()
                     }
                 }
             }
+#endif // ENABLE_QABIO
 
             // TX_MLSC: build all leaves and compute O(log N) Merkle path.
             // Leaf order: [rung_leaf[0..N-1]] (no separate relay/coil leaves in TX_MLSC)
@@ -3718,6 +3722,7 @@ static RPCHelpMan createtxmlsc()
     // QABIO: optional qabi_block tx-level field. When set, this tx is a
     // QABIO batch carrier and the coordinator will later sign via
     // qabi_signqabo (which populates tx.aggregated_sig).
+#ifdef ENABLE_QABIO
     if (!request.params[5].isNull()) {
         auto qb_bytes = ParseHex(request.params[5].get_str());
         if (qb_bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
@@ -3735,6 +3740,12 @@ static RPCHelpMan createtxmlsc()
         }
         mtx.qabi_block = std::move(qb_bytes);
     }
+#else
+    if (!request.params[5].isNull() && !request.params[5].get_str().empty()) {
+        throw JSONRPCError(RPC_METHOD_NOT_FOUND,
+            "qabi_block parameter requires QABIO support — rebuild with -DENABLE_QABIO=ON");
+    }
+#endif // ENABLE_QABIO
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
@@ -3757,8 +3768,11 @@ static RPCHelpMan createtxmlsc()
 }
 
 // ============================================================================
-// QABI RPC commands
+// QABI RPC commands (BIP-YYYY). Gated on ENABLE_QABIO — when the
+// extension is disabled, these commands are not registered and the
+// qabi_* RPC family returns "method not found" to callers.
 // ============================================================================
+#ifdef ENABLE_QABIO
 
 static RPCHelpMan qabi_buildblock()
 {
@@ -4125,6 +4139,8 @@ static RPCHelpMan qabi_sighash()
     };
 }
 
+#endif // ENABLE_QABIO
+
 // ============================================================================
 
 void RegisterRungRPCCommands(CRPCTable& t)
@@ -4145,12 +4161,16 @@ void RegisterRungRPCCommands(CRPCTable& t)
         {"rung", &verifyadaptorpresig},
         {"rung", &parseladder},
         {"rung", &formatladder},
-        // QABI family
+#ifdef ENABLE_QABIO
+        // QABI family (BIP-YYYY). Only registered when the extension is
+        // compiled in. Callers on a node built without QABIO get
+        // "method not found" for any of these RPCs.
         {"rung", &qabi_buildblock},
         {"rung", &qabi_blockinfo},
         {"rung", &qabi_authchain},
         {"rung", &qabi_sighash},
         {"rung", &qabi_signqabo},
+#endif // ENABLE_QABIO
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);

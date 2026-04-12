@@ -1,6 +1,15 @@
-// Copyright (c) 2026 The Bitcoin Ghost developers
+// Copyright (c) 2026 The Ladder Script developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
+
+// QABIO (BIP-YYYY) reference implementation. This translation unit is
+// compiled in only when ENABLE_QABIO is defined. The CMakeLists.txt in
+// this directory already excludes qabi.cpp from the source list when
+// the option is off, but the #ifdef guard here is belt-and-braces: if
+// someone manually compiles qabi.cpp without the flag (e.g. a custom
+// build script), it produces an empty object file rather than a
+// half-compiled mess.
+#ifdef ENABLE_QABIO
 
 #include <rung/qabi.h>
 #include <rung/serialize.h>
@@ -394,3 +403,5 @@ uint256 ComputeSighashQABO(const CTransaction& tx)
 }
 
 } // namespace rung
+
+#endif // ENABLE_QABIO

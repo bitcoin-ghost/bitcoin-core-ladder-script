@@ -352,11 +352,22 @@ struct ThreadSafeSharedTreeCache {
 /** Thread-safe per-tx wrapper for QABOSigCache (QABIO FALCON verify cache).
  *  All inputs of a single QABIO tx share the same SIGHASH_QABO and the
  *  same coordinator FALCON signature, so the verify only needs to be
- *  performed once per tx. */
+ *  performed once per tx.
+ *
+ *  When ENABLE_QABIO is off the struct exists as an empty type so
+ *  `std::shared_ptr<ThreadSafeQABOSigCache>` members and constructor
+ *  parameters on CScriptCheck stay compilable without any conditional
+ *  at call sites. Validation code that actually touches .mutex or
+ *  .cache must still be #ifdef'd out because those members don't
+ *  exist in the disabled build. */
+#ifdef ENABLE_QABIO
 struct ThreadSafeQABOSigCache {
     mutable Mutex mutex;
     rung::QABOSigCache cache GUARDED_BY(mutex);
 };
+#else
+struct ThreadSafeQABOSigCache {};
+#endif
 
 class CScriptCheck
 {
