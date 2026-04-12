@@ -4061,6 +4061,11 @@ static size_t CountWitnessPreimageFields(const LadderWitness& lw)
     size_t total = 0;
     for (const auto& rung : lw.rungs) {
         for (const auto& block : rung.blocks) {
+            // QABI_SPEND preimages are exempt from the per-tx spam limit:
+            // their count is already bounded by the qabi_block entry count
+            // (max STANDARD_RELAY_MAX_N), and the preimage is consensus-
+            // validated against the auth chain — not arbitrary data.
+            if (block.type == RungBlockType::QABI_SPEND) continue;
             for (const auto& field : block.fields) {
                 if (field.type == RungDataType::PREIMAGE ||
                     field.type == RungDataType::SCRIPT_BODY) {
