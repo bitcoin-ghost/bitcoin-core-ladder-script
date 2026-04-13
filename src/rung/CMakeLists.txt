@@ -68,13 +68,17 @@ target_link_libraries(bitcoin_rung
     OQS::oqs
 )
 
-target_compile_definitions(bitcoin_rung PRIVATE HAVE_LIBOQS)
+# HAVE_LIBOQS and ENABLE_QABIO are both PUBLIC: they change the
+# definitions of types exposed in rung/*.h (QABOSigCache, RungEvalContext
+# members, VerifyRungTx parameters), so every translation unit that
+# includes those headers — validation.cpp in bitcoin_node, rung_tests.cpp
+# in the test target, etc. — must see the same flag state as bitcoin_rung
+# itself. PRIVATE would let dependents see a different type and produce
+# an ODR/mangled-name split at link time.
+target_compile_definitions(bitcoin_rung PUBLIC HAVE_LIBOQS)
 
-# QABIO compile-time gate. Propagated to every translation unit in
-# bitcoin_rung so evaluator.cpp, rpc.cpp, policy.cpp, etc. can
-# conditionally compile their QABIO-specific code.
 if(ENABLE_QABIO)
-  target_compile_definitions(bitcoin_rung PRIVATE ENABLE_QABIO)
+  target_compile_definitions(bitcoin_rung PUBLIC ENABLE_QABIO)
   message(STATUS "QABIO extension enabled (BIP-YYYY consensus rules active)")
 else()
   message(STATUS "QABIO extension disabled (base Ladder Script only — QABI_SPEND returns UNSATISFIED)")
