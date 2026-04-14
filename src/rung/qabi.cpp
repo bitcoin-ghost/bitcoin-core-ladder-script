@@ -337,7 +337,7 @@ uint256 ComputeSighashQABO(const CTransaction& tx)
     // See qabi.h for the full coverage decision. Summary: covers tx intent
     // (version, vin, vout, conditions_root, qabi_block, nLockTime) AND the
     // per-input witness stacks. Excludes only tx.aggregated_sig itself
-    // (chicken-and-egg) and tx.creation_proof.
+    // (chicken-and-egg).
     //
     // Per-input witness coverage added in Phase 18 as defence-in-depth
     // against byte-level witness malleability: a third party cannot modify

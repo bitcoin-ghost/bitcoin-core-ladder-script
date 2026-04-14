@@ -184,8 +184,6 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
  *  Excluded (and why):
  *    - tx.aggregated_sig: chicken-and-egg — the sig signs the hash, the hash
  *      cannot depend on the sig.
- *    - tx.creation_proof: not consensus-relevant for the batch authorisation;
- *      it proves output structure, which is already bound via tx.vout.
  *
  *  The same sighash is produced for every input in the tx — the coordinator
  *  signs once, every primed input's QABI_SPEND evaluator verifies against

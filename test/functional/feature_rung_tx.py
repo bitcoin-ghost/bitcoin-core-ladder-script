@@ -72,7 +72,7 @@ class RungTxTest(BitcoinTestFramework):
 
         self.test_spend_v4_output()
 
-        self.test_creation_proof_required()
+        self.test_three_output_tx_supported()
 
         self.log.info("All tests passed!")
 
@@ -366,9 +366,17 @@ class RungTxTest(BitcoinTestFramework):
         self.log.info(f"  Spend confirmed. New output: {new_txout['value']} BTC")
         self.log.info("  Spend v4 output: OK")
 
-    def test_creation_proof_required(self):
-        """Verify that createtxmlsc handles creation proofs for 3+ outputs."""
-        self.log.info("Testing creation proof for 3+ MLSC outputs via createtxmlsc...")
+    def test_three_output_tx_supported(self):
+        """Verify that createtxmlsc handles 3+ output txs cleanly: all
+        outputs share the same conditions_root, all carry the 0xDF marker,
+        and the resulting tx is well-formed. This was previously named
+        `test_creation_proof_required` and was meant to verify the
+        creation_proof field, but creation_proof was removed in the
+        anti-spam audit pass — it served no useful purpose and opened
+        the largest data-embedding channel in the protocol. The test
+        survives because the underlying functionality (createtxmlsc on
+        3+ outputs) is still important to verify."""
+        self.log.info("Testing createtxmlsc with 3 MLSC outputs...")
 
         # Get a funded UTXO
         utxo = self.wallet.get_utxo()
@@ -379,8 +387,7 @@ class RungTxTest(BitcoinTestFramework):
         test_pubkey = "02" + "cc" * 32
 
         # createtxmlsc creates a TX_MLSC with a shared condition tree.
-        # 3 outputs, each governed by a SIG rung. This should trigger
-        # creation proof generation internally.
+        # 3 outputs, each governed by a SIG rung.
         result = self.node.createtxmlsc(
             # inputs
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
@@ -446,7 +453,7 @@ class RungTxTest(BitcoinTestFramework):
         assert_equal(spks[0], spks[1])
         assert_equal(spks[1], spks[2])
         self.log.info(f"  All 3 outputs share scriptPubKey: {spks[0][:16]}...")
-        self.log.info("  Creation proof for 3+ outputs: OK")
+        self.log.info("  3-output createtxmlsc: OK")
 
 
 if __name__ == "__main__":

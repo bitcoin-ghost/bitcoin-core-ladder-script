@@ -321,8 +321,6 @@ using SharedTreeCache = std::map<Txid, SharedTreeEntry>;
  *
  *  Enforces:
  *   - Output format (ValidateRungOutputs: MLSC-only, at most one DATA_RETURN, dust)
- *   - creation_proof / rung_counts presence invariant
- *   - creation_proof leaf-count / rung_counts binding (anti-spam)
  *   - Per-tx PREIMAGE/SCRIPT_BODY field count limit
  *
  *  Returns true on success. On failure, populates `error` with a human

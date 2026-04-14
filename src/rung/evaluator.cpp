@@ -4135,52 +4135,6 @@ bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& e
         return false;
     }
 
-    // Count spendable outputs (non-DATA_RETURN = scriptPubKey without data payload).
-    size_t n_spendable = 0;
-    for (const auto& out : tx.vout) {
-        if (!HasMLSCData(out.scriptPubKey) && out.nValue > 0) n_spendable++;
-    }
-
-    // Hybrid creation proof: required for 3+ spendable outputs.
-    // Proves conditions_root was built from real leaf hashes, preventing
-    // both UTXO spam AND arbitrary-data embedding in the witness. The
-    // rung_counts field strictly binds each leaf to a specific spendable
-    // output's rung structure, so there are no "free" leaves the
-    // attacker can stuff with arbitrary bytes.
-    //
-    // Invariant: creation_proof and rung_counts are either both empty
-    // or both populated. Mixing is a consensus failure.
-    if (tx.creation_proof.empty() != tx.rung_counts.empty()) {
-        error = "TX_MLSC: creation_proof and rung_counts must both be empty or both populated";
-        return false;
-    }
-    if (n_spendable > 2) {
-        if (tx.creation_proof.empty()) {
-            error = "TX_MLSC: missing creation proof for " + std::to_string(n_spendable) + " outputs";
-            return false;
-        }
-        std::vector<uint256> leaves;
-        if (!DeserializeCreationProofLeaves(tx.creation_proof, leaves, error)) {
-            error = "TX_MLSC creation proof deserialization failed: " + error;
-            return false;
-        }
-        if (!ValidateCreationProofLeaves(leaves, tx.conditions_root, tx.rung_counts, n_spendable, error)) {
-            error = "TX_MLSC creation proof validation failed: " + error;
-            return false;
-        }
-    } else if (!tx.creation_proof.empty()) {
-        // Optional proof for ≤2 outputs — validate if present.
-        // The rung_counts binding still applies: if the producer chose
-        // to include a creation_proof, they must also include
-        // rung_counts with the same strict-equality rule.
-        std::vector<uint256> leaves;
-        if (!DeserializeCreationProofLeaves(tx.creation_proof, leaves, error) ||
-            !ValidateCreationProofLeaves(leaves, tx.conditions_root, tx.rung_counts, n_spendable, error)) {
-            error = "TX_MLSC optional creation proof invalid: " + error;
-            return false;
-        }
-    }
-
     // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
     if (CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx preimage field count exceeds limit";

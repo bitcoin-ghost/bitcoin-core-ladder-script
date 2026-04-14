@@ -434,12 +434,6 @@ class QabiTest(BitcoinTestFramework):
         # per-input witness stacks (1 input, empty stack)
         buf += compact_size(0)
 
-        # creation_proof (empty)
-        buf += compact_size(0)
-
-        # rung_counts (empty; must mirror creation_proof presence)
-        buf += compact_size(0)
-
         # qabi_block
         buf += compact_size(len(qabi_block_bytes))
         buf += qabi_block_bytes
@@ -494,10 +488,6 @@ class QabiTest(BitcoinTestFramework):
         # per-input witness stacks (1 input, empty — signrungtx will populate)
         buf += compact_size(0)
 
-        # creation_proof empty
-        buf += compact_size(0)
-        # rung_counts empty (must mirror creation_proof presence)
-        buf += compact_size(0)
         # qabi_block empty
         buf += compact_size(0)
         # aggregated_sig empty

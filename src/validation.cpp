@@ -2345,8 +2345,8 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // Tx-level rung consensus checks. These run for EVERY v4 tx,
         // regardless of whether its inputs are MLSC or standard (P2WPKH/P2TR).
         // Without this call, wallet-funded v4 txs would bypass the tx-body
-        // rules (creation_proof, rung_counts, preimage count, output format)
-        // because VerifyRungTx is only invoked when the spent input is MLSC.
+        // rules (output format, per-tx preimage count) because VerifyRungTx
+        // is only invoked when the spent input is MLSC.
         std::string rung_error;
         if (!rung::CheckRungTxLevel(tx, flags, rung_error)) {
             LogPrintf("TX_MLSC tx-level rejection: %s\n", rung_error);
