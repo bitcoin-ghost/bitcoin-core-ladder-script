@@ -12476,6 +12476,7 @@ BOOST_AUTO_TEST_CASE(proof_serialize_roundtrip)
 
 BOOST_AUTO_TEST_CASE(proof_validates_correct_root)
 {
+    // 3 rungs, one per spendable output, rung_counts = {1,1,1}.
     std::vector<CreationProofRung> rungs;
     std::vector<uint256> leaves;
     for (int i = 0; i < 3; ++i) {
@@ -12484,8 +12485,9 @@ BOOST_AUTO_TEST_CASE(proof_validates_correct_root)
         rungs.push_back(r);
     }
     uint256 root = ComputeTxMLSCRoot(rungs);
+    std::vector<uint8_t> rung_counts = {1, 1, 1};
     std::string err;
-    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, 3, err));
+    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, rung_counts, 3, err));
 }
 
 BOOST_AUTO_TEST_CASE(proof_rejects_wrong_root)
@@ -12493,17 +12495,20 @@ BOOST_AUTO_TEST_CASE(proof_rejects_wrong_root)
     auto r = MakeCPRung(RungBlockType::SIG, 0);
     std::vector<uint256> leaves = {ComputeTxMLSCLeaf(r)};
     uint256 bad; bad.SetNull();
+    std::vector<uint8_t> rung_counts = {1};
     std::string err;
-    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, bad, 1, err));
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, bad, rung_counts, 1, err));
 }
 
 BOOST_AUTO_TEST_CASE(proof_rejects_too_few_leaves)
 {
+    // 1 leaf but claiming 3 spendable outputs — rung_counts.size() mismatch.
     auto r = MakeCPRung(RungBlockType::SIG, 0);
     std::vector<uint256> leaves = {ComputeTxMLSCLeaf(r)};
     uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));
+    std::vector<uint8_t> rung_counts = {1};
     std::string err;
-    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, 3, err));
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, rung_counts, 3, err));
 }
 
 BOOST_AUTO_TEST_CASE(proof_rejects_empty)
@@ -12533,13 +12538,49 @@ BOOST_AUTO_TEST_CASE(proof_rejects_truncated)
     BOOST_CHECK(!DeserializeCreationProofLeaves(bytes, parsed, err));
 }
 
-BOOST_AUTO_TEST_CASE(proof_allows_extra_leaves)
+BOOST_AUTO_TEST_CASE(proof_rejects_extra_leaves)
 {
+    // Anti-spam regression: attacker crafts 3 leaves against 2 spendable
+    // outputs, expecting to embed 32 bytes of attacker-chosen data via the
+    // extra leaf. Before the rung_counts binding, this test was named
+    // `proof_allows_extra_leaves` and asserted the check PASSED — that
+    // was the creation_proof extra-leaves embedding vulnerability. With
+    // the strict binding, the check must REJECT because rung_counts (which
+    // must match the real rung-per-output count) cannot sum to more
+    // leaves than there are real rungs.
+    //
+    // Scenario A: honest rung_counts says 2 outputs, each with 1 rung =
+    //   sum 2. But creation_proof has 3 leaves. Must reject.
     std::vector<uint256> leaves;
     for (int i = 0; i < 3; ++i) leaves.push_back(ComputeTxMLSCLeaf(MakeCPRung(RungBlockType::SIG, i)));
     uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));
+    std::vector<uint8_t> rung_counts_honest = {1, 1}; // 2 outputs, 1 rung each
     std::string err;
-    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, 2, err)); // 3 leaves, 2 outputs
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, rung_counts_honest, 2, err));
+
+    // Scenario B: attacker lies and claims 3 rungs for the first output
+    //   to make sum match. But rung_counts.size() (1) != n_spendable (2).
+    //   Must reject.
+    std::vector<uint8_t> rung_counts_sizemismatch = {3};
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, rung_counts_sizemismatch, 2, err));
+
+    // Scenario C: attacker lies and claims {3, 0}. Zero-rung entry must
+    //   reject — every spendable output must have at least one rung.
+    std::vector<uint8_t> rung_counts_zero = {3, 0};
+    BOOST_CHECK(!ValidateCreationProofLeaves(leaves, root, rung_counts_zero, 2, err));
+}
+
+BOOST_AUTO_TEST_CASE(proof_allows_multi_rung_outputs)
+{
+    // Honest multi-rung output: 1 spendable output with 3 rungs contributes
+    // 3 leaves, rung_counts = {3}. Must pass — this is the legitimate
+    // use case the `>= n_spendable` rule was originally intended to allow.
+    std::vector<uint256> leaves;
+    for (int i = 0; i < 3; ++i) leaves.push_back(ComputeTxMLSCLeaf(MakeCPRung(RungBlockType::SIG, 0)));
+    uint256 root = BuildMerkleTree(std::vector<uint256>(leaves));
+    std::vector<uint8_t> rung_counts = {3};
+    std::string err;
+    BOOST_CHECK(ValidateCreationProofLeaves(leaves, root, rung_counts, 1, err));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

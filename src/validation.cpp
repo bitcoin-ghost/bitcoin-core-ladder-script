@@ -2341,6 +2341,23 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
     std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache;
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
         shared_tree_cache = std::make_shared<ThreadSafeSharedTreeCache>();
+
+        // Tx-level rung consensus checks. These run for EVERY v4 tx,
+        // regardless of whether its inputs are MLSC or standard (P2WPKH/P2TR).
+        // Without this call, wallet-funded v4 txs would bypass the tx-body
+        // rules (creation_proof, rung_counts, preimage count, output format)
+        // because VerifyRungTx is only invoked when the spent input is MLSC.
+        std::string rung_error;
+        if (!rung::CheckRungTxLevel(tx, flags, rung_error)) {
+            LogPrintf("TX_MLSC tx-level rejection: %s\n", rung_error);
+            if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
+                return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                    "mempool-script-verify-flag-failed (tx_mlsc_check)", rung_error);
+            } else {
+                return state.Invalid(TxValidationResult::TX_CONSENSUS,
+                    "block-script-verify-flag-failed (tx_mlsc_check)", rung_error);
+            }
+        }
     }
 
     for (unsigned int i = 0; i < tx.vin.size(); i++) {

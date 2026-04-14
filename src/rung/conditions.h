@@ -308,10 +308,24 @@ bool DeserializeCreationProofLeaves(const std::vector<uint8_t>& data,
                                      std::vector<uint256>& leaves,
                                      std::string& error);
 
-/** Validate creation proof: rebuild tree from leaves, verify root matches.
- *  @param n_spendable  Number of non-DATA_RETURN outputs (leaves >= n_spendable). */
+/** Validate creation proof: rebuild tree from leaves, verify root matches,
+ *  and enforce strict binding between leaves and spendable outputs via
+ *  rung_counts.
+ *
+ *  Consensus rule (anti-spam): rung_counts.size() must equal n_spendable,
+ *  every entry must be in [1, MAX_RUNGS], and sum(rung_counts) must equal
+ *  leaves.size() exactly. This closes the creation_proof extra-leaves
+ *  embedding channel by forcing every leaf to correspond to a rung that
+ *  belongs to a specific spendable output.
+ *
+ *  @param leaves        Leaf hashes from the creation proof.
+ *  @param expected_root The on-chain conditions_root.
+ *  @param rung_counts   Per-output rung count (1 byte each, in order).
+ *  @param n_spendable   Number of non-DATA_RETURN outputs with nValue > 0.
+ *  @param error         Populated on rejection. */
 bool ValidateCreationProofLeaves(const std::vector<uint256>& leaves,
                                   const uint256& expected_root,
+                                  const std::vector<uint8_t>& rung_counts,
                                   size_t n_spendable,
                                   std::string& error);
 

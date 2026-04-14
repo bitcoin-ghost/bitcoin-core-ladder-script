@@ -64,7 +64,7 @@ std::string CTxOut::ToString() const
 }
 
 CMutableTransaction::CMutableTransaction() : version{CTransaction::CURRENT_VERSION}, nLockTime{0} {}
-CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{tx.creation_proof}, qabi_block{tx.qabi_block}, aggregated_sig{tx.aggregated_sig} {}
+CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{tx.creation_proof}, rung_counts{tx.rung_counts}, qabi_block{tx.qabi_block}, aggregated_sig{tx.aggregated_sig} {}
 
 Txid CMutableTransaction::GetHash() const
 {
@@ -92,8 +92,8 @@ Wtxid CTransaction::ComputeWitnessHash() const
     return Wtxid::FromUint256((HashWriter{} << TX_WITH_WITNESS(*this)).GetHash());
 }
 
-CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{tx.creation_proof}, qabi_block{tx.qabi_block}, aggregated_sig{tx.aggregated_sig}, m_has_witness{ComputeHasWitness()}, hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
-CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{std::move(tx.creation_proof)}, qabi_block{std::move(tx.qabi_block)}, aggregated_sig{std::move(tx.aggregated_sig)}, m_has_witness{ComputeHasWitness()}, hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
+CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{tx.creation_proof}, rung_counts{tx.rung_counts}, qabi_block{tx.qabi_block}, aggregated_sig{tx.aggregated_sig}, m_has_witness{ComputeHasWitness()}, hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
+CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), version{tx.version}, nLockTime{tx.nLockTime}, conditions_root{tx.conditions_root}, creation_proof{std::move(tx.creation_proof)}, rung_counts{std::move(tx.rung_counts)}, qabi_block{std::move(tx.qabi_block)}, aggregated_sig{std::move(tx.aggregated_sig)}, m_has_witness{ComputeHasWitness()}, hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
 
 CAmount CTransaction::GetValueOut() const
 {

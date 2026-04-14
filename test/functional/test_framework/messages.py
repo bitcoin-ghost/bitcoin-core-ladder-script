@@ -594,7 +594,7 @@ class CTxWitness:
 
 class CTransaction:
     __slots__ = ("nLockTime", "version", "vin", "vout", "wit",
-                 "conditions_root", "creation_proof",
+                 "conditions_root", "creation_proof", "rung_counts",
                  "qabi_block", "aggregated_sig")
 
     # Ladder Script TX_MLSC format:
@@ -606,6 +606,7 @@ class CTransaction:
     RUNG_TX_VERSION = 4
     _TX_MLSC_FLAG = 0x02
     _TX_MLSC_CP_MAX = 8065        # 252 leaves * 32 + 1 byte count
+    _TX_MLSC_RC_MAX = 252         # 1 byte per spendable output, matches CP leaf cap
     _TX_MLSC_QB_MAX = 262144      # 256 KB consensus cap
     _TX_MLSC_AGG_MAX = 666        # FALCON-512 signature size
 
@@ -618,6 +619,7 @@ class CTransaction:
             self.nLockTime = 0
             self.conditions_root = b"\x00" * 32
             self.creation_proof = b""
+            self.rung_counts = b""
             self.qabi_block = b""
             self.aggregated_sig = b""
         else:
@@ -628,6 +630,7 @@ class CTransaction:
             self.wit = copy.deepcopy(tx.wit)
             self.conditions_root = getattr(tx, "conditions_root", b"\x00" * 32)
             self.creation_proof = getattr(tx, "creation_proof", b"")
+            self.rung_counts = getattr(tx, "rung_counts", b"")
             self.qabi_block = getattr(tx, "qabi_block", b"")
             self.aggregated_sig = getattr(tx, "aggregated_sig", b"")
 
@@ -641,6 +644,7 @@ class CTransaction:
         self.vin = deser_vector(f, CTxIn)
         self.conditions_root = b"\x00" * 32
         self.creation_proof = b""
+        self.rung_counts = b""
         self.qabi_block = b""
         self.aggregated_sig = b""
         flags = 0
@@ -686,6 +690,10 @@ class CTransaction:
             if cp_len > self._TX_MLSC_CP_MAX:
                 raise ValueError(f"creation_proof too large: {cp_len}")
             self.creation_proof = f.read(cp_len) if cp_len else b""
+            rc_len = deser_compact_size(f)
+            if rc_len > self._TX_MLSC_RC_MAX:
+                raise ValueError(f"rung_counts too large: {rc_len}")
+            self.rung_counts = f.read(rc_len) if rc_len else b""
             qb_len = deser_compact_size(f)
             if qb_len > self._TX_MLSC_QB_MAX:
                 raise ValueError(f"qabi_block too large: {qb_len}")
@@ -743,6 +751,8 @@ class CTransaction:
                 r += ser_string_vector(self.wit.vtxinwit[i].scriptWitness.stack)
             r += ser_compact_size(len(self.creation_proof))
             r += self.creation_proof
+            r += ser_compact_size(len(self.rung_counts))
+            r += self.rung_counts
             r += ser_compact_size(len(self.qabi_block))
             r += self.qabi_block
             r += ser_compact_size(len(self.aggregated_sig))

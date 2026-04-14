@@ -312,6 +312,23 @@ struct SharedTreeEntry {
  *  SHARED proof mode — but must still prove their leaf is in the cached tree. */
 using SharedTreeCache = std::map<Txid, SharedTreeEntry>;
 
+/** Tx-level consensus checks for v4 RUNG_TX transactions.
+ *
+ *  Runs ONCE per v4 tx, regardless of input types. Must be called before
+ *  per-input script verification so that wallet-funded v4 txs (where
+ *  the spent input is a standard Bitcoin output, not MLSC) still have
+ *  their tx-level rung rules enforced.
+ *
+ *  Enforces:
+ *   - Output format (ValidateRungOutputs: MLSC-only, at most one DATA_RETURN, dust)
+ *   - creation_proof / rung_counts presence invariant
+ *   - creation_proof leaf-count / rung_counts binding (anti-spam)
+ *   - Per-tx PREIMAGE/SCRIPT_BODY field count limit
+ *
+ *  Returns true on success. On failure, populates `error` with a human
+ *  readable reason; caller maps to SCRIPT_ERR_UNKNOWN_ERROR or similar. */
+bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& error);
+
 /** Top-level verification entry point for v4 RUNG_TX transactions.
  *  TX_MLSC: validates creation proof, verifies spend proof against shared tree,
  *  checks coil.output_index matches spent output.

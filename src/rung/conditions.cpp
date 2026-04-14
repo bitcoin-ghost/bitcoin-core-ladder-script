@@ -1072,12 +1072,36 @@ bool DeserializeCreationProofLeaves(const std::vector<uint8_t>& data,
 
 bool ValidateCreationProofLeaves(const std::vector<uint256>& leaves,
                                   const uint256& expected_root,
+                                  const std::vector<uint8_t>& rung_counts,
                                   size_t n_spendable,
                                   std::string& error)
 {
-    if (leaves.size() < n_spendable) {
-        error = "creation proof: " + std::to_string(leaves.size()) + " leaves < " +
-                std::to_string(n_spendable) + " spendable outputs";
+    // Anti-spam binding: rung_counts.size() must equal n_spendable, every
+    // entry must be in [1, MAX_RUNGS], and sum(rung_counts) must equal
+    // leaves.size() exactly. Every leaf is bound to a rung that belongs to
+    // a specific spendable output, eliminating free slots in the creation
+    // proof that could be used for arbitrary data embedding.
+    if (rung_counts.size() != n_spendable) {
+        error = "creation proof: rung_counts.size() (" + std::to_string(rung_counts.size()) +
+                ") != n_spendable (" + std::to_string(n_spendable) + ")";
+        return false;
+    }
+    uint64_t rung_sum = 0;
+    for (uint8_t c : rung_counts) {
+        if (c == 0) {
+            error = "creation proof: rung_counts entry is zero (every spendable output must have at least one rung)";
+            return false;
+        }
+        if (c > MAX_RUNGS) {
+            error = "creation proof: rung_counts entry (" + std::to_string(c) +
+                    ") exceeds MAX_RUNGS (" + std::to_string(MAX_RUNGS) + ")";
+            return false;
+        }
+        rung_sum += c;
+    }
+    if (leaves.size() != rung_sum) {
+        error = "creation proof: " + std::to_string(leaves.size()) +
+                " leaves != sum(rung_counts) (" + std::to_string(rung_sum) + ")";
         return false;
     }
     uint256 computed_root = BuildMerkleTree(std::vector<uint256>(leaves));

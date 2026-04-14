@@ -3709,6 +3709,35 @@ static RPCHelpMan createtxmlsc()
             leaves.push_back(rung::ComputeTxMLSCLeaf(rung));
         }
         mtx.creation_proof = rung::SerializeCreationProofLeaves(leaves);
+
+        // Populate rung_counts: one byte per spendable output, counting
+        // how many rungs belong to that output. The anti-spam consensus
+        // rule requires sum(rung_counts) == leaves.size() strictly, so
+        // this must match exactly what's in the creation_proof.
+        mtx.rung_counts.assign(n_spendable_out, 0);
+        for (const auto& rung : cp_rungs) {
+            uint8_t oi = rung.coil.output_index;
+            if (oi >= mtx.rung_counts.size()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "internal: rung output_index " + std::to_string(oi) +
+                    " >= n_spendable " + std::to_string(n_spendable_out));
+            }
+            if (mtx.rung_counts[oi] == 255) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "internal: per-output rung count overflow");
+            }
+            mtx.rung_counts[oi]++;
+        }
+        // Sanity: every spendable output must have at least one rung, else
+        // the output is unspendable. The consensus rule rejects zero-rung
+        // entries, so catch it here for a clearer error message.
+        for (size_t i = 0; i < mtx.rung_counts.size(); ++i) {
+            if (mtx.rung_counts[i] == 0) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "output " + std::to_string(i) + " has no rungs — "
+                    "every spendable output must have at least one rung");
+            }
+        }
     }
 
     // Inflate outputs with shared scriptPubKey (for UTXO compatibility)

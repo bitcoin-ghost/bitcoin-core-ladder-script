@@ -223,6 +223,9 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - per-input witness stacks
  * - CompactSize creation_proof_len
  * - unsigned char creation_proof[]
+ * - CompactSize rung_counts_len            (anti-spam: binds every leaf in creation_proof
+ * - unsigned char rung_counts[]             to a specific spendable output, strict
+ *                                           sum(rung_counts) == n_leaves)
  * - CompactSize qabi_block_len
  * - unsigned char qabi_block[]              (QABIO: tx-level batch block)
  * - CompactSize aggregated_sig_len
@@ -243,6 +246,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vout.clear();
     tx.conditions_root.SetNull();
     tx.creation_proof.clear();
+    tx.rung_counts.clear();
     tx.qabi_block.clear();
     tx.aggregated_sig.clear();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
@@ -301,6 +305,17 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         tx.creation_proof.resize(cp_len);
         if (cp_len > 0) {
             s.read(MakeWritableByteSpan(tx.creation_proof));
+        }
+        /* Read rung_counts (anti-spam binding for creation_proof, one byte per
+         * spendable output). Present iff creation_proof is present; size must
+         * equal n_spendable and sum must equal the number of leaves. The
+         * wire cap matches creation_proof's (252 max, since n_spendable can't
+         * exceed total leaves). */
+        uint64_t rc_len = ReadCompactSize(s);
+        if (rc_len > 252) throw std::ios_base::failure("rung_counts too large");
+        tx.rung_counts.resize(rc_len);
+        if (rc_len > 0) {
+            s.read(MakeWritableByteSpan(tx.rung_counts));
         }
         /* Read QABI tx-level block (QABIO batch data, empty for non-QABIO txs).
          * Hard cap: 256 KB (consensus) — soft cap 64 KB enforced at relay policy. */
@@ -371,6 +386,10 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
         if (!tx.creation_proof.empty()) {
             s.write(MakeByteSpan(tx.creation_proof));
         }
+        WriteCompactSize(s, tx.rung_counts.size());
+        if (!tx.rung_counts.empty()) {
+            s.write(MakeByteSpan(tx.rung_counts));
+        }
         WriteCompactSize(s, tx.qabi_block.size());
         if (!tx.qabi_block.empty()) {
             s.write(MakeByteSpan(tx.qabi_block));
@@ -421,6 +440,7 @@ public:
     // Ladder Script: shared conditions root and witness-carried proofs.
     const uint256 conditions_root;
     const std::vector<uint8_t> creation_proof;  //!< Leaf hashes proving conditions_root (required for 3+ outputs)
+    const std::vector<uint8_t> rung_counts;     //!< Anti-spam: 1 byte per spendable output, strict sum == creation_proof.n_leaves; empty iff creation_proof empty
     const std::vector<uint8_t> qabi_block;      //!< QABIO: serialised QABIBlock (tx-level batch data); empty for non-QABIO txs
     const std::vector<uint8_t> aggregated_sig;  //!< QABIO: FALCON-512 coordinator sig over SIGHASH_QABO; empty for non-QABIO txs
 
@@ -503,6 +523,7 @@ struct CMutableTransaction
     // In memory: vout inflated to CTxOut(value, 0xDF + conditions_root) for compatibility.
     uint256 conditions_root;
     std::vector<uint8_t> creation_proof;
+    std::vector<uint8_t> rung_counts;     //!< Anti-spam: binds creation_proof leaves to spendable outputs
     std::vector<uint8_t> qabi_block;      //!< QABIO: serialised QABIBlock (tx-level batch data)
     std::vector<uint8_t> aggregated_sig;  //!< QABIO: FALCON-512 coordinator sig over SIGHASH_QABO
 
