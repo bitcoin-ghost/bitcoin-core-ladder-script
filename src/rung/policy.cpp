@@ -149,9 +149,6 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
     return true;
 }
 
-// IsStandardRungOutput removed — inline conditions (0xC1) are dead.
-// Output validation is consensus: ValidateRungOutputs in VerifyRungTx.
-
 // ============================================================================
 // QABI Replace-By-Depth (RBD) mempool policy (BIP-YYYY)
 // ============================================================================

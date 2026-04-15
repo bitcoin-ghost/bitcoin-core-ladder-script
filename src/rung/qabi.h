@@ -208,8 +208,6 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
  *    - tx.conditions_root
  *    - tx.qabi_block (the tx-level QABIBlock bytes, with length prefix)
  *    - tx.nLockTime
- *
- *  Covered (Phase 18 update):
  *    - per-input scriptWitness.stack contents (stack element count and
  *      bytes of every element). Closes byte-level witness malleability:
  *      a third party cannot modify LadderWitness framing, spend preimages,

@@ -16,14 +16,14 @@
 
 namespace rung {
 
-/** Legacy prefix byte for inline conditions (removed — always rejected).
- *  Retained as a constant for test code that verifies rejection. */
+/** 0xC1 inline-conditions prefix. The feature is gone; the constant stays
+ *  so the rejection tests in rung_tests can assert that every entry point
+ *  still refuses it. */
 static constexpr uint8_t RUNG_CONDITIONS_PREFIX = 0xc1;
 
-/** Magic prefix byte identifying a scriptPubKey as MLSC (Merkelised Ladder Script Conditions).
- *  Output format: 0xDF + conditions_root(32 bytes) = 33-byte scriptPubKey.
- *  Full conditions are revealed only at spend time in the witness.
- *  This is the ONLY accepted output format. Inline conditions (0xC1) are removed. */
+/** Magic prefix byte for MLSC (Merkelised Ladder Script Conditions)
+ *  scriptPubKeys: 0xDF || conditions_root(32). The only supported v4
+ *  output format. Full conditions are revealed at spend time in the witness. */
 static constexpr uint8_t RUNG_MLSC_PREFIX = 0xdf;
 
 /** Nothing-up-my-sleeve constant for empty Merkle tree leaf padding.
@@ -67,7 +67,8 @@ struct RungConditions {
     bool IsMLSC() const { return conditions_root.has_value(); }
 };
 
-// Inline conditions (0xC1) removed. These stubs always return false.
+// 0xC1 inline-conditions stubs — always reject. Used only by the
+// regression tests in rung_tests that pin "0xC1 is rejected everywhere".
 bool IsRungConditionsScript(const CScript& scriptPubKey);
 bool DeserializeRungConditions(const CScript& scriptPubKey, RungConditions& out, std::string& error);
 CScript SerializeRungConditions(const RungConditions& conditions);

@@ -5733,33 +5733,6 @@ BOOST_AUTO_TEST_CASE(spam_embed_fake_pubkey_commit_unrecoverable)
 // Relay tests
 // ============================================================================
 
-// Helper: build a simple relay with one SIG block (condition-side fields only)
-static Relay MakeCondRelay(const std::vector<uint16_t>& reqs = {})
-{
-    Relay relay;
-    RungBlock block;
-    block.type = RungBlockType::SIG;
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(MakePubkey())});
-    relay.blocks.push_back(block);
-    relay.relay_refs = reqs;
-    return relay;
-}
-
-// Helper: build a relay with merged fields (condition + witness) for evaluation
-static Relay MakeEvalRelay(bool valid_sig = true, const std::vector<uint16_t>& reqs = {})
-{
-    Relay relay;
-    RungBlock block;
-    block.type = RungBlockType::SIG;
-    auto pk = MakePubkey();
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk)});
-    block.fields.push_back({RungDataType::PUBKEY, pk});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(valid_sig ? 64 : 63)});
-    relay.blocks.push_back(block);
-    relay.relay_refs = reqs;
-    return relay;
-}
-
 BOOST_AUTO_TEST_CASE(relay_serialize_roundtrip)
 {
     LadderWitness ladder;
@@ -8737,9 +8710,7 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_verify_wrong_root_fails)
     conditions.rungs.push_back(rung);
     conditions.coil.coil_type = RungCoilType::UNLOCK;
 
-    uint256 real_root = ComputeConditionsRoot(conditions);
-
-    // Wrong root
+    // Wrong root — hash-of-literal so the assertion fails on every run.
     uint256 fake_root;
     CSHA256().Write(reinterpret_cast<const unsigned char*>("fake"), 4).Finalize(fake_root.data());
 

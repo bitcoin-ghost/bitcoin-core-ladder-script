@@ -43,8 +43,8 @@ enum class RungBlockType : uint16_t {
     CLTV_TIME        = 0x0104, //!< Absolute timelock — median-time-past
 
     // Hash family
-    RESERVED_0201    = 0x0201, //!< Reserved: was HASH_PREIMAGE, removed
-    RESERVED_0202    = 0x0202, //!< Reserved: was HASH160_PREIMAGE, removed
+    RESERVED_0201    = 0x0201, //!< Reserved (never reuse — anti-collision slot)
+    RESERVED_0202    = 0x0202, //!< Reserved (never reuse — anti-collision slot)
     TAGGED_HASH      = 0x0203, //!< BIP-340 tagged hash verification
     HASH_GUARDED     = 0x0204, //!< Raw SHA256 preimage verification (non-invertible)
 
@@ -220,7 +220,6 @@ inline bool IsKnownBlockType(uint16_t b)
     case RungBlockType::QABI_PRIME:
     case RungBlockType::QABI_SPEND:
         return true;
-    // Explicitly rejected: removed block types
     case RungBlockType::RESERVED_0201:
     case RungBlockType::RESERVED_0202:
         return false;
@@ -573,9 +572,6 @@ struct RungBlock {
     bool inverted{false}; //!< If true, evaluation result is inverted (SATISFIED↔UNSATISFIED)
 };
 
-// CompactRungType, CompactRungData removed — COMPACT_SIG stored PUBKEY_COMMIT
-// on the rung, which defeats merkle_pub_key.
-
 /** A single rung in a ladder. All blocks must be satisfied (AND logic). */
 struct Rung {
     std::vector<RungBlock> blocks;
@@ -677,7 +673,7 @@ struct LadderWitness {
 };
 
 // ============================================================================
-// Micro-header lookup table (Phase 2: encoding optimization)
+// Micro-header lookup table — single-byte encoding for common block types
 // ============================================================================
 
 /** Number of micro-header slots (0x00-0x7F). */
@@ -790,7 +786,7 @@ inline int MicroHeaderSlot(RungBlockType type)
 }
 
 // ============================================================================
-// Implicit field tables (Phase 2: per-block-type fixed field layouts)
+// Implicit field tables — per-block-type fixed field layouts
 // ============================================================================
 
 /** An entry in an implicit field table: data type + fixed size (0 = variable). */
@@ -831,8 +827,6 @@ inline constexpr ImplicitFieldLayout CLTV_CONDITIONS = CSV_CONDITIONS;
 
 /** CLTV_TIME conditions: [NUMERIC(varint)] */
 inline constexpr ImplicitFieldLayout CLTV_TIME_CONDITIONS = CSV_CONDITIONS;
-
-// RESERVED_0201/RESERVED_0202: no layout (removed block types)
 
 /** TAGGED_HASH conditions: [HASH256(32), HASH256(32)] */
 inline constexpr ImplicitFieldLayout TAGGED_HASH_CONDITIONS = {2, {
@@ -918,9 +912,8 @@ inline constexpr ImplicitFieldLayout DATA_RETURN_CONDITIONS = {1, {
     {RungDataType::DATA, 0},
 }};
 
-// -- Conditions layouts for previously layout-less block types --
-// These close the NUMERIC multiplication data channel by enforcing
-// exact field count and types for all block types in conditions context.
+// Every block type has an explicit conditions layout — strict field count
+// and types — so the NUMERIC data-multiplication channel stays closed.
 
 /** MULTISIG conditions: [NUMERIC(threshold M), SCHEME(1)] — pubkeys in Merkle leaf */
 inline constexpr ImplicitFieldLayout MULTISIG_CONDITIONS = {2, {
@@ -1107,8 +1100,6 @@ inline constexpr ImplicitFieldLayout SIG_WITNESS = {2, {
 /** CSV witness: [NUMERIC(varint)] */
 inline constexpr ImplicitFieldLayout CSV_WITNESS = CSV_CONDITIONS;
 
-// RESERVED_0201/RESERVED_0202: no layout (removed block types)
-
 /** TAGGED_HASH witness: [HASH256(32), HASH256(32), PREIMAGE(var)] */
 inline constexpr ImplicitFieldLayout TAGGED_HASH_WITNESS = {3, {
     {RungDataType::HASH256, 32},
@@ -1218,7 +1209,6 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::CSV_TIME:         return CSV_TIME_CONDITIONS;
         case RungBlockType::CLTV:             return CLTV_CONDITIONS;
         case RungBlockType::CLTV_TIME:        return CLTV_TIME_CONDITIONS;
-        // RESERVED_0201/RESERVED_0202: removed (no layout)
         case RungBlockType::TAGGED_HASH:      return TAGGED_HASH_CONDITIONS;
         case RungBlockType::HASH_GUARDED:     return HASH_GUARDED_CONDITIONS;
         case RungBlockType::CTV:              return CTV_CONDITIONS;
@@ -1231,15 +1221,13 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::EPOCH_GATE:       return EPOCH_GATE_CONDITIONS;
         case RungBlockType::ANCHOR_SEAL:      return ANCHOR_SEAL_CONDITIONS;
         case RungBlockType::DATA_RETURN:      return DATA_RETURN_CONDITIONS;
-        // Signature family (previously layout-less)
         case RungBlockType::MULTISIG:         return MULTISIG_CONDITIONS;
         case RungBlockType::KEY_REF_SIG:      return KEY_REF_SIG_CONDITIONS;
-        // Covenant family
         case RungBlockType::VAULT_LOCK:       return VAULT_LOCK_CONDITIONS;
-        // Recursion family
         case RungBlockType::RECURSE_SAME:     return RECURSE_SAME_CONDITIONS;
-        // RECURSE_MODIFIED/RECURSE_DECAY: variable field count (2+4*N mutations)
-        // Stay NO_IMPLICIT — protected by IsDataEmbeddingType in DeserializeBlock
+        // RECURSE_MODIFIED / RECURSE_DECAY stay NO_IMPLICIT (variable
+        // field count = 2 + 4*N mutations). IsDataEmbeddingType in
+        // DeserializeBlock protects them from high-bandwidth abuse.
         case RungBlockType::RECURSE_UNTIL:    return RECURSE_UNTIL_CONDITIONS;
         case RungBlockType::RECURSE_COUNT:    return RECURSE_COUNT_CONDITIONS;
         case RungBlockType::RECURSE_SPLIT:    return RECURSE_SPLIT_CONDITIONS;
@@ -1298,7 +1286,6 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::CSV_TIME:         return CSV_WITNESS;
         case RungBlockType::CLTV:             return CSV_WITNESS;
         case RungBlockType::CLTV_TIME:        return CSV_WITNESS;
-        // RESERVED_0201/RESERVED_0202: removed (no layout)
         case RungBlockType::TAGGED_HASH:      return TAGGED_HASH_WITNESS;
         case RungBlockType::HASH_GUARDED:     return HASH_GUARDED_WITNESS;
         case RungBlockType::CTV:              return CTV_WITNESS;

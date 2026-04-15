@@ -18,8 +18,11 @@ namespace rung {
 
 bool IsConditionDataType(RungDataType type)
 {
+    // PUBKEY / PUBKEY_COMMIT are witness-only: pubkeys fold into the
+    // Merkle leaf, and attacker-chosen commitments don't belong in the
+    // locking side of an output. SIGNATURE / PREIMAGE / SCRIPT_BODY are
+    // the "proof" side, also witness-only.
     switch (type) {
-    // PUBKEY_COMMIT removed from conditions — pubkeys folded into Merkle leaf
     case RungDataType::HASH256:
     case RungDataType::HASH160:
     case RungDataType::NUMERIC:
@@ -37,23 +40,21 @@ bool IsConditionDataType(RungDataType type)
     return false;
 }
 
-// Inline conditions (0xC1) removed — all outputs must use MLSC (0xDF).
-// These functions are retained for backward compatibility but always reject.
+// 0xC1 inline-conditions stubs — always reject. See conditions.h.
 
 bool IsRungConditionsScript(const CScript&)
 {
-    return false; // Inline conditions removed
+    return false;
 }
 
 bool DeserializeRungConditions(const CScript&, RungConditions&, std::string& error)
 {
-    error = "inline conditions (0xC1) removed — use MLSC (0xDF)";
+    error = "inline conditions (0xC1) not supported — use MLSC (0xDF)";
     return false;
 }
 
 CScript SerializeRungConditions(const RungConditions&)
 {
-    // Inline conditions removed — should never be called
     return CScript();
 }
 

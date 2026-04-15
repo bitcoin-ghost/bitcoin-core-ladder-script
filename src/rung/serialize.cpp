@@ -561,7 +561,7 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
         for (uint64_t r = 0; r < n_rungs; ++r) {
             uint64_t n_blocks = ReadCompactSize(ss);
             if (n_blocks == 0) {
-                error = "rung " + std::to_string(r) + " has zero blocks (compact rungs deprecated)";
+                error = "rung " + std::to_string(r) + " has zero blocks";
                 return false;
             }
             if (n_blocks > MAX_BLOCKS_PER_RUNG) {
@@ -627,14 +627,15 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                 ss.read(MakeWritableByteSpan(ladder_out.coil.address_hash));
             }
 
-            // Read coil condition count — must be 0 (coil conditions removed, reject non-zero)
+            // n_coil_rungs MUST be zero — coil conditions aren't a real
+            // field, the slot is preserved only to reject any value.
             uint64_t n_coil_rungs = ReadCompactSize(ss);
             if (n_coil_rungs != 0) {
                 error = "coil conditions not supported: n_coil_conditions must be 0, got " + std::to_string(n_coil_rungs);
                 return false;
             }
 
-            // Read per-rung destinations (0 = none, backward compatible)
+            // Per-rung destinations. Optional (0 = none).
             if (!ss.empty()) {
                 uint64_t n_rung_dests = ReadCompactSize(ss);
                 if (n_rung_dests > MAX_RUNGS) {

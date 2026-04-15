@@ -286,7 +286,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         }
     }
     if (flags == 0x02) {
-        /* TX_MLSC: read per-input witnesses + creation proof + qabi_block + aggregated signature */
+        /* TX_MLSC: read per-input witnesses + qabi_block + aggregated signature */
         flags = 0;
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness.stack;
@@ -352,7 +352,7 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
         s << tx.vout;
     }
     if (flags == 0x02) {
-        /* TX_MLSC: per-input witnesses + creation proof + qabi_block + aggregated sig */
+        /* TX_MLSC: per-input witnesses + qabi_block + aggregated sig */
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s << tx.vin[i].scriptWitness.stack;
         }

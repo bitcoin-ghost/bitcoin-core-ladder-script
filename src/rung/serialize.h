@@ -90,7 +90,7 @@ enum class SerializationContext : uint8_t {
  *    [scheme: uint8_t]
  *    [address_len: varint]
  *    [address: bytes]              (raw scriptPubKey, 0 len = no address)
- *    [n_coil_conditions: varint]   (must be 0 — coil conditions removed)
+ *    [n_coil_conditions: varint]   (must be 0 — reserved slot)
  */
 bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                               LadderWitness& ladder_out,

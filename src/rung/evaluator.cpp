@@ -121,9 +121,8 @@ static bool HasRequiredPubkeys(const RungBlock& block, size_t count)
     return pks.size() >= count;
 }
 
-/** Return PUBKEY fields from the block.
- *  merkle_pub_key: PUBKEY_COMMIT removed from conditions. Pubkeys are in the
- *  witness (PUBKEY fields), bound to the Merkle leaf at fund time. */
+/** Return PUBKEY fields from the block. Pubkeys travel in the witness
+ *  and are bound to the Merkle leaf at fund time (merkle_pub_key). */
 static std::vector<const RungField*> ResolvePubkeyCommitments(const RungBlock& block)
 {
     return FindAllFields(block, RungDataType::PUBKEY);
@@ -275,9 +274,8 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
                              SigVersion sigversion,
                              ScriptExecutionData& execdata)
 {
-    // merkle_pub_key: PUBKEY_COMMIT removed. Layout: NUMERIC (threshold M),
-    //   N x PUBKEY (witness), M x SIGNATURE (witness).
-    //   Pubkeys bound to leaf via Merkle proof.
+    // Layout: NUMERIC(threshold M), N × PUBKEY (witness), M × SIGNATURE (witness).
+    // Pubkeys are bound to the Merkle leaf — nothing leaks into conditions.
     const RungField* threshold_field = FindField(block, RungDataType::NUMERIC);
     if (!threshold_field || threshold_field->data.size() < 1) {
         return EvalResult::ERROR;
@@ -3854,7 +3852,6 @@ static bool MergeConditionsAndWitness(const RungConditions& conditions,
         const auto& cond_rung = conditions.rungs[r];
         const auto& wit_rung = witness.rungs[r];
 
-        // Compact rungs (COMPACT_SIG) removed — merkle_pub_key eliminates this path.
         if (cond_rung.blocks.size() != wit_rung.blocks.size()) {
             error = "block count mismatch in rung " + std::to_string(r);
             return false;
@@ -4054,7 +4051,8 @@ bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string
             continue;
         }
 
-        // Reject everything else: inline (0xC1) removed, OP_RETURN, P2TR, P2WPKH, arbitrary data
+        // Only MLSC (0xDF) outputs are accepted in v4. Everything else
+        // (OP_RETURN, P2TR, P2WPKH, 0xC1, arbitrary data) is rejected.
         error = "output " + std::to_string(i) + ": non-Ladder Script output rejected in v4 transaction";
         return false;
     }
@@ -4192,14 +4190,13 @@ bool VerifyRungTx(const CTransaction& tx,
 
     // Witness stack size determines spending path:
     //   1 element  = key-path spend (signature only)
-    //   2 elements = script-path (LadderWitness + MLSCProof, legacy — no tweak check)
+    //   2 elements = script-path, no tweak check (LadderWitness + MLSCProof)
     //   3 elements = script-path with tweak (LadderWitness + MLSCProof + internal_pubkey)
     if (witness.stack.empty() || witness.stack.size() > 3) {
         if (serror) *serror = SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY;
         return false;
     }
 
-    // Only MLSC (0xDF) outputs accepted. Inline (0xC1) removed.
     if (!IsMLSCScript(spent_output.scriptPubKey)) {
         if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
         return false;
@@ -4459,7 +4456,8 @@ bool VerifyRungTx(const CTransaction& tx,
                 return false;
             }
         } else {
-            // 2-element witness (legacy): verify Merkle proof directly against conditions_root
+            // 2-element witness: verify the Merkle proof directly against conditions_root
+            // (no tweak — the output was created without an internal_pubkey).
             if (mlsc_proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
                 std::string path_error;
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,

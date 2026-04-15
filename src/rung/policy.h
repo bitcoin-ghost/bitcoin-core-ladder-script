@@ -22,13 +22,11 @@ bool IsCovenantBlockType(uint16_t block_type);
 bool IsStatefulBlockType(uint16_t block_type);
 
 /** Check whether a v4 RUNG_TX transaction conforms to mempool policy.
- *  Thin deserialize-only check — delegates to the consensus deserializer which
- *  enforces all structural limits (MAX_RUNGS=16, MAX_BLOCKS_PER_RUNG=8,
- *  known block types, deprecated block rejection, field size ranges, etc.).
- *  Returns false with reason populated on policy violation. */
+ *  Delegates structural validation (MAX_RUNGS=16, MAX_BLOCKS_PER_RUNG=8,
+ *  known block types, field size ranges, etc.) to the consensus
+ *  deserializer; the extra checks here are: per-output MLSC format, and
+ *  the qabi_block soft cap. */
 bool IsStandardRungTx(const CTransaction& tx, std::string& reason);
-
-// IsStandardRungOutput removed — output validation is consensus (ValidateRungOutputs).
 
 /** QABI Replace-By-Depth (RBD) mempool policy.
  *

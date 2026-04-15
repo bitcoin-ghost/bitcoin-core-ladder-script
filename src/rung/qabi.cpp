@@ -365,7 +365,6 @@ uint256 ComputeSighashQABO(const CTransaction& tx)
     //   - tx.qabi_block (length-prefixed, opaque blob)
     //   - every vin's scriptWitness.stack (length-prefixed vector of
     //     length-prefixed elements) — closes byte-level witness malleability
-    //     per the Phase 18 hardening
     //   - EXCLUDES tx.aggregated_sig itself (chicken-and-egg: the sig signs
     //     this hash)
     HashWriter ss{HASHER_QABOSIGHASH};

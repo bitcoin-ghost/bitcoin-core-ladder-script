@@ -3630,7 +3630,6 @@ static RPCHelpMan createtxmlsc()
             if (coil_obj.exists("type")) {
                 std::string ct = coil_obj["type"].get_str();
                 if (ct == "UNLOCK_TO") cp_rung.coil.coil_type = rung::RungCoilType::UNLOCK_TO;
-                // COVENANT coil type removed — only UNLOCK and UNLOCK_TO
             }
         }
 
@@ -3698,17 +3697,8 @@ static RPCHelpMan createtxmlsc()
         mtx.conditions_root = merkle_root;
     }
 
-    // creation_proof and rung_counts are no longer populated. The audit
-    // showed that creation_proof's anti-bloat protection was cosmetic
-    // (the validator only checked internal consistency between leaves
-    // and root, both of which the attacker controls), and the field
-    // itself was the largest data-embedding channel in the protocol.
-    // It's been removed from the wire format. The remaining 32 bytes of
-    // attacker freedom (tx.conditions_root) cost ~4 sats/byte versus
-    // OP_RETURN's ~2 sats/byte, so it is strictly worse than existing
-    // Bitcoin embedding channels.
-
-    // Inflate outputs with shared scriptPubKey (for UTXO compatibility)
+    // Inflate outputs with the shared MLSC scriptPubKey so downstream
+    // tooling that reads vout[i].scriptPubKey sees the expected 0xDF form.
     CScript mlsc_spk;
     mlsc_spk.push_back(0xDF);
     mlsc_spk.insert(mlsc_spk.end(), mtx.conditions_root.begin(), mtx.conditions_root.end());
