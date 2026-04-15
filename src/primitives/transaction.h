@@ -212,7 +212,9 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  *   - CScriptWitness scriptWitness; (deserialized into CTxIn)
  * - uint32_t nLockTime
  *
- * TX_MLSC format (Ladder Script, flags == 0x02):
+ * TX_MLSC format (Ladder Script, full — witness-carrying):
+ *   Triggered when (allow_witness && version == 4). Flag byte = 0x02.
+ *
  * - uint32_t version (= 4, RUNG_TX_VERSION)
  * - unsigned char dummy = 0x00
  * - unsigned char flags = 0x02
@@ -226,6 +228,21 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - CompactSize aggregated_sig_len
  * - unsigned char aggregated_sig[]          (QABIO: FALCON-512 coordinator sig, exactly 666 B when present)
  * - uint32_t nLockTime
+ *
+ * TX_MLSC format (Ladder Script, stripped — no-witness, used for txid):
+ *   Triggered when (!allow_witness && version == 4). No flag byte.
+ *
+ * - uint32_t version (= 4, RUNG_TX_VERSION)
+ * - std::vector<CTxIn> vin
+ * - uint256 conditions_root (32 bytes — shared across all outputs)
+ * - CompactSize n_outputs
+ * - int64_t nValue[] (8 bytes per output — value only, no scriptPubKey)
+ * - uint32_t nLockTime
+ *
+ * Both forms use the compact value-only vout so that weight =
+ * stripped × 4 + witness lands at ~8 vB per MLSC output instead of
+ * 33.5 vB (the gap that would exist if the stripped form used the
+ * standard 33-byte per-output scriptPubKey).
  *
  * On deserialization, TX_MLSC outputs are inflated to CTxOut(value, 0xDF + root)
  * for compatibility with all existing code that accesses tx.vout[i].scriptPubKey.
@@ -242,7 +259,27 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.conditions_root.SetNull();
     tx.qabi_block.clear();
     tx.aggregated_sig.clear();
-    /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
+    /* Read vin. For v4 TX_MLSC txs, the body layout is
+     * (conditions_root + value-only outputs) in BOTH the stripped form
+     * (no witnesses) and the full form (flag 0x02). So the decision
+     * between standard and compact vout is driven by tx.version, not
+     * by the presence of the witness flag. This keeps the per-output
+     * weight at 8 vB instead of 33.5 vB.
+     *
+     * The "empty vin == witness dummy" SegWit convention still applies
+     * and is orthogonal to the vout format. */
+    auto read_mlsc_body = [&]() {
+        s >> tx.conditions_root;
+        uint64_t n_outputs = ReadCompactSize(s);
+        tx.vout.resize(n_outputs);
+        CScript mlsc_spk;
+        mlsc_spk.push_back(0xDF);
+        mlsc_spk.insert(mlsc_spk.end(), tx.conditions_root.begin(), tx.conditions_root.end());
+        for (size_t i = 0; i < n_outputs; ++i) {
+            s >> tx.vout[i].nValue;
+            tx.vout[i].scriptPubKey = mlsc_spk;
+        }
+    };
     s >> tx.vin;
     if (tx.vin.size() == 0 && fAllowWitness) {
         /* We read a dummy or an empty vin. */
@@ -253,25 +290,20 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         }
         if (flags != 0) {
             s >> tx.vin;
-            if (flags == 0x02 && tx.version == 4 /* RUNG_TX_VERSION */) {
-                /* TX_MLSC format: conditions_root + value-only outputs */
-                s >> tx.conditions_root;
-                uint64_t n_outputs = ReadCompactSize(s);
-                tx.vout.resize(n_outputs);
-                /* Build MLSC scriptPubKey for UTXO inflation */
-                CScript mlsc_spk;
-                mlsc_spk.push_back(0xDF);
-                mlsc_spk.insert(mlsc_spk.end(), tx.conditions_root.begin(), tx.conditions_root.end());
-                for (size_t i = 0; i < n_outputs; ++i) {
-                    s >> tx.vout[i].nValue;
-                    tx.vout[i].scriptPubKey = mlsc_spk;
+            if (flags == 0x02) {
+                if (tx.version != 4 /* RUNG_TX_VERSION */) {
+                    throw std::ios_base::failure("TX_MLSC flag 0x02 requires tx version 4");
                 }
+                read_mlsc_body();
             } else {
                 s >> tx.vout;
             }
         }
+    } else if (tx.version == 4 /* RUNG_TX_VERSION */) {
+        /* Non-empty vin AND version 4 = stripped TX_MLSC (no witness section). */
+        read_mlsc_body();
     } else {
-        /* We read a non-empty vin. Assume a normal vout follows. */
+        /* Non-empty vin, non-v4: standard vout follows. */
         s >> tx.vout;
     }
     if ((flags & 1) && fAllowWitness) {
@@ -319,10 +351,11 @@ template<typename Stream, typename TxType>
 void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParams& params)
 {
     const bool fAllowWitness = params.allow_witness;
-    // TX_MLSC format only used when witnesses are allowed (full serialization).
-    // Without witnesses (txid computation), use standard vout format so the
-    // stripped tx is parseable by all tools.
-    const bool is_tx_mlsc = fAllowWitness && (tx.version == 4 /* RUNG_TX_VERSION */ && !tx.conditions_root.IsNull());
+    // TX_MLSC wire format is used for every v4 tx, in BOTH the stripped
+    // (txid) and full (with-witness) serialisations. Applying it only in
+    // the full form would leave the per-output weight at 4 × the full-SPK
+    // cost, defeating the point of the value-only vout.
+    const bool is_tx_mlsc = (tx.version == 4 /* RUNG_TX_VERSION */);
 
     s << tx.version;
     unsigned char flags = 0;

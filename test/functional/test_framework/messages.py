@@ -598,11 +598,12 @@ class CTransaction:
                  "qabi_block", "aggregated_sig")
 
     # Ladder Script TX_MLSC format:
-    #   version == 4 + non-zero conditions_root selects TX_MLSC wire format.
-    #   vout carries the per-output value only; scriptPubKey is an in-memory
-    #   inflation of 0xDF || conditions_root so existing tooling (weight /
-    #   txid computation) works unchanged. QABI fields (qabi_block,
-    #   aggregated_sig) ride in the witness envelope.
+    #   version == 4 selects TX_MLSC wire format unconditionally, in
+    #   BOTH the stripped (txid) and full (with-witness) serialisations.
+    #   vout carries per-output value only; scriptPubKey is an in-memory
+    #   inflation of 0xDF || conditions_root so existing tooling works
+    #   unchanged. The full form adds per-input witness stacks plus the
+    #   QABI fields (qabi_block, aggregated_sig) after the vout section.
     RUNG_TX_VERSION = 4
     _TX_MLSC_FLAG = 0x02
     _TX_MLSC_QB_MAX = 262144      # 256 KB consensus cap
@@ -629,9 +630,21 @@ class CTransaction:
             self.aggregated_sig = getattr(tx, "aggregated_sig", b"")
 
     def is_tx_mlsc(self):
-        return (self.version == self.RUNG_TX_VERSION
-                and self.conditions_root != b"\x00" * 32
-                and len(self.conditions_root) == 32)
+        return self.version == self.RUNG_TX_VERSION
+
+    def _read_mlsc_body(self, f):
+        # Shared reader for the stripped and full TX_MLSC layouts:
+        # conditions_root + value-only outputs, inflated to the MLSC SPK
+        # so downstream tools (txid, weight) see the usual CTxOut shape.
+        self.conditions_root = f.read(32)
+        n_outputs = deser_compact_size(f)
+        mlsc_spk = b"\xdf" + self.conditions_root
+        self.vout = []
+        for _ in range(n_outputs):
+            out = CTxOut()
+            out.nValue = int.from_bytes(f.read(8), "little", signed=True)
+            out.scriptPubKey = mlsc_spk
+            self.vout.append(out)
 
     def deserialize(self, f):
         self.version = int.from_bytes(f.read(4), "little")
@@ -644,26 +657,18 @@ class CTransaction:
             flags = int.from_bytes(f.read(1), "little")
             if flags == 0x03:
                 raise ValueError("Invalid transaction flag combination 0x03")
-            # Not sure why flags can't be zero, but this
-            # matches the implementation in bitcoind
             if flags != 0:
                 self.vin = deser_vector(f, CTxIn)
-                if (flags == self._TX_MLSC_FLAG
-                        and self.version == self.RUNG_TX_VERSION):
-                    # TX_MLSC: conditions_root + value-only outputs.
-                    # Inflate each vout's scriptPubKey to 0xDF||conditions_root
-                    # so downstream tools (txid, weight) work unchanged.
-                    self.conditions_root = f.read(32)
-                    n_outputs = deser_compact_size(f)
-                    mlsc_spk = b"\xdf" + self.conditions_root
-                    self.vout = []
-                    for _ in range(n_outputs):
-                        out = CTxOut()
-                        out.nValue = int.from_bytes(f.read(8), "little", signed=True)
-                        out.scriptPubKey = mlsc_spk
-                        self.vout.append(out)
+                if flags == self._TX_MLSC_FLAG:
+                    if self.version != self.RUNG_TX_VERSION:
+                        raise ValueError("TX_MLSC flag 0x02 requires tx version 4")
+                    self._read_mlsc_body(f)
                 else:
                     self.vout = deser_vector(f, CTxOut)
+        elif self.version == self.RUNG_TX_VERSION:
+            # Stripped TX_MLSC: non-empty vin followed directly by the
+            # MLSC body (conditions_root + value-only outputs + nLockTime).
+            self._read_mlsc_body(f)
         else:
             self.vout = deser_vector(f, CTxOut)
         if flags & 1:
@@ -691,14 +696,20 @@ class CTransaction:
         self.nLockTime = int.from_bytes(f.read(4), "little")
 
     def serialize_without_witness(self):
-        # C++ is_tx_mlsc requires fAllowWitness, so the stripped form always
-        # uses the standard vin+vout+locktime layout. The in-memory vout
-        # already carries the inflated 0xDF||conditions_root scriptPubKey,
-        # so txid hashing matches the node's computation.
         r = b""
         r += self.version.to_bytes(4, "little")
         r += ser_vector(self.vin)
-        r += ser_vector(self.vout)
+        if self.is_tx_mlsc():
+            # Stripped TX_MLSC: conditions_root + value-only vout, no flag byte.
+            # Mirrors the C++ serializer's is_tx_mlsc path in both stripped
+            # and full forms so weight = stripped × 4 + witness lands at the
+            # intended ~8 vB per MLSC output.
+            r += self.conditions_root
+            r += ser_compact_size(len(self.vout))
+            for out in self.vout:
+                r += out.nValue.to_bytes(8, "little", signed=True)
+        else:
+            r += ser_vector(self.vout)
         r += self.nLockTime.to_bytes(4, "little")
         return r
 

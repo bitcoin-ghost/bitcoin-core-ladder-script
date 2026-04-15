@@ -2487,7 +2487,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
         }
 
         // TX_MLSC: remove synthetic root entry on disconnect
-        if (tx.version == CTransaction::RUNG_TX_VERSION && !tx.conditions_root.IsNull()) {
+        if (tx.version == CTransaction::RUNG_TX_VERSION) {
             view.SpendCoin(COutPoint(hash, MLSC_ROOT_VOUT));
         }
 

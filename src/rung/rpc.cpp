@@ -1012,7 +1012,14 @@ static RPCHelpMan createrungtx()
         mtx.vin.push_back(txin);
     }
 
-    // Parse outputs
+    // Parse outputs. All outputs in a v4 tx MUST share a single
+    // conditions_root (the wire format has only one slot). We compute
+    // the root for the first output and require subsequent outputs to
+    // match. Multi-output txs that need independent per-output trees
+    // should use createtxmlsc, which builds a shared Merkle commitment
+    // across N rung layouts.
+    uint256 tx_conditions_root;
+    bool root_set = false;
     for (size_t i = 0; i < outputs_arr.size(); ++i) {
         const UniValue& outp = outputs_arr[i];
         CAmount amount = AmountFromValue(outp["amount"]);
@@ -1025,8 +1032,9 @@ static RPCHelpMan createrungtx()
         CTxOut txout;
         txout.nValue = amount;
 
-        // Always MLSC: compute TX_MLSC Merkle root via CreationProofRung leaves.
-        // This must match what VerifyRungTx expects (ComputeTxMLSCLeaf, not ComputeRungLeaf).
+        // Compute the TX_MLSC Merkle root over CreationProofRung leaves
+        // (matches what VerifyRungTx expects — ComputeTxMLSCLeaf, not
+        // ComputeRungLeaf).
         std::vector<rung::CreationProofRung> cp_rungs;
         for (size_t r = 0; r < conditions.rungs.size(); ++r) {
             rung::CreationProofRung cp_rung;
@@ -1045,6 +1053,17 @@ static RPCHelpMan createrungtx()
         }
         uint256 root = rung::ComputeTxMLSCRoot(cp_rungs);
 
+        if (!root_set) {
+            tx_conditions_root = root;
+            root_set = true;
+        } else if (root != tx_conditions_root) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "createrungtx: all outputs must share the same conditions_root "
+                "(TX_MLSC wire format has a single per-tx root). Output " +
+                std::to_string(i) + " has a different root. Use createtxmlsc for "
+                "multi-rung shared trees.");
+        }
+
         // DATA_RETURN: append data payload to MLSC scriptPubKey
         if (conditions.rungs.size() == 1 &&
             conditions.rungs[0].blocks.size() == 1 &&
@@ -1057,6 +1076,12 @@ static RPCHelpMan createrungtx()
             txout.scriptPubKey = rung::CreateMLSCScript(root);
         }
         mtx.vout.push_back(txout);
+    }
+
+    // Commit the shared root to the tx body so the serializer picks it
+    // up via the TX_MLSC wire format (compact value-only vout).
+    if (root_set) {
+        mtx.conditions_root = tx_conditions_root;
     }
 
     UniValue result(UniValue::VOBJ);

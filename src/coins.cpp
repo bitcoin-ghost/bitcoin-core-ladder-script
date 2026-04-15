@@ -131,7 +131,7 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
     // Individual MLSC coins store a 1-byte scriptPubKey (0xDF) via compression;
     // the root is recovered from this synthetic entry at spend time.
     // Use prefix 0xDE (not 0xDF) so the compressor doesn't strip the root.
-    if (tx.version == CTransaction::RUNG_TX_VERSION && !tx.conditions_root.IsNull()) {
+    if (tx.version == CTransaction::RUNG_TX_VERSION) {
         CTxOut root_out;
         root_out.nValue = 0; // sentinel: not a real output, not spendable
         root_out.scriptPubKey.resize(33);

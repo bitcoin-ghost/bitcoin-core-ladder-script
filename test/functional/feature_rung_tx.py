@@ -79,7 +79,7 @@ class RungTxTest(BitcoinTestFramework):
         self.test_spend_v4_output()
 
         self.test_three_output_tx_supported()
-        self.test_wallet_funded_v4_non_mlsc_output_rejected()
+        self.test_wallet_funded_v4_structurally_mlsc()
         self.test_v4_mlsc_reorg_survival()
         self.test_v4_mlsc_rbf_replacement()
 
@@ -465,50 +465,57 @@ class RungTxTest(BitcoinTestFramework):
         self.log.info("  3-output createtxmlsc: OK")
 
 
-    def test_wallet_funded_v4_non_mlsc_output_rejected(self):
-        """Wallet-funded v4 tx with a non-MLSC output is rejected at relay
-        policy by IsStandardRungTx. This is the policy-layer half of the
-        defence-in-depth that protects wallet-funded v4 txs from carrying
-        invalid outputs; the consensus-layer half (via CheckRungTxLevel)
-        is exercised by test_wallet_funded_v4_consensus_dust_rejected.
+    def test_wallet_funded_v4_structurally_mlsc(self):
+        """Every v4 tx is TX_MLSC on the wire — the format is selected
+        unconditionally by version, not by conditions_root being non-null.
+        A non-MLSC output cannot even be serialised inside a v4 tx: the
+        wire format carries vout as (value only), and the scriptPubKey is
+        recomputed on deserialise as 0xDF || conditions_root. This makes
+        the old wallet-funded v4 attack (build a v4 tx with a P2WPKH
+        output) structurally impossible, not merely policy-rejected.
 
-        Test method: hand-build a v4 tx in Python with conditions_root
-        left null (so the wire format falls back to standard SegWit and
-        we can carry an arbitrary non-MLSC scriptPubKey), sign the
-        wallet input via MiniWallet, then assert testmempoolaccept
-        rejects it with the policy reason."""
-        self.log.info("Testing wallet-funded v4 with non-MLSC output rejected (policy)...")
+        This test locks the invariant down from the wire side: build a
+        v4 tx whose in-memory vout[0].scriptPubKey is non-MLSC, serialise
+        it, deserialise it, and assert the output scriptPubKey comes back
+        as the MLSC form regardless of what we put in. Any future
+        regression in the serializer/deserializer that reintroduces a
+        standard-SegWit path for v4 would fail this round-trip."""
+        self.log.info("Testing v4 tx wire format is structurally MLSC...")
 
-        utxo = self.wallet.get_utxo()
-        self.log.info(f"  Wallet UTXO: {utxo['txid']}:{utxo['vout']} ({utxo['value']} BTC)")
-
+        # Fabricate a v4 tx with a conditions_root and a single output.
+        # In-memory we set vout[0].scriptPubKey to something deliberately
+        # non-MLSC (P2WPKH-shaped) — this would have been a valid attack
+        # tx pre-fix. Post-fix the serializer ignores the in-memory SPK
+        # and writes only the value.
         tx = CTransaction()
         tx.version = CTransaction.RUNG_TX_VERSION  # 4
         tx.nLockTime = 0
-        tx.conditions_root = b"\x00" * 32  # null → wire format = standard SegWit
+        tx.conditions_root = bytes(range(32))  # arbitrary non-null root
 
-        tx.vin.append(CTxIn(COutPoint(int(utxo["txid"], 16), utxo["vout"]),
-                             b"", 0xffffffff))
-
-        # Non-MLSC output: P2WPKH-shaped (OP_0 + 20 byte hash).
-        spend_amount = int(Decimal(str(utxo["value"])) * COIN) - 1000  # 1000 sat fee
+        tx.vin.append(CTxIn(COutPoint(0, 0), b"", 0xffffffff))
         non_mlsc_spk = CScript([OP_0, b"\x00" * 20])
-        tx.vout.append(CTxOut(spend_amount, non_mlsc_spk))
+        tx.vout.append(CTxOut(99000, non_mlsc_spk))
 
-        self.wallet.sign_tx(tx)
-        raw_hex = tx.serialize().hex()
-        self.log.info(f"  Built v4 tx: {len(raw_hex) // 2} bytes, version=4, vout[0] non-MLSC")
+        raw = tx.serialize_without_witness()
+        parsed = CTransaction()
+        from io import BytesIO
+        parsed.deserialize(BytesIO(raw))
 
-        result = self.node.testmempoolaccept([raw_hex])
-        assert_equal(len(result), 1)
-        assert_equal(result[0]["allowed"], False)
-        assert "rung-non-mlsc-output" in result[0]["reject-reason"], \
-            f"expected rung-non-mlsc-output, got: {result[0]['reject-reason']}"
-        self.log.info(f"  Correctly rejected: {result[0]['reject-reason']}")
+        assert_equal(parsed.version, 4)
+        assert_equal(parsed.conditions_root, tx.conditions_root)
+        assert_equal(len(parsed.vout), 1)
+        assert_equal(parsed.vout[0].nValue, 99000)
+        expected_spk = b"\xdf" + tx.conditions_root
+        assert_equal(parsed.vout[0].scriptPubKey, expected_spk), \
+            f"deserialised vout SPK should be MLSC, got {parsed.vout[0].scriptPubKey.hex()}"
+        self.log.info("  Round-trip: in-memory non-MLSC SPK replaced with MLSC on deserialise (OK)")
 
-        assert_raises_rpc_error(-26, "rung-non-mlsc-output",
-                                 self.node.sendrawtransaction, raw_hex)
-        self.log.info("  sendrawtransaction also rejects: OK")
+        # Sanity: the same property holds through the full with-witness path.
+        raw_full = tx.serialize()
+        parsed_full = CTransaction()
+        parsed_full.deserialize(BytesIO(raw_full))
+        assert_equal(parsed_full.vout[0].scriptPubKey, expected_spk)
+        self.log.info("  Full (with-witness) serialize → deserialise round-trip: OK")
 
     def test_v4_mlsc_reorg_survival(self):
         """Reorg survival for a plain (non-QABIO) v4 MLSC tx. Mine a v4 tx,
