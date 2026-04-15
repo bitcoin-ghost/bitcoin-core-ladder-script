@@ -8396,6 +8396,150 @@ BOOST_AUTO_TEST_CASE(mlsc_data_return_min_payload)
     BOOST_CHECK_EQUAL(GetMLSCData(script).size(), 1u);
 }
 
+BOOST_AUTO_TEST_CASE(tx_mlsc_data_return_wire_round_trip)
+{
+    // End-to-end wire format round-trip for DATA_RETURN outputs. Previously
+    // the helpers CreateMLSCScript/HasMLSCData/GetMLSCData worked in memory
+    // but the wire format dropped the data payload on every serialise →
+    // deserialise cycle because it wrote only nValue per output. This test
+    // pins the nValue==0 conditional encoding: for zero-value outputs the
+    // serialiser writes (nValue, varint data_len, data) and the deserialiser
+    // reconstructs vout[i].scriptPubKey = 0xDF || conditions_root || data.
+    //
+    // Tests every valid data length 1..40, stripped AND full form, plus
+    // a mixed tx (normal MLSC output + DATA_RETURN output) to verify that
+    // non-DATA_RETURN outputs still cost zero extra wire bytes.
+
+    using namespace rung;
+
+    uint256 root;
+    for (size_t i = 0; i < 32; ++i) root.data()[i] = static_cast<uint8_t>(i * 7 + 3);
+
+    auto build_tx = [&](size_t data_len, bool with_normal_output) {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        mtx.conditions_root = root;
+
+        CTxIn in;
+        uint256 h;
+        for (size_t k = 0; k < 32; ++k) h.data()[k] = static_cast<uint8_t>(0x11 + k);
+        in.prevout = COutPoint(Txid::FromUint256(h), 0);
+        in.nSequence = 0xFFFFFFFF;
+        mtx.vin.push_back(in);
+
+        if (with_normal_output) {
+            // Normal MLSC output — should cost 0 extra wire bytes vs the
+            // pre-DATA_RETURN-restore wire format.
+            CTxOut normal;
+            normal.nValue = 50000;
+            CScript normal_spk;
+            normal_spk.push_back(0xDF);
+            normal_spk.insert(normal_spk.end(), root.begin(), root.end());
+            normal.scriptPubKey = normal_spk;
+            mtx.vout.push_back(normal);
+        }
+
+        // DATA_RETURN output: zero value, extended SPK with data tail.
+        CTxOut dr;
+        dr.nValue = 0;
+        std::vector<uint8_t> data(data_len);
+        for (size_t k = 0; k < data_len; ++k) data[k] = static_cast<uint8_t>(0xA0 + (k & 0x0F));
+        dr.scriptPubKey = CreateMLSCScript(root, data);
+        mtx.vout.push_back(dr);
+
+        return CTransaction(mtx);
+    };
+
+    // (1) Round-trip every data length from 1 to 40 in the full form.
+    for (size_t data_len = 1; data_len <= 40; ++data_len) {
+        CTransaction tx = build_tx(data_len, /*with_normal_output=*/false);
+        DataStream s;
+        s << TX_WITH_WITNESS(tx);
+
+        CMutableTransaction parsed;
+        DataStream s2{std::span<const std::byte>(s.data(), s.size())};
+        s2 >> TX_WITH_WITNESS(parsed);
+
+        BOOST_REQUIRE_EQUAL(parsed.vout.size(), 1u);
+        BOOST_CHECK_EQUAL(parsed.vout[0].nValue, 0);
+        BOOST_CHECK(IsMLSCScript(parsed.vout[0].scriptPubKey));
+        BOOST_CHECK(HasMLSCData(parsed.vout[0].scriptPubKey));
+        auto parsed_data = GetMLSCData(parsed.vout[0].scriptPubKey);
+        BOOST_CHECK_EQUAL(parsed_data.size(), data_len);
+
+        // Stripped form must also round-trip identically (critical for
+        // txid stability — the txid commits to the DATA_RETURN bytes).
+        DataStream s3;
+        s3 << TX_NO_WITNESS(tx);
+        CMutableTransaction parsed_stripped;
+        DataStream s4{std::span<const std::byte>(s3.data(), s3.size())};
+        s4 >> TX_NO_WITNESS(parsed_stripped);
+        BOOST_REQUIRE_EQUAL(parsed_stripped.vout.size(), 1u);
+        BOOST_CHECK(GetMLSCData(parsed_stripped.vout[0].scriptPubKey) == parsed_data);
+    }
+
+    // (2) Mixed tx — 1 normal output (non-zero) + 1 DATA_RETURN output.
+    // Confirms the normal output pays no wire overhead for the
+    // DATA_RETURN encoding mechanism.
+    {
+        CTransaction tx_mixed = build_tx(/*data_len=*/40, /*with_normal_output=*/true);
+        DataStream s;
+        s << TX_WITH_WITNESS(tx_mixed);
+        CMutableTransaction parsed;
+        DataStream s2{std::span<const std::byte>(s.data(), s.size())};
+        s2 >> TX_WITH_WITNESS(parsed);
+        BOOST_REQUIRE_EQUAL(parsed.vout.size(), 2u);
+        BOOST_CHECK_EQUAL(parsed.vout[0].nValue, 50000);
+        BOOST_CHECK_EQUAL(parsed.vout[0].scriptPubKey.size(), 33u); // no tail
+        BOOST_CHECK_EQUAL(parsed.vout[1].nValue, 0);
+        BOOST_CHECK_EQUAL(GetMLSCData(parsed.vout[1].scriptPubKey).size(), 40u);
+    }
+
+    // (3) Control: a normal-only tx with no DATA_RETURN output must still
+    // serialise to exactly the same wire bytes as before the DATA_RETURN
+    // restoration. This pins the "zero overhead for normal outputs" claim.
+    // We can't compare to a known-old byte string (the format history is
+    // complicated), but we can assert the wire size is stable across two
+    // calls — if DATA_RETURN encoding leaked any overhead into the normal
+    // path, this would drift.
+    {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        mtx.conditions_root = root;
+        CTxIn in;
+        uint256 h;
+        for (size_t k = 0; k < 32; ++k) h.data()[k] = static_cast<uint8_t>(0x22 + k);
+        in.prevout = COutPoint(Txid::FromUint256(h), 0);
+        in.nSequence = 0xFFFFFFFF;
+        mtx.vin.push_back(in);
+        // Single normal output — no DATA_RETURN anywhere in the tx.
+        CTxOut o;
+        o.nValue = 10000;
+        CScript spk;
+        spk.push_back(0xDF);
+        spk.insert(spk.end(), root.begin(), root.end());
+        o.scriptPubKey = spk;
+        mtx.vout.push_back(o);
+
+        CTransaction tx(mtx);
+        DataStream s1;
+        s1 << TX_NO_WITNESS(tx);
+        DataStream s2;
+        s2 << TX_NO_WITNESS(tx);
+        BOOST_CHECK_EQUAL(s1.size(), s2.size());
+        // The per-output body in the stripped form is exactly 8 bytes
+        // (int64 nValue) for a normal MLSC output. If the DATA_RETURN
+        // conditional encoding leaked extra bytes into the normal path,
+        // the stripped form would grow.
+        size_t expected_min = 4 /*version*/ + 1 /*n_vin varint*/ + 41 /*1 vin*/
+                            + 32 /*conditions_root*/ + 1 /*n_outputs varint*/
+                            + 8 /*int64 nValue*/ + 4 /*nLockTime*/;
+        BOOST_CHECK_EQUAL(s1.size(), expected_min);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(mlsc_rung_leaf_deterministic)
 {
     // Create a simple SIG block in conditions context

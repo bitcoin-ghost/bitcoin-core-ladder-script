@@ -221,7 +221,11 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - std::vector<CTxIn> vin
  * - uint256 conditions_root (32 bytes — shared across all outputs)
  * - CompactSize n_outputs
- * - int64_t nValue[] (8 bytes per output — value only, no scriptPubKey)
+ * - per-output:
+ *     int64_t nValue (8 bytes)
+ *     if nValue == 0:                       (DATA_RETURN marker — reserved)
+ *       CompactSize data_len (1..40)
+ *       unsigned char data[data_len]
  * - per-input witness stacks
  * - CompactSize qabi_block_len
  * - unsigned char qabi_block[]              (QABIO: tx-level batch block)
@@ -236,7 +240,7 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - std::vector<CTxIn> vin
  * - uint256 conditions_root (32 bytes — shared across all outputs)
  * - CompactSize n_outputs
- * - int64_t nValue[] (8 bytes per output — value only, no scriptPubKey)
+ * - per-output: nValue + (if zero: DATA_RETURN data_len + data), same as above
  * - uint32_t nLockTime
  *
  * Both forms use the compact value-only vout so that weight =
@@ -244,8 +248,20 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * 33.5 vB (the gap that would exist if the stripped form used the
  * standard 33-byte per-output scriptPubKey).
  *
+ * DATA_RETURN encoding: consensus requires DATA_RETURN outputs to be
+ * zero-value and non-DATA_RETURN MLSC outputs to be ≥ MIN_RUNG_OUTPUT_VALUE
+ * (546). So nValue == 0 is a structurally unique wire-level marker for
+ * DATA_RETURN. When the deserialiser sees a zero-value output, it reads
+ * a data_len varint (1..40) followed by that many bytes of payload, and
+ * reconstructs vout[i].scriptPubKey = 0xDF || conditions_root || data.
+ * Normal non-zero outputs pay zero overhead for this — the mechanism is
+ * free in the common case, so the "cheapest tx type in Bitcoin" claim at
+ * N=1 (109 vB vs P2WPKH's 110 vB) is preserved. A DATA_RETURN output
+ * pays ~41 vB for 40 bytes of data, close to OP_RETURN's ~43 vB.
+ *
  * On deserialization, TX_MLSC outputs are inflated to CTxOut(value, 0xDF + root)
  * for compatibility with all existing code that accesses tx.vout[i].scriptPubKey.
+ * DATA_RETURN outputs are inflated to CTxOut(0, 0xDF + root + data).
  */
 template<typename Stream, typename TxType>
 void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& params)
@@ -272,12 +288,30 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         s >> tx.conditions_root;
         uint64_t n_outputs = ReadCompactSize(s);
         tx.vout.resize(n_outputs);
+        // Base MLSC scriptPubKey shared by all non-DATA_RETURN outputs.
         CScript mlsc_spk;
         mlsc_spk.push_back(0xDF);
         mlsc_spk.insert(mlsc_spk.end(), tx.conditions_root.begin(), tx.conditions_root.end());
         for (size_t i = 0; i < n_outputs; ++i) {
             s >> tx.vout[i].nValue;
-            tx.vout[i].scriptPubKey = mlsc_spk;
+            if (tx.vout[i].nValue == 0) {
+                // DATA_RETURN output — data payload follows (1..40 bytes).
+                // nValue == 0 is a structurally unique marker because
+                // consensus requires non-DATA_RETURN MLSC outputs to be
+                // ≥ MIN_RUNG_OUTPUT_VALUE (546).
+                uint64_t data_len = ReadCompactSize(s);
+                if (data_len == 0 || data_len > 40) {
+                    throw std::ios_base::failure(
+                        "DATA_RETURN data_len out of range (1..40)");
+                }
+                std::vector<unsigned char> data_bytes(data_len);
+                s.read(MakeWritableByteSpan(data_bytes));
+                CScript dr_spk = mlsc_spk;
+                dr_spk.insert(dr_spk.end(), data_bytes.begin(), data_bytes.end());
+                tx.vout[i].scriptPubKey = dr_spk;
+            } else {
+                tx.vout[i].scriptPubKey = mlsc_spk;
+            }
         }
     };
     s >> tx.vin;
@@ -375,11 +409,34 @@ void SerializeTransaction(const TxType& tx, Stream& s, const TransactionSerParam
     }
     s << tx.vin;
     if (is_tx_mlsc) {
-        /* TX_MLSC: write conditions_root + value-only outputs */
+        /* TX_MLSC: write conditions_root + per-output body.
+         * Non-zero outputs are value-only (8 bytes). Zero-value outputs
+         * are DATA_RETURN — followed by a data_len varint and the data
+         * payload, reconstructed on the other side into the extended
+         * 0xDF || root || data scriptPubKey form. */
         s << tx.conditions_root;
         WriteCompactSize(s, tx.vout.size());
         for (const auto& out : tx.vout) {
             s << out.nValue;
+            if (out.nValue == 0) {
+                // Extract DATA_RETURN payload from the in-memory extended
+                // scriptPubKey (0xDF || root || data[]). If the in-memory
+                // SPK has no data tail, this is a zero-value output that
+                // would be rejected at validation anyway — we write an
+                // empty payload so the stream round-trips cleanly, but
+                // the deserialiser will reject data_len == 0.
+                const CScript& spk = out.scriptPubKey;
+                size_t data_len = 0;
+                const unsigned char* data_ptr = nullptr;
+                if (spk.size() > 33 && spk.size() <= 73 && spk[0] == 0xDF) {
+                    data_len = spk.size() - 33;
+                    data_ptr = spk.data() + 33;
+                }
+                WriteCompactSize(s, data_len);
+                if (data_len > 0) {
+                    s.write(std::as_bytes(std::span<const unsigned char>(data_ptr, data_len)));
+                }
+            }
         }
     } else {
         s << tx.vout;

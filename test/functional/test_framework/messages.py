@@ -634,8 +634,10 @@ class CTransaction:
 
     def _read_mlsc_body(self, f):
         # Shared reader for the stripped and full TX_MLSC layouts:
-        # conditions_root + value-only outputs, inflated to the MLSC SPK
-        # so downstream tools (txid, weight) see the usual CTxOut shape.
+        # conditions_root + per-output body (nValue, + DATA_RETURN data
+        # if nValue == 0). Outputs are inflated to the MLSC SPK so
+        # downstream tools (txid, weight) see the usual CTxOut shape.
+        # DATA_RETURN outputs get the extended 0xDF||root||data form.
         self.conditions_root = f.read(32)
         n_outputs = deser_compact_size(f)
         mlsc_spk = b"\xdf" + self.conditions_root
@@ -643,7 +645,15 @@ class CTransaction:
         for _ in range(n_outputs):
             out = CTxOut()
             out.nValue = int.from_bytes(f.read(8), "little", signed=True)
-            out.scriptPubKey = mlsc_spk
+            if out.nValue == 0:
+                data_len = deser_compact_size(f)
+                if data_len < 1 or data_len > 40:
+                    raise ValueError(
+                        f"DATA_RETURN data_len out of range (1..40): {data_len}")
+                data_bytes = f.read(data_len)
+                out.scriptPubKey = mlsc_spk + data_bytes
+            else:
+                out.scriptPubKey = mlsc_spk
             self.vout.append(out)
 
     def deserialize(self, f):
@@ -708,6 +718,19 @@ class CTransaction:
             r += ser_compact_size(len(self.vout))
             for out in self.vout:
                 r += out.nValue.to_bytes(8, "little", signed=True)
+                if out.nValue == 0:
+                    # DATA_RETURN output — extract the data payload
+                    # from the in-memory extended scriptPubKey
+                    # (0xDF || root || data[]). If the SPK lacks a tail,
+                    # write an empty payload; the C++ deserialiser will
+                    # reject data_len == 0 so the round-trip stays clean.
+                    spk = out.scriptPubKey
+                    if len(spk) > 33 and len(spk) <= 73 and spk[:1] == b"\xdf":
+                        data_bytes = spk[33:]
+                    else:
+                        data_bytes = b""
+                    r += ser_compact_size(len(data_bytes))
+                    r += data_bytes
         else:
             r += ser_vector(self.vout)
         r += self.nLockTime.to_bytes(4, "little")
@@ -733,6 +756,19 @@ class CTransaction:
             r += ser_compact_size(len(self.vout))
             for out in self.vout:
                 r += out.nValue.to_bytes(8, "little", signed=True)
+                if out.nValue == 0:
+                    # DATA_RETURN output — extract the data payload
+                    # from the in-memory extended scriptPubKey
+                    # (0xDF || root || data[]). If the SPK lacks a tail,
+                    # write an empty payload; the C++ deserialiser will
+                    # reject data_len == 0 so the round-trip stays clean.
+                    spk = out.scriptPubKey
+                    if len(spk) > 33 and len(spk) <= 73 and spk[:1] == b"\xdf":
+                        data_bytes = spk[33:]
+                    else:
+                        data_bytes = b""
+                    r += ser_compact_size(len(data_bytes))
+                    r += data_bytes
         else:
             r += ser_vector(self.vout)
         if is_mlsc:
