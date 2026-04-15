@@ -16033,6 +16033,215 @@ BOOST_AUTO_TEST_CASE(mlsc_spend_tx_size_sweep)
     }
 }
 
+BOOST_AUTO_TEST_CASE(mlsc_spend_path_sweep)
+{
+    // Spend-side wire costs broken out by the three MLSC spend paths plus
+    // three Bitcoin baselines. All sweeps are "1 input → N MLSC outputs"
+    // so the per-input witness differs but the output side is fixed.
+    //
+    //   (A) MLSC key-path     — 1-element witness: [schnorr_sig(64)]
+    //   (B) MLSC script-path  — 2-element witness: [LadderWitness, MLSCProof]
+    //   (C) MLSC script-path  — 3-element witness: [LadderWitness, MLSCProof,
+    //       with tweak          internal_pubkey(33)]
+    //
+    // Baselines:
+    //   (D) P2TR key-path     — 1-element: [schnorr_sig(64)]
+    //   (E) P2TR script-path  — 3-element: [sig(64), tapscript(34), control_block(33)]
+    //   (F) P2WPKH            — 2-element: [der_sig(72), pubkey(33)]
+    //
+    // Witness contents are realistic-sized dummy bytes — the evaluator is
+    // never invoked, so no valid keys are needed. Wire size is exactly
+    // what a validating tx would produce at each N.
+
+    const std::vector<size_t> sizes = {1, 2, 3, 5, 10, 25, 50, 100};
+
+    // Helper: MLSC spend tx builder. The vout scriptPubKey is irrelevant
+    // in v4 — the serializer writes value-only outputs and the deserializer
+    // synthesises 0xDF+conditions_root. Leave the in-memory SPK empty.
+    auto build_mlsc_spend_tx = [](const std::vector<std::vector<uint8_t>>& wit_stack,
+                                    size_t n_outputs) {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        std::fill(mtx.conditions_root.begin(), mtx.conditions_root.end(), 0x88);
+
+        CTxIn in;
+        uint256 h; std::memset(h.begin(), 0x66, 32);
+        in.prevout = COutPoint(Txid::FromUint256(h), 0);
+        in.nSequence = 0xFFFFFFFF;
+        mtx.vin.push_back(in);
+        mtx.vin[0].scriptWitness.stack = wit_stack;
+
+        for (size_t i = 0; i < n_outputs; ++i) {
+            CTxOut o;
+            o.nValue = 10000 + static_cast<int64_t>(i);
+            mtx.vout.push_back(o);
+        }
+        return CTransaction(mtx);
+    };
+
+    // Build the script-path 2-element witness shape once — used by both
+    // untweaked and tweaked variants below.
+    auto make_script_path_witness = []() {
+        rung::LadderWitness lw;
+        rung::Rung r;
+        rung::RungBlock b;
+        b.type = rung::RungBlockType::SIG;
+        b.fields.push_back({rung::RungDataType::PUBKEY, std::vector<uint8_t>(33, 0xAA)});
+        b.fields.push_back({rung::RungDataType::SIGNATURE, std::vector<uint8_t>(64, 0xBB)});
+        r.blocks.push_back(b);
+        lw.rungs.push_back(r);
+        lw.coil.output_index = 0;
+        auto lw_bytes = rung::SerializeLadderWitness(lw, rung::SerializationContext::WITNESS);
+
+        rung::MLSCProof proof;
+        proof.total_rungs = 1;
+        proof.total_relays = 0;
+        proof.rung_index = 0;
+        proof.revealed_rung = r;
+        proof.proof_mode = rung::MLSCProofMode::MERKLE_PATH;
+        auto proof_bytes = rung::SerializeMLSCProof(proof);
+
+        return std::make_pair(std::move(lw_bytes), std::move(proof_bytes));
+    };
+    auto [script_path_lw, script_path_proof] = make_script_path_witness();
+
+    auto row_mlsc = [](size_t N, const CTransaction& tx, char* out, size_t outsz) {
+        auto [b, vb] = TxSizeAndVsize(tx);
+        std::snprintf(out, outsz, "  %-6zu | %-8zu | %-8zu | %-8.1f | %-6.2f",
+                      N, b, vb,
+                      static_cast<double>(b) / N,
+                      static_cast<double>(vb) / N);
+    };
+
+    // ------------------------------------------------------------------
+    // (A) MLSC key-path spend
+    // ------------------------------------------------------------------
+    BOOST_TEST_MESSAGE("MLSC spend path (A): key-path — witness = [schnorr_sig(64)]");
+    BOOST_TEST_MESSAGE("  N      | tx bytes | vsize    | B/out    | vB/out");
+    BOOST_TEST_MESSAGE("  -------+----------+----------+----------+--------");
+    std::vector<size_t> key_path_vsize;
+    for (size_t N : sizes) {
+        std::vector<std::vector<uint8_t>> stack = {std::vector<uint8_t>(64, 0x11)};
+        CTransaction tx = build_mlsc_spend_tx(stack, N);
+        char row[256]; row_mlsc(N, tx, row, sizeof(row));
+        BOOST_TEST_MESSAGE(row);
+        key_path_vsize.push_back(GetVirtualTransactionSize(tx));
+    }
+
+    // ------------------------------------------------------------------
+    // (B) MLSC script-path (2-element witness, no tweak)
+    // ------------------------------------------------------------------
+    BOOST_TEST_MESSAGE("");
+    BOOST_TEST_MESSAGE("MLSC spend path (B): script-path, no tweak —");
+    BOOST_TEST_MESSAGE("  witness = [LadderWitness(" + std::to_string(script_path_lw.size()) +
+                       "B), MLSCProof(" + std::to_string(script_path_proof.size()) + "B)]");
+    BOOST_TEST_MESSAGE("  N      | tx bytes | vsize    | B/out    | vB/out");
+    BOOST_TEST_MESSAGE("  -------+----------+----------+----------+--------");
+    std::vector<size_t> script_untweaked_vsize;
+    for (size_t N : sizes) {
+        std::vector<std::vector<uint8_t>> stack = {script_path_lw, script_path_proof};
+        CTransaction tx = build_mlsc_spend_tx(stack, N);
+        char row[256]; row_mlsc(N, tx, row, sizeof(row));
+        BOOST_TEST_MESSAGE(row);
+        script_untweaked_vsize.push_back(GetVirtualTransactionSize(tx));
+    }
+
+    // ------------------------------------------------------------------
+    // (C) MLSC script-path (3-element witness, with internal_pubkey tweak)
+    // ------------------------------------------------------------------
+    BOOST_TEST_MESSAGE("");
+    BOOST_TEST_MESSAGE("MLSC spend path (C): script-path with tweak —");
+    BOOST_TEST_MESSAGE("  witness = [LadderWitness, MLSCProof, internal_pubkey(33)]");
+    BOOST_TEST_MESSAGE("  N      | tx bytes | vsize    | B/out    | vB/out");
+    BOOST_TEST_MESSAGE("  -------+----------+----------+----------+--------");
+    for (size_t N : sizes) {
+        std::vector<std::vector<uint8_t>> stack = {
+            script_path_lw, script_path_proof, std::vector<uint8_t>(33, 0xCC)};
+        CTransaction tx = build_mlsc_spend_tx(stack, N);
+        char row[256]; row_mlsc(N, tx, row, sizeof(row));
+        BOOST_TEST_MESSAGE(row);
+    }
+
+    // Sanity: key-path must be strictly cheaper than script-path at every N.
+    // A regression that made script-path witnesses shorter than the 1-element
+    // key-path would indicate the spend path shape has drifted.
+    for (size_t i = 0; i < sizes.size(); ++i) {
+        BOOST_CHECK_MESSAGE(key_path_vsize[i] < script_untweaked_vsize[i],
+                            "key-path (" << key_path_vsize[i] << " vB) should be < "
+                            "script-path untweaked (" << script_untweaked_vsize[i] << " vB) at N=" << sizes[i]);
+    }
+
+    // ------------------------------------------------------------------
+    // (D) (E) (F) Bitcoin baselines for direct comparison.
+    // Same "1 input → N outputs" shape. The input spend type and the
+    // output scriptPubKey format change per row.
+    // ------------------------------------------------------------------
+    auto build_btc_spend_tx = [](const std::vector<std::vector<uint8_t>>& wit_stack,
+                                  const CScript& output_spk,
+                                  size_t n_outputs,
+                                  uint8_t outpoint_fill) {
+        CMutableTransaction mtx;
+        mtx.version = 2;
+        mtx.nLockTime = 0;
+        CTxIn in;
+        uint256 h; std::memset(h.begin(), outpoint_fill, 32);
+        in.prevout = COutPoint(Txid::FromUint256(h), 0);
+        in.nSequence = 0xFFFFFFFF;
+        mtx.vin.push_back(in);
+        mtx.vin[0].scriptWitness.stack = wit_stack;
+        for (size_t i = 0; i < n_outputs; ++i) {
+            CTxOut o;
+            o.nValue = 10000 + static_cast<int64_t>(i);
+            o.scriptPubKey = output_spk;
+            mtx.vout.push_back(o);
+        }
+        return CTransaction(mtx);
+    };
+
+    // Output scripts (reused across rows)
+    CScript p2tr_spk; p2tr_spk.push_back(OP_1); p2tr_spk.push_back(32);
+    for (int k = 0; k < 32; ++k) p2tr_spk.push_back(0x99);
+    CScript p2wpkh_spk; p2wpkh_spk.push_back(OP_0); p2wpkh_spk.push_back(20);
+    for (int k = 0; k < 20; ++k) p2wpkh_spk.push_back(0x44);
+
+    BOOST_TEST_MESSAGE("");
+    BOOST_TEST_MESSAGE("Bitcoin baselines (same 1-input → N-output shape):");
+    BOOST_TEST_MESSAGE("  N      | p2tr-kp vB | p2tr-sp vB | p2wpkh vB | mlsc-kp vB | mlsc-sp vB");
+    BOOST_TEST_MESSAGE("  -------+------------+------------+-----------+------------+-----------");
+
+    for (size_t idx = 0; idx < sizes.size(); ++idx) {
+        size_t N = sizes[idx];
+
+        // P2TR key-path: 64-byte Schnorr sig, outputs are 34-byte x-only
+        auto tr_kp = build_btc_spend_tx(
+            { std::vector<uint8_t>(64, 0xF1) }, p2tr_spk, N, 0x77);
+
+        // P2TR script-path: 3-element stack for a minimal single-pubkey
+        // tapscript — [sig(64), tapscript(34), control_block(33)]
+        auto tr_sp = build_btc_spend_tx(
+            { std::vector<uint8_t>(64, 0xF2),
+              std::vector<uint8_t>(34, 0xF3),
+              std::vector<uint8_t>(33, 0xF4) }, p2tr_spk, N, 0x88);
+
+        // P2WPKH: 2-element stack [der_sig(72), compressed_pubkey(33)]
+        auto wp = build_btc_spend_tx(
+            { std::vector<uint8_t>(72, 0xAB),
+              std::vector<uint8_t>(33, 0xCD) }, p2wpkh_spk, N, 0x99);
+
+        size_t tr_kp_vb = GetVirtualTransactionSize(tr_kp);
+        size_t tr_sp_vb = GetVirtualTransactionSize(tr_sp);
+        size_t wp_vb    = GetVirtualTransactionSize(wp);
+
+        char row[320];
+        std::snprintf(row, sizeof(row),
+                      "  %-6zu | %-10zu | %-10zu | %-9zu | %-10zu | %-10zu",
+                      N, tr_kp_vb, tr_sp_vb, wp_vb,
+                      key_path_vsize[idx], script_untweaked_vsize[idx]);
+        BOOST_TEST_MESSAGE(row);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(mlsc_utxo_storage_size)
 {
     // Per-output UTXO storage cost after the d1eddccc62 compaction. The
