@@ -15795,6 +15795,324 @@ BOOST_AUTO_TEST_CASE(qabi_tx_size_sweep_v2_projection)
     }
 }
 
+// ============================================================================
+// Plain MLSC (non-QABIO) size sweeps — creation-side and spend-side
+// ============================================================================
+//
+// Complements the qabi_tx_size_sweep tests above. These measure the on-wire
+// and virtual sizes of the common, non-QABIO TX_MLSC patterns so the numbers
+// are directly comparable to standard Bitcoin tx types (P2WPKH, P2TR).
+
+namespace {
+
+// Build a realistic 1-wallet-input creation tx with N MLSC outputs,
+// each governed by a conditions tree of the given shape. Returns the
+// CTransaction with a synthetic P2WPKH-sized witness on input 0 so
+// the vsize reflects what a real wallet-signed tx would look like.
+struct MlscCreationParams {
+    size_t n_outputs;
+    size_t n_rungs_per_output;   // typically 1; larger = wider OR tree
+    size_t n_blocks_per_rung;    // typically 1; larger = wider AND
+};
+
+static CTransaction BuildPlainMLSCTx(const MlscCreationParams& p)
+{
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    // Non-null conditions_root forces TX_MLSC wire format (flag 0x02).
+    std::fill(mtx.conditions_root.begin(), mtx.conditions_root.end(), 0x77);
+
+    // One wallet input (placeholder prevout, realistic P2WPKH-shaped
+    // witness: [sig(72B), pubkey(33B)] = ~108 B after framing).
+    CTxIn in;
+    uint256 h; std::memset(h.begin(), 0x55, 32);
+    in.prevout = COutPoint(Txid::FromUint256(h), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>(72, 0xAB)); // DER sig + sighash
+    mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>(33, 0xCD)); // compressed pubkey
+
+    // N outputs; per-output scriptPubKey is synthesised from conditions_root
+    // so only the 8-byte value is on the wire. The in-memory scriptPubKey is
+    // set to 0xDF || conditions_root so weight/txid computation matches what
+    // the node would see after deserialisation.
+    CScript mlsc_spk;
+    mlsc_spk.push_back(0xDF);
+    mlsc_spk.insert(mlsc_spk.end(), mtx.conditions_root.begin(), mtx.conditions_root.end());
+    for (size_t i = 0; i < p.n_outputs; ++i) {
+        CTxOut o;
+        o.nValue = 10000 + static_cast<int64_t>(i);
+        o.scriptPubKey = mlsc_spk;
+        mtx.vout.push_back(o);
+    }
+    // No qabi_block, no aggregated_sig for plain MLSC.
+    return CTransaction(mtx);
+}
+
+// Build a standard SegWit P2WPKH tx with the same vin/vout count as a
+// reference baseline. Uses a 33-byte compressed pubkey → P2WPKH
+// scriptPubKey (22 bytes) with a 108-byte witness on input 0.
+static CTransaction BuildP2WPKHTx(size_t n_outputs)
+{
+    CMutableTransaction mtx;
+    mtx.version = 2;
+    mtx.nLockTime = 0;
+
+    CTxIn in;
+    uint256 h; std::memset(h.begin(), 0x33, 32);
+    in.prevout = COutPoint(Txid::FromUint256(h), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>(72, 0xAB));
+    mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>(33, 0xCD));
+
+    // P2WPKH: OP_0 + 20-byte hash160
+    CScript spk;
+    spk.push_back(OP_0);
+    spk.push_back(20);
+    for (int k = 0; k < 20; ++k) spk.push_back(0x44);
+    for (size_t i = 0; i < n_outputs; ++i) {
+        CTxOut o;
+        o.nValue = 10000 + static_cast<int64_t>(i);
+        o.scriptPubKey = spk;
+        mtx.vout.push_back(o);
+    }
+    return CTransaction(mtx);
+}
+
+// Build a standard SegWit P2TR (key-path) tx with the same vin/vout count.
+// Uses 32-byte x-only pubkey outputs and a 65-byte Schnorr signature witness.
+static CTransaction BuildP2TRTx(size_t n_outputs)
+{
+    CMutableTransaction mtx;
+    mtx.version = 2;
+    mtx.nLockTime = 0;
+
+    CTxIn in;
+    uint256 h; std::memset(h.begin(), 0x22, 32);
+    in.prevout = COutPoint(Txid::FromUint256(h), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    // Key-path: single 64-byte Schnorr sig. Add a trailing sighash byte
+    // for SIGHASH_ALL (65 total).
+    mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>(65, 0xAB));
+
+    // P2TR: OP_1 + 32-byte x-only pubkey
+    CScript spk;
+    spk.push_back(OP_1);
+    spk.push_back(32);
+    for (int k = 0; k < 32; ++k) spk.push_back(0x99);
+    for (size_t i = 0; i < n_outputs; ++i) {
+        CTxOut o;
+        o.nValue = 10000 + static_cast<int64_t>(i);
+        o.scriptPubKey = spk;
+        mtx.vout.push_back(o);
+    }
+    return CTransaction(mtx);
+}
+
+static std::pair<size_t, size_t> TxSizeAndVsize(const CTransaction& tx)
+{
+    DataStream s;
+    s << TX_WITH_WITNESS(tx);
+    return {s.size(), GetVirtualTransactionSize(tx)};
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(mlsc_creation_tx_size_sweep)
+{
+    // Plain (non-QABIO) TX_MLSC creation txs: 1 wallet input → N MLSC
+    // outputs, all sharing one conditions_root. Because the vout section
+    // on the wire is value-only (scriptPubKey synthesised on deserialise
+    // from conditions_root), each additional MLSC output adds only 8 B to
+    // the non-witness section. The baseline wallet input witness
+    // (~108 B P2WPKH) is counted once.
+    //
+    // Contrast with P2WPKH: each additional output adds 31 B of full
+    // scriptPubKey + value. Contrast with P2TR: 43 B per additional
+    // x-only output. MLSC wins at 2+ outputs via the shared root.
+
+    const std::vector<size_t> sizes = {1, 2, 3, 5, 10, 25, 50, 100};
+
+    BOOST_TEST_MESSAGE("Plain MLSC creation tx size sweep (1 P2WPKH wallet input, N MLSC outputs):");
+    BOOST_TEST_MESSAGE("  N      | mlsc B   | mlsc vB  | p2wpkh B | p2wpkh vB | p2tr B   | p2tr vB  | mlsc B/out | mlsc vB/out");
+    BOOST_TEST_MESSAGE("  -------+----------+----------+----------+-----------+----------+----------+------------+------------");
+
+    for (size_t N : sizes) {
+        auto mlsc_tx = BuildPlainMLSCTx({N, 1, 1});
+        auto p2wpkh_tx = BuildP2WPKHTx(N);
+        auto p2tr_tx = BuildP2TRTx(N);
+
+        auto [mlsc_b, mlsc_vb] = TxSizeAndVsize(mlsc_tx);
+        auto [p2wpkh_b, p2wpkh_vb] = TxSizeAndVsize(p2wpkh_tx);
+        auto [p2tr_b, p2tr_vb] = TxSizeAndVsize(p2tr_tx);
+
+        char row[320];
+        std::snprintf(row, sizeof(row),
+                      "  %-6zu | %-8zu | %-8zu | %-8zu | %-9zu | %-8zu | %-8zu | %-10.1f | %-10.2f",
+                      N, mlsc_b, mlsc_vb, p2wpkh_b, p2wpkh_vb, p2tr_b, p2tr_vb,
+                      static_cast<double>(mlsc_b) / N,
+                      static_cast<double>(mlsc_vb) / N);
+        BOOST_TEST_MESSAGE(row);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(mlsc_spend_tx_size_sweep)
+{
+    // A single MLSC input spending via a 1-rung 1-block SIG ladder
+    // witness, producing N MLSC outputs. This is the common "spend and
+    // re-lock" pattern: e.g. wallet payments, splits, fan-out.
+    //
+    // The per-input witness carries:
+    //   - LadderWitness: [n_rungs=1, [n_blocks=1, block=SIG{PUBKEY,SIGNATURE}], coil]
+    //   - MLSCProof:     [total_rungs=1, rung_index=0, revealed_rung=SIG, no path]
+    // Together ~200 B per input for the simplest SIG spend.
+
+    const std::vector<size_t> sizes = {1, 2, 3, 5, 10, 25, 50, 100};
+
+    BOOST_TEST_MESSAGE("MLSC spend tx size sweep (1 MLSC input, N MLSC outputs):");
+    BOOST_TEST_MESSAGE("  N      | tx bytes | vsize    | B/out    | vB/out");
+    BOOST_TEST_MESSAGE("  -------+----------+----------+----------+--------");
+
+    for (size_t N : sizes) {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        std::fill(mtx.conditions_root.begin(), mtx.conditions_root.end(), 0x88);
+
+        // One MLSC input — realistic SIG ladder witness.
+        CTxIn in;
+        uint256 h; std::memset(h.begin(), 0x66, 32);
+        in.prevout = COutPoint(Txid::FromUint256(h), 0);
+        in.nSequence = 0xFFFFFFFF;
+        mtx.vin.push_back(in);
+
+        rung::LadderWitness lw;
+        rung::Rung r;
+        rung::RungBlock b;
+        b.type = rung::RungBlockType::SIG;
+        b.fields.push_back({rung::RungDataType::PUBKEY, std::vector<uint8_t>(33, 0xAA)});
+        b.fields.push_back({rung::RungDataType::SIGNATURE, std::vector<uint8_t>(64, 0xBB)});
+        r.blocks.push_back(b);
+        lw.rungs.push_back(r);
+        lw.coil.output_index = 0;
+        auto lw_bytes = rung::SerializeLadderWitness(lw, rung::SerializationContext::WITNESS);
+
+        rung::MLSCProof proof;
+        proof.total_rungs = 1;
+        proof.total_relays = 0;
+        proof.rung_index = 0;
+        proof.revealed_rung = r;
+        proof.proof_mode = rung::MLSCProofMode::MERKLE_PATH;
+        auto proof_bytes = rung::SerializeMLSCProof(proof);
+
+        mtx.vin[0].scriptWitness.stack.push_back(lw_bytes);
+        mtx.vin[0].scriptWitness.stack.push_back(proof_bytes);
+
+        CScript mlsc_spk;
+        mlsc_spk.push_back(0xDF);
+        mlsc_spk.insert(mlsc_spk.end(), mtx.conditions_root.begin(), mtx.conditions_root.end());
+        for (size_t i = 0; i < N; ++i) {
+            CTxOut o;
+            o.nValue = 10000 + static_cast<int64_t>(i);
+            o.scriptPubKey = mlsc_spk;
+            mtx.vout.push_back(o);
+        }
+
+        CTransaction tx(mtx);
+        auto [tx_b, tx_vb] = TxSizeAndVsize(tx);
+        char row[256];
+        std::snprintf(row, sizeof(row),
+                      "  %-6zu | %-8zu | %-8zu | %-8.1f | %-6.2f",
+                      N, tx_b, tx_vb,
+                      static_cast<double>(tx_b) / N,
+                      static_cast<double>(tx_vb) / N);
+        BOOST_TEST_MESSAGE(row);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(mlsc_utxo_storage_size)
+{
+    // Per-output UTXO storage cost after the d1eddccc62 compaction. The
+    // claim we're pinning down: MLSC outputs store ~8 B per coin in the
+    // UTXO set (value + 1 B marker), vs ~48 B for a standard P2WPKH
+    // equivalent, with one synthetic 33-byte root entry amortised
+    // across the whole tx.
+    //
+    // We measure by building the CompressedScript form of each coin's
+    // scriptPubKey and summing: varint value + CompressedScript size.
+
+    using namespace rung;
+
+    // MLSC compact form: 1-byte script (0xDF marker); the root lives
+    // in the synthetic root entry at (txid, MLSC_ROOT_VOUT).
+    CScript mlsc_compact;
+    mlsc_compact.push_back(0xDF);
+
+    // P2WPKH: 22-byte script (OP_0 + 20-byte hash).
+    CScript p2wpkh;
+    p2wpkh.push_back(OP_0);
+    p2wpkh.push_back(20);
+    for (int k = 0; k < 20; ++k) p2wpkh.push_back(0x44);
+
+    // P2TR: 34-byte script (OP_1 + 32-byte pubkey).
+    CScript p2tr;
+    p2tr.push_back(OP_1);
+    p2tr.push_back(32);
+    for (int k = 0; k < 32; ++k) p2tr.push_back(0x99);
+
+    auto serialised_coin_size = [](const CScript& spk, int64_t value) {
+        // Coin serialisation = CompressAmount(value) + CompressedScript(spk).
+        // We approximate the CompressedScript size: for recognised types
+        // (P2PKH/P2SH/P2WPKH/P2TR) it's 21/22/22/34 bytes; for MLSC
+        // (compact, 1 byte), the compressor writes 1 byte because MLSC
+        // has its own compact path in src/compressor.cpp.
+        DataStream s;
+        s << VARINT(CompressAmount(value));
+        s << Using<ScriptCompression>(spk);
+        return s.size();
+    };
+
+    BOOST_TEST_MESSAGE("UTXO storage cost per coin (after compression):");
+    BOOST_TEST_MESSAGE("  output type   | per-coin bytes | notes");
+    BOOST_TEST_MESSAGE("  --------------+----------------+--------------------------------------------------");
+
+    // N=100-output MLSC tx amortises the 33-byte synthetic root entry
+    // across 100 coins → 0.33 B/coin of root overhead.
+    size_t mlsc_compact_coin = serialised_coin_size(mlsc_compact, 50000);
+    size_t p2wpkh_coin       = serialised_coin_size(p2wpkh, 50000);
+    size_t p2tr_coin         = serialised_coin_size(p2tr, 50000);
+
+    char row[256];
+    std::snprintf(row, sizeof(row),
+                  "  MLSC (compact)| %-14zu | 1-byte SPK after compression; root in synthetic entry",
+                  mlsc_compact_coin);
+    BOOST_TEST_MESSAGE(row);
+
+    std::snprintf(row, sizeof(row),
+                  "  P2WPKH        | %-14zu | 22-byte SPK stored fully",
+                  p2wpkh_coin);
+    BOOST_TEST_MESSAGE(row);
+
+    std::snprintf(row, sizeof(row),
+                  "  P2TR          | %-14zu | 34-byte SPK stored fully",
+                  p2tr_coin);
+    BOOST_TEST_MESSAGE(row);
+
+    // Sanity assertions: MLSC compact must be strictly smaller than both
+    // baselines. If this ever regresses, the compressor type 0x06 path has
+    // been broken and every MLSC UTXO is paying full freight.
+    BOOST_CHECK_LT(mlsc_compact_coin, p2wpkh_coin);
+    BOOST_CHECK_LT(mlsc_compact_coin, p2tr_coin);
+
+    BOOST_TEST_MESSAGE("");
+    BOOST_TEST_MESSAGE("  Per-tx amortisation: N outputs → N × MLSC compact + 1 × synthetic root entry");
+    BOOST_TEST_MESSAGE("  (the synthetic root entry stores the 33-byte 0xDF||conditions_root once per tx,");
+    BOOST_TEST_MESSAGE("   recoverable by all N compact coins through the (txid, MLSC_ROOT_VOUT) lookup).");
+}
+
 BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
 {
     // The big win: a 100-input batch with the cache pays 1 FALCON verify,
