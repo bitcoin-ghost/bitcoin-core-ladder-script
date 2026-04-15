@@ -15953,4 +15953,221 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_destination_index_rejected)
     BOOST_CHECK(err.find("destination_index") != std::string::npos);
 }
 
+// ============================================================================
+// Stress harnesses — in-process random fuzzing of the consensus-critical
+// parsers. We don't have libFuzzer on this build (no clang), so we use a
+// deterministic PRNG to generate ~10k inputs per harness and rely on
+// AddressSanitizer / UBSan (when the build is configured with
+// -DSANITIZERS=address,undefined) to catch any UAF / UB / overflow that
+// only triggers under fuzz pressure. Each harness asserts NOTHING — it
+// passes if the program neither crashes nor leaks. Keep iteration counts
+// bounded (10k each) so the suite still completes in <1 second per harness
+// when sanitisers are off.
+// ============================================================================
+
+namespace {
+// Tiny deterministic xorshift PRNG so the stress harnesses are reproducible
+// and don't pull in extra dependencies. Seeded with a constant per-harness so
+// failures bisect cleanly.
+struct StressRNG {
+    uint64_t s;
+    explicit StressRNG(uint64_t seed) : s(seed ? seed : 0xDEADBEEFCAFEBABEULL) {}
+    uint64_t next() {
+        s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+        return s;
+    }
+    uint8_t byte() { return static_cast<uint8_t>(next() & 0xFF); }
+    size_t range(size_t n) { return n == 0 ? 0 : static_cast<size_t>(next() % n); }
+};
+
+std::vector<uint8_t> RandomBytes(StressRNG& r, size_t len) {
+    std::vector<uint8_t> v(len);
+    for (size_t i = 0; i < len; ++i) v[i] = r.byte();
+    return v;
+}
+
+// Produce a "near-valid" QABIBlock byte stream by serialising a real block
+// and then flipping a small random subset of bytes. Catches parser bugs that
+// purely random bytes would never reach (because the version byte rejection
+// kicks in immediately).
+#ifdef ENABLE_QABIO
+std::vector<uint8_t> MutatedQABIBlock(StressRNG& r) {
+    QABIBlock b;
+    b.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(b.batch_id.begin(), r.byte(), 32);
+    b.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, r.byte());
+    b.prime_expiry_height = static_cast<uint32_t>(r.next());
+    std::memset(b.outputs_conditions_root.begin(), r.byte(), 32);
+    size_t n_entries = 1 + r.range(8);
+    for (size_t i = 0; i < n_entries; ++i) {
+        QABIEntry e;
+        std::memset(e.participant_id.begin(), r.byte(), 32);
+        e.contribution = static_cast<int64_t>(r.next() & 0x7FFFFFFFFFFFFFFFULL);
+        e.destination_index = static_cast<uint32_t>(r.range(n_entries));
+        b.entries.push_back(e);
+    }
+    for (size_t i = 0; i < n_entries; ++i) {
+        b.output_values.push_back(static_cast<int64_t>(r.next() & 0x7FFFFFFFFFFFFFFFULL));
+    }
+    auto bytes = SerializeQABIBlock(b);
+    // Flip 0..4 random bytes in the serialised form.
+    size_t flips = r.range(5);
+    for (size_t i = 0; i < flips && !bytes.empty(); ++i) {
+        bytes[r.range(bytes.size())] ^= r.byte();
+    }
+    return bytes;
+}
+#endif // ENABLE_QABIO
+} // namespace
+
+#ifdef ENABLE_QABIO
+BOOST_AUTO_TEST_CASE(stress_parse_qabi_block_random)
+{
+    // Pure random bytes: ParseQABIBlock must never crash, never assert,
+    // never read past end. It should always return either a parsed block
+    // or std::nullopt with a populated error. Sanitisers catch UAF / UB /
+    // overflow in the deserialiser path.
+    StressRNG r(0xA1A1A1A1A1A1A1A1ULL);
+    constexpr int N = 10000;
+    int parsed_ok = 0, parsed_fail = 0;
+    for (int i = 0; i < N; ++i) {
+        size_t len = r.range(1024);
+        auto bytes = RandomBytes(r, len);
+        std::string err;
+        auto result = ParseQABIBlock(bytes, err);
+        if (result.has_value()) {
+            ++parsed_ok;
+            // Round-trip property: anything that parses must re-serialise.
+            auto reser = SerializeQABIBlock(*result);
+            std::string err2;
+            auto reparsed = ParseQABIBlock(reser, err2);
+            BOOST_REQUIRE_MESSAGE(reparsed.has_value(),
+                "round-trip parse failed: " << err2);
+        } else {
+            ++parsed_fail;
+            BOOST_CHECK_MESSAGE(!err.empty(),
+                "ParseQABIBlock returned nullopt with empty error message");
+        }
+    }
+    BOOST_TEST_MESSAGE("stress_parse_qabi_block_random: " << parsed_ok
+                        << " parsed, " << parsed_fail << " rejected (of " << N << ")");
+}
+
+BOOST_AUTO_TEST_CASE(stress_parse_qabi_block_mutated)
+{
+    // Near-valid mutations: serialise a real block, flip 0-4 random bytes,
+    // re-parse. Hits parser branches that pure random bytes never reach
+    // (those would fail at the version byte). The strict round-trip
+    // property still holds.
+    StressRNG r(0xB2B2B2B2B2B2B2B2ULL);
+    constexpr int N = 10000;
+    int parsed_ok = 0, parsed_fail = 0;
+    for (int i = 0; i < N; ++i) {
+        auto bytes = MutatedQABIBlock(r);
+        std::string err;
+        auto result = ParseQABIBlock(bytes, err);
+        if (result.has_value()) {
+            ++parsed_ok;
+            auto reser = SerializeQABIBlock(*result);
+            std::string err2;
+            auto reparsed = ParseQABIBlock(reser, err2);
+            BOOST_REQUIRE_MESSAGE(reparsed.has_value(),
+                "round-trip parse failed: " << err2);
+        } else {
+            ++parsed_fail;
+            BOOST_CHECK_MESSAGE(!err.empty(),
+                "ParseQABIBlock returned nullopt with empty error message");
+        }
+    }
+    BOOST_TEST_MESSAGE("stress_parse_qabi_block_mutated: " << parsed_ok
+                        << " parsed, " << parsed_fail << " rejected (of " << N << ")");
+}
+#endif // ENABLE_QABIO
+
+BOOST_AUTO_TEST_CASE(stress_deserialize_ladder_witness_random)
+{
+    // DeserializeLadderWitness is the most attacker-influenced parser in
+    // the project — it runs on every input witness of every v4 tx.
+    // Hammer it with random byte sequences of varying length and verify
+    // it never crashes or asserts.
+    StressRNG r(0xC3C3C3C3C3C3C3C3ULL);
+    constexpr int N = 20000;
+    int parsed_ok = 0, parsed_fail = 0;
+    for (int i = 0; i < N; ++i) {
+        size_t len = r.range(2048);
+        auto bytes = RandomBytes(r, len);
+        LadderWitness lw;
+        std::string err;
+        bool ok = DeserializeLadderWitness(bytes, lw, err);
+        if (ok) {
+            ++parsed_ok;
+            // Round-trip property — anything that deserialises must reserialise.
+            auto reser = SerializeLadderWitness(lw);
+            LadderWitness lw2;
+            std::string err2;
+            BOOST_REQUIRE_MESSAGE(DeserializeLadderWitness(reser, lw2, err2),
+                "round-trip Deserialize failed: " << err2);
+        } else {
+            ++parsed_fail;
+            BOOST_CHECK_MESSAGE(!err.empty(),
+                "DeserializeLadderWitness returned false with empty error");
+        }
+    }
+    BOOST_TEST_MESSAGE("stress_deserialize_ladder_witness_random: " << parsed_ok
+                        << " parsed, " << parsed_fail << " rejected (of " << N << ")");
+}
+
+BOOST_AUTO_TEST_CASE(stress_is_standard_rung_tx_random)
+{
+    // IsStandardRungTx is the relay policy entry point. Hammer it with
+    // hand-built v4 txs whose vout / vin / qabi_block / aggregated_sig
+    // fields are randomly populated. Must never crash regardless of input.
+    StressRNG r(0xD4D4D4D4D4D4D4D4ULL);
+    constexpr int N = 5000;
+    int accepted = 0, rejected = 0;
+    for (int i = 0; i < N; ++i) {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = static_cast<uint32_t>(r.next());
+
+        size_t n_in = 1 + r.range(4);
+        for (size_t k = 0; k < n_in; ++k) {
+            CTxIn in;
+            uint256 h; std::memset(h.begin(), r.byte(), 32);
+            in.prevout = COutPoint(Txid::FromUint256(h), static_cast<uint32_t>(r.range(8)));
+            in.nSequence = static_cast<uint32_t>(r.next());
+            mtx.vin.push_back(in);
+        }
+        size_t n_out = 1 + r.range(8);
+        for (size_t k = 0; k < n_out; ++k) {
+            CTxOut o;
+            o.nValue = static_cast<int64_t>(r.next() & 0x7FFFFFFFULL);
+            // Random SPK length 0..40.
+            size_t spk_len = r.range(41);
+            CScript spk;
+            for (size_t b = 0; b < spk_len; ++b) spk.push_back(r.byte());
+            o.scriptPubKey = spk;
+            mtx.vout.push_back(o);
+        }
+#ifdef ENABLE_QABIO
+        // Optionally attach a random qabi_block (within hard cap).
+        if ((r.next() & 1) != 0) {
+            size_t qb_len = r.range(1024);
+            mtx.qabi_block = RandomBytes(r, qb_len);
+        }
+#endif
+        std::memset(mtx.conditions_root.begin(), r.byte(), 32);
+
+        CTransaction tx(mtx);
+        std::string reason;
+        bool ok = IsStandardRungTx(tx, reason);
+        if (ok) ++accepted; else { ++rejected;
+            BOOST_CHECK_MESSAGE(!reason.empty(),
+                "IsStandardRungTx returned false with empty reason");
+        }
+    }
+    BOOST_TEST_MESSAGE("stress_is_standard_rung_tx_random: " << accepted
+                        << " accepted, " << rejected << " rejected (of " << N << ")");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
