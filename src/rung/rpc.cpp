@@ -3024,19 +3024,14 @@ static RPCHelpMan signladder()
                 throw JSONRPCError(RPC_INTERNAL_ERROR, "Failed to compute key-path sighash");
             }
 
-            // Sign with the INTERNAL key tweaked by LadderTweak.
-            // CKey::SignSchnorr(hash, sig, merkle_root, aux) uses TapTweak internally.
-            // We need LadderTweak instead. Use a null merkle_root to get H_LadderTweak(pubkey)
-            // and apply the tweak manually via ComputeLadderTweakHash.
-            //
-            // For now: sign with null merkle_root (key-path-only, no script tree).
-            // For outputs created with createtxmlsc + internal_pubkey, the merkle_root
-            // was used during tweaking and would need to be passed here too.
-            // TODO: Accept optional merkle_root parameter for script-tree-enabled key-path.
+            // Sign with the INTERNAL key tweaked by LadderTweak. Caller passes
+            // the optional keypath_merkle_root (param 7) when the output was
+            // created with createtxmlsc + internal_pubkey + a script tree —
+            // SignSchnorrLadder applies the tweak via ComputeLadderTweakHash.
+            // For pure key-path-only outputs the merkle_root is null.
             std::vector<unsigned char> sig(64);
             uint256 aux; // zero aux for deterministic signing
 
-            // Determine merkle_root: null for key-path-only, provided hex for script tree
             uint256 merkle_root; // default = null (key-path-only)
             const uint256* mr_ptr = &merkle_root;
             if (!request.params[7].isNull() && !request.params[7].get_str().empty()) {
