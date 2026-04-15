@@ -6,6 +6,9 @@
 #include <rung/conditions.h>
 #include <rung/serialize.h>
 #include <rung/types.h>
+#ifdef ENABLE_QABIO
+#include <rung/qabi.h>
+#endif
 
 #include <primitives/transaction.h>
 
@@ -131,6 +134,17 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
             return false;
         }
     }
+
+#ifdef ENABLE_QABIO
+    // QABIO soft cap on tx.qabi_block: consensus allows up to QABI_BLOCK_MAX_HARD
+    // (256 KB) but standard relay caps at QABI_BLOCK_MAX_SOFT (64 KB) to bound
+    // mempool memory and propagation cost. Non-QABIO v4 txs have an empty
+    // qabi_block so this check is a no-op for them.
+    if (tx.qabi_block.size() > QABI_BLOCK_MAX_SOFT) {
+        reason = "qabi-block-soft-cap";
+        return false;
+    }
+#endif
 
     return true;
 }

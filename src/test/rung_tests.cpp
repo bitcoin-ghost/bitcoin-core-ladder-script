@@ -14893,6 +14893,79 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
                        << n << " participants");
 }
 
+BOOST_AUTO_TEST_CASE(qabi_block_over_soft_cap_rejected_by_policy)
+{
+    // Build a v4 tx whose qabi_block exceeds QABI_BLOCK_MAX_SOFT (64 KB) but
+    // remains under the consensus hard cap (256 KB). Such a tx must be parseable
+    // (consensus-valid) but rejected at relay policy by IsStandardRungTx with
+    // the "qabi-block-soft-cap" reason. This locks down the soft-cap enforcement
+    // wired in policy.cpp::IsStandardRungTx — a regression here would silently
+    // re-enable propagation of large qabi_block payloads, blowing the per-tx
+    // mempool memory budget the soft cap is meant to bound.
+    QABIBlock block;
+    block.version = QABI_BLOCK_VERSION_CURRENT;
+    std::memset(block.batch_id.data(), 0xAB, 32);
+    block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xCD);
+    block.prime_expiry_height = 100;
+    std::memset(block.outputs_conditions_root.begin(), 0x99, 32);
+
+    // Aim for ~70 KB (above 64 KB soft, below 256 KB hard).
+    constexpr size_t TARGET_FILL = 70000;
+    size_t running = 966;
+    size_t n = 0;
+    while (running + 54 < TARGET_FILL) {
+        QABIEntry e;
+        std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
+        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        e.contribution = 1000;
+        e.destination_index = static_cast<uint32_t>(n);
+        block.entries.push_back(e);
+        block.output_values.push_back(900);
+        running += 54;
+        ++n;
+    }
+
+    auto block_bytes = SerializeQABIBlock(block);
+    BOOST_REQUIRE_MESSAGE(block_bytes.size() > QABI_BLOCK_MAX_SOFT,
+                          "block " << block_bytes.size() << " not over soft cap "
+                          << QABI_BLOCK_MAX_SOFT);
+    BOOST_REQUIRE_MESSAGE(block_bytes.size() <= QABI_BLOCK_MAX_HARD,
+                          "block " << block_bytes.size() << " over hard cap");
+
+    // The parser still accepts it (consensus-valid).
+    std::string parse_err;
+    auto parsed = ParseQABIBlock(block_bytes, parse_err);
+    BOOST_REQUIRE_MESSAGE(parsed.has_value(),
+                          "parse failed: " << parse_err);
+
+    // Build a minimal v4 tx carrying the oversized qabi_block. Use the MLSC
+    // SPK form so IsStandardRungTx's per-output check passes and the soft-cap
+    // check is the rule that fires.
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.nLockTime = 0;
+    std::memset(mtx.conditions_root.begin(), 0x77, 32);
+    mtx.qabi_block = block_bytes;
+    mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+
+    CTxIn in;
+    in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
+    in.nSequence = 0xFFFFFFFF;
+    mtx.vin.push_back(in);
+    CTxOut out;
+    out.nValue = 1000;
+    out.scriptPubKey = CScript();
+    out.scriptPubKey.push_back(0xDF);
+    for (int i = 0; i < 32; ++i) out.scriptPubKey.push_back(0x77);
+    mtx.vout.push_back(out);
+
+    CTransaction tx(mtx);
+    std::string reason;
+    bool ok = IsStandardRungTx(tx, reason);
+    BOOST_CHECK_MESSAGE(!ok, "IsStandardRungTx should reject qabi_block > soft cap");
+    BOOST_CHECK_EQUAL(reason, "qabi-block-soft-cap");
+}
+
 BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
 {
     // Push to just under the 256 KB hard cap to find the absolute max.
