@@ -64,7 +64,29 @@ struct QABIEntry
 };
 
 /** Tx-level structured data describing a QABIO batch. Carried in
- *  tx.qabi_block (serialised). QABI_ROOT = SHA256(canonical_serialise(block)). */
+ *  tx.qabi_block (serialised). QABI_ROOT = SHA256(canonical_serialise(block)).
+ *
+ *  Output binding (post-dedup design):
+ *  ----------------------------------
+ *  Participants do NOT commit to per-output scriptPubKeys. They commit to a
+ *  single shared `outputs_conditions_root` and a vector of per-output values.
+ *  At spend time the QABI_SPEND evaluator enforces:
+ *
+ *    (a) tx.conditions_root == parsed.outputs_conditions_root
+ *        — pins the spend tx's conditions tree to the participants' agreed root;
+ *          any v4 MLSC tx has tx.vout[i].scriptPubKey = 0xDF + tx.conditions_root,
+ *          so binding tx.conditions_root structurally pins every destination SPK.
+ *
+ *    (b) tx.vout.size() == output_values.size()
+ *
+ *    (c) tx.vout[i].nValue == output_values[i] for all i.
+ *
+ *  Replaces the previous `std::vector<CTxOut> outputs` field, which carried
+ *  a redundant 33-byte scriptPubKey per output. The combined check (a)+(c)
+ *  is strictly equivalent to the old bit-exact CTxOut comparison for any
+ *  on-the-wire v4 MLSC tx (where SPK is structurally `0xDF + conditions_root`),
+ *  while removing 34 wire bytes per output and eliminating the per-output SPK
+ *  field entirely. */
 struct QABIBlock
 {
     //! Wire format version (currently QABI_BLOCK_VERSION_CURRENT = 0x01).
@@ -79,12 +101,18 @@ struct QABIBlock
     //! Max block height at which QABI_SPEND may fire on any primed input bound to this block.
     uint32_t prime_expiry_height{0};
 
+    //! Conditions tree root that the spend tx MUST use as its tx.conditions_root.
+    //! Pins the destination SPKs structurally (every v4 MLSC output has SPK =
+    //! 0xDF + tx.conditions_root). See QABIBlock docstring for the full check chain.
+    uint256 outputs_conditions_root;
+
     //! Participant list. Each entry is one primed UTXO's committed contribution.
     std::vector<QABIEntry> entries;
 
-    //! Destination output list. QABI_SPEND enforces tx.vout bit-exact equal to this list
-    //! (full output set match — closes the coordinator-skim hole).
-    std::vector<CTxOut> outputs;
+    //! Per-output values (sats). Indexed by QABIEntry::destination_index.
+    //! The destination scriptPubKey is implicit: every v4 MLSC output uses
+    //! 0xDF + outputs_conditions_root.
+    std::vector<int64_t> output_values;
 };
 
 /** Canonical serialiser. Produces the exact bytes used in tx.qabi_block

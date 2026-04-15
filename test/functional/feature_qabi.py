@@ -172,17 +172,16 @@ class QabiTest(BitcoinTestFramework):
                                  self.node.qabi_authchain, seed, 10, 11)
 
     def test_buildblock_roundtrip(self):
+        from decimal import Decimal
         self.log.info("Testing qabi_buildblock → qabi_blockinfo roundtrip...")
 
         coordinator_pubkey = "ab" * QABI_COORDINATOR_PUBKEY_SIZE
         batch_id = "cd" * 32
         expiry_height = 12345
+        outputs_conditions_root = "ee" * 32
 
         # A participant's Rung 0 FALCON pubkey hash (participant_id)
         participant_id = "ef" * 32
-
-        # A dummy destination scriptPubKey — P2WPKH-ish
-        dest_script = "0014" + "11" * 20
 
         entries = [
             {
@@ -191,15 +190,11 @@ class QabiTest(BitcoinTestFramework):
                 "destination_index": 0,
             },
         ]
-        outputs = [
-            {
-                "amount": "0.00099",  # 99000 sats — 1000 sats fee
-                "script_pubkey": dest_script,
-            },
-        ]
+        output_values = ["0.00099"]  # 99000 sats — 1000 sats fee
 
         built = self.node.qabi_buildblock(
-            coordinator_pubkey, expiry_height, batch_id, entries, outputs)
+            coordinator_pubkey, expiry_height, batch_id, entries,
+            outputs_conditions_root, output_values)
         assert "qabi_block" in built
         assert "qabi_root" in built
         assert "size" in built
@@ -212,6 +207,7 @@ class QabiTest(BitcoinTestFramework):
         assert_equal(info["batch_id"], batch_id)
         assert_equal(info["coordinator_pubkey"], coordinator_pubkey)
         assert_equal(info["prime_expiry_height"], expiry_height)
+        assert_equal(info["outputs_conditions_root"], outputs_conditions_root)
         assert_equal(info["n_entries"], 1)
         assert_equal(info["n_outputs"], 1)
         assert_equal(info["qabi_root"], built["qabi_root"])
@@ -221,9 +217,9 @@ class QabiTest(BitcoinTestFramework):
         assert_equal(info["entries"][0]["participant_id"], participant_id)
         assert_equal(info["entries"][0]["destination_index"], 0)
 
-        # Output round-trips (script preserved)
-        assert_equal(len(info["outputs"]), 1)
-        assert_equal(info["outputs"][0]["script_pubkey"], dest_script)
+        # Output values round-trip
+        assert_equal(len(info["output_values"]), 1)
+        assert_equal(info["output_values"][0], Decimal("0.00099"))
         self.log.info("  Roundtrip verified")
 
     def test_buildblock_rejects_bad_pubkey_size(self):
@@ -233,7 +229,8 @@ class QabiTest(BitcoinTestFramework):
                                  self.node.qabi_buildblock,
                                  short_pubkey, 1000, "cd" * 32,
                                  [{"participant_id": "ef" * 32, "contribution": "0.001", "destination_index": 0}],
-                                 [{"amount": "0.0009", "script_pubkey": "00" * 22}])
+                                 "ee" * 32,
+                                 ["0.0009"])
 
     def test_buildblock_rejects_bad_destination_index(self):
         self.log.info("Testing qabi_buildblock rejects out-of-range destination_index...")
@@ -242,7 +239,8 @@ class QabiTest(BitcoinTestFramework):
                                  self.node.qabi_buildblock,
                                  coordinator_pubkey, 1000, "cd" * 32,
                                  [{"participant_id": "ef" * 32, "contribution": "0.001", "destination_index": 99}],
-                                 [{"amount": "0.0009", "script_pubkey": "00" * 22}])
+                                 "ee" * 32,
+                                 ["0.0009"])
 
     def test_blockinfo_rejects_malformed(self):
         self.log.info("Testing qabi_blockinfo rejects malformed bytes...")
@@ -341,7 +339,6 @@ class QabiTest(BitcoinTestFramework):
 
         # 2. Build a QABIBlock with this coordinator pubkey.
         participant_id = "77" * 32
-        destination_script = "0014" + "22" * 20
         built = self.node.qabi_buildblock(
             coordinator_pubkey,
             5000,                 # prime_expiry_height
@@ -351,10 +348,8 @@ class QabiTest(BitcoinTestFramework):
                 "contribution": "0.0001",
                 "destination_index": 0,
             }],
-            [{
-                "amount": "0.00009",
-                "script_pubkey": destination_script,
-            }],
+            "00" * 32,            # outputs_conditions_root (matches null tx.conditions_root)
+            ["0.00009"],
         )
         qabi_block_hex = built["qabi_block"]
         self.log.info(f"  built QABIBlock: {built['size']} bytes")
@@ -592,7 +587,6 @@ class QabiTest(BitcoinTestFramework):
 
         # Build a QABIBlock to stuff into the tx.
         kp = self.node.generatepqkeypair("FALCON512")
-        destination_script = "0014" + "33" * 20
         built = self.node.qabi_buildblock(
             kp["pubkey"],
             9999,  # expiry
@@ -602,10 +596,8 @@ class QabiTest(BitcoinTestFramework):
                 "contribution": "0.0001",
                 "destination_index": 0,
             }],
-            [{
-                "amount": "0.00009",
-                "script_pubkey": destination_script,
-            }],
+            "00" * 32,
+            ["0.00009"],
         )
 
         # Minimal conditions: one SIG-only rung.
@@ -852,10 +844,8 @@ class QabiTest(BitcoinTestFramework):
                 "contribution": "0.0001",
                 "destination_index": 0,
             }],
-            [{
-                "amount": "0.00009",
-                "script_pubkey": "0014" + "ee" * 20,
-            }],
+            "00" * 32,
+            ["0.00009"],
         )
         batch_tx = self.node.createtxmlsc(
             [{"txid": "cc" * 32, "vout": 0}],  # placeholder primed UTXO
@@ -907,10 +897,8 @@ class QabiTest(BitcoinTestFramework):
                 "contribution": "0.0001",
                 "destination_index": 0,
             }],
-            [{
-                "amount": "0.00009",
-                "script_pubkey": "0014" + "aa" * 20,
-            }],
+            "00" * 32,
+            ["0.00009"],
         )
         tx_hex = self._build_minimal_qabio_tx_hex(block["qabi_block"])
         signed = self.node.qabi_signqabo(tx_hex, kp["privkey"])
@@ -1051,10 +1039,8 @@ class QabiTest(BitcoinTestFramework):
                 "contribution": "0.0001",
                 "destination_index": 0,
             }],
-            [{
-                "amount": "0.00009",
-                "script_pubkey": "0014" + "bb" * 20,
-            }],
+            "00" * 32,
+            ["0.00009"],
         )
         qabi_block_hex = block["qabi_block"]
         tx_hex = self._build_minimal_qabio_tx_hex(qabi_block_hex)
@@ -1766,8 +1752,10 @@ class QabiTest(BitcoinTestFramework):
             })
 
         # Build a template batch tx so we can extract the actual MLSC
-        # output scriptPubKeys — the qabi_block's outputs[] must match
-        # tx.vout byte-exact per consensus check 8.
+        # conditions_root — every v4 MLSC output's scriptPubKey is
+        # 0xDF + conditions_root, so binding qabi_block.outputs_conditions_root
+        # to the template's conditions_root structurally pins all three
+        # destination SPKs (consensus check 8 uses this binding).
         z32 = "00" * 32
         template_rungs = [
             {
@@ -1784,10 +1772,7 @@ class QabiTest(BitcoinTestFramework):
             batch_amounts,
             template_rungs,
         )
-        decoded_template = self.node.decoderawtransaction(template["hex"])
-        output_spks = [v["scriptPubKey"]["hex"]
-                       for v in decoded_template["vout"]]
-        assert len(output_spks) == 3
+        template_conditions_root = template["conditions_root"]
 
         prime_expiry = 99999
         built = self.node.qabi_buildblock(
@@ -1798,8 +1783,8 @@ class QabiTest(BitcoinTestFramework):
               "contribution": "0.0005",
               "destination_index": i}
              for i, p in enumerate(participants)],
-            [{"amount": "0.00049", "script_pubkey": output_spks[i]}
-             for i in range(3)],
+            template_conditions_root,
+            ["0.00049"] * 3,
         )
         qabi_block_hex = built["qabi_block"]
         qabi_root_display = built["qabi_root"]

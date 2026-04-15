@@ -3182,10 +3182,17 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
  *    6. parsed_block.prime_expiry_height == committed_expiry  (expiry binding)
  *    7. owner_pubkey_hash appears in parsed_block.entries[*].participant_id
  *                                                     (identity in block)
- *    8. tx.vout.size() == parsed_block.outputs.size()
- *       tx.vout[i] == parsed_block.outputs[i] for all i
- *                                                     (full output-set match —
- *                                                      closes coordinator-skim hole)
+ *    8. tx.conditions_root == parsed_block.outputs_conditions_root
+ *       tx.vout.size() == parsed_block.output_values.size()
+ *       tx.vout[i].nValue == parsed_block.output_values[i] for all i
+ *                                                     (output-set binding —
+ *                                                      closes coordinator-skim hole.
+ *                                                      Per-output SPK is structurally
+ *                                                      0xDF + tx.conditions_root for any
+ *                                                      v4 MLSC tx, so binding
+ *                                                      tx.conditions_root pins every
+ *                                                      destination SPK without storing
+ *                                                      them on the wire.)
  *    9. FalconVerify(coordinator_pubkey,
  *                    ComputeSighashQABO(tx),
  *                    tx.aggregated_sig) == VALID      (QABO sig valid)
@@ -3352,14 +3359,19 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         }
         entries_set_ptr = &fresh_entries_set;
 
-        // Check 8: tx.vout bit-exact equal to parsed.outputs.
+        // Check 8: bind tx.conditions_root to the participants' agreed root,
+        // and verify the per-output values match. The per-output scriptPubKey
+        // is structurally 0xDF + tx.conditions_root for any v4 MLSC tx, so
+        // binding tx.conditions_root pins every destination SPK without
+        // storing them on the wire.
         vout_matches_outputs = true;
-        if (ctx.tx->vout.size() != parsed_ptr->outputs.size()) {
+        if (ctx.tx->conditions_root != parsed_ptr->outputs_conditions_root) {
+            vout_matches_outputs = false;
+        } else if (ctx.tx->vout.size() != parsed_ptr->output_values.size()) {
             vout_matches_outputs = false;
         } else {
-            for (size_t i = 0; i < parsed_ptr->outputs.size(); ++i) {
-                if (ctx.tx->vout[i].nValue != parsed_ptr->outputs[i].nValue ||
-                    ctx.tx->vout[i].scriptPubKey != parsed_ptr->outputs[i].scriptPubKey) {
+            for (size_t i = 0; i < parsed_ptr->output_values.size(); ++i) {
+                if (ctx.tx->vout[i].nValue != parsed_ptr->output_values[i]) {
                     vout_matches_outputs = false;
                     break;
                 }

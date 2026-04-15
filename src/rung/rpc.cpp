@@ -3804,17 +3804,15 @@ static RPCHelpMan qabi_buildblock()
                     },
                 },
             },
-            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO,
-                "Destination outputs — tx.vout must match this bit-exact",
+            {"outputs_conditions_root", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+                "32-byte conditions root that the spend tx must use as tx.conditions_root. "
+                "Pins every destination scriptPubKey structurally — see QABIBlock docs."},
+            {"output_values", RPCArg::Type::ARR, RPCArg::Optional::NO,
+                "Per-output amounts. The destination scriptPubKey is implicit "
+                "(0xDF + outputs_conditions_root for every output).",
                 {
-                    {"output", RPCArg::Type::OBJ, RPCArg::Optional::NO, "One output",
-                        {
-                            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO,
-                                "Output value in satoshis"},
-                            {"script_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
-                                "Output scriptPubKey (hex)"},
-                        },
-                    },
+                    {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO,
+                        "Output value (BTC)"},
                 },
             },
         },
@@ -3859,19 +3857,20 @@ static RPCHelpMan qabi_buildblock()
             block.entries.push_back(entry);
         }
 
-        const UniValue& outs = request.params[4].get_array();
+        auto ocr_bytes = ParseHex(request.params[4].get_str());
+        if (ocr_bytes.size() != 32) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "outputs_conditions_root must be 32 bytes");
+        }
+        std::memcpy(block.outputs_conditions_root.data(), ocr_bytes.data(), 32);
+
+        const UniValue& outs = request.params[5].get_array();
         for (size_t i = 0; i < outs.size(); ++i) {
-            const UniValue& o = outs[i];
-            CTxOut out;
-            out.nValue = AmountFromValue(o["amount"]);
-            auto spk = ParseHex(o["script_pubkey"].get_str());
-            out.scriptPubKey = CScript(spk.begin(), spk.end());
-            block.outputs.push_back(out);
+            block.output_values.push_back(AmountFromValue(outs[i]));
         }
 
         // Validate destination_index bounds.
         for (size_t i = 0; i < block.entries.size(); ++i) {
-            if (block.entries[i].destination_index >= block.outputs.size()) {
+            if (block.entries[i].destination_index >= block.output_values.size()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER,
                     "destination_index out of range at entry " + std::to_string(i));
             }
@@ -3909,6 +3908,7 @@ static RPCHelpMan qabi_blockinfo()
             {RPCResult::Type::STR_HEX, "batch_id", ""},
             {RPCResult::Type::STR_HEX, "coordinator_pubkey", ""},
             {RPCResult::Type::NUM, "prime_expiry_height", ""},
+            {RPCResult::Type::STR_HEX, "outputs_conditions_root", "32-byte conditions root the spend tx must use"},
             {RPCResult::Type::NUM, "n_entries", ""},
             {RPCResult::Type::NUM, "n_outputs", ""},
             {RPCResult::Type::STR_HEX, "qabi_root", "SHA256 of the serialised bytes"},
@@ -3919,11 +3919,8 @@ static RPCHelpMan qabi_blockinfo()
                     {RPCResult::Type::NUM, "destination_index", ""},
                 }},
             }},
-            {RPCResult::Type::ARR, "outputs", "Destination list", {
-                {RPCResult::Type::OBJ, "", "Output", {
-                    {RPCResult::Type::STR_AMOUNT, "amount", ""},
-                    {RPCResult::Type::STR_HEX, "script_pubkey", ""},
-                }},
+            {RPCResult::Type::ARR, "output_values", "Per-output amounts. Destination scriptPubKey is implicit (0xDF + outputs_conditions_root).", {
+                {RPCResult::Type::STR_AMOUNT, "", "Output value (BTC)"},
             }},
         }},
         RPCExamples{HelpExampleCli("qabi_blockinfo", "\"<hex>\"")},
@@ -3944,8 +3941,9 @@ static RPCHelpMan qabi_blockinfo()
         result.pushKV("batch_id", parsed->batch_id.GetHex());
         result.pushKV("coordinator_pubkey", HexStr(parsed->coordinator_pubkey));
         result.pushKV("prime_expiry_height", static_cast<uint64_t>(parsed->prime_expiry_height));
+        result.pushKV("outputs_conditions_root", parsed->outputs_conditions_root.GetHex());
         result.pushKV("n_entries", static_cast<uint64_t>(parsed->entries.size()));
-        result.pushKV("n_outputs", static_cast<uint64_t>(parsed->outputs.size()));
+        result.pushKV("n_outputs", static_cast<uint64_t>(parsed->output_values.size()));
         result.pushKV("qabi_root", root.GetHex());
 
         UniValue entries(UniValue::VARR);
@@ -3958,14 +3956,11 @@ static RPCHelpMan qabi_blockinfo()
         }
         result.pushKV("entries", entries);
 
-        UniValue outputs(UniValue::VARR);
-        for (const auto& o : parsed->outputs) {
-            UniValue out(UniValue::VOBJ);
-            out.pushKV("amount", ValueFromAmount(o.nValue));
-            out.pushKV("script_pubkey", HexStr(o.scriptPubKey));
-            outputs.push_back(out);
+        UniValue output_values(UniValue::VARR);
+        for (int64_t v : parsed->output_values) {
+            output_values.push_back(ValueFromAmount(v));
         }
-        result.pushKV("outputs", outputs);
+        result.pushKV("output_values", output_values);
 
         return result;
     },

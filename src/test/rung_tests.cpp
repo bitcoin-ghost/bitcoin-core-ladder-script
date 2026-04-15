@@ -12566,6 +12566,7 @@ static QABIBlock MakeValidQABIBlock()
     std::memset(block.batch_id.begin(), 0xA1, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xB2);
     block.prime_expiry_height = 12345;
+    std::memset(block.outputs_conditions_root.begin(), 0xD4, 32);
 
     QABIEntry e;
     std::memset(e.participant_id.begin(), 0xC3, 32);
@@ -12573,10 +12574,7 @@ static QABIBlock MakeValidQABIBlock()
     e.destination_index = 0;
     block.entries.push_back(e);
 
-    CTxOut out;
-    out.nValue = 99000;
-    out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0xD4);
-    block.outputs.push_back(out);
+    block.output_values.push_back(99000);
 
     return block;
 }
@@ -12596,13 +12594,13 @@ BOOST_AUTO_TEST_CASE(qabi_block_serialize_roundtrip)
     BOOST_CHECK(p.batch_id == original.batch_id);
     BOOST_CHECK(p.coordinator_pubkey == original.coordinator_pubkey);
     BOOST_CHECK_EQUAL(p.prime_expiry_height, original.prime_expiry_height);
+    BOOST_CHECK(p.outputs_conditions_root == original.outputs_conditions_root);
     BOOST_REQUIRE_EQUAL(p.entries.size(), original.entries.size());
     BOOST_CHECK(p.entries[0].participant_id == original.entries[0].participant_id);
     BOOST_CHECK_EQUAL(p.entries[0].contribution, original.entries[0].contribution);
     BOOST_CHECK_EQUAL(p.entries[0].destination_index, original.entries[0].destination_index);
-    BOOST_REQUIRE_EQUAL(p.outputs.size(), original.outputs.size());
-    BOOST_CHECK_EQUAL(p.outputs[0].nValue, original.outputs[0].nValue);
-    BOOST_CHECK(p.outputs[0].scriptPubKey == original.outputs[0].scriptPubKey);
+    BOOST_REQUIRE_EQUAL(p.output_values.size(), original.output_values.size());
+    BOOST_CHECK_EQUAL(p.output_values[0], original.output_values[0]);
 }
 
 BOOST_AUTO_TEST_CASE(qabi_block_parse_rejects_empty)
@@ -12690,8 +12688,12 @@ BOOST_AUTO_TEST_CASE(qabi_root_mutation_sensitivity)
     BOOST_CHECK(ComputeQABIRoot(b4) != r_orig);
 
     QABIBlock b5 = b1;
-    b5.outputs[0].nValue += 1;
+    b5.output_values[0] += 1;
     BOOST_CHECK(ComputeQABIRoot(b5) != r_orig);
+
+    QABIBlock b6 = b1;
+    std::memset(b6.outputs_conditions_root.begin(), 0x77, 32);
+    BOOST_CHECK(ComputeQABIRoot(b6) != r_orig);
 }
 
 // Helper: build a minimal CTransaction carrying a qabi_block payload.
@@ -12848,6 +12850,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     std::memset(block.batch_id.data(), 0x5A, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
+    block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root below
     {
         QABIEntry e;
         e.participant_id = owner_id;
@@ -12855,16 +12858,12 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
         e.destination_index = 0;
         block.entries.push_back(e);
     }
-    {
-        CTxOut out;
-        out.nValue = 99000;
-        out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0x7F);
-        block.outputs.push_back(out);
-    }
+    block.output_values.push_back(99000);
     auto block_bytes = SerializeQABIBlock(block);
     uint256 committed_root = ComputeQABIRoot(block_bytes);
 
-    // Build the tx — vout must match block.outputs bit-exact per check 8.
+    // Build the tx — tx.conditions_root must match block.outputs_conditions_root,
+    // and per-output values must match block.output_values (check 8).
     CMutableTransaction mtx;
     mtx.version = CTransaction::RUNG_TX_VERSION;
     mtx.nLockTime = 0;
@@ -12875,7 +12874,11 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
     in.nSequence = 0xFFFFFFFF;
     mtx.vin.push_back(in);
-    mtx.vout.push_back(block.outputs[0]);  // exact copy
+    {
+        CTxOut o;
+        o.nValue = 99000;
+        mtx.vout.push_back(o);
+    }
 
     // Sign SIGHASH_QABO with the coordinator's FALCON key.
     // Placeholder tx.aggregated_sig of the expected length while we compute
@@ -13001,15 +13004,13 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     std::memset(block.batch_id.data(), 0x3C, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
+    block.outputs_conditions_root.SetNull();
     QABIEntry e;
     e.participant_id = owner_id;
     e.contribution = 50000;
     e.destination_index = 0;
     block.entries.push_back(e);
-    CTxOut oout;
-    oout.nValue = 49000;
-    oout.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0x42);
-    block.outputs.push_back(oout);
+    block.output_values.push_back(49000);
 
     auto block_bytes = SerializeQABIBlock(block);
     uint256 committed_root = ComputeQABIRoot(block_bytes);
@@ -13023,7 +13024,11 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
     in.nSequence = 0xFFFFFFFF;
     mtx.vin.push_back(in);
-    mtx.vout.push_back(block.outputs[0]);
+    {
+        CTxOut o;
+        o.nValue = 49000;
+        mtx.vout.push_back(o);
+    }
     mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
 
     uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
@@ -13128,6 +13133,7 @@ static bool BuildQABISpendHappyPath(QABISpendSetup& s)
     std::memset(s.block.batch_id.data(), 0x6B, 32);
     s.block.coordinator_pubkey = s.coord_pk;
     s.block.prime_expiry_height = QABISpendSetup::EXPIRY_HEIGHT;
+    s.block.outputs_conditions_root.SetNull();
     {
         QABIEntry e;
         e.participant_id = s.owner_id;
@@ -13135,12 +13141,7 @@ static bool BuildQABISpendHappyPath(QABISpendSetup& s)
         e.destination_index = 0;
         s.block.entries.push_back(e);
     }
-    {
-        CTxOut out;
-        out.nValue = 99000;
-        out.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, 0xBB);
-        s.block.outputs.push_back(out);
-    }
+    s.block.output_values.push_back(99000);
     auto block_bytes = SerializeQABIBlock(s.block);
     s.committed_root = ComputeQABIRoot(block_bytes);
 
@@ -13152,7 +13153,11 @@ static bool BuildQABISpendHappyPath(QABISpendSetup& s)
     in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
     in.nSequence = 0xFFFFFFFF;
     s.mtx.vin.push_back(in);
-    s.mtx.vout.push_back(s.block.outputs[0]);
+    {
+        CTxOut o;
+        o.nValue = 99000;
+        s.mtx.vout.push_back(o);
+    }
     s.mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
 
     uint256 sighash = ComputeSighashQABO(CTransaction(s.mtx));
@@ -13328,12 +13333,13 @@ BOOST_AUTO_TEST_CASE(qabi_spend_check7_identity_not_in_entries)
 
 BOOST_AUTO_TEST_CASE(qabi_spend_check8_output_set_mismatch)
 {
-    // Check 8: tx.vout differs from block.outputs. We mutate tx.vout, then
-    // re-sign so checks 4–7 and 9 all still pass and only check 8 fires.
+    // Check 8: tx.vout values differ from block.output_values. We mutate
+    // tx.vout, then re-sign so checks 4–7 and 9 all still pass and only
+    // check 8 fires.
     QABISpendSetup s;
     if (!BuildQABISpendHappyPath(s)) return;
 
-    s.mtx.vout[0].nValue = 88888;  // different from block.outputs[0].nValue
+    s.mtx.vout[0].nValue = 88888;  // != block.output_values[0]
 
     s.mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
     uint256 sighash = ComputeSighashQABO(CTransaction(s.mtx));
@@ -13861,8 +13867,19 @@ BOOST_AUTO_TEST_CASE(build_qabi_spend_block_shape)
     BOOST_CHECK(b.fields[4].type == RungDataType::PUBKEY_COMMIT);  // owner_id
     BOOST_CHECK(b.fields[5].type == RungDataType::PREIMAGE);       // spend_preimage
 
-    const auto& layout = GetImplicitLayout(RungBlockType::QABI_SPEND, 0);
-    BOOST_CHECK(MatchesImplicitLayout(b, layout));
+    // BuildQABISpendBlock produces the *merged* 6-field form (5 conditions +
+    // 1 witness). The implicit-layout tables hold each side separately
+    // (QABI_SPEND_CONDITIONS = 5 fields, QABI_SPEND_WITNESS = 1 field), so
+    // we verify each portion against its respective layout rather than
+    // comparing the merged block against a single layout.
+    const auto& cond_layout = GetImplicitLayout(RungBlockType::QABI_SPEND, 1);
+    const auto& wit_layout  = GetImplicitLayout(RungBlockType::QABI_SPEND, 0);
+    BOOST_REQUIRE_EQUAL(cond_layout.count, 5u);
+    BOOST_REQUIRE_EQUAL(wit_layout.count, 1u);
+    for (uint8_t i = 0; i < cond_layout.count; ++i) {
+        BOOST_CHECK(b.fields[i].type == cond_layout.fields[i].type);
+    }
+    BOOST_CHECK(b.fields[5].type == wit_layout.fields[0].type);
 }
 
 // ============================================================================
@@ -14367,6 +14384,7 @@ static QABIBlock BuildScaleQABIBlock(
     std::memset(block.batch_id.data(), 0x42, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = expiry;
+    block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root in caller
 
     for (size_t p = 0; p < participants.size(); ++p) {
         QABIEntry e;
@@ -14376,7 +14394,7 @@ static QABIBlock BuildScaleQABIBlock(
         block.entries.push_back(e);
     }
     for (const auto& sp : participants) {
-        block.outputs.push_back(sp.destination);
+        block.output_values.push_back(sp.destination.nValue);
     }
     return block;
 }
@@ -14480,9 +14498,12 @@ static void RunMultiPartyBatch(size_t n_participants)
         in.nSequence = 0xFFFFFFFF;
         mtx.vin.push_back(in);
     }
-    // Outputs must match block.outputs exactly (full output-set check).
+    // Output values must match block.output_values; per-output SPK is
+    // structurally bound by tx.conditions_root == block.outputs_conditions_root.
     for (const auto& sp : participants) {
-        mtx.vout.push_back(sp.destination);
+        CTxOut o;
+        o.nValue = sp.destination.nValue;
+        mtx.vout.push_back(o);
     }
     mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
 
@@ -14734,6 +14755,7 @@ BOOST_AUTO_TEST_CASE(adversarial_duplicate_participant_id_rejected_by_parse)
     std::memset(block.batch_id.data(), 0x99, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xAA);
     block.prime_expiry_height = 1000;
+    block.outputs_conditions_root.SetNull();
 
     uint256 shared_id;
     std::memset(shared_id.data(), 0xCC, 32);
@@ -14744,10 +14766,8 @@ BOOST_AUTO_TEST_CASE(adversarial_duplicate_participant_id_rejected_by_parse)
     block.entries.push_back(e1);
     block.entries.push_back(e2);
 
-    CTxOut o1; o1.nValue = 100; o1.scriptPubKey = CScript() << OP_0;
-    CTxOut o2; o2.nValue = 200; o2.scriptPubKey = CScript() << OP_1;
-    block.outputs.push_back(o1);
-    block.outputs.push_back(o2);
+    block.output_values.push_back(100);
+    block.output_values.push_back(200);
 
     auto bytes = SerializeQABIBlock(block);
     std::string err;
@@ -14785,7 +14805,11 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
     CTxIn in; in.prevout = COutPoint(Txid::FromUint256(uint256::ZERO), 0);
     in.nSequence = 0xFFFFFFFF;
     mtx.vin.push_back(in);
-    mtx.vout.push_back(participants[0].destination);
+    {
+        CTxOut o;
+        o.nValue = participants[0].destination.nValue;
+        mtx.vout.push_back(o);
+    }
     mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
     uint256 sighash = ComputeSighashQABO(CTransaction(mtx));
     std::vector<uint8_t> sig;
@@ -14828,31 +14852,29 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
 BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
 {
     // Build a block just under the soft cap (64 KB) and verify it parses.
+    // Post-output-dedup: per-participant cost is ~50 bytes (entry ~41 +
+    // output value 8 + a small varint margin). The 32-byte outputs root
+    // adds a constant header overhead.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
     std::memset(block.batch_id.data(), 0x11, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x22);
     block.prime_expiry_height = 100;
+    std::memset(block.outputs_conditions_root.begin(), 0xEE, 32);
 
-    // Pack entries + outputs until just under 64 KB.
-    // Each entry is ~41 bytes, each output ~35 bytes with a 20-byte scriptPubKey.
-    // Header ~934 bytes. Target: ~63000 bytes total budget.
     constexpr size_t TARGET_FILL = 63000;
-    size_t running = 934;
+    size_t running = 966;  // 934 header + 32 outputs_conditions_root
     size_t n = 0;
-    while (running + 76 < TARGET_FILL) {  // ~76 B per participant
+    while (running + 50 < TARGET_FILL) {  // ~50 B per participant after dedup
         QABIEntry e;
         std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
         e.contribution = 1000;
         e.destination_index = static_cast<uint32_t>(n);
         block.entries.push_back(e);
 
-        CTxOut o;
-        o.nValue = 900;
-        o.scriptPubKey = CScript() << OP_0 << std::vector<uint8_t>(20, static_cast<uint8_t>(n));
-        block.outputs.push_back(o);
+        block.output_values.push_back(900);
 
-        running += 76;
+        running += 50;
         ++n;
     }
 
@@ -14866,7 +14888,7 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
     BOOST_REQUIRE_MESSAGE(parsed.has_value(),
                           "parse failed: " << err);
     BOOST_CHECK_EQUAL(parsed->entries.size(), n);
-    BOOST_CHECK_EQUAL(parsed->outputs.size(), n);
+    BOOST_CHECK_EQUAL(parsed->output_values.size(), n);
     BOOST_TEST_MESSAGE("Soft-cap stress: " << bytes.size() << " bytes, "
                        << n << " participants");
 }
@@ -14879,14 +14901,14 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
     std::memset(block.batch_id.data(), 0x33, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 100;
+    std::memset(block.outputs_conditions_root.begin(), 0x55, 32);
 
     // Target: ~260000 bytes (just under 262144 hard cap).
+    // Post-output-dedup: ~54 B per participant (entry ~41 + 8 value + ~5 varint margin).
     constexpr size_t TARGET_FILL = 260000;
-    size_t running = 934;
+    size_t running = 966;  // 934 header + 32 outputs_conditions_root
     size_t n = 0;
-    // destination_index stored as varint — for n > 252 it takes 3 bytes.
-    // Average ~76 B per participant.
-    while (running + 80 < TARGET_FILL) {
+    while (running + 54 < TARGET_FILL) {
         QABIEntry e;
         std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
         // Vary middle bytes so participant_ids don't collide in hot regions.
@@ -14896,13 +14918,9 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
         e.destination_index = static_cast<uint32_t>(n);
         block.entries.push_back(e);
 
-        CTxOut o;
-        o.nValue = 900;
-        o.scriptPubKey = CScript() << OP_0
-            << std::vector<uint8_t>(20, static_cast<uint8_t>(n & 0xFF));
-        block.outputs.push_back(o);
+        block.output_values.push_back(900);
 
-        running += 80;
+        running += 54;
         ++n;
     }
 
@@ -14945,6 +14963,7 @@ BOOST_AUTO_TEST_CASE(adversarial_committed_expiry_overflow_rejected_or_handled)
     std::memset(block.batch_id.data(), 0x33, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 0xFFFFFFFFu;  // u32 max
+    block.outputs_conditions_root.SetNull();
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x55, 32);
@@ -14952,8 +14971,7 @@ BOOST_AUTO_TEST_CASE(adversarial_committed_expiry_overflow_rejected_or_handled)
     e.destination_index = 0;
     block.entries.push_back(e);
 
-    CTxOut o; o.nValue = 1; o.scriptPubKey = CScript() << OP_0;
-    block.outputs.push_back(o);
+    block.output_values.push_back(1);
 
     auto bytes = SerializeQABIBlock(block);
     std::string err;
@@ -14971,6 +14989,7 @@ BOOST_AUTO_TEST_CASE(adversarial_zero_length_coordinator_pubkey_rejected)
     std::memset(block.batch_id.data(), 0x77, 32);
     block.coordinator_pubkey.clear();  // zero-length
     block.prime_expiry_height = 100;
+    block.outputs_conditions_root.SetNull();
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x88, 32);
@@ -14978,8 +14997,7 @@ BOOST_AUTO_TEST_CASE(adversarial_zero_length_coordinator_pubkey_rejected)
     e.destination_index = 0;
     block.entries.push_back(e);
 
-    CTxOut o; o.nValue = 1; o.scriptPubKey = CScript() << OP_0;
-    block.outputs.push_back(o);
+    block.output_values.push_back(1);
 
     auto bytes = SerializeQABIBlock(block);
     std::string err;
@@ -14997,6 +15015,7 @@ BOOST_AUTO_TEST_CASE(adversarial_reordered_witness_detected_by_sighash)
     std::memset(block.batch_id.data(), 0x66, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x77);
     block.prime_expiry_height = 100;
+    block.outputs_conditions_root.SetNull();
     QABIEntry e1, e2;
     std::memset(e1.participant_id.data(), 0xA1, 32);
     std::memset(e2.participant_id.data(), 0xA2, 32);
@@ -15004,10 +15023,8 @@ BOOST_AUTO_TEST_CASE(adversarial_reordered_witness_detected_by_sighash)
     e2.contribution = 200; e2.destination_index = 1;
     block.entries.push_back(e1);
     block.entries.push_back(e2);
-    CTxOut o1; o1.nValue = 100; o1.scriptPubKey = CScript() << OP_0;
-    CTxOut o2; o2.nValue = 200; o2.scriptPubKey = CScript() << OP_1;
-    block.outputs.push_back(o1);
-    block.outputs.push_back(o2);
+    block.output_values.push_back(100);
+    block.output_values.push_back(200);
 
     auto bytes = SerializeQABIBlock(block);
 
@@ -15028,8 +15045,12 @@ BOOST_AUTO_TEST_CASE(adversarial_reordered_witness_detected_by_sighash)
     // Give each input a distinct witness stack.
     mtx.vin[0].scriptWitness.stack.push_back(std::vector<uint8_t>{0xAA, 0xBB});
     mtx.vin[1].scriptWitness.stack.push_back(std::vector<uint8_t>{0xCC, 0xDD});
-    mtx.vout.push_back(o1);
-    mtx.vout.push_back(o2);
+    {
+        CTxOut o; o.nValue = 100; mtx.vout.push_back(o);
+    }
+    {
+        CTxOut o; o.nValue = 200; mtx.vout.push_back(o);
+    }
 
     uint256 hash_original = ComputeSighashQABO(CTransaction(mtx));
 
@@ -15842,6 +15863,7 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_destination_index_rejected)
     std::memset(block.batch_id.data(), 0x1F, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x2F);
     block.prime_expiry_height = 100;
+    block.outputs_conditions_root.SetNull();
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x3F, 32);
@@ -15849,8 +15871,7 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_destination_index_rejected)
     e.destination_index = 99;  // way out of range
     block.entries.push_back(e);
 
-    CTxOut o; o.nValue = 100; o.scriptPubKey = CScript() << OP_0;
-    block.outputs.push_back(o);  // only 1 output
+    block.output_values.push_back(100);  // only 1 output
 
     auto bytes = SerializeQABIBlock(block);
     std::string err;

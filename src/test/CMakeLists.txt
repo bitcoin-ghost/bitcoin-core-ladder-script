@@ -156,6 +156,7 @@ target_link_libraries(test_bitcoin
   bitcoin_cli
   bitcoin_node
   bitcoin_consensus
+  bitcoin_rung
   minisketch
   secp256k1
   Boost::headers

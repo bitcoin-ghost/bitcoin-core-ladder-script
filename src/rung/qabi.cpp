@@ -50,6 +50,11 @@ std::vector<uint8_t> SerializeQABIBlock(const QABIBlock& block)
 
     s << block.prime_expiry_height;
 
+    // Outputs conditions root (32 bytes). Pins the spend tx's tx.conditions_root,
+    // which in turn structurally pins every destination scriptPubKey
+    // (= 0xDF + tx.conditions_root for v4 MLSC outputs).
+    s << block.outputs_conditions_root;
+
     // Entries
     WriteCompactSize(s, block.entries.size());
     for (const auto& e : block.entries) {
@@ -58,10 +63,12 @@ std::vector<uint8_t> SerializeQABIBlock(const QABIBlock& block)
         WriteCompactSize(s, e.destination_index);
     }
 
-    // Outputs — reuse CTxOut serialisation (value + scriptPubKey).
-    WriteCompactSize(s, block.outputs.size());
-    for (const auto& o : block.outputs) {
-        s << o;
+    // Per-output values (8 bytes each — int64 sats). The destination
+    // scriptPubKey is implicit (= 0xDF + outputs_conditions_root) and not
+    // carried on the wire.
+    WriteCompactSize(s, block.output_values.size());
+    for (const int64_t v : block.output_values) {
+        s << v;
     }
 
     std::vector<uint8_t> result(s.size());
@@ -126,6 +133,9 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
         // Expiry
         s >> block.prime_expiry_height;
 
+        // Outputs conditions root (32 bytes).
+        s >> block.outputs_conditions_root;
+
         // Entries
         uint64_t n_entries;
         if (!ReadCompactSizeChecked(s, QABI_BLOCK_MAX_HARD, n_entries, error_out)) {
@@ -152,7 +162,7 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             block.entries.push_back(e);
         }
 
-        // Outputs
+        // Per-output values
         uint64_t n_outputs;
         if (!ReadCompactSizeChecked(s, QABI_BLOCK_MAX_HARD, n_outputs, error_out)) {
             return std::nullopt;
@@ -161,11 +171,15 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             error_out = "qabi_block has zero outputs";
             return std::nullopt;
         }
-        block.outputs.reserve(n_outputs);
+        block.output_values.reserve(n_outputs);
         for (uint64_t i = 0; i < n_outputs; ++i) {
-            CTxOut o;
-            s >> o;
-            block.outputs.push_back(o);
+            int64_t v;
+            s >> v;
+            if (v < 0) {
+                error_out = "output value is negative";
+                return std::nullopt;
+            }
+            block.output_values.push_back(v);
         }
 
         // No trailing data allowed.
@@ -176,7 +190,7 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
 
         // Validate destination_index bounds for every entry.
         for (const auto& e : block.entries) {
-            if (e.destination_index >= block.outputs.size()) {
+            if (e.destination_index >= block.output_values.size()) {
                 error_out = "entry destination_index out of range";
                 return std::nullopt;
             }
