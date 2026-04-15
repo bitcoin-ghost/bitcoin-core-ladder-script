@@ -10,6 +10,9 @@
 
 *.pyc
 
+# CMake-generated functional test config
+/test/config.ini
+
 # Only ignore unexpected patches
 *.patch
 !contrib/guix/patches/*.patch
