@@ -18,11 +18,17 @@ from decimal import Decimal
 from test_framework.blocktools import COINBASE_MATURITY
 from test_framework.key import ECKey
 from test_framework.messages import (
+    COIN,
     COutPoint,
     CTransaction,
     CTxIn,
     CTxInWitness,
+    CTxOut,
     tx_from_hex,
+)
+from test_framework.script import (
+    OP_0,
+    CScript,
 )
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
@@ -73,6 +79,7 @@ class RungTxTest(BitcoinTestFramework):
         self.test_spend_v4_output()
 
         self.test_three_output_tx_supported()
+        self.test_wallet_funded_v4_non_mlsc_output_rejected()
 
         self.log.info("All tests passed!")
 
@@ -454,6 +461,66 @@ class RungTxTest(BitcoinTestFramework):
         assert_equal(spks[1], spks[2])
         self.log.info(f"  All 3 outputs share scriptPubKey: {spks[0][:16]}...")
         self.log.info("  3-output createtxmlsc: OK")
+
+
+    def test_wallet_funded_v4_non_mlsc_output_rejected(self):
+        """Wallet-funded v4 tx with a non-MLSC output is rejected at relay
+        policy by IsStandardRungTx. This is the policy-layer half of the
+        defence-in-depth that protects wallet-funded v4 txs from carrying
+        invalid outputs; the consensus-layer half (via CheckRungTxLevel)
+        is exercised by test_wallet_funded_v4_consensus_dust_rejected.
+
+        Test method: hand-build a v4 tx in Python with conditions_root
+        left null (so the wire format falls back to standard SegWit and
+        we can carry an arbitrary non-MLSC scriptPubKey), sign the
+        wallet input via MiniWallet, then assert testmempoolaccept
+        rejects it with the policy reason."""
+        self.log.info("Testing wallet-funded v4 with non-MLSC output rejected (policy)...")
+
+        utxo = self.wallet.get_utxo()
+        self.log.info(f"  Wallet UTXO: {utxo['txid']}:{utxo['vout']} ({utxo['value']} BTC)")
+
+        tx = CTransaction()
+        tx.version = CTransaction.RUNG_TX_VERSION  # 4
+        tx.nLockTime = 0
+        tx.conditions_root = b"\x00" * 32  # null → wire format = standard SegWit
+
+        tx.vin.append(CTxIn(COutPoint(int(utxo["txid"], 16), utxo["vout"]),
+                             b"", 0xffffffff))
+
+        # Non-MLSC output: P2WPKH-shaped (OP_0 + 20 byte hash).
+        spend_amount = int(Decimal(str(utxo["value"])) * COIN) - 1000  # 1000 sat fee
+        non_mlsc_spk = CScript([OP_0, b"\x00" * 20])
+        tx.vout.append(CTxOut(spend_amount, non_mlsc_spk))
+
+        self.wallet.sign_tx(tx)
+        raw_hex = tx.serialize().hex()
+        self.log.info(f"  Built v4 tx: {len(raw_hex) // 2} bytes, version=4, vout[0] non-MLSC")
+
+        result = self.node.testmempoolaccept([raw_hex])
+        assert_equal(len(result), 1)
+        assert_equal(result[0]["allowed"], False)
+        assert "rung-non-mlsc-output" in result[0]["reject-reason"], \
+            f"expected rung-non-mlsc-output, got: {result[0]['reject-reason']}"
+        self.log.info(f"  Correctly rejected: {result[0]['reject-reason']}")
+
+        assert_raises_rpc_error(-26, "rung-non-mlsc-output",
+                                 self.node.sendrawtransaction, raw_hex)
+        self.log.info("  sendrawtransaction also rejects: OK")
+
+    # Note: the consensus-layer half of the wallet-funded v4 defence
+    # (CheckRungTxLevel invoked unconditionally from CheckInputScripts)
+    # is exercised directly by the boost suite (qabi_tests::* and the
+    # CheckRungTxLevel branches in rung_tests). We intentionally do not
+    # add a functional test for it because every consensus-only rejection
+    # path (sub-MIN_RUNG_OUTPUT_VALUE, DATA_RETURN count > 1,
+    # MAX_PREIMAGE_FIELDS_PER_TX) is shadowed by an earlier standard
+    # policy rejection (dust threshold, OP_RETURN data-carrier rules,
+    # mismatched witness shape) — there is no input the mempool will
+    # accept that lands at the consensus check before being bounced by
+    # policy first. The consensus check is defence-in-depth against
+    # future policy regressions and against direct block validation
+    # (where policy is bypassed).
 
 
 if __name__ == "__main__":
