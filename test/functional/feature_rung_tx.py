@@ -80,6 +80,8 @@ class RungTxTest(BitcoinTestFramework):
 
         self.test_three_output_tx_supported()
         self.test_wallet_funded_v4_non_mlsc_output_rejected()
+        self.test_v4_mlsc_reorg_survival()
+        self.test_v4_mlsc_rbf_replacement()
 
         self.log.info("All tests passed!")
 
@@ -507,6 +509,158 @@ class RungTxTest(BitcoinTestFramework):
         assert_raises_rpc_error(-26, "rung-non-mlsc-output",
                                  self.node.sendrawtransaction, raw_hex)
         self.log.info("  sendrawtransaction also rejects: OK")
+
+    def test_v4_mlsc_reorg_survival(self):
+        """Reorg survival for a plain (non-QABIO) v4 MLSC tx. Mine a v4 tx,
+        invalidate the block containing it, verify it re-enters the mempool,
+        mine a fresh block, verify the tx is reconfirmed at a new block hash
+        and the MLSC UTXO lands in the UTXO set.
+
+        Why this matters: feature_qabi.py exercises the reorg path for
+        QABIO txs (which use the qabi_block tx-level field) but until now
+        nothing exercised it for plain MLSC txs (the much more common case
+        — every v4 tx that doesn't use QABIO). The TX_MLSC wire format
+        round-trip through the disconnect/reconnect path is consensus-
+        critical: a regression in the deserialiser, the conditions_root
+        synthesis, or the UTXO compaction inflate path would silently
+        break reorg recovery for every MLSC user."""
+        self.log.info("Testing plain v4 MLSC tx reorg survival...")
+
+        # Top up MiniWallet's pool — earlier tests have consumed mature
+        # coinbases, and this test needs at least 2 UTXOs (one for the
+        # v4 tx, one for a filler that distinguishes the re-mined block's
+        # merkle root).
+        self.generate(self.wallet, 3)
+        utxo = self.wallet.get_utxo()
+        test_pubkey = "02" + "dd" * 32
+
+        create_result = self.node.createrungtx(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [{
+                "amount": Decimal(str(utxo["value"])) - Decimal("0.001"),
+                "conditions": [{"blocks": [{"type": "SIG", "fields": [
+                    {"type": "SCHEME", "hex": "01"},
+                    {"type": "PUBKEY", "hex": test_pubkey},
+                ]}]}],
+            }],
+        )
+        unsigned_hex = create_result["hex"]
+
+        tx = tx_from_hex(unsigned_hex)
+        self.wallet.sign_tx(tx)
+        signed_hex = tx.serialize().hex()
+
+        txid = self.node.sendrawtransaction(signed_hex)
+        original_hashes = self.generate(self.node, 1)
+        original_block_hash = original_hashes[0]
+        original_block_info = self.node.getblock(original_block_hash)
+        assert txid in original_block_info["tx"], \
+            "v4 MLSC tx must be in the mined block before invalidation"
+        self.log.info(f"  Initial mine: tx {txid[:16]}... in block {original_block_hash[:16]}...")
+
+        # Invalidate the block — the tx must re-enter the mempool.
+        self.node.invalidateblock(original_block_hash)
+        mempool = self.node.getrawmempool()
+        assert txid in mempool, \
+            f"v4 MLSC tx must re-enter mempool after invalidateblock, mempool={mempool}"
+        self.log.info(f"  After invalidateblock: tx back in mempool (size={len(mempool)})")
+
+        # Filler tx so the re-mined block has a different merkle root and
+        # therefore a different hash — same trick as the QABIO reorg test
+        # in feature_qabi.py.
+        filler_txid = self.wallet.send_self_transfer(from_node=self.node)["txid"]
+        mempool_after_filler = self.node.getrawmempool()
+        assert txid in mempool_after_filler
+        assert filler_txid in mempool_after_filler
+
+        new_hashes = self.generate(self.node, 1)
+        new_block_hash = new_hashes[0]
+        assert new_block_hash != original_block_hash, \
+            "re-mined block must have a different hash"
+        new_block_info = self.node.getblock(new_block_hash)
+        assert txid in new_block_info["tx"], \
+            "v4 MLSC tx must be re-confirmed in the fresh block"
+
+        tx_out = self.node.gettxout(txid, 0)
+        assert tx_out is not None, \
+            "MLSC UTXO must be in the UTXO set after reorg re-mining"
+        assert tx_out["scriptPubKey"]["hex"].startswith("df"), \
+            "Reconfirmed output must still carry the 0xDF MLSC prefix"
+        self.log.info(f"  After re-mine: tx in new block {new_block_hash[:16]}..., "
+                      f"UTXO confirmed ({tx_out['value']} BTC)")
+        self.log.info("  v4 MLSC reorg survival: OK")
+
+    def test_v4_mlsc_rbf_replacement(self):
+        """RBF replacement of a plain v4 MLSC tx: build a replaceable v4 tx
+        (nSequence < 0xfffffffe), broadcast it, then build a higher-fee
+        replacement spending the same input and verify it evicts the
+        original from the mempool.
+
+        Why this matters: BIP125 RBF is the standard fee-bump mechanism
+        and any v4 tx user needs it to recover from a stuck transaction.
+        It's not v4-specific behaviour, but a regression in v4 wire-format
+        handling could break the replacement match (e.g., conflict
+        detection on inputs, or sigops accounting). This test pins the
+        behaviour as a baseline."""
+        self.log.info("Testing plain v4 MLSC RBF replacement...")
+
+        self.generate(self.wallet, 3)
+        utxo = self.wallet.get_utxo()
+        test_pubkey = "02" + "ee" * 32
+
+        # Build the original tx: leave more fee headroom so the replacement
+        # can pay strictly more.
+        original_create = self.node.createrungtx(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [{
+                "amount": Decimal(str(utxo["value"])) - Decimal("0.005"),  # 5000 sat fee
+                "conditions": [{"blocks": [{"type": "SIG", "fields": [
+                    {"type": "SCHEME", "hex": "01"},
+                    {"type": "PUBKEY", "hex": test_pubkey},
+                ]}]}],
+            }],
+        )
+        original_tx = tx_from_hex(original_create["hex"])
+        # Mark the input as RBF-replaceable (BIP125: nSequence < 0xfffffffe).
+        original_tx.vin[0].nSequence = 0
+        self.wallet.sign_tx(original_tx)
+        original_hex = original_tx.serialize().hex()
+        original_txid = self.node.sendrawtransaction(original_hex)
+        self.log.info(f"  Broadcast original: {original_txid[:16]}... (5000 sat fee, RBF)")
+
+        assert original_txid in self.node.getrawmempool(), \
+            "original RBF tx must be in mempool before replacement"
+
+        # Build the replacement: same input, lower output value (= higher fee).
+        replacement_create = self.node.createrungtx(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [{
+                "amount": Decimal(str(utxo["value"])) - Decimal("0.010"),  # 10000 sat fee
+                "conditions": [{"blocks": [{"type": "SIG", "fields": [
+                    {"type": "SCHEME", "hex": "01"},
+                    {"type": "PUBKEY", "hex": test_pubkey},
+                ]}]}],
+            }],
+        )
+        replacement_tx = tx_from_hex(replacement_create["hex"])
+        replacement_tx.vin[0].nSequence = 0
+        self.wallet.sign_tx(replacement_tx)
+        replacement_hex = replacement_tx.serialize().hex()
+        replacement_txid = self.node.sendrawtransaction(replacement_hex)
+        self.log.info(f"  Broadcast replacement: {replacement_txid[:16]}... (10000 sat fee)")
+
+        mempool = self.node.getrawmempool()
+        assert replacement_txid in mempool, \
+            "replacement RBF tx must be in mempool after sending"
+        assert original_txid not in mempool, \
+            f"original tx must be evicted, but still present in mempool={mempool}"
+        self.log.info("  Original evicted, replacement confirmed in mempool: OK")
+
+        # Mine the replacement so we don't leave state behind for the next test.
+        self.generate(self.node, 1)
+        assert self.node.gettxout(replacement_txid, 0) is not None, \
+            "replacement v4 MLSC UTXO must land in UTXO set after mining"
+        self.log.info("  v4 MLSC RBF replacement: OK")
 
     # Note: the consensus-layer half of the wallet-funded v4 defence
     # (CheckRungTxLevel invoked unconditionally from CheckInputScripts)
