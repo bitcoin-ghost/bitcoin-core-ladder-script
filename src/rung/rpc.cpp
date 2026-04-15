@@ -86,6 +86,10 @@ static UniValue CoilToJSON(const RungCoil& coil)
     case RungCoilType::UNLOCK_TO: obj.pushKV("type", "UNLOCK_TO"); break;
     default: obj.pushKV("type", "UNKNOWN"); break;
     }
+    switch (coil.attestation) {
+    case RungAttestationMode::INLINE: obj.pushKV("attestation", "INLINE"); break;
+    default: obj.pushKV("attestation", "UNKNOWN"); break;
+    }
     switch (coil.scheme) {
     case RungScheme::SCHNORR:     obj.pushKV("scheme", "SCHNORR"); break;
     case RungScheme::ECDSA:       obj.pushKV("scheme", "ECDSA"); break;
@@ -539,8 +543,9 @@ static RPCHelpMan decoderung()
             {RPCResult::Type::OBJ, "coil", "Coil metadata (per-output)",
                 {
                     {RPCResult::Type::STR, "type", "Coil type"},
+                    {RPCResult::Type::STR, "attestation", "Attestation mode"},
                     {RPCResult::Type::STR, "scheme", "Signature scheme"},
-                    {RPCResult::Type::STR_HEX, "address", /*optional=*/ true, "Destination scriptPubKey hex"},
+                    {RPCResult::Type::STR_HEX, "address_hash", /*optional=*/ true, "SHA256 of destination address (raw address never on-chain)"},
                     {RPCResult::Type::ARR, "conditions", /*optional=*/ true, "Coil condition rungs (same block format as input rungs)",
                         {
                             {RPCResult::Type::OBJ, "", "", {
