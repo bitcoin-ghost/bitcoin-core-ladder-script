@@ -15,6 +15,7 @@
 // option definition.
 #ifdef ENABLE_QABIO
 
+#include <hash.h>
 #include <primitives/transaction.h>
 #include <rung/types.h>
 #include <uint256.h>
@@ -27,6 +28,12 @@
 #include <vector>
 
 namespace rung {
+
+/** Tagged hash writer for QABO sighash, pre-fed with TaggedHash("QABOSighash").
+ *  Same pattern as HASHER_LADDERSIGHASH / HASHER_LADDERKEYPATH in rung/sighash.h —
+ *  every sighash in the project uses a domain-separated tagged hash so that a
+ *  digest from one context can never collide with a digest from another. */
+extern const HashWriter HASHER_QABOSIGHASH;
 
 //! Current QABIBlock wire format version.
 static constexpr uint8_t QABI_BLOCK_VERSION_CURRENT = 0x01;

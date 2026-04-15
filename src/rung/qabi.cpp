@@ -17,6 +17,7 @@
 
 #include <crypto/sha256.h>
 #include <hash.h>
+#include <primitives/transaction.h>
 #include <serialize.h>
 #include <streams.h>
 #include <uint256.h>
@@ -31,6 +32,8 @@
 #include <vector>
 
 namespace rung {
+
+const HashWriter HASHER_QABOSIGHASH{TaggedHash("QABOSighash")};
 
 /* ---------------- Serialise ---------------- */
 
@@ -348,72 +351,46 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block)
 
 uint256 ComputeSighashQABO(const CTransaction& tx)
 {
-    // See qabi.h for the full coverage decision. Summary: covers tx intent
-    // (version, vin, vout, conditions_root, qabi_block, nLockTime) AND the
-    // per-input witness stacks. Excludes only tx.aggregated_sig itself
-    // (chicken-and-egg).
+    // Domain-separated tagged hash — same HashWriter pattern as the rest
+    // of the Ladder Script sighash family (HASHER_LADDERSIGHASH,
+    // HASHER_LADDERKEYPATH). The `<<` operator routes through the standard
+    // Bitcoin Core serializer which encodes integers little-endian on every
+    // supported architecture, so the resulting digest is portable.
     //
-    // Per-input witness coverage added in Phase 18 as defence-in-depth
-    // against byte-level witness malleability: a third party cannot modify
-    // the witness bytes of any primed input (LadderWitness framing, spend
-    // preimage, Merkle proofs, extra stack padding) without invalidating
-    // the coordinator's FALCON signature.
-    CSHA256 hasher;
+    // Coverage (see qabi.h for the rationale):
+    //   - tx.version, tx.nLockTime
+    //   - every vin's (prevout, nSequence) in order
+    //   - every vout (value + scriptPubKey) in order
+    //   - tx.conditions_root
+    //   - tx.qabi_block (length-prefixed, opaque blob)
+    //   - every vin's scriptWitness.stack (length-prefixed vector of
+    //     length-prefixed elements) — closes byte-level witness malleability
+    //     per the Phase 18 hardening
+    //   - EXCLUDES tx.aggregated_sig itself (chicken-and-egg: the sig signs
+    //     this hash)
+    HashWriter ss{HASHER_QABOSIGHASH};
 
-    // Version
-    uint32_t ver = tx.version;
-    hasher.Write(reinterpret_cast<const uint8_t*>(&ver), sizeof(ver));
+    ss << tx.version;
 
-    // vin (outpoints + sequences, in order)
     for (const auto& in : tx.vin) {
-        hasher.Write(reinterpret_cast<const unsigned char*>(in.prevout.hash.begin()), 32);
-        uint32_t n = in.prevout.n;
-        hasher.Write(reinterpret_cast<const uint8_t*>(&n), sizeof(n));
-        uint32_t seq = in.nSequence;
-        hasher.Write(reinterpret_cast<const uint8_t*>(&seq), sizeof(seq));
+        ss << in.prevout;
+        ss << in.nSequence;
     }
 
-    // vout (value + scriptPubKey, in order)
     for (const auto& o : tx.vout) {
-        int64_t v = o.nValue;
-        hasher.Write(reinterpret_cast<const uint8_t*>(&v), sizeof(v));
-        uint64_t spk_size = o.scriptPubKey.size();
-        hasher.Write(reinterpret_cast<const uint8_t*>(&spk_size), sizeof(spk_size));
-        if (!o.scriptPubKey.empty()) {
-            hasher.Write(o.scriptPubKey.data(), o.scriptPubKey.size());
-        }
+        ss << o;
     }
 
-    // Ladder Script tx-level fields (excluding aggregated_sig)
-    hasher.Write(reinterpret_cast<const unsigned char*>(tx.conditions_root.begin()), 32);
-    uint64_t qb_size = tx.qabi_block.size();
-    hasher.Write(reinterpret_cast<const uint8_t*>(&qb_size), sizeof(qb_size));
-    if (!tx.qabi_block.empty()) {
-        hasher.Write(tx.qabi_block.data(), tx.qabi_block.size());
-    }
+    ss << tx.conditions_root;
+    ss << tx.qabi_block;
 
-    // Per-input witness stacks (closes byte-level witness malleability).
-    // For each input, we hash: stack_count || (for each element: length || bytes).
-    // Length-prefixing prevents boundary-ambiguity attacks.
     for (const auto& in : tx.vin) {
-        uint64_t stack_count = in.scriptWitness.stack.size();
-        hasher.Write(reinterpret_cast<const uint8_t*>(&stack_count), sizeof(stack_count));
-        for (const auto& element : in.scriptWitness.stack) {
-            uint64_t elem_size = element.size();
-            hasher.Write(reinterpret_cast<const uint8_t*>(&elem_size), sizeof(elem_size));
-            if (!element.empty()) {
-                hasher.Write(element.data(), element.size());
-            }
-        }
+        ss << in.scriptWitness.stack;
     }
 
-    // nLockTime
-    uint32_t lt = tx.nLockTime;
-    hasher.Write(reinterpret_cast<const uint8_t*>(&lt), sizeof(lt));
+    ss << tx.nLockTime;
 
-    uint256 out;
-    hasher.Finalize(out.begin());
-    return out;
+    return ss.GetSHA256();
 }
 
 } // namespace rung
