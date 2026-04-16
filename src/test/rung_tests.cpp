@@ -8467,6 +8467,9 @@ BOOST_AUTO_TEST_CASE(tx_mlsc_data_return_wire_round_trip)
         BOOST_CHECK(HasMLSCData(parsed.vout[0].scriptPubKey));
         auto parsed_data = GetMLSCData(parsed.vout[0].scriptPubKey);
         BOOST_CHECK_EQUAL(parsed_data.size(), data_len);
+        // CScript::IsUnspendable should fire — DATA_RETURN outputs are
+        // pruned from the UTXO set just like OP_RETURN.
+        BOOST_CHECK(parsed.vout[0].scriptPubKey.IsUnspendable());
 
         // Stripped form must also round-trip identically (critical for
         // txid stability — the txid commits to the DATA_RETURN bytes).

@@ -567,10 +567,26 @@ public:
      * Returns whether the script is guaranteed to fail at execution,
      * regardless of the initial stack. This allows outputs to be pruned
      * instantly when entering the UTXO set.
+     *
+     * Recognised unspendable patterns:
+     *   1. OP_RETURN prefix
+     *   2. Script larger than MAX_SCRIPT_SIZE
+     *   3. MLSC DATA_RETURN (Ladder Script v4): 0xDF prefix with extended
+     *      payload (34..73 bytes total — 1 marker + 32 conditions_root +
+     *      1..40 bytes of DATA). The DATA_RETURN block evaluator returns
+     *      ERROR for every spend attempt, so these outputs are
+     *      consensus-unspendable. Marking them unspendable here keeps them
+     *      out of the UTXO set (parity with OP_RETURN) and exempts them
+     *      from the dust-threshold standard policy check.
+     *      Bare MLSC (33 bytes: 0xDF + root, no data tail) is normal
+     *      spendable MLSC and is NOT marked unspendable here.
      */
     bool IsUnspendable() const
     {
-        return (size() > 0 && *begin() == OP_RETURN) || (size() > MAX_SCRIPT_SIZE);
+        if (size() > 0 && *begin() == OP_RETURN) return true;
+        if (size() > MAX_SCRIPT_SIZE) return true;
+        if (size() > 33 && size() <= 73 && (*this)[0] == 0xDF) return true;
+        return false;
     }
 
     void clear()

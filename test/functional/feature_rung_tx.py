@@ -82,6 +82,7 @@ class RungTxTest(BitcoinTestFramework):
         self.test_wallet_funded_v4_structurally_mlsc()
         self.test_v4_mlsc_reorg_survival()
         self.test_v4_mlsc_rbf_replacement()
+        self.test_v4_data_return_round_trip()
 
         self.log.info("All tests passed!")
 
@@ -668,6 +669,122 @@ class RungTxTest(BitcoinTestFramework):
         assert self.node.gettxout(replacement_txid, 0) is not None, \
             "replacement v4 MLSC UTXO must land in UTXO set after mining"
         self.log.info("  v4 MLSC RBF replacement: OK")
+
+    def test_v4_data_return_round_trip(self):
+        """End-to-end DATA_RETURN round-trip through the full node pipeline:
+        build a v4 tx with a DATA_RETURN output, broadcast, mine, then read
+        the output back and assert the 40-byte data payload is intact.
+
+        This is the test class that DIDN'T exist for the first ~3 weeks of
+        v4's life, which is why DATA_RETURN's wire format bug went undetected
+        — the in-memory helpers (CreateMLSCScript, IsMLSCScript, HasMLSCData,
+        GetMLSCData) all worked, the unit tests passed, the RPC produced
+        plausible-looking hex. No test ever serialised a tx with DATA_RETURN
+        and deserialised it on the receiving end. Adding this test pins the
+        wire format invariant: 40 bytes in, 40 bytes out, regardless of how
+        many serialise/deserialise hops the tx makes."""
+        self.log.info("Testing DATA_RETURN end-to-end wire round-trip...")
+
+        self.generate(self.wallet, 3)
+        utxo = self.wallet.get_utxo()
+        self.log.info(f"  Wallet UTXO: {utxo['txid']}:{utxo['vout']} ({utxo['value']} BTC)")
+
+        # 40 bytes of distinctive data — pattern lets us spot any byte-level
+        # corruption immediately. Bytes 0xC0..0xE7 are a sweep that doesn't
+        # accidentally match common test fixtures (0xAA, 0xCC, 0xFF) and
+        # has no run-length compression hits.
+        payload = bytes(range(0xC0, 0xC0 + 40))
+        assert_equal(len(payload), 40)
+        payload_hex = payload.hex()
+
+        # Build a v4 tx with ONE output: a zero-value DATA_RETURN carrying
+        # the payload. Single-output keeps the test focused on the wire
+        # format invariant; the createrungtx shared-root check is trivially
+        # satisfied with one output, no SIG outputs to compare against.
+        # The wallet input value goes entirely to the miner as fee — fine
+        # for a regtest test, mempool accepts arbitrarily-high-fee txs.
+        create_result = self.node.createrungtx(
+            [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [
+                {
+                    "amount": 0,
+                    "conditions": [
+                        {
+                            "blocks": [
+                                {
+                                    "type": "DATA_RETURN",
+                                    "fields": [
+                                        {"type": "DATA", "hex": payload_hex},
+                                    ],
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ],
+        )
+        unsigned_hex = create_result["hex"]
+        self.log.info(f"  Built v4 tx with DATA_RETURN: {len(unsigned_hex) // 2} bytes")
+
+        # Sanity: decoderawtransaction should return version 4 with one
+        # output whose scriptPubKey starts with 0xDF and is 73 bytes long
+        # (1 marker + 32 root + 40 data).
+        decoded = self.node.decoderawtransaction(unsigned_hex)
+        assert_equal(decoded["version"], 4)
+        assert_equal(len(decoded["vout"]), 1)
+        assert_equal(decoded["vout"][0]["value"], Decimal("0E-8"))
+        spk_hex_pre = decoded["vout"][0]["scriptPubKey"]["hex"]
+        assert spk_hex_pre.startswith("df"), \
+            f"DATA_RETURN scriptPubKey must start with 0xDF, got {spk_hex_pre[:4]}"
+        assert_equal(len(spk_hex_pre), 2 * 73)  # 73 bytes hex
+        # The trailing 40 bytes of the SPK are the payload — verify byte-exact
+        # match so we know decoderawtransaction reads the wire format correctly.
+        assert_equal(spk_hex_pre[-80:], payload_hex)
+        self.log.info(f"  decoderawtransaction sees 73-byte SPK with payload trailing bytes")
+
+        # Sign the wallet input and broadcast.
+        tx = tx_from_hex(unsigned_hex)
+        self.wallet.sign_tx(tx)
+        signed_hex = tx.serialize().hex()
+
+        # The wallet input goes entirely to the miner as fee (the only
+        # output is zero-value). That's a ~50 BTC fee — well above the
+        # default maxtxfee sanity check. Pass maxfeerate=0 to bypass that
+        # client-side guard (consensus and policy still apply).
+        txid = self.node.sendrawtransaction(signed_hex, 0)
+        self.log.info(f"  Broadcast txid: {txid[:16]}...")
+
+        # Mine the tx and verify the data survives one full
+        # serialise → mempool → mine → block → block-storage round trip.
+        block_hashes = self.generate(self.node, 1)
+        block_hash = block_hashes[0]
+
+        # gettxout MUST return null: DATA_RETURN outputs are marked
+        # IsUnspendable (extended CScript::IsUnspendable recognises 0xDF
+        # SPKs of size 34..73), so AddCoins skips them. This matches
+        # OP_RETURN semantics — unspendable outputs aren't in the UTXO
+        # set, parity with how Bitcoin handles standard data carriers.
+        tx_out = self.node.gettxout(txid, 0)
+        assert tx_out is None, \
+            "DATA_RETURN output must be unspendable and excluded from UTXO set " \
+            f"(IsUnspendable should fire on 73-byte 0xDF SPK), got {tx_out}"
+        self.log.info("  gettxout: null (DATA_RETURN is unspendable, parity with OP_RETURN)")
+
+        # Read the data back via getrawtransaction (block storage path).
+        # This is the canonical "look up DATA_RETURN bytes I anchored on
+        # chain" workflow — same as how clients fetch OP_RETURN data.
+        # The regtest node doesn't have -txindex, so we provide the block
+        # hash explicitly to enable the lookup.
+        raw_from_block = self.node.getrawtransaction(txid, True, block_hash)
+        block_spk_hex = raw_from_block["vout"][0]["scriptPubKey"]["hex"]
+        assert_equal(len(block_spk_hex), 2 * 73)
+        assert block_spk_hex.startswith("df"), \
+            f"block SPK must start with 0xDF, got {block_spk_hex[:4]}"
+        assert_equal(block_spk_hex[-80:], payload_hex), \
+            f"DATA_RETURN payload corrupted: got {block_spk_hex[-80:]}, " \
+            f"expected {payload_hex}"
+        self.log.info("  getrawtransaction (from block): 73-byte SPK with intact 40-byte payload")
+        self.log.info("  DATA_RETURN end-to-end round-trip: OK (40 bytes in, 40 bytes out)")
 
     # Note: the consensus-layer half of the wallet-funded v4 defence
     # (CheckRungTxLevel invoked unconditionally from CheckInputScripts)
