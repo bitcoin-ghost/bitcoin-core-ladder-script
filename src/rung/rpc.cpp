@@ -767,12 +767,16 @@ static std::vector<uint16_t> ParseRelayRefs(const UniValue& arr)
 
 /** Helper: parse a conditions JSON spec into a RungConditions struct.
  *  rungs_arr is the array of rung specs; coil_obj is the optional coil spec (per-output).
- *  relays_arr is the optional relays array (top-level, shared across outputs). */
+ *  relays_arr is the optional relays array (top-level, shared across outputs).
+ *  rung_output_indices_out collects per-rung output_index values (0xFF = unspecified,
+ *  caller should fall back to spent_vout). Used at spend time to rebuild Merkle leaves
+ *  with the same coil.output_index that was committed at fund time. */
 static RungConditions ParseConditionsSpec(const UniValue& rungs_arr,
                                           const UniValue& coil_obj,
                                           const UniValue& relays_arr,
                                           std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys_out,
-                                          std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys_out)
+                                          std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys_out,
+                                          std::vector<uint8_t>* rung_output_indices_out = nullptr)
 {
     RungConditions conditions;
 
@@ -851,6 +855,13 @@ static RungConditions ParseConditionsSpec(const UniValue& rungs_arr,
             rung.blocks.push_back(std::move(sig_block));
             conditions.rungs.push_back(std::move(rung));
             rung_pubkeys_out.push_back(std::move(rung_pks));
+            if (rung_output_indices_out) {
+                uint8_t oi = 0xFF;
+                if (rung_obj.exists("output_index")) {
+                    oi = static_cast<uint8_t>(rung_obj["output_index"].getInt<int>());
+                }
+                rung_output_indices_out->push_back(oi);
+            }
             continue;
         }
 
@@ -866,6 +877,13 @@ static RungConditions ParseConditionsSpec(const UniValue& rungs_arr,
 
         conditions.rungs.push_back(std::move(rung));
         rung_pubkeys_out.push_back(std::move(rung_pks));
+        if (rung_output_indices_out) {
+            uint8_t oi = 0xFF;
+            if (rung_obj.exists("output_index")) {
+                oi = static_cast<uint8_t>(rung_obj["output_index"].getInt<int>());
+            }
+            rung_output_indices_out->push_back(oi);
+        }
     }
 
     // Parse coil at output level (not per-rung)
@@ -2028,6 +2046,7 @@ static RPCHelpMan signrungtx()
         bool is_mlsc = rung::IsMLSCScript(spent_outputs[input_idx].scriptPubKey);
         bool has_conditions = false;
         std::vector<std::vector<std::vector<uint8_t>>> rung_pubkeys2, relay_pubkeys2;
+        std::vector<uint8_t> rung_output_indices2;
 
         if (is_mlsc) {
             // MLSC: conditions must be provided by the signer (not on-chain)
@@ -2038,7 +2057,7 @@ static RPCHelpMan signrungtx()
             }
             UniValue coil_val = signer_obj.exists("coil") ? signer_obj["coil"] : UniValue();
             UniValue relays_val2 = signer_obj.exists("relays") ? signer_obj["relays"] : UniValue();
-            conditions = ParseConditionsSpec(signer_obj["conditions"].get_array(), coil_val, relays_val2, rung_pubkeys2, relay_pubkeys2);
+            conditions = ParseConditionsSpec(signer_obj["conditions"].get_array(), coil_val, relays_val2, rung_pubkeys2, relay_pubkeys2, &rung_output_indices2);
 
             // Set the conditions_root from the spent output
             uint256 root;
@@ -2344,9 +2363,15 @@ static RPCHelpMan signrungtx()
             }
         }
 
-        // Set witness coil from conditions (must match fund-time coil for Merkle leaf)
+        // Set witness coil from conditions (must match fund-time coil for Merkle leaf).
+        // For MLSC the witness's coil.output_index must equal the spent vout —
+        // consensus checks this AND uses it when reconstructing my_leaf, so it
+        // must match what was committed at fund time for the rung being revealed.
         if (has_conditions) {
             ladder.coil = conditions.coil;
+            if (is_mlsc) {
+                ladder.coil.output_index = static_cast<uint8_t>(mtx.vin[input_idx].prevout.n);
+            }
         }
 
         auto witness_bytes = rung::SerializeLadderWitness(ladder);
@@ -2457,8 +2482,12 @@ static RPCHelpMan signrungtx()
 
             // TX_MLSC: build all leaves and compute O(log N) Merkle path.
             // Leaf order: [rung_leaf[0..N-1]] (no separate relay/coil leaves in TX_MLSC)
+            // Each rung's coil.output_index must match what was committed at fund time.
+            // For multi-output trees, sibling leaves are bound to other outputs and
+            // must use their original output_index, not the spent vout.
             {
                 std::vector<uint256> all_leaves;
+                uint8_t spent_vout = static_cast<uint8_t>(mtx.vin[input_idx].prevout.n);
                 for (uint16_t r = 0; r < conditions.rungs.size(); ++r) {
                     rung::CreationProofRung cp_rung;
                     for (const auto& block : conditions.rungs[r].blocks) {
@@ -2468,7 +2497,10 @@ static RPCHelpMan signrungtx()
                         });
                     }
                     cp_rung.coil = conditions.coil;
-                    cp_rung.coil.output_index = mtx.vin[input_idx].prevout.n;
+                    uint8_t oi = (r < rung_output_indices2.size() && rung_output_indices2[r] != 0xFF)
+                                     ? rung_output_indices2[r]
+                                     : spent_vout;
+                    cp_rung.coil.output_index = oi;
                     std::vector<std::vector<uint8_t>> rpks;
                     if (r < rung_pubkeys2.size()) rpks = rung_pubkeys2[r];
                     cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
@@ -2480,6 +2512,73 @@ static RPCHelpMan signrungtx()
 
             auto proof_bytes = rung::SerializeMLSCProof(mlsc_proof);
             mtx.vin[input_idx].scriptWitness.stack.push_back(proof_bytes);
+
+            // Auto-tweak detection: when all rungs were single-block SIG with the
+            // same pubkey at fund time, createtxmlsc tweaked the conditions_root
+            // for key-path spending. The verifier then needs the internal_pubkey
+            // as a 3rd witness element to recompute the tweak. Mirror createtxmlsc's
+            // detection logic here so the spend witness is shaped correctly.
+            {
+                uint256 raw_merkle = uint256();
+                {
+                    std::vector<uint256> leaves_for_root;
+                    uint8_t spent_vout = static_cast<uint8_t>(mtx.vin[input_idx].prevout.n);
+                    for (uint16_t r = 0; r < conditions.rungs.size(); ++r) {
+                        rung::CreationProofRung cp_rung;
+                        for (const auto& block : conditions.rungs[r].blocks) {
+                            cp_rung.blocks.push_back({
+                                static_cast<uint16_t>(block.type),
+                                static_cast<uint8_t>(block.inverted ? 1 : 0)
+                            });
+                        }
+                        cp_rung.coil = conditions.coil;
+                        uint8_t oi = (r < rung_output_indices2.size() && rung_output_indices2[r] != 0xFF)
+                                         ? rung_output_indices2[r]
+                                         : spent_vout;
+                        cp_rung.coil.output_index = oi;
+                        std::vector<std::vector<uint8_t>> rpks;
+                        if (r < rung_pubkeys2.size()) rpks = rung_pubkeys2[r];
+                        cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
+                        leaves_for_root.push_back(rung::ComputeTxMLSCLeaf(cp_rung));
+                    }
+                    raw_merkle = rung::BuildMerkleTree(std::move(leaves_for_root));
+                }
+
+                bool all_single_sig = !rung_pubkeys2.empty();
+                std::vector<uint8_t> first_pk;
+                for (size_t r = 0; r < conditions.rungs.size() && all_single_sig; ++r) {
+                    if (conditions.rungs[r].blocks.size() != 1 ||
+                        conditions.rungs[r].blocks[0].type != rung::RungBlockType::SIG) {
+                        all_single_sig = false;
+                        break;
+                    }
+                    if (r < rung_pubkeys2.size() && rung_pubkeys2[r].size() == 1) {
+                        if (first_pk.empty()) {
+                            first_pk = rung_pubkeys2[r][0];
+                        } else if (first_pk != rung_pubkeys2[r][0]) {
+                            all_single_sig = false;
+                            break;
+                        }
+                    } else {
+                        all_single_sig = false;
+                        break;
+                    }
+                }
+
+                if (all_single_sig && !first_pk.empty() && conditions.conditions_root.has_value() &&
+                    *conditions.conditions_root != raw_merkle) {
+                    std::vector<uint8_t> internal_pk = first_pk;
+                    if (internal_pk.size() == 33) {
+                        internal_pk.assign(first_pk.begin() + 1, first_pk.end());
+                    }
+                    if (internal_pk.size() == 32) {
+                        auto tweaked = rung::ComputeTweakedConditionsRoot(internal_pk, raw_merkle);
+                        if (tweaked && tweaked->first == *conditions.conditions_root) {
+                            mtx.vin[input_idx].scriptWitness.stack.push_back(internal_pk);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -3660,7 +3759,6 @@ static RPCHelpMan createtxmlsc()
 
         // Compute value_commitment = SHA256(field_values || pubkeys)
         cp_rung.value_commitment = rung::ComputeValueCommitment(rung, rung_pks);
-
 
         cp_rungs.push_back(std::move(cp_rung));
     }
