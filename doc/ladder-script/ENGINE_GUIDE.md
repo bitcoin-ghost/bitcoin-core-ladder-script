@@ -16,7 +16,7 @@ The engine version string is **GHOST LADDER v2.0**.
 1. Open `tools/ladder-engine/index.html` directly in a browser (file:// works).
 2. For signet features (Send, Spend), either run the ladder-script proxy on
    `http://localhost:8801` or access the hosted version at
-   `https://bitcoinghost.org`.
+   `https://ladder-script.org`.
 
 ### Component architecture
 
@@ -316,7 +316,7 @@ Configured in the output inspector under "Wire Format":
 ## 8. Signet Mode (Send Tab)
 
 The SignetPanel connects to the signet API. The base URL is
-`http://localhost:8801` when running locally, or `https://bitcoinghost.org`
+`http://localhost:8801` when running locally, or `https://ladder-script.org`
 when hosted.
 
 ### API endpoints used

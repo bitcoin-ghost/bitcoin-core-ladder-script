@@ -86,5 +86,5 @@ Interactive HTML pages in [`web/`](web/):
 
 ## Repository
 
-Source: [github.com/bitcoin-ghost/bitcoin-core-ladder-script](https://github.com/bitcoin-ghost/bitcoin-core-ladder-script)
+Source: [github.com/defenwycke/bitcoin-core-ladder-script](https://github.com/defenwycke/bitcoin-core-ladder-script)
 Base: Bitcoin Core v30.0 (`ladder-script` branch)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 The Bitcoin Ghost developers
+# Copyright (c) 2026 The Bitcoin Core developers
+# Copyright (c) 2026 defenwycke
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
 """Functional test for QABIO (Quantum Atomic Batch Input / Output) RPCs.

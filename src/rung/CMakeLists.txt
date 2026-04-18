@@ -1,4 +1,5 @@
-# Copyright (c) 2026 The Ladder Script developers
+# Copyright (c) 2026 The Bitcoin Core developers
+# Copyright (c) 2026 defenwycke
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
 

@@ -1,6 +1,6 @@
 # LADDER SCRIPT — Complete Block Library Reference
 
-**Bitcoin Ghost Project · March 2026 · v1.0 · Not for distribution**
+**Ladder Script · v1.0 · Draft**
 
 ---
 
@@ -756,4 +756,4 @@ All block type enum values. Unrecognised blocks return `UNSATISFIED` — forward
 
 ---
 
-*Ladder Script Block Library Reference v1.0 · Bitcoin Ghost Project · March 2026 · Not for distribution*
+*Ladder Script Block Library Reference v1.0 · Draft*
