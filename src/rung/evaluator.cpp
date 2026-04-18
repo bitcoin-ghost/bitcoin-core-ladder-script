@@ -4198,7 +4198,29 @@ bool VerifyRungTx(const CTransaction& tx,
         return false;
     }
 
+    // ================================================================
+    // Dispatch invariant — defense in depth.
+    //
+    // VerifyRungTx must only ever be called for inputs spending an MLSC
+    // scriptPubKey (0xDF prefix). The actual dispatch lives in
+    // src/validation.cpp (CScriptCheck::operator()), gated by:
+    //   tx.version == RUNG_TX_VERSION && IsMLSCScript(spent_pk)
+    //
+    // That gate makes ladder-vs-taproot witness "mixing" structurally
+    // impossible: P2TR (OP_1 + 32B) and MLSC (0xDF + 32B) have disjoint
+    // scriptPubKey prefixes, so a single input is dispatched to exactly
+    // one parser based on the spent output, never both. The witness
+    // stack is interpreted by the parser the dispatch chose; ladder
+    // bytes never reach the taproot interpreter and vice versa.
+    //
+    // This check is the safety net: if a future refactor changes the
+    // dispatch in validation.cpp, ladder code still refuses to evaluate
+    // a non-MLSC scriptPubKey instead of silently mis-interpreting the
+    // witness as ladder. Do not weaken or remove without auditing
+    // every call site of VerifyRungTx.
+    // ================================================================
     if (!IsMLSCScript(spent_output.scriptPubKey)) {
+        LogPrintf("VerifyRungTx called on non-MLSC scriptPubKey — dispatch invariant violated\n");
         if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
         return false;
     }

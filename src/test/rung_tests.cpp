@@ -12381,6 +12381,49 @@ BOOST_AUTO_TEST_CASE(value_commitment_pubkey_binding)
     BOOST_CHECK(ComputeTxMLSCLeaf(cp1) != ComputeTxMLSCLeaf(cp2));
 }
 
+// Dispatch invariant: VerifyRungTx must reject any spent output that is not
+// an MLSC scriptPubKey, even if the witness "looks like" a ladder spend.
+// The real dispatch in src/validation.cpp already prevents this branch from
+// being reached, but this test pins the safety net in evaluator.cpp so a
+// future refactor cannot accidentally let ladder code interpret a
+// non-MLSC output. See the long comment above the IsMLSCScript check
+// in VerifyRungTx for context.
+BOOST_AUTO_TEST_CASE(verify_rung_tx_rejects_non_mlsc_spent_output)
+{
+    auto pk = MakePubkey();
+
+    // Build a tx that LOOKS like a ladder key-path spend (1-element witness
+    // containing a 64-byte signature). For a real MLSC output this is the
+    // valid key-path shape — it's only invalid because the spent output
+    // here is a P2TR scriptPubKey, not MLSC.
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    CTxIn input;
+    input.prevout = COutPoint(Txid::FromUint256(uint256::ONE), 0);
+    input.scriptWitness.stack.push_back(MakeSignature(64));
+    mtx.vin.push_back(input);
+    mtx.vout.push_back(CTxOut(50000, CScript() << OP_RETURN));
+
+    // P2TR-shaped scriptPubKey: OP_1 + 32-byte x-only pubkey. Disjoint from
+    // MLSC (0xDF + 32-byte root) at the very first byte.
+    CTxOut spent_out;
+    spent_out.nValue = 100000;
+    spent_out.scriptPubKey = CScript() << OP_1 << ToByteVector(pk);
+    BOOST_REQUIRE(!rung::IsMLSCScript(spent_out.scriptPubKey));
+
+    CTransaction tx(mtx);
+    PrecomputedTransactionData txdata;
+    txdata.Init(mtx, std::vector<CTxOut>{spent_out});
+
+    MockSignatureChecker checker;
+    ScriptError serror{SCRIPT_ERR_OK};
+    BOOST_CHECK(!VerifyRungTx(tx, 0, spent_out, 0, checker, txdata, &serror));
+    // Specific error doesn't matter (this branch is "shouldn't be reached"),
+    // but the ladder evaluator must NOT have parsed the witness as a valid
+    // spend. Anything other than SCRIPT_ERR_OK demonstrates the safety net.
+    BOOST_CHECK(serror != SCRIPT_ERR_OK);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 // ============================================================================
