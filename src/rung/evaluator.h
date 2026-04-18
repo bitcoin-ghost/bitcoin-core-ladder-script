@@ -296,13 +296,6 @@ uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index);
 /** Rung verification flags (use high bits to avoid collision with SCRIPT_VERIFY_* flags). */
 static constexpr unsigned int RUNG_VERIFY_MLSC_ONLY = (1U << 28); //!< Reject 0xC1 inline conditions (mainnet)
 
-/** Per-output format check: every vout must be MLSC, at most one
- *  DATA_RETURN, and every non-DATA_RETURN output meets the dust
- *  threshold. Called from CheckRungTxLevel (once per v4 tx) and
- *  indirectly from the recursive covenant evaluators
- *  (RECURSE_SAME / RECURSE_MODIFIED / RECURSE_DECAY). */
-bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string& error);
-
 /** Cache entry for same-source proof sharing. */
 struct SharedTreeEntry {
     uint256 root;                   //!< Verified conditions_root
@@ -326,8 +319,11 @@ using SharedTreeCache = std::map<Txid, SharedTreeEntry>;
  *   - Per-tx PREIMAGE/SCRIPT_BODY field count limit
  *
  *  Returns true on success. On failure, populates `error` with a human
- *  readable reason; caller maps to SCRIPT_ERR_UNKNOWN_ERROR or similar. */
-bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& error);
+ *  readable reason; caller maps to SCRIPT_ERR_UNKNOWN_ERROR or similar.
+ *
+ *  Declared in rung/api.h (adapter-typed; rung::api::CheckRungTxLevel /
+ *  rung::api::ValidateRungOutputs). CTransaction-taking wrappers live in
+ *  rung_shims.h and forward via LadderTxViewBuilder. */
 
 /** Top-level verification entry point for v4 RUNG_TX transactions.
  *  TX_MLSC: validates creation proof, verifies spend proof against shared tree,

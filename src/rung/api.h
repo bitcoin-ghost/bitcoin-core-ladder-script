@@ -458,6 +458,16 @@ bool CheckRungTxLevel(
     uint32_t flags,
     std::string& error_out);
 
+// Per-output format check: every vout must be MLSC, at most one
+// DATA_RETURN, and every non-DATA_RETURN output meets the dust
+// threshold. Called from CheckRungTxLevel (once per v4 tx) and
+// indirectly from the recursive covenant evaluators
+// (RECURSE_SAME / RECURSE_MODIFIED / RECURSE_DECAY).
+bool ValidateRungOutputs(
+    const LadderTxView& tx,
+    uint32_t flags,
+    std::string& error_out);
+
 // Is this scriptPubKey an MLSC output of any form (compact, full, or with
 // DATA_RETURN suffix)? Dispatch predicate — used by Core's CScriptCheck
 // to decide whether to route to VerifyRungTx or VerifyScript.

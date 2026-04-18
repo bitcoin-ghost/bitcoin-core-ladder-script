@@ -4024,12 +4024,15 @@ static bool ResolveWitnessReference(LadderWitness& witness,
 }
 
 
-bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string& error)
+namespace api {
+
+bool ValidateRungOutputs(const LadderTxView& tx, uint32_t /*flags*/, std::string& error)
 {
     size_t data_return_count = 0;
 
-    for (size_t i = 0; i < tx.vout.size(); ++i) {
-        const auto& spk = tx.vout[i].scriptPubKey;
+    for (size_t i = 0; i < tx.output_count; ++i) {
+        const auto spk = tx.outputs[i].script_pub_key.as_span();
+        const int64_t value = tx.outputs[i].value;
 
         // MLSC output: 0xDF + 32 bytes (+ optional DATA_RETURN payload)
         if (IsMLSCScript(spk)) {
@@ -4037,16 +4040,16 @@ bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string
             if (HasMLSCData(spk)) {
                 data_return_count++;
                 // Must be zero-value (unspendable)
-                if (tx.vout[i].nValue != 0) {
+                if (value != 0) {
                     error = "output " + std::to_string(i) + ": DATA_RETURN output must have zero value";
                     return false;
                 }
             } else {
                 // Consensus dust threshold: non-DATA_RETURN outputs must carry
                 // minimum value to prevent UTXO set bloat and cheap spam.
-                if (tx.vout[i].nValue < MIN_RUNG_OUTPUT_VALUE) {
+                if (value < MIN_RUNG_OUTPUT_VALUE) {
                     error = "output " + std::to_string(i) + ": value " +
-                            std::to_string(tx.vout[i].nValue) + " below minimum " +
+                            std::to_string(value) + " below minimum " +
                             std::to_string(MIN_RUNG_OUTPUT_VALUE);
                     return false;
                 }
@@ -4068,6 +4071,8 @@ bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string
 
     return true;
 }
+
+} // namespace api
 
 /** Extract pubkeys from witness blocks positionally (merkle_pub_key).
  *  Walks blocks left-to-right, collecting PUBKEY fields based on
@@ -4124,23 +4129,28 @@ static size_t CountWitnessPreimageFields(const LadderWitness& lw)
 
 /** Count PREIMAGE/SCRIPT_BODY fields across ALL inputs in a transaction.
  *  Deserializes each input's witness once. O(N) in total inputs. */
-static size_t CountTxPreimageFields(const CTransaction& tx)
+static size_t CountTxPreimageFields(const LadderTxView& tx)
 {
     size_t total = 0;
-    for (size_t i = 0; i < tx.vin.size(); ++i) {
-        const auto& witness = tx.vin[i].scriptWitness;
-        if (witness.stack.size() < 2 || witness.stack.size() > 3) continue;
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
 
         LadderWitness lw;
         std::string err;
-        if (!DeserializeLadderWitness(witness.stack[0], lw, err)) continue;
+        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
 
         total += CountWitnessPreimageFields(lw);
     }
     return total;
 }
 
-bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& error)
+namespace api {
+
+bool CheckRungTxLevel(const LadderTxView& tx, uint32_t flags, std::string& error)
 {
     // Consensus: validate all outputs are valid Ladder Script format.
     // Ensures only MLSC (0xDF) outputs, max 1 DATA_RETURN, dust threshold.
@@ -4156,6 +4166,8 @@ bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& e
 
     return true;
 }
+
+} // namespace api
 
 bool VerifyRungTx(const CTransaction& tx,
                   unsigned int nIn,
@@ -4182,7 +4194,8 @@ bool VerifyRungTx(const CTransaction& tx,
     // is redundant (but harmless) when CheckRungTxLevel has already run.
     if (nIn == 0) {
         std::string tx_error;
-        if (!CheckRungTxLevel(tx, flags, tx_error)) {
+        LadderTxViewBuilder tx_view_builder(tx);
+        if (!api::CheckRungTxLevel(tx_view_builder.view, flags, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
             if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
             return false;
