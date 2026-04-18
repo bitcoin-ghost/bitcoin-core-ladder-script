@@ -16,6 +16,43 @@
  * form).
  */
 
+/*
+ * MLSC UTXO invariant (Ladder Script, TX_MLSC / RUNG_TX v4)
+ * ---------------------------------------------------------
+ * Special script type 0x06 compresses a 33-byte MLSC scriptPubKey
+ * (`0xDF || conditions_root[32]`) down to a single-byte marker. The
+ * 32-byte `conditions_root` is NOT stored in the per-coin UTXO
+ * record; it is recovered at spend time from the CREATING transaction
+ * via the block database, where it appears once per transaction as a
+ * TX_MLSC field (the `0xFFFFFFFF` sentinel vout in the on-disk
+ * format). This deduplicates the root across all outputs of the same
+ * TX_MLSC transaction and drops per-output UTXO cost from ~48 bytes
+ * to ~8 bytes, which is the load-bearing economy behind the whole
+ * MLSC design.
+ *
+ * Consequence — NOT self-contained: v4 UTXOs cannot be validated
+ * without access to the creating block. Any validation path that
+ * treats UTXOs as self-describing is incorrect for v4:
+ *
+ *   - `assumeutxo` / snapshot loading MUST carry or reconstruct the
+ *     conditions_root for every MLSC UTXO in the snapshot, or reject
+ *     snapshots that include any MLSC UTXO.
+ *   - Stateless / library-style script verifiers MUST be supplied the
+ *     conditions_root via an explicit accessor — see libladder's
+ *     fetch_conditions_root callback (the one piece of state that
+ *     prevents libladder from being pure byte-in / byte-out, analogous
+ *     to how libsecp256k1 takes a SigVersion).
+ *   - Pruned nodes keep the creating tx's block indefinitely for every
+ *     unspent MLSC UTXO, via the standard undo-data retention path.
+ *     This already works, but it is load-bearing — do not prune around
+ *     MLSC roots without replacing the access path.
+ *
+ * If you change UTXO layout, compression, or recovery semantics for
+ * type 0x06, you MUST preserve this access path. Breaking it is a
+ * silent consensus divergence: nodes that can recover the root
+ * accept spends that nodes that cannot recover it will reject.
+ */
+
 static bool IsToKeyID(const CScript& script, CKeyID &hash)
 {
     if (script.size() == 25 && script[0] == OP_DUP && script[1] == OP_HASH160
