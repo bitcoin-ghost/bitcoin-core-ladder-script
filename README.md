@@ -1,3 +1,32 @@
+Bitcoin Core (Ladder Script fork)
+=================================
+
+This is a Bitcoin Core v30.0 fork that adds **Ladder Script**, a typed
+transaction condition format. The fork lives on the `ladder-script` branch.
+The `master` branch tracks upstream Bitcoin Core unchanged.
+
+- **Live signet, engine, playground, block reference, full docs:** https://ladder-script.org
+- **Spec and design docs in this repository:** [`doc/ladder-script/`](doc/ladder-script/)
+- **BIP wireframe:** [`doc/ladder-script/BIP-XXXX.md`](doc/ladder-script/BIP-XXXX.md) (pre-draft — see file for status)
+- **Tools, engine source, website:** [github.com/defenwycke/bitcoin-ladder-script](https://github.com/defenwycke/bitcoin-ladder-script)
+
+Ladder Script-specific code lives under [`src/rung/`](src/rung/) and is
+being extracted into a standalone `libladder` library so the rest of the
+fork carries only thin integration shims. Functional tests are at
+[`test/functional/feature_rung_*.py`](test/functional/) and
+[`test/functional/feature_qabi.py`](test/functional/feature_qabi.py).
+
+Branches other than `ladder-script` (e.g. `feature/buds`, `feature/exorcism`,
+`feature/reaper`, `feature/shroud`) are unrelated experiments on vanilla
+v30.0 and are not part of this project.
+
+This is **research-stage** protocol work on a private signet — not for
+mainnet, not for real money.
+
+The remainder of this README is the upstream Bitcoin Core text.
+
+---
+
 Bitcoin Core integration/staging tree
 =====================================
 
