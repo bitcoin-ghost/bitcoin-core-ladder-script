@@ -4,6 +4,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <rung/conditions.h>
+#include <rung_shims.h>
 #include <rung/descriptor.h>
 #include <rung/evaluator.h>
 #include <rung/policy.h>

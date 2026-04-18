@@ -14,6 +14,7 @@
 #include <policy/feerate.h>
 #include <primitives/transaction.h>
 #include <rung/conditions.h>
+#include <rung_shims.h>
 #include <rung/policy.h>
 #include <script/interpreter.h>
 #include <script/script.h>

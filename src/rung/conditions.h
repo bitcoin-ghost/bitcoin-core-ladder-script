@@ -6,12 +6,13 @@
 #ifndef BITCOIN_RUNG_CONDITIONS_H
 #define BITCOIN_RUNG_CONDITIONS_H
 
+#include <rung/api.h>
 #include <rung/types.h>
-#include <script/script.h>
 #include <uint256.h>
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -70,9 +71,13 @@ struct RungConditions {
 
 // 0xC1 inline-conditions stubs — always reject. Used only by the
 // regression tests in rung_tests that pin "0xC1 is rejected everywhere".
-bool IsRungConditionsScript(const CScript& scriptPubKey);
-bool DeserializeRungConditions(const CScript& scriptPubKey, RungConditions& out, std::string& error);
-CScript SerializeRungConditions(const RungConditions& conditions);
+// These + the MLSC predicates below live in rung::api to match api.h.
+// Library-internal code can `using namespace rung::api;` at file scope.
+namespace api {
+bool IsRungConditionsScript(std::span<const uint8_t> script_pub_key);
+bool DeserializeRungConditions(std::span<const uint8_t> script_pub_key, RungConditions& out, std::string& error);
+std::vector<uint8_t> SerializeRungConditions(const RungConditions& conditions);
+}  // namespace api
 
 /** Resolve a template reference: copy conditions from the referenced input
  *  and apply field-level diffs.
@@ -97,34 +102,38 @@ inline bool IsConditionFieldType(RungDataType type) { return IsConditionDataType
 // MLSC (Merkelized Ladder Script Conditions)
 // ============================================================================
 
+namespace api {
+
 /** Check if scriptPubKey is an MLSC output (0xDF prefix).
  *  Accepts both full (33+ bytes: 0xDF + root) and compact (1 byte: 0xDF only, from UTXO decompression). */
-bool IsMLSCScript(const CScript& scriptPubKey);
+bool IsMLSCScript(std::span<const uint8_t> script_pub_key);
 
 /** Check if scriptPubKey is a Ladder Script output (MLSC 0xDF). */
-bool IsLadderScript(const CScript& scriptPubKey);
+bool IsLadderScript(std::span<const uint8_t> script_pub_key);
 
 /** Check if this is a compact MLSC scriptPubKey (1 byte, root not embedded).
  *  The conditions_root must be recovered from the creating transaction. */
-bool IsCompactMLSC(const CScript& scriptPubKey);
+bool IsCompactMLSC(std::span<const uint8_t> script_pub_key);
 
 /** Extract the 32-byte conditions root from a full MLSC scriptPubKey.
  *  Returns false for compact (1-byte) MLSC — use block database lookup instead. */
-bool GetMLSCRoot(const CScript& scriptPubKey, uint256& root_out);
+bool GetMLSCRoot(std::span<const uint8_t> script_pub_key, uint256& root_out);
 
 /** Extract the DATA_RETURN payload from an MLSC scriptPubKey (bytes after the root).
  *  Returns empty vector if no data is appended (standard 33-byte MLSC). */
-std::vector<uint8_t> GetMLSCData(const CScript& scriptPubKey);
+std::vector<uint8_t> GetMLSCData(std::span<const uint8_t> script_pub_key);
 
 /** Check if an MLSC scriptPubKey has a DATA_RETURN payload appended. */
-bool HasMLSCData(const CScript& scriptPubKey);
+bool HasMLSCData(std::span<const uint8_t> script_pub_key);
 
-/** Create an MLSC scriptPubKey: 0xDF + conditions_root. */
-CScript CreateMLSCScript(const uint256& conditions_root);
+/** Create an MLSC scriptPubKey: 0xDF + conditions_root. Returns raw bytes. */
+std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root);
 
 /** Create an MLSC scriptPubKey with DATA_RETURN payload: 0xDF + conditions_root + data.
- *  Data must be 1-80 bytes. */
-CScript CreateMLSCScript(const uint256& conditions_root, const std::vector<uint8_t>& data);
+ *  Data must be 1-80 bytes. Returns raw bytes. */
+std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root, const std::vector<uint8_t>& data);
+
+}  // namespace api
 
 /** Compute the SHA256 leaf hash for a single rung (blocks + relay_refs + pubkeys).
  *  merkle_pub_key: pubkeys are appended to the leaf in positional order,

@@ -42,22 +42,25 @@ bool IsConditionDataType(RungDataType type)
 }
 
 // 0xC1 inline-conditions stubs — always reject. See conditions.h.
+namespace api {
 
-bool IsRungConditionsScript(const CScript&)
+bool IsRungConditionsScript(std::span<const uint8_t>)
 {
     return false;
 }
 
-bool DeserializeRungConditions(const CScript&, RungConditions&, std::string& error)
+bool DeserializeRungConditions(std::span<const uint8_t>, RungConditions&, std::string& error)
 {
     error = "inline conditions (0xC1) not supported — use MLSC (0xDF)";
     return false;
 }
 
-CScript SerializeRungConditions(const RungConditions&)
+std::vector<uint8_t> SerializeRungConditions(const RungConditions&)
 {
-    return CScript();
+    return {};
 }
+
+}  // namespace api
 
 bool ResolveTemplateReference(RungConditions& conditions,
                               const std::vector<RungConditions>& all_conditions,
@@ -176,64 +179,68 @@ static uint256 ComputeEmptyLeaf()
 
 const uint256 MLSC_EMPTY_LEAF = ComputeEmptyLeaf();
 
-bool IsMLSCScript(const CScript& scriptPubKey)
+namespace api {
+
+bool IsMLSCScript(std::span<const uint8_t> script_pub_key)
 {
     // 1 byte = compact MLSC from UTXO decompression (0xDF only, root recovered at spend time)
     // 33 bytes = full MLSC (0xDF + 32-byte root)
     // 34-73 bytes = MLSC with DATA_RETURN payload (max 40 bytes data)
     // Sizes 2-32 are invalid (not compact, not full)
-    if (scriptPubKey.empty() || scriptPubKey[0] != RUNG_MLSC_PREFIX) return false;
-    return scriptPubKey.size() == 1 || (scriptPubKey.size() >= 33 && scriptPubKey.size() <= 73);
+    if (script_pub_key.empty() || script_pub_key[0] != RUNG_MLSC_PREFIX) return false;
+    return script_pub_key.size() == 1 || (script_pub_key.size() >= 33 && script_pub_key.size() <= 73);
 }
 
-bool IsLadderScript(const CScript& scriptPubKey)
+bool IsLadderScript(std::span<const uint8_t> script_pub_key)
 {
-    return IsMLSCScript(scriptPubKey);
+    return IsMLSCScript(script_pub_key);
 }
 
 /** Check if this is a compact MLSC scriptPubKey (1-byte, root not embedded).
  *  The conditions_root must be recovered from the creating transaction. */
-bool IsCompactMLSC(const CScript& scriptPubKey)
+bool IsCompactMLSC(std::span<const uint8_t> script_pub_key)
 {
-    return scriptPubKey.size() == 1 && scriptPubKey[0] == RUNG_MLSC_PREFIX;
+    return script_pub_key.size() == 1 && script_pub_key[0] == RUNG_MLSC_PREFIX;
 }
 
-bool GetMLSCRoot(const CScript& scriptPubKey, uint256& root_out)
+bool GetMLSCRoot(std::span<const uint8_t> script_pub_key, uint256& root_out)
 {
-    if (scriptPubKey.size() < 33 || scriptPubKey[0] != RUNG_MLSC_PREFIX) return false;
-    memcpy(root_out.data(), scriptPubKey.data() + 1, 32);
+    if (script_pub_key.size() < 33 || script_pub_key[0] != RUNG_MLSC_PREFIX) return false;
+    memcpy(root_out.data(), script_pub_key.data() + 1, 32);
     return true;
 }
 
-std::vector<uint8_t> GetMLSCData(const CScript& scriptPubKey)
+std::vector<uint8_t> GetMLSCData(std::span<const uint8_t> script_pub_key)
 {
-    if (!IsMLSCScript(scriptPubKey) || scriptPubKey.size() <= 33) {
+    if (!IsMLSCScript(script_pub_key) || script_pub_key.size() <= 33) {
         return {};
     }
-    return std::vector<uint8_t>(scriptPubKey.begin() + 33, scriptPubKey.end());
+    return std::vector<uint8_t>(script_pub_key.begin() + 33, script_pub_key.end());
 }
 
-bool HasMLSCData(const CScript& scriptPubKey)
+bool HasMLSCData(std::span<const uint8_t> script_pub_key)
 {
-    return IsMLSCScript(scriptPubKey) && scriptPubKey.size() > 33;
+    return IsMLSCScript(script_pub_key) && script_pub_key.size() > 33;
 }
 
-CScript CreateMLSCScript(const uint256& conditions_root)
+std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root)
 {
-    CScript result;
+    std::vector<uint8_t> result;
     result.push_back(RUNG_MLSC_PREFIX);
     result.insert(result.end(), conditions_root.begin(), conditions_root.end());
     return result;
 }
 
-CScript CreateMLSCScript(const uint256& conditions_root, const std::vector<uint8_t>& data)
+std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root, const std::vector<uint8_t>& data)
 {
-    CScript result;
+    std::vector<uint8_t> result;
     result.push_back(RUNG_MLSC_PREFIX);
     result.insert(result.end(), conditions_root.begin(), conditions_root.end());
     result.insert(result.end(), data.begin(), data.end());
     return result;
 }
+
+}  // namespace api
 
 uint256 ComputeRungLeaf(const Rung& rung,
                          const std::vector<std::vector<uint8_t>>& pubkeys)

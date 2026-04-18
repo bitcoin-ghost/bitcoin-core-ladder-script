@@ -42,6 +42,7 @@
 #include <primitives/block.h>
 #include <rung/evaluator.h>
 #include <rung/conditions.h>
+#include <rung_shims.h>
 #include <rung/policy.h>
 #include <primitives/transaction.h>
 #include <random.h>

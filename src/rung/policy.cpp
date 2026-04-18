@@ -18,6 +18,7 @@
 #include <string>
 
 namespace rung {
+using namespace api;  // Bring libladder public API (span-based) into file scope
 
 bool IsBaseBlockType(uint16_t block_type)
 {

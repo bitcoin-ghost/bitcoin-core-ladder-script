@@ -10,6 +10,7 @@
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <rung/conditions.h>
+#include <rung_shims.h>
 #include <core_io.h>
 #include <kernel/mempool_entry.h>
 #include <net_processing.h>

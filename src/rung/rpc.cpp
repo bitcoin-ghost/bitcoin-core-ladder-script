@@ -13,6 +13,7 @@
 #include <rung/serialize.h>
 #include <rung/sighash.h>
 #include <rung/types.h>
+#include <rung_shims.h>  // transitional: rpc.cpp will move to src/rpc/ladder.cpp in Phase F
 
 #include <core_io.h>
 #include <node/context.h>

@@ -26,6 +26,7 @@
 #include <optional>
 
 namespace rung {
+using namespace api;  // Bring libladder public API (span-based) into file scope
 
 bool LadderSignatureChecker::CheckSchnorrSignature(std::span<const unsigned char> sig,
                                                     std::span<const unsigned char> pubkey_in,

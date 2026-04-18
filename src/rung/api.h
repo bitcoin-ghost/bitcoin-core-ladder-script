@@ -51,6 +51,11 @@
 #include <span>
 #include <string>
 
+// Forward declaration: RungField is library-internal (rung/types.h).
+// Appears in LadderBlockDescriptor callbacks because those fire inside
+// the library after deserialisation. Hosts never construct RungField.
+namespace rung { struct RungField; }
+
 namespace rung::api {
 
 // ============================================================================
@@ -277,14 +282,11 @@ public:
 // the memory. Created once per transaction / block by the host, passed
 // through each per-input VerifyRungTx call, destroyed at the end.
 
-struct SharedTreeCache;   // opaque
-struct QABOSigCache;      // opaque
-
-SharedTreeCache* ladder_shared_tree_cache_new();
-void ladder_shared_tree_cache_free(SharedTreeCache* c);
-
-QABOSigCache* ladder_qabo_sig_cache_new();
-void ladder_qabo_sig_cache_free(QABOSigCache* c);
+// Caches: currently library-internal std::map<Txid, ...> aliases defined
+// in rung/evaluator.h. Converting them to genuine opaque handles (so api.h
+// is independent of uint256/Txid/Core types) is deferred to a later phase
+// — see libladder-extraction-notes.md for the interim representation.
+// For now, callers pass pointers to the library-internal types directly.
 
 // ============================================================================
 // Section 6: evaluation context
@@ -298,8 +300,11 @@ struct LadderEvalContext {
     const LadderSigChecker* sig_checker{nullptr};
     const LadderBlockAccessor* block_accessor{nullptr};
 
-    SharedTreeCache* shared_tree_cache{nullptr};
-    QABOSigCache* qabo_sig_cache{nullptr};
+    // Caches — see note in Section 5. Typed as void* in api.h for now;
+    // library-internal code casts back to rung::SharedTreeCache* /
+    // rung::QABOSigCache*. A later phase will make these truly opaque.
+    void* shared_tree_cache{nullptr};
+    void* qabo_sig_cache{nullptr};
 };
 
 // ============================================================================
@@ -329,9 +334,10 @@ struct LadderEvalContext {
 // CMakeLists.txt entry — disabling them is a build error, not a silent
 // reduction.
 
-// Forward declarations of library-internal types used in block descriptors.
-// Definitions live in src/rung/types.h (library-internal header).
-struct RungField;
+// RungField is defined in rung/types.h (library-internal). Forward declared
+// at file scope above. Block eval/validate callbacks receive the parsed
+// RungField form because that's what exists inside the library after
+// deserialisation.
 
 enum class LadderEvalResult : uint8_t {
     SATISFIED,
@@ -340,13 +346,13 @@ enum class LadderEvalResult : uint8_t {
 };
 
 using LadderBlockEvalFn = LadderEvalResult (*)(
-    const RungField* fields,
+    const ::rung::RungField* fields,
     size_t field_count,
     const LadderEvalContext& ctx,
     LadderScriptError* error_out);
 
 using LadderBlockValidateFn = bool (*)(
-    const RungField* fields,
+    const ::rung::RungField* fields,
     size_t field_count,
     LadderScriptError* error_out);
 
