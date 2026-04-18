@@ -201,6 +201,11 @@ struct LadderTxView {
     // cached makes repeated evaluations (same tx, multiple inputs) cheap.
     const uint8_t* txid{nullptr};     // 32 bytes or nullptr
     const uint8_t* wtxid{nullptr};    // 32 bytes or nullptr
+
+    // QABIO extension: the per-tx serialised QABI batch block, if any.
+    // Empty (data=nullptr, size=0) for non-QABIO v4 transactions.
+    const uint8_t* qabi_block{nullptr};
+    size_t qabi_block_size{0};
 };
 
 // ============================================================================

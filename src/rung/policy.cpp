@@ -4,6 +4,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <rung/policy.h>
+#include <rung/api.h>
 #include <rung/conditions.h>
 #include <rung/serialize.h>
 #include <rung/types.h>
@@ -11,9 +12,9 @@
 #include <rung/qabi.h>
 #endif
 
-#include <primitives/transaction.h>
-
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <map>
 #include <string>
 
@@ -112,7 +113,9 @@ bool IsStatefulBlockType(uint16_t block_type)
     }
 }
 
-bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
+namespace api {
+
+bool IsStandardRungTx(const LadderTxView& tx, std::string& reason)
 {
     // All structural validation is enforced at consensus in DeserializeLadderWitness
     // (serialize.cpp) and ValidateRungOutputs (evaluator.cpp). Policy only needs to
@@ -129,9 +132,9 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 
     // Output validation is consensus (ValidateRungOutputs in VerifyRungTx).
     // Run it here too for early mempool rejection.
-    for (size_t i = 0; i < tx.vout.size(); ++i) {
-        const auto& spk = tx.vout[i].scriptPubKey;
-        if (!IsMLSCScript(spk)) {
+    for (size_t i = 0; i < tx.output_count; ++i) {
+        const auto& spk = tx.outputs[i].script_pub_key;
+        if (!IsMLSCScript(spk.as_span())) {
             reason = "rung-non-mlsc-output";
             return false;
         }
@@ -142,7 +145,7 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
     // (256 KB) but standard relay caps at QABI_BLOCK_MAX_SOFT (64 KB) to bound
     // mempool memory and propagation cost. Non-QABIO v4 txs have an empty
     // qabi_block so this check is a no-op for them.
-    if (tx.qabi_block.size() > QABI_BLOCK_MAX_SOFT) {
+    if (tx.qabi_block_size > QABI_BLOCK_MAX_SOFT) {
         reason = "qabi-block-soft-cap";
         return false;
     }
@@ -150,6 +153,8 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 
     return true;
 }
+
+}  // namespace api
 
 // ============================================================================
 // QABI Replace-By-Depth (RBD) mempool policy (BIP-YYYY)
@@ -198,24 +203,29 @@ static bool FindPrimeDepthInLadder(const LadderWitness& ladder, int64_t& depth_o
     return false;
 }
 
-bool ExtractQABIPrimeDepth(const CTransaction& tx,
+namespace api {
+
+bool ExtractQABIPrimeDepth(const LadderTxView& tx,
                             uint32_t input_index,
                             int64_t& depth_out)
 {
-    if (input_index >= tx.vin.size()) return false;
-    const auto& witness = tx.vin[input_index].scriptWitness;
-    if (witness.stack.empty()) return false;
+    if (input_index >= tx.input_count) return false;
+    const auto& witness = tx.inputs[input_index].witness;
+    if (witness.count == 0) return false;
+
+    const auto& first = witness.elements[0];
+    std::vector<uint8_t> buf(first.data, first.data + first.size);
 
     LadderWitness ladder;
     std::string err;
-    if (!DeserializeLadderWitness(witness.stack[0], ladder, err)) return false;
+    if (!DeserializeLadderWitness(buf, ladder, err)) return false;
 
     return FindPrimeDepthInLadder(ladder, depth_out);
 }
 
-bool IsQABIPrimingTx(const CTransaction& tx)
+bool IsQABIPrimingTx(const LadderTxView& tx)
 {
-    for (uint32_t i = 0; i < tx.vin.size(); ++i) {
+    for (uint32_t i = 0; i < tx.input_count; ++i) {
         int64_t dummy;
         if (ExtractQABIPrimeDepth(tx, i, dummy)) {
             return true;
@@ -224,8 +234,8 @@ bool IsQABIPrimingTx(const CTransaction& tx)
     return false;
 }
 
-bool IsValidRBDReplacement(const CTransaction& new_tx,
-                            const CTransaction& old_tx,
+bool IsValidRBDReplacement(const LadderTxView& new_tx,
+                            const LadderTxView& old_tx,
                             std::string& reason)
 {
     // Both must be priming txs.
@@ -238,19 +248,35 @@ bool IsValidRBDReplacement(const CTransaction& new_tx,
         return false;
     }
 
-    // Collect (prevout → prime_depth) for each priming input of the old tx.
-    // We only care about inputs whose witness carries a QABI_PRIME block; a
-    // single tx may mix priming and non-priming inputs (e.g., a coordinator
-    // fee input) but only the QABI_PRIME inputs participate in RBD.
+    // Collect (prevout-as-36-bytes → prime_depth) for each priming input of
+    // the old tx. The map key is an opaque 36-byte blob (32-byte txid + 4-byte
+    // vout LE) built at the boundary so the library never sees COutPoint.
+    struct PrimeKey {
+        std::array<uint8_t, 36> bytes;
+        bool operator<(const PrimeKey& o) const {
+            return std::memcmp(bytes.data(), o.bytes.data(), 36) < 0;
+        }
+    };
+    auto make_key = [](const LadderOutPoint& op) {
+        PrimeKey k{};
+        std::memcpy(k.bytes.data(), op.txid, 32);
+        // Little-endian vout encoding; order is arbitrary as long as it's
+        // consistent between new_tx and old_tx comparison.
+        for (size_t i = 0; i < 4; ++i) {
+            k.bytes[32 + i] = static_cast<uint8_t>((op.n >> (8 * i)) & 0xff);
+        }
+        return k;
+    };
+
     struct PrimeEntry {
         uint32_t input_idx;
         int64_t depth;
     };
-    std::map<COutPoint, PrimeEntry> old_primes;
-    for (uint32_t i = 0; i < old_tx.vin.size(); ++i) {
+    std::map<PrimeKey, PrimeEntry> old_primes;
+    for (uint32_t i = 0; i < old_tx.input_count; ++i) {
         int64_t d;
         if (ExtractQABIPrimeDepth(old_tx, i, d)) {
-            old_primes.emplace(old_tx.vin[i].prevout, PrimeEntry{i, d});
+            old_primes.emplace(make_key(old_tx.inputs[i].prevout), PrimeEntry{i, d});
         }
     }
     if (old_primes.empty()) {
@@ -261,11 +287,11 @@ bool IsValidRBDReplacement(const CTransaction& new_tx,
     // For every QABI_PRIME input in new_tx that shares a prevout with old_tx,
     // require new_tx.depth > old_tx.depth.
     bool found_shared = false;
-    for (uint32_t i = 0; i < new_tx.vin.size(); ++i) {
+    for (uint32_t i = 0; i < new_tx.input_count; ++i) {
         int64_t new_depth;
         if (!ExtractQABIPrimeDepth(new_tx, i, new_depth)) continue;
 
-        auto it = old_primes.find(new_tx.vin[i].prevout);
+        auto it = old_primes.find(make_key(new_tx.inputs[i].prevout));
         if (it == old_primes.end()) continue;
 
         found_shared = true;
@@ -283,24 +309,30 @@ bool IsValidRBDReplacement(const CTransaction& new_tx,
     return true;
 }
 
+}  // namespace api
+
 #else // !ENABLE_QABIO
+
+namespace api {
 
 // Always-false stubs so validation.cpp RBD checks collapse cleanly when
 // the extension is disabled. No priming tx ever exists from this node's
 // point of view; RBD replacements are never accepted.
-bool ExtractQABIPrimeDepth(const CTransaction& /*tx*/,
+bool ExtractQABIPrimeDepth(const LadderTxView& /*tx*/,
                             uint32_t /*input_index*/,
                             int64_t& /*depth_out*/) { return false; }
 
-bool IsQABIPrimingTx(const CTransaction& /*tx*/) { return false; }
+bool IsQABIPrimingTx(const LadderTxView& /*tx*/) { return false; }
 
-bool IsValidRBDReplacement(const CTransaction& /*new_tx*/,
-                            const CTransaction& /*old_tx*/,
+bool IsValidRBDReplacement(const LadderTxView& /*new_tx*/,
+                            const LadderTxView& /*old_tx*/,
                             std::string& reason)
 {
     reason = "rbd-qabio-disabled";
     return false;
 }
+
+}  // namespace api
 
 #endif // ENABLE_QABIO
 

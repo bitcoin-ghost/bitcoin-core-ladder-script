@@ -6,12 +6,16 @@
 #ifndef BITCOIN_RUNG_POLICY_H
 #define BITCOIN_RUNG_POLICY_H
 
-#include <primitives/transaction.h>
-#include <script/script.h>
+#include <rung/api.h>
 
+#include <cstdint>
 #include <string>
 
 namespace rung {
+
+// Block-type family predicates — plain primitives, no Core types.
+// Not part of rung::api because they're introspection (used by RPC /
+// tooling) rather than consensus-critical.
 
 /** Check whether a block type is a base block (signature, timelock, hash, compound). */
 bool IsBaseBlockType(uint16_t block_type);
@@ -22,12 +26,16 @@ bool IsCovenantBlockType(uint16_t block_type);
 /** Check whether a block type is a recursion or PLC block. */
 bool IsStatefulBlockType(uint16_t block_type);
 
+namespace api {
+
 /** Check whether a v4 RUNG_TX transaction conforms to mempool policy.
  *  Delegates structural validation (MAX_RUNGS=16, MAX_BLOCKS_PER_RUNG=8,
  *  known block types, field size ranges, etc.) to the consensus
  *  deserializer; the extra checks here are: per-output MLSC format, and
  *  the qabi_block soft cap. */
-bool IsStandardRungTx(const CTransaction& tx, std::string& reason);
+bool IsStandardRungTx(const LadderTxView& tx, std::string& reason);
+
+}  // namespace api
 
 /** QABI Replace-By-Depth (RBD) mempool policy.
  *
@@ -47,6 +55,8 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason);
 // conditional compilation — when ENABLE_QABIO is off, IsQABIPrimingTx
 // always returns false and the RBD path is never taken.
 
+namespace api {
+
 /** Extract the prime_depth from the first QABI_PRIME block found in the
  *  witness of the given input. Returns false if the witness cannot be parsed,
  *  the input has no QABI_PRIME block, or the prime_depth field is malformed.
@@ -56,7 +66,7 @@ bool IsStandardRungTx(const CTransaction& tx, std::string& reason);
  *  NUMERIC, prime_preimage PREIMAGE).
  *
  *  When ENABLE_QABIO is off this helper always returns false. */
-bool ExtractQABIPrimeDepth(const CTransaction& tx,
+bool ExtractQABIPrimeDepth(const LadderTxView& tx,
                             uint32_t input_index,
                             int64_t& depth_out);
 
@@ -66,7 +76,7 @@ bool ExtractQABIPrimeDepth(const CTransaction& tx,
  *  When ENABLE_QABIO is off this helper always returns false, which
  *  cleanly disables the Replace-By-Depth mempool path without any
  *  call-site conditional compilation. */
-bool IsQABIPrimingTx(const CTransaction& tx);
+bool IsQABIPrimingTx(const LadderTxView& tx);
 
 /** RBD policy check: return true iff new_tx is a valid Replace-By-Depth
  *  replacement for old_tx.
@@ -79,9 +89,11 @@ bool IsQABIPrimingTx(const CTransaction& tx);
  *
  *  On failure, `reason` is populated with a machine-readable error tag.
  *  When ENABLE_QABIO is off this helper always returns false. */
-bool IsValidRBDReplacement(const CTransaction& new_tx,
-                            const CTransaction& old_tx,
+bool IsValidRBDReplacement(const LadderTxView& new_tx,
+                            const LadderTxView& old_tx,
                             std::string& reason);
+
+}  // namespace api
 
 } // namespace rung
 
