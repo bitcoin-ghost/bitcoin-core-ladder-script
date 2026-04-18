@@ -9,6 +9,7 @@
 #include <rung/qabi.h>
 #include <rung/serialize.h>
 #include <rung/sighash.h>
+#include <rung_shims.h>  // transitional: CTransaction/PrecomputedTransactionData wrappers
 
 #include <consensus/validation.h>
 #include <crypto/sha256.h>

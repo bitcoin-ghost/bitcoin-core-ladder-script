@@ -28,10 +28,13 @@
 #include <rung/api.h>
 #include <rung/conditions.h>
 #include <rung/policy.h>
+#include <rung/sighash.h>
+#include <script/interpreter.h>
 #include <script/script.h>
 #include <uint256.h>
 
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <vector>
@@ -104,7 +107,8 @@ struct LadderTxViewBuilder {
     std::vector<std::vector<rung::api::LadderWitnessElement>> witness_stacks;
     rung::api::LadderTxView view;
 
-    explicit LadderTxViewBuilder(const CTransaction& tx)
+    template <class T>
+    explicit LadderTxViewBuilder(const T& tx)
     {
         input_views.reserve(tx.vin.size());
         output_views.reserve(tx.vout.size());
@@ -135,7 +139,8 @@ struct LadderTxViewBuilder {
             output_views.push_back(ov);
         }
 
-        view.version = tx.version;
+        // CTransaction.version is int32_t; CMutableTransaction.version is int32_t as well.
+        view.version = static_cast<int32_t>(tx.version);
         view.lock_time = tx.nLockTime;
         view.inputs = input_views.data();
         view.input_count = input_views.size();
@@ -177,6 +182,67 @@ inline bool IsValidRBDReplacement(const CTransaction& new_tx, const CTransaction
 {
     LadderTxViewBuilder bn(new_tx), bo(old_tx);
     return rung::api::IsValidRBDReplacement(bn.view, bo.view, reason);
+}
+
+// --- LadderPrecomputedTxData construction ---------------------------------
+//
+// Build a rung::api::LadderPrecomputedTxData from Core's PrecomputedTransactionData
+// + spent CTxOut array. Borrows pointers; lifetime must not exceed the cache +
+// spent-outputs vector that back it.
+struct LadderPrecomputedBuilder {
+    std::vector<rung::api::LadderOutputView> spent_output_views;
+    rung::api::LadderPrecomputedTxData view;
+
+    explicit LadderPrecomputedBuilder(const PrecomputedTransactionData& cache)
+    {
+        if (cache.m_ladder_ready) {
+            view.hash_prevouts_sha256       = cache.m_prevouts_single_hash.begin();
+            view.hash_sequences_sha256      = cache.m_sequences_single_hash.begin();
+            view.hash_outputs_sha256        = cache.m_outputs_single_hash.begin();
+            view.hash_spent_amounts_sha256  = cache.m_spent_amounts_single_hash.begin();
+            view.ladder_ready               = true;
+        }
+        if (cache.m_spent_outputs_ready) {
+            spent_output_views.reserve(cache.m_spent_outputs.size());
+            for (const auto& out : cache.m_spent_outputs) {
+                rung::api::LadderOutputView ov;
+                ov.value = out.nValue;
+                ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+                spent_output_views.push_back(ov);
+            }
+            view.spent_outputs = spent_output_views.data();
+            view.spent_output_count = spent_output_views.size();
+        }
+    }
+};
+
+// --- Sighash shims (CTransaction / CMutableTransaction + PrecomputedTransactionData) -----
+
+template <class T>
+inline bool SignatureHashLadder(const PrecomputedTransactionData& cache,
+                                const T& tx,
+                                unsigned int nIn,
+                                uint8_t hash_type,
+                                const rung::RungConditions& conditions,
+                                uint256& hash_out)
+{
+    LadderTxViewBuilder tvb(tx);
+    LadderPrecomputedBuilder pcb(cache);
+    return rung::api::SignatureHashLadder(pcb.view, tvb.view, nIn, hash_type,
+                                          conditions, hash_out);
+}
+
+template <class T>
+inline bool SignatureHashLadderKeyPath(const PrecomputedTransactionData& cache,
+                                       const T& tx,
+                                       unsigned int nIn,
+                                       uint8_t hash_type,
+                                       uint256& hash_out)
+{
+    LadderTxViewBuilder tvb(tx);
+    LadderPrecomputedBuilder pcb(cache);
+    return rung::api::SignatureHashLadderKeyPath(pcb.view, tvb.view, nIn, hash_type,
+                                                 hash_out);
 }
 
 }  // namespace rung

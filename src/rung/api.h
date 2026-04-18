@@ -226,6 +226,14 @@ struct LadderPrecomputedTxData {
     // Note: ladder sighash does NOT consume hash_spent_scripts_sha256
     // (that is BIP341 territory); the field is omitted here.
     bool ladder_ready{false};  // all four pointers above are valid and computed
+
+    // SIGHASH_ANYONECANPAY sighashes commit to the single spent output
+    // directly, rather than the prevouts/sequences/amounts summaries.
+    // The library needs access to spent outputs for that path.
+    // nullptr + count=0 means no spent outputs available (the library
+    // will refuse ANYONECANPAY sighashes in that case).
+    const LadderOutputView* spent_outputs{nullptr};
+    size_t spent_output_count{0};
 };
 
 // ============================================================================
