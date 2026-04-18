@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HYSTERESIS_VALUE  -- LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">HYSTERESIS_VALUE</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">PLC Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0602 &middot; PLC FAMILY</div>
+  <h1 class="block-title">HYSTERESIS_VALUE</h1>
+  <p class="block-subtitle">UTXO value band check. SATISFIED if the input amount falls within a configurable [low_sats, high_sats] range. Enables value-gated spending paths and tiered authorization policies.</p>
+  <span class="block-family-badge badge-plc">PLC</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="170" viewBox="0 0 620 170">
+      <line x1="20" y1="10" x2="20" y2="160" stroke="#4a4a4a" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="160" stroke="#4a4a4a" stroke-width="3"/>
+      <line x1="20" y1="60" x2="160" y2="60" stroke="#98c379" stroke-width="2"/>
+      <line x1="440" y1="60" x2="600" y2="60" stroke="#98c379" stroke-width="2"/>
+      <rect x="160" y="20" width="280" height="80" rx="2" fill="#2a2a2a" stroke="#98c379" stroke-width="1.5"/>
+      <text x="300" y="38" text-anchor="middle" fill="#98c379" font-family="Share Tech Mono" font-size="13" letter-spacing="2">HYSTERESIS_VALUE</text>
+      <!-- Band visualization -->
+      <line x1="185" y1="75" x2="415" y2="75" stroke="#3a3a3a" stroke-width="1"/>
+      <rect x="220" y="50" width="160" height="30" fill="#1a5c28" stroke="#2979ff" stroke-width="1" rx="1"/>
+      <text x="300" y="69" text-anchor="middle" fill="#3fb950" font-family="IBM Plex Mono" font-size="9">low &le; amount &le; high</text>
+      <rect x="185" y="50" width="35" height="30" fill="#6e1a1a" stroke="#ff4081" stroke-width="1" rx="1"/>
+      <text x="202" y="69" text-anchor="middle" fill="#f85149" font-family="IBM Plex Mono" font-size="7">&lt; low</text>
+      <rect x="380" y="50" width="35" height="30" fill="#6e1a1a" stroke="#ff4081" stroke-width="1" rx="1"/>
+      <text x="397" y="69" text-anchor="middle" fill="#f85149" font-family="IBM Plex Mono" font-size="7">&gt; high</text>
+      <!-- Labels -->
+      <text x="300" y="125" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">input_amount checked against [low_sats, high_sats]</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">high_sats</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Upper bound of the value band (satoshis)</td></tr>
+      <tr><td class="field-name">low_sats</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Lower bound of the value band (satoshis)</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:12px">No witness fields required. Evaluation uses the input amount from the UTXO being spent.</p>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0602</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 8B</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 8B</span>
+      <span class="wire-bytes">Conditions = 24 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0602</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">0</span>
+      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total</span>
+      <span class="wire-total-bytes">28 bytes</span>
+    </div>
+  </div>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">high_sats</span> and <span class="eval-keyword">low_sats</span> from NUMERIC fields</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">input_amount</span> from the UTXO being spent</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If low_sats &le; input_amount &le; high_sats &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (value outside band)</span></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
+      <tr><td>input_amount &lt; low_sats</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>input_amount &gt; high_sats</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>low_sats &le; input_amount &le; high_sats</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-label">Conditions (value band 100,000 - 10,000,000 sats)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"HYSTERESIS_VALUE"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">10000000</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">100000</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">This allows spending only if the UTXO value is between 0.001 BTC and 0.1 BTC. UTXOs outside this range require a different spending path.</p>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Value-Gated Spending Paths</div>
+    <div class="use-case-desc">Different authorization policies for different UTXO sizes. Small amounts use a single signature, while larger amounts require multisig or time-delays, all enforced at the covenant level.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Tiered Authorization</div>
+    <div class="use-case-desc">Organizational spending tiers where petty cash (under threshold) flows freely, mid-range requires manager approval, and large amounts need board authorization  -- each tier a separate ladder rung gated by HYSTERESIS_VALUE.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="hysteresis-fee.html">&larr; HYSTERESIS_FEE</a>
+  <a href="timer-continuous.html">TIMER_CONTINUOUS &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

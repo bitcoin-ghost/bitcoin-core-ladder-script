@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OUTPUT_CHECK — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">OUTPUT_CHECK</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Governance Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0807 &middot; GOVERNANCE FAMILY</div>
+  <h1 class="block-title">OUTPUT_CHECK</h1>
+  <p class="block-subtitle">Per-output value and script constraint. Verifies that a specific output in the spending transaction has a value within bounds and optionally matches a script hash.</p>
+  <span class="block-family-badge badge-governance">Governance</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">output_index</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Index of the output to check</td></tr>
+      <tr><td class="field-name">min_sats</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Minimum output value in satoshis</td></tr>
+      <tr><td class="field-name">max_sats</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Maximum output value in satoshis</td></tr>
+      <tr><td class="field-name">script_hash</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">SHA-256 of expected scriptPubKey (all zeros = skip script check)</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read output_index, min_sats, max_sats from NUMERIC fields, script_hash from HASH256. If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Bounds check: output_index &lt; tx.vout.size(). If out of bounds &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Value check: vout[idx].nValue &ge; min_sats AND &le; max_sats. If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Script check (if hash non-zero): SHA256(vout[idx].scriptPubKey) == script_hash. If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">All checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing fields or invalid parameters</td><td class="r-err">ERROR</td></tr>
+      <tr><td>No transaction context</td><td class="r-err">ERROR</td></tr>
+      <tr><td>min_sats > max_sats</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Output index out of bounds</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Output value out of range</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Script hash mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>All checks pass</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Treasury Governance</div>
+    <div class="use-case-desc">Enforce that treasury spends route a minimum amount to a known address. OUTPUT_CHECK on output 0 ensures the destination script and minimum value match the approved disbursement.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Covenant Enforcement</div>
+    <div class="use-case-desc">Combine with SIG to require that a specific output receives a minimum value. Unlike AMOUNT_LOCK (which checks input/output ratios), OUTPUT_CHECK constrains individual outputs by index.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="accumulator.html">&larr; ACCUMULATOR</a>
+  <a href="p2pk-legacy.html">P2PK_LEGACY &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ladder Script</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f5f5f5;
+  --bg-code: #f0f0f0;
+  --text: #1a1a1a;
+  --text-body: #333333;
+  --text-dim: #666666;
+  --text-light: #999999;
+  --accent: #e67e22;
+  --accent-dark: #d35400;
+  --green: #27ae60;
+  --red: #c0392b;
+  --blue: #2980b9;
+  --border: #e0e0e0;
+  --border-light: #eeeeee;
+}
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
+::selection { background: var(--accent); color: #fff; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* -- HEADER -- */
+.site-header { background: #fff; border-bottom: 1px solid var(--border); padding: 0; }
+.site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { text-decoration: none; color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
+.header-nav { display: flex; gap: 28px; padding-bottom: 0; border-top: 1px solid var(--border-light); padding-top: 10px; padding-bottom: 10px; }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+/* -- MAIN -- */
+.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 48px; }
+
+/* -- SECTIONS -- */
+.section { margin-bottom: 56px; }
+.section-head { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 16px; }
+.section p { margin-bottom: 12px; }
+
+/* -- PROJECT CARD -- */
+.project { display: block; text-decoration: none; color: inherit; background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 28px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: border-color 0.2s, box-shadow 0.2s; cursor: pointer; }
+.project:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,0.12); text-decoration: none; }
+.project-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.project-name { font-size: 18px; font-weight: 700; color: var(--text); }
+.project-status { font-size: 13px; color: var(--green); font-weight: 500; }
+.project-desc { margin-bottom: 16px; }
+.project-stats { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; font-size: 14px; }
+.project-stats .stat-key { color: var(--text-dim); }
+.project-stats .stat-val { color: var(--accent); font-weight: 600; }
+.project-links { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+
+/* -- PROCESS -- */
+.step { display: flex; gap: 16px; margin-bottom: 16px; }
+.step-num { color: var(--accent); font-weight: 700; flex-shrink: 0; width: 24px; }
+.step-title { color: var(--text); font-weight: 600; }
+.step-desc { color: var(--text-dim); margin-top: 4px; }
+
+/* -- FOOTER -- */
+.site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
+.site-footer a { color: var(--text-light); }
+.site-footer a:hover { color: var(--accent); }
+
+@media (max-width: 600px) {
+  .header-top { flex-direction: column; align-items: flex-start; gap: 8px; height: auto; padding: 12px 0; }
+  .header-nav { flex-wrap: wrap; }
+  .project-stats { flex-direction: column; gap: 8px; }
+  .main { padding: 32px 16px 60px; }
+  .site-header-inner { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="index.html" class="header-title">Ladder Script</a>
+      <div class="header-right">
+        
+        <a href="https://github.com/defenwycke/bitcoin-ladder-script" target="_blank" class="gh-icon">
+          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+
+  <h1 class="page-title">Ladder Script</h1>
+  <p class="page-sub">Experimental Bitcoin tools and protocol proposals</p>
+
+  <div class="section">
+    <div class="section-head">About</div>
+    <p>Ladder Script builds, tests, and proposes new ideas for the Bitcoin protocol. Every project starts as working code on signet and graduates to a formal BIP if the design holds up. Labs projects ship with documentation, test suites, and tooling you can run yourself.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-head">Projects</div>
+
+    <a href="tools/ladder-script.html" class="project">
+      <div class="project-header">
+        <span class="project-name">Ladder Script</span>
+        <span class="project-status">Active &mdash; signet testing</span>
+      </div>
+      <div class="project-desc">
+        <p>A typed, structured transaction format for Bitcoin. Replaces opcode-based scripting with a declarative block model. 61 block types across 10 families. Every byte in a witness is typed. Evaluation is deterministic with bounded execution time. Native post-quantum support, covenant recursion, and anti-spam hardening.</p>
+      </div>
+      <div class="project-stats">
+        <span><span class="stat-key">Version </span><span class="stat-val">4</span></span>
+        <span><span class="stat-key">Block types </span><span class="stat-val">61</span></span>
+        <span><span class="stat-key">Unit tests </span><span class="stat-val">480</span></span>
+        <span><span class="stat-key">Functional tests </span><span class="stat-val">60</span></span>
+        <span><span class="stat-key">TLA+ properties </span><span class="stat-val">80</span></span>
+      </div>
+      <div class="project-arrow" style="margin-top:12px;color:var(--accent);font-weight:600;font-size:14px;">Explore project &rarr;</div>
+    </a>
+  </div>
+
+  <div class="section">
+    <div class="section-head">Process</div>
+    <p>Every Labs project follows the same pipeline.</p>
+
+    <div style="margin-top: 24px;">
+      <div class="step">
+        <span class="step-num">1.</span>
+        <div>
+          <div class="step-title">Research and prototype</div>
+          <div class="step-desc">Design the system, write a reference implementation in ghost-core, build comprehensive test coverage. Ship docs alongside code.</div>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">2.</span>
+        <div>
+          <div class="step-title">Signet testing</div>
+          <div class="step-desc">Deploy to Bitcoin signet. Build interactive tools so anyone can construct, inspect, and broadcast test transactions.</div>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">3.</span>
+        <div>
+          <div class="step-title">BIP proposal</div>
+          <div class="step-desc">Write the formal Bitcoin Improvement Proposal with specification, rationale, security analysis, test vectors, and reference implementation.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="site-footer">
+  <a href="index.html">Ladder Script</a> &middot; 
+</footer>
+
+</body>
+</html>

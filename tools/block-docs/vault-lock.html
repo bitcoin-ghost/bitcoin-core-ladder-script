@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAULT_LOCK — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">VAULT_LOCK</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Covenant Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0302 &middot; COVENANT FAMILY</div>
+  <h1 class="block-title">VAULT_LOCK</h1>
+  <p class="block-subtitle">Two-path vault with recovery key and hot key. The recovery key (cold sweep) can sign immediately with no delay. The hot key requires a CSV delay before spending is valid. Combines custody tiering and time-delayed authorization in a single block.</p>
+  <span class="block-family-badge badge-covenant">Covenant</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="210" viewBox="0 0 620 210">
+      <line x1="20" y1="10" x2="20" y2="200" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="200" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="80" x2="140" y2="80" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="460" y1="80" x2="600" y2="80" stroke="#e74c3c" stroke-width="2"/>
+      <rect x="140" y="16" width="320" height="130" rx="2" fill="#f5f5f5" stroke="#e74c3c" stroke-width="1.5"/>
+      <text x="300" y="34" text-anchor="middle" fill="#e74c3c" font-family="Share Tech Mono" font-size="13" letter-spacing="2">VAULT_LOCK</text>
+      <!-- Recovery path -->
+      <rect x="165" y="46" width="130" height="40" rx="1" fill="#c8e6c9" stroke="#2980b9" stroke-width="1"/>
+      <text x="230" y="62" text-anchor="middle" fill="#2ecc71" font-family="IBM Plex Mono" font-size="9">RECOVERY KEY</text>
+      <text x="230" y="78" text-anchor="middle" fill="#2ecc71" font-family="IBM Plex Mono" font-size="8">immediate spend</text>
+      <!-- Hot path -->
+      <rect x="310" y="46" width="130" height="40" rx="1" fill="#ffcdd2" stroke="#e91e63" stroke-width="1"/>
+      <text x="375" y="62" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="9">HOT KEY</text>
+      <text x="375" y="78" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="8">CSV delay required</text>
+      <!-- Divider -->
+      <text x="300" y="68" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="10">|</text>
+      <!-- Delay label -->
+      <rect x="210" y="100" width="180" height="20" rx="1" fill="#e8f5e9" stroke="#b2dfdb" stroke-width="1"/>
+      <text x="300" y="114" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="8">hot_delay (NUMERIC) blocks</text>
+      <!-- Label -->
+      <text x="300" y="180" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">recovery_sig &rarr; instant | hot_sig + CSV(delay) &rarr; delayed</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">hot_delay</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of blocks the hot key path must wait (CSV relative timelock).</td></tr>
+      <tr><td class="field-name">signer_key</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Public key of the signer &mdash; either the recovery key or the hot key. Only the key being used is revealed; the evaluator checks which commitment it matches.</td></tr>
+      <tr><td class="field-name">signature</td><td class="field-type">SIGNATURE</td><td class="field-size">64-65 B</td><td class="field-side-w">Witness</td><td class="field-desc">Signature from the revealed key (recovery or hot).</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0302</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
+      <span class="wire-bytes">Conditions &asymp; 10 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0302</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-segment wire-field-sig">SIGNATURE &middot; 67B</span>
+      <span class="wire-bytes">Witness &asymp; 110 bytes</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total</span>
+      <span class="wire-total-bytes">&asymp; 188 bytes</span>
+    </div>
+  </div>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">recovery_commit</span>, <span class="eval-keyword">hot_commit</span>, <span class="eval-keyword">hot_delay</span> from conditions. Read <span class="eval-keyword">signer_key</span>, <span class="eval-keyword">signature</span> from witness. Any missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Hash <span class="eval-keyword">signer_key</span> and check which commitment it matches (recovery_commit or hot_commit). If neither &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If signer_key matches recovery_commit: verify <span class="eval-keyword">signature</span> against <span class="eval-keyword">signer_key</span>. If valid &rarr; <span class="eval-result-sat">SATISFIED</span> (no delay)</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If signer_key matches hot_commit: verify <span class="eval-keyword">signature</span> against <span class="eval-keyword">signer_key</span>. If valid AND <span class="eval-keyword">CheckSequence(hot_delay)</span> passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Neither path satisfied &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing required fields (pubkeys, signature, delay)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Pubkey does not match its commitment</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Signature invalid for both keys</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Hot key sig valid but CSV delay not met</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Recovery key signature valid</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Hot key sig valid + CSV delay satisfied</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-label">Conditions (recovery + hot key with 144-block delay)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"VAULT_LOCK"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"02aabb...recovery_pubkey..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"03ccdd...hot_pubkey..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
+  ]
+}</pre></div>
+  <div class="json-label" style="margin-top:16px">Witness (hot key spend)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"VAULT_LOCK"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"03ccdd...signer_pubkey..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"value"</span>: <span class="json-str">"3045...signature..."</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">The 144-block delay (~1 day) gives the cold key holder time to detect unauthorized hot key usage and sweep funds using the recovery path before the hot spend confirms.</p>
+</div>
+
+<!-- Example -->
+<div class="doc-section">
+  <div class="section-label">Worked Example</div>
+  <div class="eval-box">
+    <p class="section-text" style="margin-bottom:12px"><strong>Vault with 144-block hot delay</strong></p>
+    <div class="eval-step"><span class="eval-step-text">UTXO locked with VAULT_LOCK: recovery_commit + hot_commit + delay=144</span></div>
+    <div class="eval-step"><span class="eval-step-text"><strong>Scenario A (emergency recovery):</strong> Owner detects compromise, signs with cold key</span></div>
+    <div class="eval-step"><span class="eval-step-text">Signature verifies against recovery key &rarr; <span class="eval-result-sat">SATISFIED</span> immediately</span></div>
+    <div class="eval-step"><span class="eval-step-text"><strong>Scenario B (normal spend):</strong> Hot key signs, tx has nSequence &ge; 144</span></div>
+    <div class="eval-step"><span class="eval-step-text">Signature verifies against hot key, CheckSequence(144) passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text"><strong>Scenario C (premature hot spend):</strong> Hot key signs but only 50 blocks elapsed</span></div>
+    <div class="eval-step"><span class="eval-step-text">Signature valid but CheckSequence(144) fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Bitcoin Vaults</div>
+    <div class="use-case-desc">Traditional vault pattern where day-to-day spending uses the hot key with a mandatory delay, while a cold recovery key can sweep funds immediately if the hot key is compromised. The delay window is the detection-and-response period.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Tiered Custody</div>
+    <div class="use-case-desc">Corporate treasury with an operations key (hot, delayed) and a board-level override key (recovery, instant). The board can intervene during the delay period if an unauthorized transaction is initiated by the operations team.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Emergency Recovery</div>
+    <div class="use-case-desc">Personal cold storage with a hardware wallet as the recovery key and a mobile wallet as the hot key. If the phone is stolen, the hardware wallet can sweep all funds immediately before the attacker's delayed spend confirms.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="ctv.html">&larr; CTV</a>
+  <a href="amount-lock.html">AMOUNT_LOCK &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

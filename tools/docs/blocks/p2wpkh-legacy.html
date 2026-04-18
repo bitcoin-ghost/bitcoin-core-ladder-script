@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2WPKH_LEGACY -- LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">P2WPKH_LEGACY</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Legacy Family</span>
+</div>
+
+<div class="doc-content">
+
+<!-- Title -->
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0904 &middot; LEGACY FAMILY</div>
+  <h1 class="block-title">P2WPKH_LEGACY</h1>
+  <p class="block-subtitle">Legacy P2WPKH (pay-to-witness-pubkey-hash) wrapped as a typed Ladder Script block. Identical evaluation to P2PKH_LEGACY -- HASH160 check + signature verify. Represents the segwit migration path.</p>
+  <span class="block-family-badge" style="color: #00e5ff; border-color: #00e5ff40;">Legacy</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
+</div>
+
+<!-- Ladder Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="150" viewBox="0 0 620 150">
+      <!-- Power rails -->
+      <line x1="20" y1="10" x2="20" y2="140" stroke="#4a4a4a" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="140" stroke="#4a4a4a" stroke-width="3"/>
+      <!-- Wire -->
+      <line x1="20" y1="60" x2="180" y2="60" stroke="#00e5ff" stroke-width="2"/>
+      <line x1="440" y1="60" x2="600" y2="60" stroke="#00e5ff" stroke-width="2"/>
+      <!-- Block body -->
+      <rect x="180" y="20" width="260" height="80" rx="2" fill="#2a2a2a" stroke="#00e5ff" stroke-width="1.5"/>
+      <!-- Block label -->
+      <text x="310" y="38" text-anchor="middle" fill="#00e5ff" font-family="Share Tech Mono" font-size="13" letter-spacing="2">P2WPKH_LEGACY</text>
+      <!-- Internal component -->
+      <rect x="210" y="48" width="200" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
+      <text x="310" y="66" text-anchor="middle" fill="#00e5ff" font-family="IBM Plex Mono" font-size="10" font-weight="600">HASH160 + SIG</text>
+      <!-- Annotation -->
+      <text x="310" y="125" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">Delegates to P2PKH evaluator</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead>
+      <tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="field-name" colspan="5" style="color:#888;font-style:italic;">Public key bound via merkle_pub_key (folded into Merkle leaf hash, not stored in conditions)</td></tr>
+      <tr>
+        <td class="field-name">hash160</td>
+        <td class="field-type">HASH160</td>
+        <td class="field-size">20 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">RIPEMD160(SHA256(pubkey)) commitment. <strong>Node-computed</strong>  -- the user provides PUBKEY and the node computes this field automatically. Raw hash input is rejected.</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32-33 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Public key  -- provided by the user. The node derives HASH160 from this key at creation time. Revealed at spend time.</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64-65 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Signature over the transaction sighash</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+
+  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type" style="min-width:60px">0x0904</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">HASH160 &middot; 20B</span>
+      <span class="wire-bytes">= 26 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text" style="margin-bottom:16px">Witness side (in input witness):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type" style="min-width:60px">0x0904</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">PUBKEY &middot; 33B</span>
+      <span class="wire-segment wire-field-sig" style="min-width:140px">SIGNATURE &middot; 64B</span>
+      <span class="wire-bytes">= 105 bytes</span>
+    </div>
+
+    <div class="wire-total">
+      <span class="wire-total-label">Total (conditions + witness)</span>
+      <span class="wire-total-bytes">131 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text">With rung overhead included. Compressed pubkey (33B) case.</p>
+</div>
+
+<!-- Evaluation Logic -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step">
+      <span class="eval-step-num">1.</span>
+      <span class="eval-step-text">Delegates to P2PKH evaluator.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2.</span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">HASH160</span>(PUBKEY) and compare to committed hash. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">3.</span>
+      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">4.</span>
+      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Result Table -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing HASH160, PUBKEY, or SIGNATURE</td><td class="r-err">ERROR</td></tr>
+      <tr><td>HASH160 wrong size (not 20B)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>HASH160(PUBKEY) != committed hash</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature valid</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON Output -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+
+  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"P2WPKH_LEGACY"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH160"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"89abcd...20 bytes"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"P2WPKH_LEGACY"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e5f6a7...64 bytes"</span> }
+  ]
+}</pre></div>
+</div>
+
+<!-- Notes -->
+<div class="doc-section">
+  <div class="section-label">Notes</div>
+  <ul class="doc-notes">
+    <li>Functionally identical to P2PKH_LEGACY.</li>
+    <li>The HASH160 field is <strong>node-computed</strong>: the user supplies PUBKEY and the node derives the hash commitment automatically. Submitting a raw HASH160 value directly is rejected.</li>
+    <li>Kept as a separate type code to represent the distinct segwit migration path.</li>
+    <li>In Bitcoin, P2WPKH moved witness data outside the transaction body for fee savings. In Ladder Script, the distinction is semantic only.</li>
+  </ul>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+
+  <div class="use-case">
+    <div class="use-case-title">Segwit Migration Path</div>
+    <div class="use-case-desc">Represents the SegWit P2WPKH migration. Identical evaluation to P2PKH_LEGACY.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Witness Discount Compatibility</div>
+    <div class="use-case-desc">Maintains the conceptual distinction from P2PKH for users migrating from segwit outputs.</div>
+  </div>
+</div>
+
+<!-- Nav -->
+<div class="doc-nav">
+  <a href="p2sh-legacy.html">&larr; P2SH_LEGACY</a>
+  <a href="p2wsh-legacy.html">P2WSH_LEGACY &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

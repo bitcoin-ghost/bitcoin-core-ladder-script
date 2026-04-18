@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RECURSE_SPLIT — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">RECURSE_SPLIT</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Recursion Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0405 &middot; RECURSION FAMILY</div>
+  <h1 class="block-title">RECURSE_SPLIT</h1>
+  <p class="block-subtitle">Splitting covenant. Allows a UTXO to split into multiple outputs, each re-encumbered with decremented max_splits. Enforces a minimum per-split value to prevent dust. Total output value must not exceed input. No Tapscript equivalent.</p>
+  <span class="block-family-badge badge-recursion">Recursion</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="700" height="190" viewBox="0 0 700 190">
+      <line x1="20" y1="10" x2="20" y2="180" stroke="#cccccc" stroke-width="3"/>
+      <line x1="680" y1="10" x2="680" y2="180" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="70" x2="120" y2="70" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="580" y1="50" x2="680" y2="50" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="580" y1="90" x2="680" y2="90" stroke="#e74c3c" stroke-width="2"/>
+      <rect x="120" y="20" width="460" height="110" rx="2" fill="#f5f5f5" stroke="#f39c12" stroke-width="1.5"/>
+      <text x="350" y="42" text-anchor="middle" fill="#f39c12" font-family="Share Tech Mono" font-size="13" letter-spacing="2">RECURSE_SPLIT</text>
+      <!-- Formula -->
+      <text x="350" y="64" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="12" font-weight="600">1 input &rarr; N outputs, each SPLIT(max-1)</text>
+      <!-- Detail -->
+      <text x="350" y="82" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="10">each output &ge; min_split_sats</text>
+      <rect x="400" y="92" width="160" height="16" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="480" y="103" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">dust protection enforced</text>
+      <text x="350" y="160" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">Tree-structured splitting &mdash; fan-out with recursive re-encumbrance</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">max_splits</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Remaining split depth (&gt; 0). Each output gets max_splits - 1. When 0, no further splits allowed.</td></tr>
+      <tr><td class="field-name">min_split_sats</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Minimum value in satoshis for each split output. Prevents dust creation.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Wire -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0405</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; max_splits</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; min_split_sats</span>
+      <span class="wire-bytes">Conditions = 14 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0405</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">0</span>
+      <span class="wire-bytes">Witness = 4 bytes</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total</span>
+      <span class="wire-total-bytes">20 bytes</span>
+    </div>
+  </div>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_splits</span> and <span class="eval-keyword">min_split_sats</span> from NUMERIC fields</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If max_splits &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (no further splits allowed)</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">For each output in the spending transaction:</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">&nbsp;&nbsp;Verify output value &ge; <span class="eval-keyword">min_split_sats</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">&nbsp;&nbsp;Verify output carries <span class="eval-keyword">RECURSE_SPLIT(max_splits - 1, min_split_sats)</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Verify total output value &le; input value</span></div>
+    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">All checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">8.</span><span class="eval-step-text">Any check fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Worked Example -->
+<div class="doc-section">
+  <div class="section-label">Worked Example</div>
+  <div class="eval-box">
+    <p class="section-text" style="margin-bottom:12px"><strong>Binary tree split: max_splits=3, min_split_sats=1000</strong></p>
+    <p class="section-text" style="margin-bottom:12px">Input: 100,000 sats with RECURSE_SPLIT(3, 1000).</p>
+    <div class="eval-step"><span class="eval-step-text">Split into 2 outputs: 60,000 and 40,000 sats</span></div>
+    <div class="eval-step"><span class="eval-step-text">60,000 &ge; 1,000 and 40,000 &ge; 1,000 &rarr; dust check passes</span></div>
+    <div class="eval-step"><span class="eval-step-text">Each output carries RECURSE_SPLIT(2, 1000) &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+
+    <p class="section-text" style="margin:16px 0 12px"><strong>Attempt to split below minimum:</strong></p>
+    <div class="eval-step"><span class="eval-step-text">Output of 500 sats &lt; min_split_sats of 1,000 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"RECURSE_SPLIT"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">3</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">1000</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">max_splits=3 allows up to 3 levels of splitting. With binary splits, this produces up to 8 leaf outputs. min_split_sats=1000 prevents dust.</p>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Recursive Payment Splitting</div>
+    <div class="use-case-desc">A single UTXO that can be progressively divided among recipients. Each split creates new covenanted outputs that can themselves be further split, enabling hierarchical payment distribution.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Tree-Structured Payout Schemes</div>
+    <div class="use-case-desc">Organizational payroll or revenue sharing where a root UTXO splits into department budgets, which split into team budgets, which split into individual payouts. The tree depth is bounded by max_splits.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Airdrop Distribution Trees</div>
+    <div class="use-case-desc">Efficient token distribution using a binary tree of splits. A single large UTXO is recursively halved until each leaf output reaches the per-recipient amount, bounded by min_split_sats to prevent uneconomical outputs.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="recurse-count.html">&larr; RECURSE_COUNT</a>
+  <a href="recurse-decay.html">RECURSE_DECAY &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

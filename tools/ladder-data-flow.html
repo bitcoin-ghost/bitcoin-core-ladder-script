@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ladder Script Data Flow — Interactive Visual Aid</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --black: #050505;
+  --darker: #0a0a0a;
+  --gray-900: #111;
+  --gray-800: #1a1a1a;
+  --gray-700: #242424;
+  --gray-600: #333;
+  --gray-500: #4a4a4a;
+  --gray-400: #666;
+  --gray-300: #888;
+  --gray-200: #aaa;
+  --gray-100: #ccc;
+  --white: #f0f0f0;
+  --orange: #f7931a;
+  --orange-light: #ffb347;
+  --amber: #e6a817;
+  --cyan: #00d4ff;
+  --green: #00ff88;
+  --red: #ff4444;
+  --blue: #5b9bd5;
+  --purple: #b55bcd;
+  --teal: #5bc0cd;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--black);
+  color: var(--gray-100);
+  font-family: 'Outfit', system-ui, sans-serif;
+  line-height: 1.5;
+}
+::selection { background: var(--orange); color: var(--black); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--darker); }
+::-webkit-scrollbar-thumb { background: var(--gray-600); border-radius: 3px; }
+
+/* --- NAV --- */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 12px 0;
+  background: rgba(5,5,5,0.95);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--gray-800);
+}
+.nav-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 1400px; margin: 0 auto; padding: 0 24px;
+}
+.logo {
+  display: flex; align-items: center; gap: 12px;
+  text-decoration: none; color: var(--white);
+}
+.logo-text { font-weight: 700; font-size: 18px; }
+.logo-text span { color: var(--orange); }
+.nav-breadcrumb {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--gray-400);
+}
+.nav-breadcrumb a { color: var(--gray-400); text-decoration: none; }
+.nav-breadcrumb a:hover { color: var(--white); }
+.nav-breadcrumb .sep { color: var(--gray-600); }
+.nav-breadcrumb .current { color: var(--orange); }
+
+/* --- CANVAS --- */
+.canvas {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 80px 24px 80px;
+}
+
+/* --- HERO --- */
+.hero {
+  padding: 0 0 24px;
+  border-bottom: 1px solid var(--gray-800);
+  margin-bottom: 32px;
+}
+.hero h1 {
+  font-size: 32px; font-weight: 800;
+  color: var(--white);
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+.hero p { font-size: 15px; color: var(--gray-300); font-weight: 300; line-height: 1.8; }
+
+/* --- TABS --- */
+.tabs {
+  display: flex; gap: 4px;
+  border-bottom: 1px solid var(--gray-800);
+  margin-bottom: 32px;
+}
+.tab {
+  padding: 12px 20px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px; font-weight: 500;
+  color: var(--gray-400);
+  background: none; border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.tab:hover { color: var(--white); }
+.tab.active {
+  color: var(--orange);
+  border-bottom-color: var(--orange);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* --- SECTION LABEL --- */
+.section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: var(--gray-400);
+  margin-bottom: 16px;
+}
+
+/* --- FLOW DIAGRAM --- */
+.flow-container {
+  position: relative;
+  overflow-x: auto;
+  padding: 24px 0;
+}
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 32px;
+  justify-content: center;
+}
+.flow-box {
+  position: relative;
+  min-width: 180px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--gray-700);
+  background: var(--gray-900);
+  cursor: pointer;
+  transition: all 0.3s;
+}
+.flow-box:hover {
+  border-color: var(--gray-500);
+  background: var(--gray-800);
+}
+.flow-box.expanded {
+  border-color: var(--orange);
+}
+.flow-box h3 {
+  font-size: 15px; font-weight: 700;
+  color: var(--white);
+  margin-bottom: 4px;
+}
+.flow-box .subtitle {
+  font-size: 12px;
+  color: var(--gray-400);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.flow-box .detail {
+  display: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gray-700);
+  font-size: 13px;
+  color: var(--gray-200);
+  font-family: 'IBM Plex Mono', monospace;
+  line-height: 1.8;
+}
+.flow-box.expanded .detail { display: block; }
+
+.flow-box.fund { border-color: var(--orange); }
+.flow-box.fund h3 { color: var(--orange); }
+.flow-box.utxo { border-color: var(--green); }
+.flow-box.utxo h3 { color: var(--green); }
+.flow-box.spend { border-color: var(--cyan); }
+.flow-box.spend h3 { color: var(--cyan); }
+.flow-box.verify { border-color: var(--purple); }
+.flow-box.verify h3 { color: var(--purple); }
+
+.flow-arrow {
+  width: 48px;
+  height: 2px;
+  background: var(--gray-600);
+  position: relative;
+  flex-shrink: 0;
+}
+.flow-arrow::after {
+  content: '';
+  position: absolute;
+  right: 0; top: -4px;
+  border: 5px solid transparent;
+  border-left: 7px solid var(--gray-600);
+}
+
+/* --- FIELD --- */
+.field {
+  display: flex; gap: 8px; align-items: baseline;
+  margin-bottom: 2px;
+}
+.field-label {
+  color: var(--gray-400);
+  min-width: 90px;
+  text-align: right;
+}
+.field-value { color: var(--white); }
+.field-value.orange { color: var(--orange); }
+.field-value.green { color: var(--green); }
+.field-value.cyan { color: var(--cyan); }
+.field-value.purple { color: var(--purple); }
+
+/* --- COMPARISON TABLE --- */
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-bottom: 32px;
+}
+.compare-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gray-400);
+  border-bottom: 1px solid var(--gray-700);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.compare-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gray-800);
+  color: var(--gray-200);
+}
+.compare-table tr:hover td {
+  background: var(--gray-900);
+}
+.compare-table .highlight {
+  color: var(--green);
+  font-weight: 600;
+}
+.compare-table .warn {
+  color: var(--red);
+  font-weight: 600;
+}
+.compare-table .channel-label {
+  color: var(--white);
+  font-weight: 500;
+}
+
+/* --- BAR CHART --- */
+.bar-chart {
+  margin: 32px 0;
+  padding: 24px;
+  background: var(--gray-900);
+  border: 1px solid var(--gray-800);
+  border-radius: 12px;
+}
+.bar-chart h4 {
+  font-size: 14px; font-weight: 600;
+  color: var(--white);
+  margin-bottom: 20px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.bar-label {
+  min-width: 120px;
+  font-size: 13px;
+  color: var(--gray-300);
+  text-align: right;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.bar-track {
+  flex: 1;
+  height: 24px;
+  background: var(--gray-800);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.8s ease-out;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--black);
+  white-space: nowrap;
+}
+.bar-fill.green { background: var(--green); }
+.bar-fill.red { background: var(--red); }
+.bar-fill.orange { background: var(--orange); }
+
+/* --- MERKLE TREE --- */
+.merkle-container {
+  position: relative;
+  padding: 24px 0;
+}
+.merkle-controls {
+  display: flex; gap: 8px;
+  margin-bottom: 24px;
+}
+.merkle-btn {
+  padding: 8px 16px;
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 13px; font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--gray-600);
+  background: var(--gray-800);
+  color: var(--white);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.merkle-btn:hover { background: var(--gray-700); border-color: var(--gray-500); }
+.merkle-btn.active { background: var(--orange); color: var(--black); border-color: var(--orange); }
+.merkle-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.merkle-svg {
+  width: 100%;
+  min-height: 400px;
+}
+
+.merkle-step-info {
+  margin-top: 16px;
+  padding: 16px 20px;
+  background: var(--gray-900);
+  border: 1px solid var(--gray-800);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--gray-200);
+  line-height: 1.7;
+}
+.merkle-step-info code {
+  font-family: 'Geist Mono', monospace;
+  color: var(--cyan);
+  font-size: 13px;
+}
+
+/* --- COVENANT FLOW --- */
+.covenant-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--gray-900);
+  border: 1px solid var(--gray-800);
+  border-radius: 8px;
+}
+.covenant-step {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.covenant-step.active { background: var(--orange); color: var(--black); }
+.covenant-step.pending { background: var(--gray-700); color: var(--gray-400); }
+.covenant-step.done { background: var(--green); color: var(--black); }
+.covenant-desc {
+  flex: 1;
+  font-size: 14px;
+  color: var(--gray-200);
+}
+.covenant-desc strong { color: var(--white); }
+.covenant-desc code {
+  font-family: 'Geist Mono', monospace;
+  color: var(--cyan);
+  font-size: 13px;
+}
+
+/* --- RESPONSIVE --- */
+@media (max-width: 768px) {
+  .flow-row { flex-direction: column; }
+  .flow-arrow { width: 2px; height: 32px; }
+  .flow-arrow::after { right: -4px; top: auto; bottom: 0; border: 5px solid transparent; border-top: 7px solid var(--gray-600); }
+  .bar-label { min-width: 80px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="logo" href="#">
+      <div class="logo-text">Ladder<span>Script</span></div>
+    </a>
+    <div class="nav-breadcrumb">
+      <a href="rung-tx-anatomy.html">Tools</a>
+      <span class="sep">/</span>
+      <span class="current">Data Flow</span>
+    </div>
+  </div>
+</nav>
+
+<div class="canvas">
+  <div class="hero">
+    <h1>Ladder Script Data Flow</h1>
+    <p>Interactive visual guide to the transaction lifecycle, anti-spam architecture, and Merkle mechanics in Ladder Script.</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="lifecycle">Transaction Lifecycle</button>
+    <button class="tab" data-tab="antispam">Anti-Spam Comparison</button>
+    <button class="tab" data-tab="merkle">Merkle Mechanics</button>
+  </div>
+
+  <!-- ========== SECTION A: TRANSACTION LIFECYCLE ========== -->
+  <div class="tab-content active" id="tab-lifecycle">
+    <div class="section-label">Fund &rarr; UTXO &rarr; Spend &rarr; Verify</div>
+
+    <div class="flow-row">
+      <div class="flow-box fund" onclick="toggleDetail(this)">
+        <h3>1. Fund</h3>
+        <div class="subtitle">Create output</div>
+        <div class="detail">
+          <div class="field"><span class="field-label">address:</span><span class="field-value">raw_address (off-chain)</span></div>
+          <div class="field"><span class="field-label">hash:</span><span class="field-value orange">SHA256(address) &rarr; address_hash</span></div>
+          <div class="field"><span class="field-label">conditions:</span><span class="field-value">blocks &rarr; leaf hashes</span></div>
+          <div class="field"><span class="field-label">pubkeys:</span><span class="field-value">folded into leaf (merkle_pub_key)</span></div>
+          <div class="field"><span class="field-label">tree:</span><span class="field-value orange">leaves &rarr; Merkle root</span></div>
+          <div class="field"><span class="field-label">output:</span><span class="field-value orange">8 bytes (value only) per output</span></div>
+          <div class="field"><span class="field-label">conditions_root:</span><span class="field-value orange">0xDF || root (33 bytes, one per tx)</span></div>
+        </div>
+      </div>
+      <div class="flow-arrow"></div>
+      <div class="flow-box utxo" onclick="toggleDetail(this)">
+        <h3>2. UTXO</h3>
+        <div class="subtitle">40-byte entry</div>
+        <div class="detail">
+          <div class="field"><span class="field-label">value:</span><span class="field-value green">int64 (8 bytes)</span></div>
+          <div class="field"><span class="field-label">root:</span><span class="field-value green">uint256 (32 bytes)</span></div>
+          <div class="field"><span class="field-label">total:</span><span class="field-value green">40 bytes, fixed</span></div>
+          <div class="field"><span class="field-label">stored:</span><span class="field-value">no conditions, no keys</span></div>
+          <div class="field"><span class="field-label">lifespan:</span><span class="field-value">permanent until spent</span></div>
+        </div>
+      </div>
+      <div class="flow-arrow"></div>
+      <div class="flow-box spend" onclick="toggleDetail(this)">
+        <h3>3. Spend</h3>
+        <div class="subtitle">Witness construction</div>
+        <div class="detail">
+          <div class="field"><span class="field-label">stack[0]:</span><span class="field-value cyan">LadderWitness</span></div>
+          <div class="field"><span class="field-label">stack[1]:</span><span class="field-value cyan">MLSCProof</span></div>
+          <div class="field"><span class="field-label">reveals:</span><span class="field-value">1 rung + coil + relays</span></div>
+          <div class="field"><span class="field-label">proves:</span><span class="field-value">Merkle proof hashes</span></div>
+          <div class="field"><span class="field-label">provides:</span><span class="field-value">PUBKEY, SIGNATURE, PREIMAGE</span></div>
+          <div class="field"><span class="field-label">lifespan:</span><span class="field-value">ephemeral (prunable)</span></div>
+        </div>
+      </div>
+      <div class="flow-arrow"></div>
+      <div class="flow-box verify" onclick="toggleDetail(this)">
+        <h3>4. Verify</h3>
+        <div class="subtitle">Consensus validation</div>
+        <div class="detail">
+          <div class="field"><span class="field-label">step 1:</span><span class="field-value purple">Deserialize witness</span></div>
+          <div class="field"><span class="field-label">step 2:</span><span class="field-value purple">Verify Merkle proof &rarr; root</span></div>
+          <div class="field"><span class="field-label">step 3:</span><span class="field-value purple">Merge conditions + witness</span></div>
+          <div class="field"><span class="field-label">step 4:</span><span class="field-value purple">EvalLadder (AND/OR)</span></div>
+          <div class="field"><span class="field-label">step 5:</span><span class="field-value purple">ValidateRungOutputs</span></div>
+          <div class="field"><span class="field-label">step 6:</span><span class="field-value purple">Coil constraints</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="margin-top:40px">Key Concepts</div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px;">
+      <div class="flow-box" onclick="toggleDetail(this)" style="border-color: var(--orange);">
+        <h3 style="color:var(--orange)">merkle_pub_key</h3>
+        <div class="subtitle">Zero writable surface</div>
+        <div class="detail">
+          Public keys are folded into the Merkle leaf hash at fund time. No PUBKEY_COMMIT field exists in conditions. The leaf preimage is:<br><br>
+          <code>TaggedHash("LadderLeaf", SerializeRung(rung) || pk1 || pk2 || ... || pkN)</code><br><br>
+          Keys are appended in block order (left to right), count determined by <code>PubkeyCountForBlock()</code>. At spend time, witness provides full keys; verifier recomputes leaf and checks against Merkle root.
+        </div>
+      </div>
+      <div class="flow-box" onclick="toggleDetail(this)" style="border-color: var(--cyan);">
+        <h3 style="color:var(--cyan)">address_hash</h3>
+        <div class="subtitle">Coil destination privacy</div>
+        <div class="detail">
+          UNLOCK_TO coils store <code>SHA256(destination_scriptPubKey)</code> instead of the raw address. The raw address is never on-chain in the coil.<br><br>
+          <code>address_hash_len: 0 or 32</code><br>
+          <code>address_hash: SHA256(raw_spk)</code><br><br>
+          At evaluation time, the verifier computes SHA256 of the spending transaction's output scriptPubKey and compares it to the committed hash.
+        </div>
+      </div>
+      <div class="flow-box" onclick="toggleDetail(this)" style="border-color: var(--green);">
+        <h3 style="color:var(--green)">MLSCVerifiedLeaves</h3>
+        <div class="subtitle">Leaf-centric covenants</div>
+        <div class="detail">
+          Covenant verification uses verified leaf hashes rather than full-conditions comparison. The structure caches:<br><br>
+          &bull; <code>conditions_root</code> (committed Merkle root)<br>
+          &bull; <code>leaf_hashes[]</code> (verified rung + relay + coil leaves)<br>
+          &bull; <code>n_rungs</code>, <code>n_relays</code><br><br>
+          For mutations: copy leaf array, recompute mutated leaf, rebuild root, compare against output. Only exercised rung and mutation targets are deserialized.
+        </div>
+      </div>
+      <div class="flow-box" onclick="toggleDetail(this)" style="border-color: var(--purple);">
+        <h3 style="color:var(--purple)">revealed_mutation_targets</h3>
+        <div class="subtitle">Cross-rung mutations</div>
+        <div class="detail">
+          When RECURSE_MODIFIED targets a different rung than the exercised one, the MLSC proof includes the target rung's condition blocks:<br><br>
+          <code>[n_mutation_targets: varint]</code><br>
+          <code>&nbsp;&nbsp;[rung_index: uint16]</code><br>
+          <code>&nbsp;&nbsp;[serialised_rung: bytes]</code><br><br>
+          The verifier computes the target leaf hash and confirms it in the Merkle tree. This enables cross-rung mutation without revealing the entire ladder.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== SECTION B: ANTI-SPAM COMPARISON ========== -->
+  <div class="tab-content" id="tab-antispam">
+    <div class="section-label">Data Channel Comparison</div>
+
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Ladder Script</th>
+          <th>Bitcoin (Taproot)</th>
+          <th>OP_RETURN (83B)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="channel-label">Output data</td>
+          <td class="highlight">40B (DATA_RETURN, 1/tx)</td>
+          <td class="warn">Unlimited (OP_RETURN)</td>
+          <td>83B cap</td>
+        </tr>
+        <tr>
+          <td class="channel-label">Conditions writable surface</td>
+          <td class="highlight">0B (merkle_pub_key)</td>
+          <td class="warn">~4,000,000B (script-path)</td>
+          <td>~4,000,000B (unchanged)</td>
+        </tr>
+        <tr>
+          <td class="channel-label">Witness arbitrary data</td>
+          <td class="highlight">64B (2x PREIMAGE, post-legacy)</td>
+          <td class="warn">~400,000B</td>
+          <td>~400,000B (unchanged)</td>
+        </tr>
+        <tr>
+          <td class="channel-label">Coil address</td>
+          <td class="highlight">32B hash (SHA256)</td>
+          <td>Variable (raw address)</td>
+          <td>Variable (raw address)</td>
+        </tr>
+        <tr>
+          <td class="channel-label">UTXO footprint</td>
+          <td class="highlight">40B fixed</td>
+          <td>43-530B variable</td>
+          <td>43-530B variable</td>
+        </tr>
+        <tr style="border-top: 2px solid var(--gray-600);">
+          <td class="channel-label"><strong>Total per 1-input tx</strong></td>
+          <td class="highlight"><strong>104 bytes</strong></td>
+          <td class="warn"><strong>~400,000 bytes</strong></td>
+          <td><strong>~400,083 bytes</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="bar-chart">
+      <h4>Maximum Embeddable Data Per Transaction</h4>
+      <div class="bar-row">
+        <div class="bar-label">Ladder Script</div>
+        <div class="bar-track">
+          <div class="bar-fill green" style="width: 0.024%;" id="bar-ladder">96 B</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Bitcoin Taproot</div>
+        <div class="bar-track">
+          <div class="bar-fill red" style="width: 100%;" id="bar-taproot">~400,000 B</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">OP_RETURN (83B)</div>
+        <div class="bar-track">
+          <div class="bar-fill orange" style="width: 100%;" id="bar-bip110">~400,083 B</div>
+        </div>
+      </div>
+      <div style="margin-top: 16px; font-size: 13px; color: var(--gray-400); font-family: 'IBM Plex Mono', monospace;">
+        Ladder Script reduces the embeddable data surface by <strong style="color: var(--green);">3,846x</strong> compared to Taproot.
+      </div>
+    </div>
+
+    <div class="section-label" style="margin-top:32px">Defense Layers</div>
+
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Defense</th>
+          <th>Vector Closed</th>
+          <th>Enforcement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td class="channel-label">merkle_pub_key</td>
+          <td>Writable PUBKEY_COMMIT fields</td>
+          <td>Consensus (field removed)</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td class="channel-label">Selective inversion</td>
+          <td>Garbage-pubkey inverted SIG</td>
+          <td>Consensus (deserialize reject)</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td class="channel-label">Hash lock design</td>
+          <td>Invertible writable hash fields</td>
+          <td>Consensus (HASH_GUARDED is non-invertible; codes 0x0201/0x0202 reserved)</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td class="channel-label">Type enforcement</td>
+          <td>Unknown/arbitrary data types</td>
+          <td>Consensus (IsKnownDataType)</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td class="channel-label">Context separation</td>
+          <td>PUBKEY/SIG in conditions</td>
+          <td>Consensus (IsConditionDataType)</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td class="channel-label">PREIMAGE cap</td>
+          <td>Large arbitrary witness data</td>
+          <td>Consensus (MAX_PREIMAGE_FIELDS_PER_TX=2, 32B max each)</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td class="channel-label">ACCUMULATOR 10-field cap</td>
+          <td>Proof padding / data stuffing</td>
+          <td>Consensus (max 10 HASH256 fields)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ========== SECTION C: MERKLE MECHANICS ========== -->
+  <div class="tab-content" id="tab-merkle">
+
+    <div class="merkle-controls">
+      <button class="merkle-btn active" onclick="setMerkleView('leaf')">Leaf Computation</button>
+      <button class="merkle-btn" onclick="setMerkleView('proof')">Proof Verification</button>
+      <button class="merkle-btn" onclick="setMerkleView('covenant')">Covenant Flow</button>
+      <button class="merkle-btn" onclick="setMerkleView('mutation')">Cross-Rung Mutation</button>
+    </div>
+
+    <div id="merkle-leaf" class="merkle-view">
+      <div class="section-label">Click a rung to see leaf computation</div>
+      <svg class="merkle-svg" id="svg-leaf" viewBox="0 0 900 420"></svg>
+      <div class="merkle-step-info" id="leaf-info">
+        Click any rung leaf to see how <code>TaggedHash("LadderLeaf", blocks || pk1 || pk2)</code> is computed. Public keys are appended in block order using <code>PubkeyCountForBlock()</code>.
+      </div>
+    </div>
+
+    <div id="merkle-proof" class="merkle-view" style="display:none">
+      <div class="section-label">Step through proof verification</div>
+      <svg class="merkle-svg" id="svg-proof" viewBox="0 0 900 420"></svg>
+      <div style="display:flex; gap:8px; margin: 16px 0;">
+        <button class="merkle-btn" id="proof-prev" onclick="proofStep(-1)" disabled>Previous</button>
+        <button class="merkle-btn" id="proof-next" onclick="proofStep(1)">Next Step</button>
+        <button class="merkle-btn" onclick="proofReset()">Reset</button>
+      </div>
+      <div class="merkle-step-info" id="proof-info">
+        Press <strong>Next Step</strong> to walk through Merkle proof verification. The revealed leaf (orange) + proof hashes (gray) rebuild the tree to the root.
+      </div>
+    </div>
+
+    <div id="merkle-covenant" class="merkle-view" style="display:none">
+      <div class="section-label">Covenant re-encumbrance flow</div>
+
+      <div id="covenant-steps">
+        <div class="covenant-row">
+          <div class="covenant-step active">1</div>
+          <div class="covenant-desc"><strong>Copy leaves.</strong> The verifier copies the input's verified leaf hashes from <code>MLSCVerifiedLeaves</code>.</div>
+        </div>
+        <div class="covenant-row">
+          <div class="covenant-step pending">2</div>
+          <div class="covenant-desc"><strong>Apply mutation.</strong> For the target rung, apply the declared mutation (e.g., RECURSE_MODIFIED delta). Recompute the target leaf hash.</div>
+        </div>
+        <div class="covenant-row">
+          <div class="covenant-step pending">3</div>
+          <div class="covenant-desc"><strong>Rebuild root.</strong> Build a new Merkle root from the modified leaf array using <code>TaggedHash("LadderInternal", min(A,B) || max(A,B))</code>.</div>
+        </div>
+        <div class="covenant-row">
+          <div class="covenant-step pending">4</div>
+          <div class="covenant-desc"><strong>Compare.</strong> Assert that the recomputed root equals the spending transaction's <code>conditions_root</code> (<code>0xDF || root</code>).</div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin: 16px 0;">
+        <button class="merkle-btn" id="cov-prev" onclick="covenantStep(-1)" disabled>Previous</button>
+        <button class="merkle-btn" id="cov-next" onclick="covenantStep(1)">Next Step</button>
+        <button class="merkle-btn" onclick="covenantReset()">Reset</button>
+      </div>
+
+      <svg class="merkle-svg" id="svg-covenant" viewBox="0 0 900 380"></svg>
+    </div>
+
+    <div id="merkle-mutation" class="merkle-view" style="display:none">
+      <div class="section-label">Cross-rung mutation via revealed_mutation_targets</div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+        <div class="flow-box" style="border-color: var(--orange);">
+          <h3 style="color:var(--orange)">Exercised Rung (Rung 0)</h3>
+          <div class="subtitle">Revealed in standard proof</div>
+          <div style="margin-top:12px; font-size: 13px; font-family: 'Geist Mono', monospace; color: var(--gray-200); line-height: 1.8;">
+            SIG { scheme: SCHNORR }<br>
+            RECURSE_MODIFIED {<br>
+            &nbsp;&nbsp;target_rung: <span style="color:var(--cyan)">1</span><br>
+            &nbsp;&nbsp;target_block: 0<br>
+            &nbsp;&nbsp;target_field: 0<br>
+            &nbsp;&nbsp;delta: -1<br>
+            }
+          </div>
+        </div>
+        <div class="flow-box" style="border-color: var(--cyan);">
+          <h3 style="color:var(--cyan)">Target Rung (Rung 1)</h3>
+          <div class="subtitle">Revealed via mutation_targets</div>
+          <div style="margin-top:12px; font-size: 13px; font-family: 'Geist Mono', monospace; color: var(--gray-200); line-height: 1.8;">
+            CSV { blocks: 52560 }<br>
+            SIG { scheme: SCHNORR }<br>
+            COUNTER_DOWN {<br>
+            &nbsp;&nbsp;count: <span style="color:var(--orange)">12</span> &rarr; <span style="color:var(--green)">11</span><br>
+            }
+          </div>
+        </div>
+      </div>
+
+      <svg class="merkle-svg" id="svg-mutation" viewBox="0 0 900 320"></svg>
+
+      <div class="merkle-step-info">
+        The MLSC proof includes <code>revealed_mutation_targets</code> with Rung 1's condition blocks. The verifier:
+        (1) confirms Rung 1's leaf hash matches the Merkle tree,
+        (2) applies the mutation (count 12 &rarr; 11),
+        (3) recomputes the leaf hash,
+        (4) rebuilds the root and compares against the output.
+        Rung 1 itself is never exercised &mdash; only its structure is revealed for mutation verification.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// --- TAB SWITCHING ---
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'antispam') animateBars();
+    if (tab.dataset.tab === 'merkle') initMerkleSVGs();
+  });
+});
+
+// --- FLOW BOX EXPAND ---
+function toggleDetail(el) {
+  el.classList.toggle('expanded');
+}
+
+// --- BAR ANIMATION ---
+function animateBars() {
+  setTimeout(() => {
+    const ladder = document.getElementById('bar-ladder');
+    ladder.style.width = '3%';
+    ladder.style.minWidth = '60px';
+  }, 100);
+}
+
+// --- MERKLE VIEW SWITCHING ---
+function setMerkleView(view) {
+  document.querySelectorAll('.merkle-view').forEach(v => v.style.display = 'none');
+  document.getElementById('merkle-' + view).style.display = 'block';
+  document.querySelectorAll('.merkle-controls .merkle-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  initMerkleSVGs();
+}
+
+// --- SVG HELPERS ---
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  return el;
+}
+
+function drawNode(svg, x, y, w, h, label, color, sublabel, id) {
+  const g = svgEl('g', { id: id || '', style: 'cursor:pointer' });
+  const rect = svgEl('rect', { x, y, width: w, height: h, rx: 8, fill: '#141414', stroke: color, 'stroke-width': 1.5 });
+  const text = svgEl('text', { x: x + w/2, y: y + (sublabel ? h/2 - 4 : h/2 + 5), fill: color, 'font-size': 13, 'font-family': "'Geist Mono', monospace", 'font-weight': 600, 'text-anchor': 'middle' });
+  text.textContent = label;
+  g.appendChild(rect);
+  g.appendChild(text);
+  if (sublabel) {
+    const sub = svgEl('text', { x: x + w/2, y: y + h/2 + 14, fill: '#888', 'font-size': 10, 'font-family': "'Geist Mono', monospace", 'text-anchor': 'middle' });
+    sub.textContent = sublabel;
+    g.appendChild(sub);
+  }
+  svg.appendChild(g);
+  return g;
+}
+
+function drawLine(svg, x1, y1, x2, y2, color, dashed) {
+  const line = svgEl('line', { x1, y1, x2, y2, stroke: color || '#333', 'stroke-width': 1.5 });
+  if (dashed) line.setAttribute('stroke-dasharray', '4,4');
+  svg.appendChild(line);
+}
+
+// --- LEAF COMPUTATION SVG ---
+function drawLeafSVG() {
+  const svg = document.getElementById('svg-leaf');
+  svg.innerHTML = '';
+
+  const leaves = [
+    { label: 'Rung 0', sub: 'SIG(Schnorr)', color: '#f7931a' },
+    { label: 'Rung 1', sub: 'CSV + SIG', color: '#f7931a' },
+    { label: 'Rung 2', sub: 'MULTISIG', color: '#f7931a' },
+    { label: 'Coil', sub: 'UNLOCK', color: '#00ff88' },
+  ];
+
+  const lw = 160, lh = 50, gap = 40;
+  const startX = (900 - (leaves.length * lw + (leaves.length-1) * gap)) / 2;
+  const ly = 340;
+
+  // Draw leaves
+  leaves.forEach((leaf, i) => {
+    const x = startX + i * (lw + gap);
+    const g = drawNode(svg, x, ly, lw, lh, leaf.label, leaf.color, leaf.sub, 'leaf-' + i);
+    g.addEventListener('click', () => showLeafDetail(i));
+  });
+
+  // Internal nodes
+  const iw = 140, ih = 40;
+  const i0x = startX + (lw + gap) / 2 - iw/2;
+  const i1x = startX + 2*(lw + gap) + (lw + gap) / 2 - iw/2;
+  const iy = 240;
+  drawNode(svg, i0x, iy, iw, ih, 'H(R0, R1)', '#5b9bd5', null);
+  drawNode(svg, i1x, iy, iw, ih, 'H(R2, Coil)', '#5b9bd5', null);
+
+  // Root
+  const rx = 450 - 80;
+  drawNode(svg, rx, 140, 160, ih, 'Root', '#b55bcd', 'conditions_root');
+
+  // Lines: leaves to internals
+  drawLine(svg, startX + lw/2, ly, i0x + iw/2, iy + ih, '#444');
+  drawLine(svg, startX + lw + gap + lw/2, ly, i0x + iw/2, iy + ih, '#444');
+  drawLine(svg, startX + 2*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, '#444');
+  drawLine(svg, startX + 3*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, '#444');
+
+  // Lines: internals to root
+  drawLine(svg, i0x + iw/2, iy, rx + 80, 140 + ih, '#444');
+  drawLine(svg, i1x + iw/2, iy, rx + 80, 140 + ih, '#444');
+
+  // Title
+  const title = svgEl('text', { x: 450, y: 120, fill: '#f0f0f0', 'font-size': 16, 'font-weight': 700, 'font-family': "'Outfit', system-ui, sans-serif", 'text-anchor': 'middle' });
+  title.textContent = 'MLSC Merkle Tree (4 leaves)';
+  svg.appendChild(title);
+}
+
+function showLeafDetail(idx) {
+  const info = document.getElementById('leaf-info');
+  const details = [
+    `<strong>Rung 0 — SIG(Schnorr):</strong><br>
+     <code>leaf = TaggedHash("LadderLeaf", SerializeRung([SIG{scheme:0x01}]) || pk_owner)</code><br><br>
+     PubkeyCountForBlock(SIG) = <strong>1</strong>. One 33-byte compressed pubkey appended after the serialized rung blocks.`,
+    `<strong>Rung 1 — CSV + SIG:</strong><br>
+     <code>leaf = TaggedHash("LadderLeaf", SerializeRung([CSV{blocks:52560}, SIG{scheme:0x01}]) || pk_recovery)</code><br><br>
+     PubkeyCountForBlock(CSV) = <strong>0</strong>, PubkeyCountForBlock(SIG) = <strong>1</strong>. Total: 1 pubkey.`,
+    `<strong>Rung 2 — MULTISIG(2-of-3):</strong><br>
+     <code>leaf = TaggedHash("LadderLeaf", SerializeRung([MULTISIG{threshold:2}]) || pk1 || pk2 || pk3)</code><br><br>
+     PubkeyCountForBlock(MULTISIG) = <strong>N</strong> (read from NUMERIC field = 3). Three pubkeys appended.`,
+    `<strong>Coil — UNLOCK:</strong><br>
+     <code>leaf = TaggedHash("LadderLeaf", SerializeCoil({type:UNLOCK, attest:INLINE, scheme:SCHNORR}))</code><br><br>
+     No pubkeys in the coil leaf. The coil metadata (type, attestation mode, scheme, address_hash) is serialized and hashed.`
+  ];
+  info.innerHTML = details[idx];
+}
+
+// --- PROOF VERIFICATION SVG ---
+let proofStepIdx = 0;
+const proofSteps = [
+  { info: 'Starting state: the verifier has the UTXO root and the spending witness with revealed Rung 0, coil, and proof hashes.' },
+  { info: '<strong>Step 1:</strong> Compute <code>rung_leaf[0] = TaggedHash("LadderLeaf", SerializeRung(revealed_rung_0) || pk)</code>. The revealed rung + witness pubkeys produce the leaf hash.' },
+  { info: '<strong>Step 2:</strong> The proof provides <code>rung_leaf[1]</code> (Rung 1\'s opaque hash). Compute <code>H(R0, R1) = TaggedHash("LadderInternal", min(R0,R1) || max(R0,R1))</code>.' },
+  { info: '<strong>Step 3:</strong> Compute <code>coil_leaf = TaggedHash("LadderLeaf", SerializeCoil(coil))</code>. EMPTY_LEAF is a known constant. Compute <code>H(Coil, EMPTY)</code>.' },
+  { info: '<strong>Step 4:</strong> Compute <code>root = TaggedHash("LadderInternal", min(H01, HCE) || max(H01, HCE))</code>. Compare against UTXO root. <span style="color:var(--green)">Match! Proof valid.</span>' },
+];
+
+function drawProofSVG() {
+  const svg = document.getElementById('svg-proof');
+  svg.innerHTML = '';
+
+  const colors = ['#f7931a', '#666', '#666', '#00ff88'];
+  const labels = ['Rung 0', 'Rung 1', 'EMPTY', 'Coil'];
+  const types = ['REVEALED', 'proof hash', 'constant', 'REVEALED'];
+
+  const lw = 150, lh = 50, gap = 30;
+  const startX = (900 - (4 * lw + 3 * gap)) / 2;
+  const ly = 330;
+
+  // Leaves
+  labels.forEach((label, i) => {
+    const c = proofStepIdx >= (i <= 1 ? 1 : 3) ? (i === 0 || i === 3 ? '#f7931a' : '#666') : '#333';
+    const x = startX + i * (lw + gap);
+    drawNode(svg, x, ly, lw, lh, label, c, types[i]);
+  });
+
+  // Internals
+  const iw = 140, ih = 40;
+  const i0x = startX + (lw + gap) / 2 - iw/2;
+  const i1x = startX + 2*(lw + gap) + (lw + gap) / 2 - iw/2;
+  const iy = 230;
+  const ic0 = proofStepIdx >= 2 ? '#5b9bd5' : '#333';
+  const ic1 = proofStepIdx >= 3 ? '#5b9bd5' : '#333';
+  drawNode(svg, i0x, iy, iw, ih, 'H(R0, R1)', ic0);
+  drawNode(svg, i1x, iy, iw, ih, 'H(Coil, EMPTY)', ic1);
+
+  // Root
+  const rc = proofStepIdx >= 4 ? '#00ff88' : '#333';
+  drawNode(svg, 370, 130, 160, ih, 'Root', rc, proofStepIdx >= 4 ? 'MATCH!' : 'conditions_root');
+
+  // Lines
+  const lc = '#333';
+  drawLine(svg, startX + lw/2, ly, i0x + iw/2, iy + ih, proofStepIdx >= 2 ? '#5b9bd5' : lc);
+  drawLine(svg, startX + lw + gap + lw/2, ly, i0x + iw/2, iy + ih, proofStepIdx >= 2 ? '#5b9bd5' : lc);
+  drawLine(svg, startX + 2*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, proofStepIdx >= 3 ? '#5b9bd5' : lc);
+  drawLine(svg, startX + 3*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, proofStepIdx >= 3 ? '#5b9bd5' : lc);
+  drawLine(svg, i0x + iw/2, iy, 450, 130 + ih, proofStepIdx >= 4 ? '#00ff88' : lc);
+  drawLine(svg, i1x + iw/2, iy, 450, 130 + ih, proofStepIdx >= 4 ? '#00ff88' : lc);
+
+  const title = svgEl('text', { x: 450, y: 110, fill: '#f0f0f0', 'font-size': 16, 'font-weight': 700, 'font-family': "'Outfit', system-ui, sans-serif", 'text-anchor': 'middle' });
+  title.textContent = 'Merkle Proof Verification';
+  svg.appendChild(title);
+}
+
+function proofStep(dir) {
+  proofStepIdx = Math.max(0, Math.min(proofSteps.length - 1, proofStepIdx + dir));
+  document.getElementById('proof-prev').disabled = proofStepIdx === 0;
+  document.getElementById('proof-next').disabled = proofStepIdx === proofSteps.length - 1;
+  document.getElementById('proof-info').innerHTML = proofSteps[proofStepIdx].info;
+  drawProofSVG();
+}
+function proofReset() { proofStepIdx = 0; proofStep(0); }
+
+// --- COVENANT FLOW ---
+let covStepIdx = 0;
+function covenantStep(dir) {
+  covStepIdx = Math.max(0, Math.min(3, covStepIdx + dir));
+  const steps = document.querySelectorAll('#covenant-steps .covenant-step');
+  steps.forEach((s, i) => {
+    s.className = 'covenant-step ' + (i < covStepIdx ? 'done' : i === covStepIdx ? 'active' : 'pending');
+  });
+  document.getElementById('cov-prev').disabled = covStepIdx === 0;
+  document.getElementById('cov-next').disabled = covStepIdx === 3;
+  drawCovenantSVG();
+}
+function covenantReset() { covStepIdx = 0; covenantStep(0); }
+
+function drawCovenantSVG() {
+  const svg = document.getElementById('svg-covenant');
+  svg.innerHTML = '';
+
+  // Input tree
+  const inputTitle = svgEl('text', { x: 220, y: 30, fill: '#ccc', 'font-size': 14, 'font-weight': 600, 'font-family': "'Outfit', system-ui, sans-serif", 'text-anchor': 'middle' });
+  inputTitle.textContent = 'Input Leaves';
+  svg.appendChild(inputTitle);
+
+  const leaves = ['Leaf 0', 'Leaf 1*', 'Coil'];
+  const lcolors = ['#666', covStepIdx >= 1 ? '#f7931a' : '#666', '#666'];
+  leaves.forEach((l, i) => {
+    drawNode(svg, 60 + i * 130, 50, 110, 36, l, lcolors[i]);
+  });
+
+  // Arrow
+  const arrow = svgEl('text', { x: 450, y: 80, fill: '#888', 'font-size': 24, 'font-family': "'Outfit', system-ui, sans-serif", 'text-anchor': 'middle' });
+  arrow.textContent = '\u2192';
+  svg.appendChild(arrow);
+
+  // Output tree
+  const outputTitle = svgEl('text', { x: 680, y: 30, fill: '#ccc', 'font-size': 14, 'font-weight': 600, 'font-family': "'Outfit', system-ui, sans-serif", 'text-anchor': 'middle' });
+  outputTitle.textContent = 'Output Leaves';
+  svg.appendChild(outputTitle);
+
+  const oleaves = ['Leaf 0', "Leaf 1'", 'Coil'];
+  const ocolors = ['#666', covStepIdx >= 1 ? '#00ff88' : '#666', '#666'];
+  oleaves.forEach((l, i) => {
+    drawNode(svg, 520 + i * 130, 50, 110, 36, l, ocolors[i]);
+  });
+
+  // Roots
+  const inRoot = covStepIdx >= 2 ? '#5b9bd5' : '#444';
+  const outRoot = covStepIdx >= 3 ? '#00ff88' : '#444';
+  drawNode(svg, 130, 140, 180, 40, 'Input Root', inRoot);
+  drawNode(svg, 590, 140, 180, 40, 'Output Root', outRoot);
+
+  drawLine(svg, 115, 86, 220, 140, '#333');
+  drawLine(svg, 245, 86, 220, 140, '#333');
+  drawLine(svg, 375, 86, 220, 140, '#333');
+
+  drawLine(svg, 575, 86, 680, 140, '#333');
+  drawLine(svg, 705, 86, 680, 140, '#333');
+  drawLine(svg, 835, 86, 680, 140, '#333');
+
+  // Compare
+  if (covStepIdx >= 3) {
+    drawLine(svg, 310, 160, 590, 160, '#00ff88', true);
+    const eq = svgEl('text', { x: 450, y: 165, fill: '#00ff88', 'font-size': 18, 'font-weight': 700, 'font-family': "'Geist Mono', monospace", 'text-anchor': 'middle' });
+    eq.textContent = '== ?';
+    svg.appendChild(eq);
+  }
+
+  // Mutation label
+  if (covStepIdx >= 1) {
+    const mut = svgEl('text', { x: 450, y: 250, fill: '#f7931a', 'font-size': 12, 'font-family': "'Geist Mono', monospace", 'text-anchor': 'middle' });
+    mut.textContent = 'Leaf 1: apply mutation (delta) \u2192 recompute hash';
+    svg.appendChild(mut);
+  }
+}
+
+// --- MUTATION SVG ---
+function drawMutationSVG() {
+  const svg = document.getElementById('svg-mutation');
+  svg.innerHTML = '';
+
+  // Tree with exercised rung highlighted
+  const leaves = [
+    { label: 'Rung 0', sub: 'EXERCISED', color: '#f7931a' },
+    { label: 'Rung 1', sub: 'MUTATION TARGET', color: '#00d4ff' },
+    { label: 'Coil', sub: 'UNLOCK', color: '#00ff88' },
+    { label: 'EMPTY', sub: 'padding', color: '#444' },
+  ];
+
+  const lw = 150, lh = 50, gap = 30;
+  const startX = (900 - (4 * lw + 3 * gap)) / 2;
+  const ly = 230;
+
+  leaves.forEach((leaf, i) => {
+    drawNode(svg, startX + i * (lw + gap), ly, lw, lh, leaf.label, leaf.color, leaf.sub);
+  });
+
+  // Internals
+  const iw = 140, ih = 40;
+  const i0x = startX + (lw + gap) / 2 - iw/2;
+  const i1x = startX + 2*(lw + gap) + (lw + gap) / 2 - iw/2;
+  const iy = 140;
+  drawNode(svg, i0x, iy, iw, ih, 'H(R0, R1)', '#5b9bd5');
+  drawNode(svg, i1x, iy, iw, ih, 'H(Coil, EMPTY)', '#5b9bd5');
+
+  // Root
+  drawNode(svg, 370, 40, 160, ih, 'Root', '#b55bcd', 'conditions_root');
+
+  // Lines
+  drawLine(svg, startX + lw/2, ly, i0x + iw/2, iy + ih, '#444');
+  drawLine(svg, startX + lw + gap + lw/2, ly, i0x + iw/2, iy + ih, '#00d4ff');
+  drawLine(svg, startX + 2*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, '#444');
+  drawLine(svg, startX + 3*(lw+gap) + lw/2, ly, i1x + iw/2, iy + ih, '#444');
+  drawLine(svg, i0x + iw/2, iy, 450, 40 + ih, '#444');
+  drawLine(svg, i1x + iw/2, iy, 450, 40 + ih, '#444');
+}
+
+// --- INIT ---
+function initMerkleSVGs() {
+  drawLeafSVG();
+  drawProofSVG();
+  drawCovenantSVG();
+  drawMutationSVG();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initMerkleSVGs();
+});
+</script>
+
+</body>
+</html>

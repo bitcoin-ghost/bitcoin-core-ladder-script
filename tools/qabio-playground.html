@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QABIO Playground — Ladder Script</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg-alt: #f5f5f5; --text: #1a1a1a; --text-dim: #666666;
+  --text-light: #999999; --accent: #e67e22; --border: #e0e0e0; --border-light: #eeeeee;
+}
+html, body { height: 100%; overflow: hidden; }
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.site-header { background: #fff; border-bottom: 1px solid var(--border); }
+.site-header-inner { padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 48px; }
+.header-title { font-size: 15px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { text-decoration: none; color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 12px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
+.header-nav { display: flex; gap: 24px; border-top: 1px solid var(--border-light); padding: 8px 0; }
+.header-nav a { color: var(--text-dim); font-size: 12px; font-weight: 500; text-decoration: none; padding-bottom: 6px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+.app-frame { width: 100%; height: calc(100vh - 88px); border: none; display: block; }
+
+@media (max-width: 600px) {
+  .site-header-inner { padding: 0 16px; }
+  .header-nav { flex-wrap: wrap; gap: 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="../index.html" class="header-title">Ladder Script</a>
+      <div class="header-right">
+        
+        <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" class="gh-icon">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="ladder-script.html">Ladder Script</a>
+      <a href="rung-tx-anatomy.html">Anatomy</a>
+      <a href="block-docs/">Blocks</a>
+      <a href="docs/">Docs</a>
+      <a href="patch-overview.html">Patch</a>
+      <a href="get-started.html">Get Started</a>
+      <a href="ladder-engine.html">Engine</a>
+      <a href="qabio-playground.html" class="active">QABIO</a>
+      <a href="explorer.html">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+<iframe src="qabio-playground/?v=3" class="app-frame" allow="clipboard-write"></iframe>
+
+</body>
+</html>

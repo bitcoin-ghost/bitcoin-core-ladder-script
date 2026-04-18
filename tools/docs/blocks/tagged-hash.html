@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TAGGED_HASH  -- LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">TAGGED_HASH</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Hash Family</span>
+</div>
+
+<div class="doc-content">
+
+<!-- Title -->
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0203 &middot; HASH FAMILY</div>
+  <h1 class="block-title">TAGGED_HASH</h1>
+  <p class="block-subtitle">BIP-340 tagged hash verification. Computes SHA256(SHA256(tag) || SHA256(tag) || preimage) and compares to an expected hash. The tag_hash field IS SHA256(tag) already.</p>
+  <span class="block-family-badge badge-hash">Hash</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Ladder Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="170" viewBox="0 0 620 170">
+      <!-- Power rails -->
+      <line x1="20" y1="10" x2="20" y2="160" stroke="#4a4a4a" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="160" stroke="#4a4a4a" stroke-width="3"/>
+      <!-- Wire -->
+      <line x1="20" y1="60" x2="120" y2="60" stroke="#ff1744" stroke-width="2"/>
+      <line x1="500" y1="60" x2="600" y2="60" stroke="#ff1744" stroke-width="2"/>
+      <!-- Block body -->
+      <rect x="120" y="15" width="380" height="90" rx="2" fill="#2a2a2a" stroke="#b070b0" stroke-width="1.5"/>
+      <!-- Block label -->
+      <text x="310" y="33" text-anchor="middle" fill="#b070b0" font-family="Share Tech Mono" font-size="13" letter-spacing="2">TAGGED_HASH</text>
+      <!-- Internal: concat -->
+      <rect x="140" y="45" width="110" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
+      <text x="195" y="63" text-anchor="middle" fill="#b070b0" font-family="IBM Plex Mono" font-size="9" font-weight="600">tag || tag || pre</text>
+      <!-- Arrow -->
+      <text x="262" y="63" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="12">&rarr;</text>
+      <!-- Internal: SHA-256 -->
+      <rect x="275" y="45" width="80" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
+      <text x="315" y="63" text-anchor="middle" fill="#b070b0" font-family="IBM Plex Mono" font-size="10" font-weight="600">SHA-256</text>
+      <!-- Arrow -->
+      <text x="367" y="63" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="12">&rarr;</text>
+      <!-- Internal: compare -->
+      <rect x="380" y="45" width="80" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
+      <text x="420" y="63" text-anchor="middle" fill="#b070b0" font-family="IBM Plex Mono" font-size="10" font-weight="600">COMPARE</text>
+      <!-- Annotation -->
+      <text x="310" y="140" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">SHA256(tag_hash || tag_hash || preimage) == expected_hash</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead>
+      <tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="field-name">tag_hash</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">SHA-256 of the tag string (pre-hashed for efficiency)</td>
+      </tr>
+      <tr>
+        <td class="field-name">expected_hash</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Expected tagged hash result</td>
+      </tr>
+      <tr>
+        <td class="field-name">witness_tag_hash</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Copy of tag_hash, echoed in the witness for implicit layout matching</td>
+      </tr>
+      <tr>
+        <td class="field-name">witness_expected_hash</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Copy of expected_hash, echoed in the witness for implicit layout matching</td>
+      </tr>
+      <tr>
+        <td class="field-name">preimage</td>
+        <td class="field-type">PREIMAGE</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Data to hash with the tag</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Wire Format -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+
+  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0203</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[0] &middot; 32B</span>
+      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[1] &middot; 32B</span>
+      <span class="wire-bytes">= 72 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text" style="margin-bottom:16px">Witness side (in input witness):</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0203</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[0] &middot; 32B</span>
+      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[1] &middot; 32B</span>
+      <span class="wire-segment wire-field-pre" style="min-width:140px">PREIMAGE &middot; 32B</span>
+      <span class="wire-bytes">= 102 bytes</span>
+    </div>
+
+    <div class="wire-total">
+      <span class="wire-total-label">Total (conditions + witness)</span>
+      <span class="wire-total-bytes">~174 bytes</span>
+    </div>
+  </div>
+
+  <p class="section-text">Two condition HASH256 fields: one for the tag hash, one for the expected result.</p>
+</div>
+
+<!-- Evaluation Logic -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step">
+      <span class="eval-step-num">1.</span>
+      <span class="eval-step-text">Require 2 <span class="eval-keyword">HASH256</span> fields + <span class="eval-keyword">PREIMAGE</span>. Any missing &rarr; <span class="eval-result-err">ERROR</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2.</span>
+      <span class="eval-step-text">Compute SHA256(<span class="eval-keyword">tag_hash</span> || <span class="eval-keyword">tag_hash</span> || <span class="eval-keyword">PREIMAGE</span>)</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">3.</span>
+      <span class="eval-step-text">Compare result to <span class="eval-keyword">expected_hash</span>. If match &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">4.</span>
+      <span class="eval-step-text">Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Result Table -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing HASH256 fields (need 2)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Missing PREIMAGE field</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Tagged hash does not match expected_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Tagged hash matches expected_hash</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON Output -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+
+  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"TAGGED_HASH"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3...32 bytes (tag_hash)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"d4e5f6...32 bytes (expected)"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"TAGGED_HASH"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3...32 bytes (tag_hash)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"d4e5f6...32 bytes (expected)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef...exactly 32 bytes"</span> }
+  ]
+}</pre></div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+
+  <div class="use-case">
+    <div class="use-case-title">Domain-Separated Commitments</div>
+    <div class="use-case-desc">The tag provides domain separation, ensuring that a preimage valid in one context cannot be replayed in another. Different tags produce entirely different hashes from the same data.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">BIP-340 Challenge Verification</div>
+    <div class="use-case-desc">Schnorr signature challenges use tagged hashes with the "BIP0340/challenge" tag. This block can verify that a specific challenge was correctly constructed from its components.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Taproot-Compatible Tagged Hashing</div>
+    <div class="use-case-desc">Taproot uses tagged hashes extensively (TapLeaf, TapBranch, TapTweak). This block enables on-chain verification of taproot tree construction and tweak derivation.</div>
+  </div>
+</div>
+
+<!-- Nav -->
+<div class="doc-nav">
+  <a href="cltv-time.html">&larr; CLTV_TIME</a>
+  <a href="ctv.html">CTV &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

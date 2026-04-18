@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACCUMULATOR — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">ACCUMULATOR</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Governance Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0806 &middot; GOVERNANCE FAMILY</div>
+  <h1 class="block-title">ACCUMULATOR</h1>
+  <p class="block-subtitle">Merkle set membership proof. Verifies that a value belongs to a committed set using sorted-pair Merkle proofs. The conditions commit to a Merkle root; the witness provides the leaf and proof path. No Tapscript equivalent.</p>
+  <span class="block-family-badge badge-governance">Governance</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="700" height="210" viewBox="0 0 700 210">
+      <line x1="20" y1="10" x2="20" y2="200" stroke="#cccccc" stroke-width="3"/>
+      <line x1="680" y1="10" x2="680" y2="200" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="40" x2="120" y2="40" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="580" y1="40" x2="680" y2="40" stroke="#e74c3c" stroke-width="2"/>
+      <rect x="120" y="16" width="460" height="50" rx="2" fill="#f5f5f5" stroke="#7f8c8d" stroke-width="1.5"/>
+      <text x="350" y="36" text-anchor="middle" fill="#7f8c8d" font-family="Share Tech Mono" font-size="13" letter-spacing="2">ACCUMULATOR</text>
+      <!-- Merkle tree visualization -->
+      <text x="350" y="78" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="10">Merkle Tree Structure</text>
+
+      <!-- Root -->
+      <rect x="310" y="92" width="80" height="22" rx="2" fill="#fff8e1" stroke="#e74c3c"/>
+      <text x="350" y="107" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="9" font-weight="600">ROOT</text>
+
+      <!-- Level 1 -->
+      <line x1="330" y1="114" x2="270" y2="128" stroke="#dddddd" stroke-width="1"/>
+      <line x1="370" y1="114" x2="430" y2="128" stroke="#dddddd" stroke-width="1"/>
+
+      <rect x="230" y="128" width="80" height="22" rx="2" fill="#e3f2fd" stroke="#e74c3c"/>
+      <text x="270" y="143" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="8">H(min||max)</text>
+
+      <rect x="390" y="128" width="80" height="22" rx="2" fill="#e8f5e9" stroke="#2980b9"/>
+      <text x="430" y="143" text-anchor="middle" fill="#2980b9" font-family="IBM Plex Mono" font-size="8">SIBLING</text>
+
+      <!-- Leaves -->
+      <line x1="250" y1="150" x2="210" y2="160" stroke="#dddddd" stroke-width="1"/>
+      <line x1="290" y1="150" x2="330" y2="160" stroke="#dddddd" stroke-width="1"/>
+
+      <rect x="175" y="158" width="70" height="18" rx="2" fill="#fce4ec" stroke="#e91e63"/>
+      <text x="210" y="170" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="8" font-weight="600">LEAF</text>
+
+      <rect x="295" y="158" width="70" height="18" rx="2" fill="#e8f5e9" stroke="#2980b9"/>
+      <text x="330" y="170" text-anchor="middle" fill="#2980b9" font-family="IBM Plex Mono" font-size="8">SIBLING</text>
+
+      <!-- Convention note -->
+      <text x="560" y="148" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">Sorted pairs:</text>
+      <text x="560" y="160" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="8">H(min(a,b) || max(a,b))</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">merkle_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Root of the Merkle tree committing to the allowed set</td></tr>
+      <tr><td class="field-name">siblings[0..N]</td><td class="field-type">HASH256</td><td class="field-size">32 B each</td><td class="field-side-w">Witness</td><td class="field-desc">Sibling hashes from leaf to root (proof path). One per tree level.</td></tr>
+      <tr><td class="field-name">leaf</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-w">Witness</td><td class="field-desc">The leaf hash being proven (last HASH256 field in the block)</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:12px">Minimum 3 HASH256 fields required: root + at least 1 sibling + leaf. Fields are ordered: [root, sibling_0, sibling_1, ..., leaf].</p>
+</div>
+
+<!-- Wire -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <p class="section-text" style="margin-bottom:12px">Example: depth-2 tree (4 leaves), proving membership of one leaf:</p>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0806</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-hash">HASH256 &middot; root</span>
+      <span class="wire-bytes">Conditions = 38 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0806</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-hash">HASH256 &middot; sib0</span>
+      <span class="wire-segment wire-field-hash">HASH256 &middot; sib1</span>
+      <span class="wire-segment wire-field-hash">HASH256 &middot; leaf</span>
+      <span class="wire-bytes">Witness = 106 bytes</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total (depth 2)</span>
+      <span class="wire-total-bytes">144 bytes</span>
+    </div>
+  </div>
+  <p class="section-text" style="margin-top:12px">Witness grows by 34 bytes per tree level (1B type + 1B len + 32B hash).</p>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract all <span class="eval-keyword">HASH256</span> fields. If fewer than 3 &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">First hash = <span class="eval-keyword">root</span>, last hash = <span class="eval-keyword">leaf</span>, middle hashes = proof siblings</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Start with <span class="eval-keyword">current</span> = leaf</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">For each sibling: <span class="eval-keyword">current</span> = SHA256(min(current, sibling) || max(current, sibling))</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If computed root == committed root &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+  <p class="section-text" style="margin-top:12px"><strong>Sorted pair convention:</strong> At each level, the two children are sorted lexicographically before hashing. This makes the proof deterministic — no left/right direction bits needed, saving 1 bit per level.</p>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-label">Conditions (commit to set root)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ACCUMULATOR"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3d4...merkle root...32 bytes"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness (prove membership)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ACCUMULATOR"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...sibling at level 0..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...sibling at level 1..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...leaf being proven..."</span> }
+  ]
+}</pre></div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Whitelist Authorization</div>
+    <div class="use-case-desc">Commit to a Merkle root of allowed transaction hashes, pubkey hashes, or output scripts. Only transactions that can prove membership in the committed set are valid spends. The set can contain millions of entries with only 32 bytes on-chain.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Inverted: Blacklist Enforcement</div>
+    <div class="use-case-desc">With the inverted flag, spending is blocked if the leaf IS in the set. Creates exclusion lists — e.g., block specific output patterns or addresses from being created.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Merkle Airdrops</div>
+    <div class="use-case-desc">Covenant output commits to a Merkle root of eligible claimants. Each claimant proves their pubkey hash is in the tree to claim their share. Scales to millions of recipients with O(log N) proof size.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Oracle Data Attestation</div>
+    <div class="use-case-desc">Oracle publishes a Merkle root of attested facts. Contract verifies a specific fact by checking its Merkle proof against the committed root, enabling trustless off-chain data verification.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="relative-value.html">&larr; RELATIVE_VALUE</a>
+  <a href="p2pk-legacy.html">P2PK_LEGACY &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

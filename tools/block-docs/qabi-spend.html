@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QABI_SPEND &mdash; LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">QABI_SPEND</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">QABIO Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0A02 &middot; QABIO FAMILY</div>
+  <h1 class="block-title">QABI_SPEND</h1>
+  <p class="block-subtitle">Batch-spend the primed UTXO. Consumes the next preimage at <code>committed_depth + 1</code>, verifies against <code>auth_tip</code>, and relies on the tx-level <code>aggregated_sig</code> (FALCON-512 over SIGHASH_QABO) to authorise the whole batch atomically. Every primed input in the same tx shares the same aggregated signature &mdash; one FALCON verification per tx, not per input. Output set must bit-exact match the QABIBlock&rsquo;s outputs vector; no coordinator-side skim is possible.</p>
+  <span class="block-family-badge" style="background:#9b59b6;color:#fff;">QABIO</span>
+  <span class="invertible-badge inv-no">Non-invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="320" viewBox="0 0 620 320">
+      <line x1="20" y1="10" x2="20" y2="310" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="310" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="150" x2="140" y2="150" stroke="#9b59b6" stroke-width="2"/>
+      <line x1="460" y1="150" x2="600" y2="150" stroke="#9b59b6" stroke-width="2"/>
+      <rect x="140" y="20" width="320" height="260" rx="2" fill="#f5f5f5" stroke="#9b59b6" stroke-width="1.5"/>
+      <text x="300" y="38" text-anchor="middle" fill="#9b59b6" font-family="Share Tech Mono" font-size="13" letter-spacing="2">QABI_SPEND</text>
+      <rect x="170" y="50" width="260" height="22" rx="1" fill="#f3e5f5" stroke="#ce93d8" stroke-width="1"/>
+      <text x="300" y="65" text-anchor="middle" fill="#8e44ad" font-family="IBM Plex Mono" font-size="9">HASH256 &middot; auth_tip (32B, conditions)</text>
+      <rect x="170" y="78" width="260" height="22" rx="1" fill="#f3e5f5" stroke="#ce93d8" stroke-width="1"/>
+      <text x="300" y="93" text-anchor="middle" fill="#8e44ad" font-family="IBM Plex Mono" font-size="9">HASH256 &middot; committed_root (32B, conditions)</text>
+      <rect x="170" y="106" width="260" height="22" rx="1" fill="#e8eaf6" stroke="#9fa8da" stroke-width="1"/>
+      <text x="300" y="121" text-anchor="middle" fill="#3949ab" font-family="IBM Plex Mono" font-size="9">NUMERIC &middot; committed_depth (conditions)</text>
+      <rect x="170" y="134" width="260" height="22" rx="1" fill="#e8eaf6" stroke="#9fa8da" stroke-width="1"/>
+      <text x="300" y="149" text-anchor="middle" fill="#3949ab" font-family="IBM Plex Mono" font-size="9">NUMERIC &middot; committed_expiry (conditions)</text>
+      <rect x="170" y="162" width="260" height="22" rx="1" fill="#e1f5fe" stroke="#81d4fa" stroke-width="1"/>
+      <text x="300" y="177" text-anchor="middle" fill="#0277bd" font-family="IBM Plex Mono" font-size="9">PUBKEY_COMMIT &middot; owner_id (32B, conditions)</text>
+      <rect x="170" y="190" width="260" height="22" rx="1" fill="#fff3e0" stroke="#ffb74d" stroke-width="1"/>
+      <text x="300" y="205" text-anchor="middle" fill="#ef6c00" font-family="IBM Plex Mono" font-size="9">PREIMAGE &middot; spend_preimage (32B, witness)</text>
+      <rect x="170" y="222" width="260" height="42" rx="2" fill="#fff" stroke="#b39ddb" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="300" y="237" text-anchor="middle" fill="#5e35b1" font-family="IBM Plex Mono" font-size="9">tx-level: aggregated_sig (FALCON-512, 666B)</text>
+      <text x="300" y="249" text-anchor="middle" fill="#5e35b1" font-family="IBM Plex Mono" font-size="9">qabi_block (coord_pk + batch_id + entries</text>
+      <text x="300" y="258" text-anchor="middle" fill="#5e35b1" font-family="IBM Plex Mono" font-size="9">+ outputs), verified once per tx (cached)</text>
+      <text x="300" y="300" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">9 consensus checks &rarr; SATISFIED per primed input</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">auth_tip</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Tip of the auth chain: <code>H^N(auth_seed)</code>. Committed at UTXO creation time. The participant&rsquo;s single secret is <code>auth_seed</code>; every future priming and spending preimage derives from it.</td></tr>
+      <tr><td class="field-name">committed_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Primed batch root. Zero before priming; set to the coordinator&rsquo;s batch root by a QABI_PRIME tx. The coordinator&rsquo;s aggregated sig at QABI_SPEND time is checked against the qabi_block whose SHA256 equals this root.</td></tr>
+      <tr><td class="field-name">committed_depth</td><td class="field-type">NUMERIC</td><td class="field-size">1&ndash;4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Depth of the most recently consumed preimage. Monotonically increasing. The witness-revealed <code>spend_preimage</code> must hash to <code>auth_tip</code> after <code>committed_depth + 1</code> SHA256 iterations.</td></tr>
+      <tr><td class="field-name">committed_expiry</td><td class="field-type">NUMERIC</td><td class="field-size">1&ndash;4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Max block height at which the spend may fire. Evaluated against <code>block_height</code>. Prevents stale primed UTXOs from being batch-spent against an old committed batch after the window closes.</td></tr>
+      <tr><td class="field-name">owner_id</td><td class="field-type">PUBKEY_COMMIT</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">SHA256 of the owner&rsquo;s FALCON public key. Must match one entry in the QABIBlock&rsquo;s <code>entries</code> list (consensus check 7). Ties the input to its position in the batch.</td></tr>
+      <tr><td class="field-name">spend_preimage</td><td class="field-type">PREIMAGE</td><td class="field-size">32 B</td><td class="field-side-w">Witness</td><td class="field-desc">The next preimage in the auth chain, revealed at depth <code>committed_depth + 1</code>. Verified via <code>SHA256^(committed_depth + 1)(spend_preimage) == auth_tip</code>.</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:12px">QABI_SPEND carries the QABI_SPEND_WITNESS implicit layout (6 fields total, 1 witness-only). The per-tx <code>qabi_block</code> and <code>aggregated_sig</code> are not part of the block&rsquo;s field list &mdash; they live on the transaction object itself and are shared across all primed inputs.</p>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">All 6 witness+conditions fields present with correct types and sizes. Otherwise &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Check <code>block_height &lt;= committed_expiry</code> (expiry window). Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Verify <code>SHA256^(committed_depth + 1)(spend_preimage) == auth_tip</code>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Tx must carry a 666-byte <code>aggregated_sig</code> and a non-empty <code>qabi_block</code>. Otherwise &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Parse qabi_block; coordinator_pubkey must be exactly 897 bytes (FALCON-512). Verify SHA256(qabi_block) == committed_root. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">QABO sighash: compute SIGHASH_QABO over tx intent + per-input witness stacks (excluding <code>aggregated_sig</code> itself). Verify FALCON-512(coord_pk, sighash, aggregated_sig). Cached per tx &mdash; one verify per tx, not per input. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">This input&rsquo;s <code>owner_id</code> must appear in <code>qabi_block.entries[*].participant_id</code> (O(1) hash-indexed lookup). Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">8.</span><span class="eval-step-text">Full output-set match: <code>tx.vout</code> bit-exact equal to <code>qabi_block.outputs</code> (same count, same order, same values, same scriptPubKeys). Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">9.</span><span class="eval-step-text">Expiry binding: <code>qabi_block.prime_expiry_height == committed_expiry</code>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">10.</span><span class="eval-step-text">All 9 checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Field count or types incorrect</td><td class="r-err">ERROR</td></tr>
+      <tr><td>committed_expiry in the past</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>spend_preimage does not hash to auth_tip</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>qabi_block SHA256 != committed_root</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>FALCON-512 verify fails (shared across all inputs)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>owner_id not in qabi_block.entries</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>tx.vout != qabi_block.outputs bit-exact</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>expiry_height mismatch between qabi_block and committed state</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>All 9 checks pass</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Example -->
+<div class="doc-section">
+  <div class="section-label">Worked Example</div>
+  <div class="eval-box">
+    <p class="section-text" style="margin-bottom:12px"><strong>Coordinator finalises a 100-party QABIO batch</strong></p>
+    <div class="eval-step"><span class="eval-step-text">100 primed UTXOs, each committed to the same <code>committed_root = SHA256(qabi_block)</code></span></div>
+    <div class="eval-step"><span class="eval-step-text">Coordinator builds a tx with 100 inputs and <code>K</code> outputs (the destination list from qabi_block)</span></div>
+    <div class="eval-step"><span class="eval-step-text">Each primed input&rsquo;s witness reveals its own <code>spend_preimage</code> at its own <code>committed_depth + 1</code></span></div>
+    <div class="eval-step"><span class="eval-step-text">Coordinator computes SIGHASH_QABO and signs once with their FALCON-512 key &rarr; 666-byte <code>aggregated_sig</code> attached to the tx</span></div>
+    <div class="eval-step"><span class="eval-step-text">Consensus verifies the aggregated sig ONCE per tx via the QABO sig cache &rarr; shared across all 100 inputs</span></div>
+    <div class="eval-step"><span class="eval-step-text">For each input: check its own preimage, expiry, owner_id &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">Tx mined; every participant&rsquo;s contribution lands at their committed destination atomically, or none of them do</span></div>
+  </div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Coordinator-driven batch payments</div>
+    <div class="use-case-desc">A payroll service, mixing pool, or L2 exit coordinator collects primed UTXOs from N participants, publishes a single qabi_block listing contributions and destinations, and finalises the whole batch with one FALCON-512 signature. One on-chain tx, N inputs, K outputs, one signature. Consensus-guaranteed atomicity.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Post-quantum multi-party batching</div>
+    <div class="use-case-desc">The aggregated signature is FALCON-512 &mdash; not Schnorr &mdash; so the coordinator authorisation is PQ-safe today, without needing MuSig or threshold schemes. A coordinator wanting Schnorr or another PQ scheme (DILITHIUM3, SPHINCS+) would require a future <code>QABI_BLOCK_VERSION = 0x02</code> with scheme dispatch.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Atomic swaps at scale</div>
+    <div class="use-case-desc">Any multi-party protocol needing &ldquo;all or nothing&rdquo; settlement with a small trusted (or semi-trusted) coordinator role: liquidity pool exits, swap commit phases, gas-station batch settlements. The coordinator sees the full tx before signing; participants see the coordinator&rsquo;s pubkey + batch root before priming.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="qabi-prime.html">&larr; QABI_PRIME</a>
+  <a href="index.html">Block Index &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

@@ -33,3 +33,13 @@ regtest-data/
 
 # TLC model-checking state dumps
 spec/states/
+
+# Tools artefacts (from bitcoin-ladder-script merge)
+tools/test-results*.json
+tools/dashboard.html
+tools/generate-tx-docs.py
+
+# TLA+ tooling (download locally, never commit)
+spec/jdk-*/
+spec/*.tar.gz
+spec/tla2tools.jar

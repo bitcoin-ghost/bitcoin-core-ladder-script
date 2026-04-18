@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OUTPUT_COUNT — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="../../index.html" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Ladder Script</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">OUTPUT_COUNT</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Governance Family</span>
+</div>
+
+<div class="doc-content">
+
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0804 &middot; GOVERNANCE FAMILY</div>
+  <h1 class="block-title">OUTPUT_COUNT</h1>
+  <p class="block-subtitle">Bounds on the number of outputs in the spending transaction. Controls fan-out behavior and prevents excessive output creation. No Tapscript equivalent.</p>
+  <span class="block-family-badge badge-governance">Governance</span>
+  <span class="invertible-badge inv-yes">Invertible</span>
+</div>
+
+<!-- Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="150" viewBox="0 0 620 150">
+      <line x1="20" y1="10" x2="20" y2="140" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="140" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="60" x2="180" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <line x1="420" y1="60" x2="600" y2="60" stroke="#e74c3c" stroke-width="2"/>
+      <rect x="180" y="20" width="240" height="80" rx="2" fill="#f5f5f5" stroke="#7f8c8d" stroke-width="1.5"/>
+      <text x="300" y="38" text-anchor="middle" fill="#7f8c8d" font-family="Share Tech Mono" font-size="13" letter-spacing="2">OUTPUT_COUNT</text>
+      <text x="300" y="60" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="11" font-weight="600">min &le; tx.vout.size() &le; max</text>
+      <text x="300" y="125" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">Controls output fan-out behavior</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td class="field-name">min_outputs</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Minimum number of outputs required (&ge; 0)</td></tr>
+      <tr><td class="field-name">max_outputs</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Maximum number of outputs allowed (&ge; min_outputs)</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Wire -->
+<div class="doc-section">
+  <div class="section-label">Wire Format Breakdown</div>
+  <div class="wire-breakdown">
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0804</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-num">NUMERIC</span>
+      <span class="wire-segment wire-field-num">NUMERIC</span>
+      <span class="wire-bytes">Conditions = 14 bytes</span>
+    </div>
+    <div class="wire-row">
+      <span class="wire-segment wire-type">0x0804</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">0</span>
+      <span class="wire-bytes">Witness = 4 bytes</span>
+    </div>
+    <div class="wire-total">
+      <span class="wire-total-label">Total</span>
+      <span class="wire-total-bytes">20 bytes</span>
+    </div>
+  </div>
+</div>
+
+<!-- Evaluation -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">min_outputs</span> and <span class="eval-keyword">max_outputs</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Validate: min &ge; 0, max &ge; 0, min &le; max. If invalid &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If no tx context &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Count outputs: if min &le; count &le; max &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+  </div>
+</div>
+
+<!-- JSON -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"OUTPUT_COUNT"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">1</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">2</span> }
+  ]
+}</pre></div>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+  <div class="use-case">
+    <div class="use-case-title">Simple Transfer Enforcement</div>
+    <div class="use-case-desc">Setting max=2 forces the spend to create at most 2 outputs (payment + change). Prevents the UTXO from being used in batch payouts or CoinJoin-style transactions.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Covenant Output Structure</div>
+    <div class="use-case-desc">Combined with RECURSE_SAME, ensures the spending transaction creates exactly the right number of covenant outputs. Setting min=max=1 forces a 1-to-1 covenant chain.</div>
+  </div>
+  <div class="use-case">
+    <div class="use-case-title">Anti-Fragmentation</div>
+    <div class="use-case-desc">Capping output count prevents value fragmentation attacks where an adversary splits a large UTXO into many dust outputs to increase future spending costs.</div>
+  </div>
+</div>
+
+<div class="doc-nav">
+  <a href="input-count.html">&larr; INPUT_COUNT</a>
+  <a href="relative-value.html">RELATIVE_VALUE &rarr;</a>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transaction Anatomy — Ladder Script</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg-alt: #f5f5f5; --bg-code: #f0f0f0;
+  --text: #1a1a1a; --text-body: #333333; --text-dim: #666666; --text-light: #999999;
+  --accent: #e67e22; --accent-dark: #d35400; --green: #27ae60; --red: #c0392b; --blue: #2980b9;
+  --border: #e0e0e0; --border-light: #eeeeee;
+  --c-version: #e74c3c; --c-marker: #9b59b6; --c-inputs: #2980b9;
+  --c-outputs: #27ae60; --c-witness: #e67e22; --c-locktime: #7f8c8d;
+  --c-mlsc: #16a085; --c-micro: #8e44ad; --c-fields: #d35400;
+  --c-coil: #2c3e50; --c-proof: #c0392b;
+}
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
+::selection { background: var(--accent); color: #fff; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.site-header { background: #fff; border-bottom: 1px solid var(--border); }
+.site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+.header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
+.header-title:hover { text-decoration: none; color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
+.header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding: 10px 0; }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 48px; }
+.section { margin-bottom: 64px; }
+.section-head { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.section-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 24px; }
+.section p { margin-bottom: 12px; }
+
+.byte-bar { display: flex; margin: 24px 0 8px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.byte-seg { padding: 14px 12px; text-align: center; color: #fff; min-width: 40px; }
+.byte-seg .seg-label { font-weight: 700; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 2px; }
+.byte-seg .seg-size { font-size: 10px; opacity: 0.8; }
+.byte-seg .seg-hex { font-size: 9px; opacity: 0.6; margin-top: 2px; word-break: break-all; }
+.byte-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 24px; font-size: 12px; }
+.byte-legend-item { display: flex; align-items: center; gap: 6px; }
+.byte-legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+.detail { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 20px 24px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.detail-swatch { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; }
+.detail-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.detail-bytes { font-size: 12px; color: var(--text-dim); }
+.detail code { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: var(--bg-code); padding: 2px 6px; border-radius: 3px; }
+.detail table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.detail th { text-align: left; font-weight: 600; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.detail td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
+.detail td:first-child { font-family: 'JetBrains Mono', monospace; color: var(--blue); font-size: 12px; }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 24px 0; }
+.compare-card { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 20px; }
+.compare-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.compare-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+.note { background: var(--bg-alt); border-left: 3px solid var(--accent); padding: 12px 16px; margin: 16px 0; font-size: 14px; color: var(--text-dim); border-radius: 0 4px 4px 0; }
+
+.site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
+.site-footer a { color: var(--text-light); }
+.site-footer a:hover { color: var(--accent); }
+
+@media (max-width: 700px) {
+  .byte-bar { flex-wrap: wrap; }
+  .compare { grid-template-columns: 1fr; }
+  .main { padding: 32px 16px 60px; }
+  .site-header-inner { padding: 0 16px; }
+  .header-top { flex-direction: column; align-items: flex-start; gap: 8px; height: auto; padding: 12px 0; }
+  .header-nav { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="header-top">
+      <a href="../index.html" class="header-title">Ladder Script</a>
+      <div class="header-right">
+        
+        <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" class="gh-icon">
+          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="ladder-script.html">Ladder Script</a>
+      <a href="rung-tx-anatomy.html" class="active">Anatomy</a>
+      <a href="block-docs/">Blocks</a>
+      <a href="docs/">Docs</a>
+      <a href="patch-overview.html">Patch</a>
+      <a href="get-started.html">Get Started</a>
+      <a href="ladder-engine.html">Engine</a>
+      <a href="qabio-playground.html">QABIO</a>
+      <a href="explorer.html">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+<div class="main">
+
+  <h1 class="page-title">Transaction Anatomy</h1>
+  <p class="page-sub">How Ladder Script transactions are structured, byte by byte</p>
+
+  <div class="section">
+    <div class="section-head">1. Funding Transaction</div>
+    <div class="section-sub">A standard Bitcoin input creates a Ladder Script output. This is how coins enter the system.</div>
+
+    <div class="byte-bar">
+      <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 bytes</div><div class="seg-hex">04000000</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div><div class="seg-hex">0001</div></div>
+      <div class="byte-seg" style="background:var(--c-inputs);flex:4"><div class="seg-label">Input (P2PKH)</div><div class="seg-size">~148 bytes</div><div class="seg-hex">txid + vout + scriptSig + sequence</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1"><div class="seg-label">Output</div><div class="seg-size">8 bytes</div><div class="seg-hex">value only</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.5"><div class="seg-label">Conditions Root</div><div class="seg-size">33 bytes</div><div class="seg-hex">df + root</div></div>
+      <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 bytes</div><div class="seg-hex">00000000</div></div>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-version)"></div><div class="detail-title">Version</div><div class="detail-bytes">4 bytes, little-endian</div></div>
+      <p>Transaction version <code>4</code> signals a TX_MLSC. Nodes without Ladder Script treat it as a standard transaction (soft fork compatibility). The version routes validation to <code>VerifyRungTx</code> instead of <code>VerifyScript</code>.</p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-inputs)"></div><div class="detail-title">Input</div><div class="detail-bytes">~148 bytes for P2PKH</div></div>
+      <p>The funding input is a standard Bitcoin input: P2PKH, P2WPKH, P2TR, or any existing type. The wallet signs it normally. Ladder Script only governs the output side.</p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Output (value only)</div><div class="detail-bytes">8 bytes per output</div></div>
+      <p>Each output is exactly 8 bytes: the value in satoshis. There is no per-output script. Conditions are defined once per transaction via the shared conditions_root (PLC model).</p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">33 bytes, one per transaction</div></div>
+      <p>One <code>0xDF</code> prefix + 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where outputs are mapped to conditions via the <code>output()</code> wrapper. A creation proof in the witness validates the root is protocol-derived.</p>
+      <table>
+        <tr><td>0xDF</td><td>TX_MLSC prefix (1 byte)</td></tr>
+        <tr><td>root</td><td>SHA-256 Merkle root of conditions, relays, and coil (32 bytes)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">2. Spending Transaction</div>
+    <div class="section-sub">An MLSC input spends a Ladder Script output. The witness carries the conditions and proof.</div>
+
+    <div class="byte-bar">
+      <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 B</div><div class="seg-hex">04000000</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div></div>
+      <div class="byte-seg" style="background:var(--c-inputs);flex:2"><div class="seg-label">Input</div><div class="seg-size">41 B</div><div class="seg-hex">txid + vout + empty scriptSig + seq</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:0.8"><div class="seg-label">Output</div><div class="seg-size">8 B</div><div class="seg-hex">value</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.2"><div class="seg-label">Conditions Root</div><div class="seg-size">33 B</div><div class="seg-hex">df + root</div></div>
+      <div class="byte-seg" style="background:var(--c-witness);flex:4"><div class="seg-label">Witness</div><div class="seg-size">variable</div><div class="seg-hex">ladder witness + MLSC proof</div></div>
+      <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 B</div></div>
+    </div>
+
+    <p>The per-input witness stack has exactly 2 elements:</p>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-witness)"></div><div class="detail-title">Witness Stack[0]: Ladder Witness</div></div>
+      <p>The serialised rung with all blocks and their witness fields (signatures, pubkeys, preimages), plus coil metadata and relay definitions.</p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-proof)"></div><div class="detail-title">Witness Stack[1]: MLSC Proof</div></div>
+      <p>The Merkle proof linking the revealed conditions to the conditions_root. Contains the rung index, revealed conditions, and sibling hashes.</p>
+    </div>
+
+    <p style="margin-top:12px">The <strong>creation proof</strong> is a separate per-transaction blob (not a per-input witness element). It validates that the conditions_root is protocol-derived from valid typed structure. It is carried after all per-input witness stacks in the TX_MLSC wire format (flag byte 0x02).</p>
+  </div>
+
+  <div class="section">
+    <div class="section-head">3. Inside the Ladder Witness</div>
+    <div class="section-sub">The witness encodes exactly one rung with all its blocks and fields.</div>
+
+    <div class="byte-bar">
+      <div class="byte-seg" style="background:var(--c-inputs);flex:0.5"><div class="seg-label">Rungs</div><div class="seg-size">1 B</div><div class="seg-hex">01</div></div>
+      <div class="byte-seg" style="background:var(--c-inputs);flex:0.5"><div class="seg-label">Blocks</div><div class="seg-size">1 B</div><div class="seg-hex">02</div></div>
+      <div class="byte-seg" style="background:var(--c-micro);flex:1"><div class="seg-label">Block 1</div><div class="seg-size">header + fields</div></div>
+      <div class="byte-seg" style="background:var(--c-fields);flex:1.5"><div class="seg-label">Block 2</div><div class="seg-size">header + fields</div></div>
+      <div class="byte-seg" style="background:var(--c-coil);flex:2"><div class="seg-label">Coil</div><div class="seg-size">type + scheme + address + destinations</div></div>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-micro)"></div><div class="detail-title">Micro-header encoding</div></div>
+      <p>Each block starts with a single byte. Values <code>0x00</code>&ndash;<code>0x3E</code> are micro-headers that encode the block type via a lookup table. Fields use the implicit layout, so no field count or type bytes are needed. Values <code>0x80</code>/<code>0x81</code> are escape codes for full 2-byte type + explicit fields.</p>
+      <table>
+        <tr><td>0x00</td><td>SIG</td></tr>
+        <tr><td>0x01</td><td>MULTISIG</td></tr>
+        <tr><td>0x03</td><td>CSV</td></tr>
+        <tr><td>0x0A</td><td>CTV</td></tr>
+        <tr><td>0x3E</td><td>OUTPUT_CHECK</td></tr>
+        <tr><td>0x80</td><td>Escape (full type follows)</td></tr>
+        <tr><td>0x81</td><td>Escape + inverted</td></tr>
+      </table>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-fields)"></div><div class="detail-title">Typed fields</div></div>
+      <p>Every field has a declared type with enforced size. No arbitrary data is possible.</p>
+      <table>
+        <thead><tr><th>Type</th><th>Size</th><th>Used for</th></tr></thead>
+        <tr><td>PUBKEY</td><td>1&ndash;2,048 B</td><td>Public keys (Schnorr 33B, PQ up to 2KB)</td></tr>
+        <tr><td>SIGNATURE</td><td>1&ndash;50,000 B</td><td>Signatures (Schnorr 64B, PQ up to 49KB)</td></tr>
+        <tr><td>HASH256</td><td>32 B</td><td>SHA-256 commitments</td></tr>
+        <tr><td>NUMERIC</td><td>1&ndash;4 B</td><td>Thresholds, timelocks, counts</td></tr>
+        <tr><td>SCHEME</td><td>1 B</td><td>Signature scheme selector</td></tr>
+        <tr><td>PREIMAGE</td><td>32 B</td><td>Hash preimage (max 2 per witness)</td></tr>
+      </table>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-coil)"></div><div class="detail-title">Coil</div></div>
+      <p>Defines what happens when a rung is satisfied.</p>
+      <table>
+        <tr><td>coil_type</td><td>UNLOCK (0x01) or UNLOCK_TO (0x02). All other values rejected.</td></tr>
+        <tr><td>attestation</td><td>INLINE (0x01). All other values rejected.</td></tr>
+        <tr><td>scheme</td><td>SCHNORR, ECDSA, or PQ scheme</td></tr>
+        <tr><td>address_hash</td><td>0 or 32 bytes (destination for UNLOCK_TO)</td></tr>
+        <tr><td>rung_destinations</td><td>Per-rung destination overrides</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">4. Funding vs Spending</div>
+    <div class="compare">
+      <div class="compare-card">
+        <div class="compare-title" style="color:var(--c-inputs)">Funding (coins enter)</div>
+        <p><strong>Input:</strong> any standard Bitcoin output</p>
+        <p><strong>Output:</strong> 8 bytes (value only) per output</p>
+        <p><strong>Conditions root:</strong> <code>0xDF</code> + 32-byte Merkle root (one per tx)</p>
+        <p><strong>Witness:</strong> standard Bitcoin witness + creation proof</p>
+        <p>The funding wallet needs the Ladder Script library (or the engine/RPC) to compute the conditions_root from the desired conditions. Each output is just 8 bytes; the shared root is 33 bytes per transaction.</p>
+      </div>
+      <div class="compare-card">
+        <div class="compare-title" style="color:var(--c-witness)">Spending (coins leave)</div>
+        <p><strong>Input:</strong> references the TX_MLSC output</p>
+        <p><strong>Output:</strong> another TX_MLSC output (8 bytes value only)</p>
+        <p><strong>Witness:</strong> ladder witness + MLSC proof + creation proof</p>
+        <p>The node verifies the Merkle proof, merges conditions with witness, and evaluates the ladder.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">5. Verification flow</div>
+    <div class="detail" style="border-left: 3px solid var(--accent);">
+      <p><strong>1.</strong> Node sees tx version 4, input spending a TX_MLSC output</p>
+      <p><strong>2.</strong> Routes to <code>VerifyRungTx</code></p>
+      <p><strong>3.</strong> Validates outputs are value-only (8 bytes each) with one conditions_root per tx</p>
+      <p><strong>4.</strong> Deserialises witness stack[0] as LadderWitness</p>
+      <p><strong>5.</strong> Deserialises witness stack[1] as MLSCProof</p>
+      <p><strong>6.</strong> Validates the per-transaction creation proof (root is protocol-derived)</p>
+      <p><strong>7.</strong> Extracts pubkeys from witness blocks (merkle_pub_key)</p>
+      <p><strong>8.</strong> Verifies Merkle proof against conditions_root</p>
+      <p><strong>9.</strong> Merges conditions with witness into single structure</p>
+      <p><strong>10.</strong> Evaluates the ladder (AND within rung, OR across rungs)</p>
+      <p><strong>11.</strong> If SATISFIED, the input is valid</p>
+    </div>
+  </div>
+
+</div>
+
+<footer class="site-footer">
+  <a href="../index.html">Ladder Script</a> &middot; 
+</footer>
+
+</body>
+</html>
