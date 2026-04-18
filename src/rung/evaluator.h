@@ -150,14 +150,20 @@ struct QABOSigCache {};
  *  Provides transaction and amount data needed by covenant, anchor,
  *  recursion, and PLC evaluators. */
 struct RungEvalContext {
-    const CTransaction* tx{nullptr};       //!< The spending transaction (for CTV template verification)
+    const api::LadderTxView* tx{nullptr};  //!< The spending transaction (adapter view)
+    //! Core-typed pointer to the same transaction, kept transitional so
+    //! evaluators can still call Core sizing helpers
+    //! (GetVirtualTransactionSize / GetTransactionWeight) and CTV hash /
+    //! QABO sighash. Removed once those are adapter-typed.
+    const CTransaction* tx_core{nullptr};
     uint32_t input_index{0};               //!< Index of the input being evaluated
-    CAmount input_amount{0};               //!< Amount of the UTXO being spent
-    CAmount output_amount{0};              //!< Amount of the output being created (for AMOUNT_LOCK)
+    int64_t input_amount{0};               //!< Amount of the UTXO being spent (satoshis)
+    int64_t output_amount{0};              //!< Amount of the output being created (for AMOUNT_LOCK)
     int32_t block_height{0};               //!< Current block height (for RECURSE_UNTIL)
-    const CTxOut* spending_output{nullptr}; //!< Output script being created (for recursion covenant checks)
+    const api::LadderOutputView* spending_output{nullptr}; //!< Output being created (for recursion covenant checks)
     const RungConditions* input_conditions{nullptr}; //!< Input conditions (for recursion covenant comparison)
-    const std::vector<CTxOut>* spent_outputs{nullptr}; //!< All spent outputs in the tx (for COSIGN cross-input checks)
+    const api::LadderOutputView* spent_outputs{nullptr}; //!< All spent outputs in the tx (for COSIGN cross-input checks)
+    size_t spent_output_count{0};                        //!< Count for spent_outputs above
     const std::vector<Relay>* relays{nullptr};         //!< Relay definitions (for KEY_REF_SIG resolution)
     const std::vector<uint16_t>* rung_relay_refs{nullptr}; //!< Current rung's relay_refs (KEY_REF_SIG validation)
     const std::vector<std::vector<std::vector<uint8_t>>>* rung_pubkeys{nullptr}; //!< Per-rung pubkey lists for Merkle leaf (merkle_pub_key)

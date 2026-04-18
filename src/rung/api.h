@@ -212,6 +212,11 @@ struct LadderTxView {
     // Empty (data=nullptr, size=0) for non-QABIO v4 transactions.
     const uint8_t* qabi_block{nullptr};
     size_t qabi_block_size{0};
+
+    // QABIO extension: the FALCON-512 coordinator signature over the
+    // QABO sighash. Empty for non-QABIO transactions.
+    const uint8_t* aggregated_sig{nullptr};
+    size_t aggregated_sig_size{0};
 };
 
 // ============================================================================

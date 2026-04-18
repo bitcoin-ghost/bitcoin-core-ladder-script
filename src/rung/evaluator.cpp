@@ -768,11 +768,11 @@ EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx)
         return EvalResult::ERROR;
     }
 
-    if (!ctx.tx) {
+    if (!ctx.tx_core) {
         return EvalResult::UNSATISFIED;
     }
 
-    uint256 computed = ComputeCTVHash(*ctx.tx, ctx.input_index);
+    uint256 computed = ComputeCTVHash(*ctx.tx_core, ctx.input_index);
 
     if (memcmp(computed.data(), template_hash->data.data(), 32) == 0) {
         return EvalResult::SATISFIED;
@@ -999,22 +999,22 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     }
 
     // 4. Fee rate check (consensus-enforced anti-pinning)
-    if (!ctx.tx || !ctx.spent_outputs) {
+    if (!ctx.tx || !ctx.spent_outputs || !ctx.tx_core) {
         return EvalResult::ERROR; // fail-closed: tx context required for fee/weight checks
     }
     {
         int64_t total_in = 0;
-        for (const auto& spent : *ctx.spent_outputs) {
-            total_in += spent.nValue;
+        for (size_t i = 0; i < ctx.spent_output_count; ++i) {
+            total_in += ctx.spent_outputs[i].value;
         }
         int64_t total_out = 0;
-        for (const auto& out : ctx.tx->vout) {
-            total_out += out.nValue;
+        for (size_t i = 0; i < ctx.tx->output_count; ++i) {
+            total_out += ctx.tx->outputs[i].value;
         }
         int64_t fee = total_in - total_out;
         if (fee < 0) return EvalResult::UNSATISFIED;
 
-        int64_t vsize = GetVirtualTransactionSize(*ctx.tx);
+        int64_t vsize = GetVirtualTransactionSize(*ctx.tx_core);
         if (vsize <= 0) return EvalResult::ERROR;
 
         int64_t fee_rate = fee / vsize;
@@ -1025,7 +1025,7 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
 
     // 5. Weight limit check
     {
-        int64_t tx_weight = GetTransactionWeight(*ctx.tx);
+        int64_t tx_weight = GetTransactionWeight(*ctx.tx_core);
         if (tx_weight > max_weight) {
             return EvalResult::UNSATISFIED;
         }
@@ -1109,10 +1109,10 @@ EvalResult EvalAnchorOracleBlock(const RungBlock& block)
 
 /** Check if an output's MLSC root matches the verified input root (identity check).
  *  Used by RECURSE_SAME and RECURSE_UNTIL (before deadline). */
-static bool OutputRootMatchesInput(const CTxOut& output, const MLSCVerifiedLeaves& verified_leaves)
+static bool OutputRootMatchesInput(const api::LadderOutputView& output, const MLSCVerifiedLeaves& verified_leaves)
 {
     uint256 output_root;
-    if (!GetMLSCRoot(output.scriptPubKey, output_root)) {
+    if (!GetMLSCRoot(output.script_pub_key.as_span(), output_root)) {
         return false;
     }
     return output_root == verified_leaves.root;
@@ -1218,7 +1218,7 @@ static EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
             if (!applied) return EvalResult::UNSATISFIED;
         }
         uint256 output_root;
-        if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+        if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
             return EvalResult::UNSATISFIED;
         }
         if (output_root != ComputeConditionsRootMLSC(expected, pubkeys)) {
@@ -1298,7 +1298,7 @@ static EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
     // Build tree from mutated leaves and compare with output root
     uint256 expected_root = BuildMerkleTree(std::move(leaves_copy));
     uint256 output_root;
-    if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+    if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
         return EvalResult::UNSATISFIED;
     }
     if (output_root != expected_root) {
@@ -1333,7 +1333,7 @@ EvalResult EvalRecurseSameBlock(const RungBlock& block, const RungEvalContext& c
         if (!ctx.spending_output) return EvalResult::ERROR;
         // Fallback: compare MLSC roots directly
         uint256 output_root;
-        if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+        if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
             return EvalResult::UNSATISFIED;
         }
         std::vector<std::vector<std::vector<uint8_t>>> pks;
@@ -1416,8 +1416,8 @@ EvalResult EvalRecurseUntilBlock(const RungBlock& block, const RungEvalContext& 
     // Use tx nLockTime as height proxy (like CLTV — consensus ensures tx can't
     // be included before nLockTime). If nLockTime >= until_height, covenant terminates.
     int64_t effective_height = ctx.block_height;
-    if (ctx.tx && ctx.tx->nLockTime < LOCKTIME_THRESHOLD) {
-        effective_height = std::max(effective_height, static_cast<int64_t>(ctx.tx->nLockTime));
+    if (ctx.tx && ctx.tx->lock_time < LOCKTIME_THRESHOLD) {
+        effective_height = std::max(effective_height, static_cast<int64_t>(ctx.tx->lock_time));
     }
     if (effective_height >= until_height) {
         return EvalResult::SATISFIED;
@@ -1431,7 +1431,7 @@ EvalResult EvalRecurseUntilBlock(const RungBlock& block, const RungEvalContext& 
     } else if (ctx.input_conditions && ctx.spending_output) {
         // Fallback: compare MLSC roots directly
         uint256 output_root;
-        if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+        if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
             return EvalResult::UNSATISFIED;
         }
         std::vector<std::vector<std::vector<uint8_t>>> pks;
@@ -1491,7 +1491,7 @@ EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& 
             uint256 expected_root = ComputeExpectedRoot(*ctx.verified_leaves,
                                                          ctx.verified_leaves->rung_index, new_leaf);
             uint256 output_root;
-            if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+            if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
                 return EvalResult::UNSATISFIED;
             }
             if (output_root != expected_root) {
@@ -1504,7 +1504,7 @@ EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& 
             std::vector<std::vector<std::vector<uint8_t>>> pks;
             if (ctx.rung_pubkeys) pks = *ctx.rung_pubkeys;
             uint256 output_root;
-            if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+            if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
                 return EvalResult::UNSATISFIED;
             }
             if (output_root != ComputeConditionsRootMLSC(expected, pks)) {
@@ -1572,17 +1572,18 @@ EvalResult EvalRecurseSplitBlock(const RungBlock& block, const RungEvalContext& 
             expected_root = ComputeConditionsRootMLSC(expected, pks);
         }
 
-        CAmount total_output = 0;
-        for (const auto& vout : ctx.tx->vout) {
-            // DATA_RETURN outputs (nValue == 0) are exempt from covenant checks
-            if (vout.nValue == 0) continue;
-            if (vout.nValue < min_split_sats) {
+        int64_t total_output = 0;
+        for (size_t voi = 0; voi < ctx.tx->output_count; ++voi) {
+            const auto& vout = ctx.tx->outputs[voi];
+            // DATA_RETURN outputs (value == 0) are exempt from covenant checks
+            if (vout.value == 0) continue;
+            if (vout.value < min_split_sats) {
                 return EvalResult::UNSATISFIED;
             }
-            total_output += vout.nValue;
+            total_output += vout.value;
             // Every spendable output must be MLSC with the expected root
             uint256 out_root;
-            if (!GetMLSCRoot(vout.scriptPubKey, out_root)) {
+            if (!GetMLSCRoot(vout.script_pub_key.as_span(), out_root)) {
                 return EvalResult::UNSATISFIED; // non-MLSC output breaks covenant
             }
             if (out_root != expected_root) {
@@ -1641,24 +1642,24 @@ EvalResult EvalHysteresisFeeBlock(const RungBlock& block, const RungEvalContext&
         return EvalResult::UNSATISFIED;
     }
     // If no tx context, fail-safe to error
-    if (!ctx.tx || !ctx.spent_outputs) {
+    if (!ctx.tx || !ctx.spent_outputs || !ctx.tx_core) {
         return EvalResult::ERROR;
     }
     // Compute fee = sum(input values) - sum(output values)
     int64_t total_in = 0;
-    for (const auto& spent : *ctx.spent_outputs) {
-        total_in += spent.nValue;
+    for (size_t i = 0; i < ctx.spent_output_count; ++i) {
+        total_in += ctx.spent_outputs[i].value;
     }
     int64_t total_out = 0;
-    for (const auto& out : ctx.tx->vout) {
-        total_out += out.nValue;
+    for (size_t i = 0; i < ctx.tx->output_count; ++i) {
+        total_out += ctx.tx->outputs[i].value;
     }
     int64_t fee = total_in - total_out;
     if (fee < 0) {
         return EvalResult::UNSATISFIED;
     }
     // fee_rate = fee / vsize (sat/vB)
-    int64_t vsize = GetVirtualTransactionSize(*ctx.tx);
+    int64_t vsize = GetVirtualTransactionSize(*ctx.tx_core);
     if (vsize <= 0) {
         return EvalResult::ERROR;
     }
@@ -1932,12 +1933,12 @@ EvalResult EvalCosignBlock(const RungBlock& block, const RungEvalContext& ctx)
     }
 
     // Check each other input's spent output scriptPubKey
-    for (size_t i = 0; i < ctx.tx->vin.size(); ++i) {
+    for (size_t i = 0; i < ctx.tx->input_count; ++i) {
         if (i == ctx.input_index) continue; // skip self
 
-        if (i >= ctx.spent_outputs->size()) continue;
+        if (i >= ctx.spent_output_count) continue;
 
-        const CScript& other_spk = (*ctx.spent_outputs)[i].scriptPubKey;
+        const auto other_spk = ctx.spent_outputs[i].script_pub_key.as_span();
 
         // SHA256 of the other input's spent scriptPubKey
         unsigned char hash[CSHA256::OUTPUT_SIZE];
@@ -2293,9 +2294,9 @@ EvalResult EvalWeightLimitBlock(const RungBlock& block, const RungEvalContext& c
     if (!max_weight_opt || *max_weight_opt <= 0) return EvalResult::ERROR;
     int64_t max_weight = *max_weight_opt;
 
-    if (!ctx.tx) return EvalResult::ERROR; // fail-safe: no tx context
+    if (!ctx.tx_core) return EvalResult::ERROR; // fail-safe: no tx context
 
-    int64_t tx_weight = GetTransactionWeight(*ctx.tx);
+    int64_t tx_weight = GetTransactionWeight(*ctx.tx_core);
     if (tx_weight <= max_weight) {
         return EvalResult::SATISFIED;
     }
@@ -2322,7 +2323,7 @@ EvalResult EvalInputCountBlock(const RungBlock& block, const RungEvalContext& ct
 
     if (!ctx.tx) return EvalResult::ERROR;
 
-    int64_t count = static_cast<int64_t>(ctx.tx->vin.size());
+    int64_t count = static_cast<int64_t>(ctx.tx->input_count);
     if (count >= min_inputs && count <= max_inputs) {
         return EvalResult::SATISFIED;
     }
@@ -2349,7 +2350,7 @@ EvalResult EvalOutputCountBlock(const RungBlock& block, const RungEvalContext& c
 
     if (!ctx.tx) return EvalResult::ERROR;
 
-    int64_t count = static_cast<int64_t>(ctx.tx->vout.size());
+    int64_t count = static_cast<int64_t>(ctx.tx->output_count);
     if (count >= min_outputs && count <= max_outputs) {
         return EvalResult::SATISFIED;
     }
@@ -2478,22 +2479,23 @@ EvalResult EvalOutputCheckBlock(const RungBlock& block, const RungEvalContext& c
     if (!ctx.tx) return EvalResult::ERROR;
 
     // Bounds check
-    if (static_cast<size_t>(output_index) >= ctx.tx->vout.size()) {
+    if (static_cast<size_t>(output_index) >= ctx.tx->output_count) {
         return EvalResult::UNSATISFIED;
     }
 
-    const auto& vout = ctx.tx->vout[static_cast<size_t>(output_index)];
+    const auto& vout = ctx.tx->outputs[static_cast<size_t>(output_index)];
 
     // Value check
-    if (vout.nValue < min_sats || vout.nValue > max_sats) {
+    if (vout.value < min_sats || vout.value > max_sats) {
         return EvalResult::UNSATISFIED;
     }
 
     // Script check (skip if hash is all zeros)
     static const std::vector<uint8_t> zero_hash(32, 0x00);
     if (hash_field->data != zero_hash) {
+        const auto spk = vout.script_pub_key.as_span();
         unsigned char computed[CSHA256::OUTPUT_SIZE];
-        CSHA256().Write(vout.scriptPubKey.data(), vout.scriptPubKey.size()).Finalize(computed);
+        CSHA256().Write(spk.data(), spk.size()).Finalize(computed);
         if (memcmp(computed, hash_field->data.data(), 32) != 0) {
             return EvalResult::UNSATISFIED;
         }
@@ -3033,7 +3035,7 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
         if (ctx.rung_pubkeys) pks = *ctx.rung_pubkeys;
         uint256 expected_root = ComputeConditionsRootMLSC(expected, pks);
         uint256 output_root;
-        if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+        if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
             return EvalResult::UNSATISFIED;
         }
         if (output_root != expected_root) return EvalResult::UNSATISFIED;
@@ -3151,7 +3153,7 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
 
     // Extract the output's committed conditions_root.
     uint256 output_root;
-    if (!GetMLSCRoot(ctx.spending_output->scriptPubKey, output_root)) {
+    if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
         return EvalResult::UNSATISFIED;
     }
 
@@ -3279,9 +3281,9 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     //
     // Cache key is sighash — constant within a single tx.
 
-    if (ctx.tx->qabi_block.empty()) return EvalResult::UNSATISFIED;
+    if (ctx.tx->qabi_block_size == 0) return EvalResult::UNSATISFIED;
 
-    uint256 sighash = rung::ComputeSighashQABO(*ctx.tx);
+    uint256 sighash = rung::api::ComputeSighashQABO(*ctx.tx);
 
     const rung::QABIBlock* parsed_ptr = nullptr;
     const uint8_t* qabi_root_hash_ptr = nullptr;
@@ -3336,13 +3338,14 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
 
         // Check 4: SHA256 of qabi_block.
         CSHA256()
-            .Write(ctx.tx->qabi_block.data(), ctx.tx->qabi_block.size())
+            .Write(ctx.tx->qabi_block, ctx.tx->qabi_block_size)
             .Finalize(fresh_root_hash.begin());
         qabi_root_hash_ptr = fresh_root_hash.begin();
 
         // Check 5: parse the block.
         std::string parse_err;
-        auto parsed_opt = rung::ParseQABIBlock(ctx.tx->qabi_block, parse_err);
+        std::vector<uint8_t> qabi_bytes(ctx.tx->qabi_block, ctx.tx->qabi_block + ctx.tx->qabi_block_size);
+        auto parsed_opt = rung::ParseQABIBlock(qabi_bytes, parse_err);
         if (!parsed_opt) {
             cache_failure(fresh_root_hash, nullptr, false, false);
             return EvalResult::UNSATISFIED;
@@ -3366,13 +3369,15 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         // binding tx.conditions_root pins every destination SPK without
         // storing them on the wire.
         vout_matches_outputs = true;
-        if (ctx.tx->conditions_root != parsed_ptr->outputs_conditions_root) {
+        if (!ctx.tx->conditions_root ||
+            std::memcmp(ctx.tx->conditions_root,
+                        parsed_ptr->outputs_conditions_root.data(), 32) != 0) {
             vout_matches_outputs = false;
-        } else if (ctx.tx->vout.size() != parsed_ptr->output_values.size()) {
+        } else if (ctx.tx->output_count != parsed_ptr->output_values.size()) {
             vout_matches_outputs = false;
         } else {
             for (size_t i = 0; i < parsed_ptr->output_values.size(); ++i) {
-                if (ctx.tx->vout[i].nValue != parsed_ptr->output_values[i]) {
+                if (ctx.tx->outputs[i].value != parsed_ptr->output_values[i]) {
                     vout_matches_outputs = false;
                     break;
                 }
@@ -3384,7 +3389,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         }
 
         // Check 9: FALCON verify.
-        if (ctx.tx->aggregated_sig.size() != rung::QABI_AGGREGATED_SIG_MAX) {
+        if (ctx.tx->aggregated_sig_size != rung::QABI_AGGREGATED_SIG_MAX) {
             cache_failure(fresh_root_hash, fresh_parsed, false, true);
             return EvalResult::UNSATISFIED;
         }
@@ -3394,7 +3399,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         }
         sig_ok = rung::VerifyPQSignature(
             rung::RungScheme::FALCON512,
-            std::span<const uint8_t>(ctx.tx->aggregated_sig.data(), ctx.tx->aggregated_sig.size()),
+            std::span<const uint8_t>(ctx.tx->aggregated_sig, ctx.tx->aggregated_sig_size),
             std::span<const uint8_t>(sighash.begin(), 32),
             std::span<const uint8_t>(parsed_ptr->coordinator_pubkey.data(),
                                       parsed_ptr->coordinator_pubkey.size()));
@@ -4192,9 +4197,14 @@ bool VerifyRungTx(const CTransaction& tx,
     // (src/validation.cpp CheckInputScripts) so the rules apply regardless
     // of input types. The call here is a safety net for pure-MLSC txs and
     // is redundant (but harmless) when CheckRungTxLevel has already run.
+    // Build adapter views once at function scope. RungEvalContext carries
+    // these to every EvalBlock and QABI_SPEND, keeping the library code
+    // on the api side of the boundary.
+    LadderTxViewBuilder tx_view_builder(tx);
+    LadderPrecomputedBuilder precomputed_builder(txdata);
+
     if (nIn == 0) {
         std::string tx_error;
-        LadderTxViewBuilder tx_view_builder(tx);
         if (!api::CheckRungTxLevel(tx_view_builder.view, flags, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
             if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
@@ -4603,19 +4613,20 @@ bool VerifyRungTx(const CTransaction& tx,
 
     // Build evaluation context for covenant, anchor, recursion, and PLC blocks
     RungEvalContext eval_ctx;
-    eval_ctx.tx = &tx;
+    eval_ctx.tx = &tx_view_builder.view;
+    eval_ctx.tx_core = &tx;
     eval_ctx.input_index = nIn;
     eval_ctx.input_amount = spent_output.nValue;
     eval_ctx.block_height = block_height;
     // Use the output matching coil.output_index for covenant amount checks
     {
         uint32_t coil_out_idx = witness_ladder.coil.output_index;
-        if (coil_out_idx < tx.vout.size()) {
-            eval_ctx.output_amount = tx.vout[coil_out_idx].nValue;
-            eval_ctx.spending_output = &tx.vout[coil_out_idx];
-        } else if (!tx.vout.empty()) {
-            eval_ctx.output_amount = tx.vout[0].nValue;
-            eval_ctx.spending_output = &tx.vout[0];
+        if (coil_out_idx < tx_view_builder.output_views.size()) {
+            eval_ctx.output_amount = tx_view_builder.output_views[coil_out_idx].value;
+            eval_ctx.spending_output = &tx_view_builder.output_views[coil_out_idx];
+        } else if (!tx_view_builder.output_views.empty()) {
+            eval_ctx.output_amount = tx_view_builder.output_views[0].value;
+            eval_ctx.spending_output = &tx_view_builder.output_views[0];
         }
     }
     if (has_conditions) {
@@ -4628,8 +4639,9 @@ bool VerifyRungTx(const CTransaction& tx,
         eval_ctx.verified_leaves = &verified_leaves_data;
         eval_ctx.mlsc_proof = &mlsc_proof;
     }
-    if (txdata.m_spent_outputs_ready) {
-        eval_ctx.spent_outputs = &txdata.m_spent_outputs;
+    if (precomputed_builder.view.spent_output_count > 0) {
+        eval_ctx.spent_outputs = precomputed_builder.view.spent_outputs;
+        eval_ctx.spent_output_count = precomputed_builder.view.spent_output_count;
     }
     // Plumb the QABO sig cache through so QABI_SPEND can short-circuit
     // duplicate FALCON verifications across primed inputs of the same tx.

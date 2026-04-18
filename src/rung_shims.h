@@ -157,9 +157,13 @@ struct LadderTxViewBuilder {
 #ifdef ENABLE_QABIO
         view.qabi_block = tx.qabi_block.data();
         view.qabi_block_size = tx.qabi_block.size();
+        view.aggregated_sig = tx.aggregated_sig.data();
+        view.aggregated_sig_size = tx.aggregated_sig.size();
 #else
         view.qabi_block = nullptr;
         view.qabi_block_size = 0;
+        view.aggregated_sig = nullptr;
+        view.aggregated_sig_size = 0;
 #endif
     }
 };

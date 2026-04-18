@@ -81,6 +81,26 @@ static std::vector<uint8_t> MakeNumeric(uint32_t val)
     return data;
 }
 
+// Adapter-view helpers: bridge Core CTxOut / vector<CTxOut> into the
+// LadderOutputView shape that RungEvalContext now consumes. Storage in the
+// returned value is owned by the caller's local; the view borrows pointers
+// into the source CTxOut, so the source must outlive any use of the view.
+static rung::api::LadderOutputView MakeOutputView(const CTxOut& out)
+{
+    rung::api::LadderOutputView v;
+    v.value = out.nValue;
+    v.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+    return v;
+}
+
+static std::vector<rung::api::LadderOutputView> MakeOutputViews(const std::vector<CTxOut>& outs)
+{
+    std::vector<rung::api::LadderOutputView> v;
+    v.reserve(outs.size());
+    for (const auto& o : outs) v.push_back(MakeOutputView(o));
+    return v;
+}
+
 /** Compute SHA-256 of a pubkey to produce a PUBKEY_COMMIT value. */
 static std::vector<uint8_t> MakePubkeyCommit(const std::vector<uint8_t>& pubkey)
 {
@@ -1155,7 +1175,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_all_field_types)
     // With matching conditions → SATISFIED
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1178 = MakeOutputView(output);
+    ctx.spending_output = &ov_1178;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::SATISFIED);
 }
 
@@ -1210,7 +1231,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_scheme_mismatch)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1233 = MakeOutputView(output);
+    ctx.spending_output = &ov_1233;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -1265,7 +1287,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_pubkey_commit_mismatch)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1288 = MakeOutputView(output);
+    ctx.spending_output = &ov_1288;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -1313,7 +1336,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_numeric_mismatch)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1336 = MakeOutputView(output);
+    ctx.spending_output = &ov_1336;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -1356,7 +1380,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_extra_block)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1379 = MakeOutputView(output);
+    ctx.spending_output = &ov_1379;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -1403,7 +1428,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_compound_carry_forward)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_1426 = MakeOutputView(output);
+    ctx.spending_output = &ov_1426;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::SATISFIED);
 }
 
@@ -4551,7 +4577,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_legacy_compat)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_4574 = MakeOutputView(output);
+    ctx.spending_output = &ov_4574;
 
     // RECURSE_MODIFIED block: max_depth=10, block_idx=0, param_idx=0, delta=5
     RungBlock rm_block;
@@ -4620,7 +4647,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_cross_rung)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_4643 = MakeOutputView(output);
+    ctx.spending_output = &ov_4643;
 
     // New format: max_depth=10, num_mutations=1, rung_idx=1, block_idx=0, param_idx=0, delta=3
     RungBlock rm_block;
@@ -4693,7 +4721,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_4716 = MakeOutputView(output);
+    ctx.spending_output = &ov_4716;
 
     // New format: 2 mutations
     RungBlock rm_block;
@@ -4740,7 +4769,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
         uint256 root = ComputeMLSCRoot(bad_output_conds);
         bad_output.scriptPubKey = CreateMLSCScript(root);
     }
-    ctx.spending_output = &bad_output;
+    rung::api::LadderOutputView ov_4763 = MakeOutputView(bad_output);
+    ctx.spending_output = &ov_4763;
 
     BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -4822,7 +4852,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &good_output;
+    rung::api::LadderOutputView ov_4845 = MakeOutputView(good_output);
+    ctx.spending_output = &ov_4845;
 
     BOOST_CHECK(EvalBlock(eval_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
@@ -4844,7 +4875,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
     }
     bad_output.nValue = 50000;
 
-    ctx.spending_output = &bad_output;
+    rung::api::LadderOutputView ov_4867 = MakeOutputView(bad_output);
+    ctx.spending_output = &ov_4867;
     BOOST_CHECK(EvalBlock(eval_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -4905,7 +4937,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_legacy_compat)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_4928 = MakeOutputView(output);
+    ctx.spending_output = &ov_4928;
 
     RungBlock decay_block;
     decay_block.type = RungBlockType::RECURSE_DECAY;
@@ -4974,7 +5007,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_multi_mutation)
 
     RungEvalContext ctx;
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &output;
+    rung::api::LadderOutputView ov_4997 = MakeOutputView(output);
+    ctx.spending_output = &ov_4997;
 
     RungBlock decay_block;
     decay_block.type = RungBlockType::RECURSE_DECAY;
@@ -5042,9 +5076,13 @@ BOOST_AUTO_TEST_CASE(eval_cosign_matching_input)
     spent_outputs.push_back(CTxOut(50000, CScript() << OP_RETURN));  // child (placeholder)
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_5065(tx);
+    ctx.tx = &tvb_5065.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 1;  // evaluating input 1 (the child)
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_5067 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_5067.data();
+    ctx.spent_output_count = sov_5067.size();
 
     BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
@@ -5077,9 +5115,13 @@ BOOST_AUTO_TEST_CASE(eval_cosign_no_matching_input)
     spent_outputs.push_back(CTxOut(50000, CScript() << OP_RETURN));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_5100(tx);
+    ctx.tx = &tvb_5100.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 1;
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_5102 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_5102.data();
+    ctx.spent_output_count = sov_5102.size();
 
     BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -5144,9 +5186,13 @@ BOOST_AUTO_TEST_CASE(eval_cosign_skips_self)
     spent_outputs.push_back(CTxOut(100000, self_spk));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_5167(tx);
+    ctx.tx = &tvb_5167.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;  // evaluating the only input — matches hash but is self
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_5169 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_5169.data();
+    ctx.spent_output_count = sov_5169.size();
 
     BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -5423,8 +5469,12 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_with_tx_context)
     spent_outputs.push_back(CTxOut(100000, CScript() << OP_1));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
-    ctx.spent_outputs = &spent_outputs;
+    rung::LadderTxViewBuilder tvb_5446(tx);
+    ctx.tx = &tvb_5446.view;
+    ctx.tx_core = &tx;
+    std::vector<rung::api::LadderOutputView> sov_5447 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_5447.data();
+    ctx.spent_output_count = sov_5447.size();
 
     // fee_rate = 10000 / vsize. vsize is small for this tx, so fee_rate will be high.
     // With high=100, this should be UNSATISFIED (fee rate exceeds band)
@@ -6531,7 +6581,9 @@ BOOST_AUTO_TEST_CASE(weight_limit_within_bounds)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6554(tx);
+    ctx.tx = &tvb_6554.view;
+    ctx.tx_core = &tx;
     auto result = EvalWeightLimitBlock(block, ctx);
     // A minimal tx with 1 input and 1 output is well under 100000 WU
     BOOST_CHECK(result == EvalResult::SATISFIED);
@@ -6549,7 +6601,9 @@ BOOST_AUTO_TEST_CASE(weight_limit_exceeded)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6572(tx);
+    ctx.tx = &tvb_6572.view;
+    ctx.tx_core = &tx;
     auto result = EvalWeightLimitBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -6567,7 +6621,9 @@ BOOST_AUTO_TEST_CASE(input_count_within_bounds)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6590(tx);
+    ctx.tx = &tvb_6590.view;
+    ctx.tx_core = &tx;
     auto result = EvalInputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
@@ -6584,7 +6640,9 @@ BOOST_AUTO_TEST_CASE(input_count_below_min)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6607(tx);
+    ctx.tx = &tvb_6607.view;
+    ctx.tx_core = &tx;
     auto result = EvalInputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -6601,7 +6659,9 @@ BOOST_AUTO_TEST_CASE(output_count_within_bounds)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6624(tx);
+    ctx.tx = &tvb_6624.view;
+    ctx.tx_core = &tx;
     auto result = EvalOutputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
@@ -6618,7 +6678,9 @@ BOOST_AUTO_TEST_CASE(output_count_exceeds_max)
     CTransaction tx(mtx);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_6641(tx);
+    ctx.tx = &tvb_6641.view;
+    ctx.tx_core = &tx;
     auto result = EvalOutputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -9136,7 +9198,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_mixed_pq_schnorr_carry_forward)
 
     RungEvalContext ctx{};
     ctx.input_conditions = &input_conds;
-    ctx.spending_output = &mock_output;
+    rung::api::LadderOutputView ov_9159 = MakeOutputView(mock_output);
+    ctx.spending_output = &ov_9159;
 
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::SATISFIED);
 
@@ -9147,7 +9210,8 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_mixed_pq_schnorr_carry_forward)
     CScript tampered_spk = CreateMLSCScript(tampered_root);
     CTxOut tampered_output(50000, tampered_spk);
 
-    ctx.spending_output = &tampered_output;
+    rung::api::LadderOutputView ov_9170 = MakeOutputView(tampered_output);
+    ctx.spending_output = &ov_9170;
     BOOST_CHECK(EvalRecurseSameBlock(eval_block, ctx) == EvalResult::UNSATISFIED);
 }
 
@@ -11505,9 +11569,13 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_satisfied)
     spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_11528(tx);
+    ctx.tx = &tvb_11528.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_11530 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_11530.data();
+    ctx.spent_output_count = sov_11530.size();
 
     auto result = EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx);
     BOOST_CHECK_MESSAGE(result == EvalResult::SATISFIED,
@@ -11587,9 +11655,13 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_below_min)
     spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_11610(tx);
+    ctx.tx = &tvb_11610.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_11612 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_11612.data();
+    ctx.spent_output_count = sov_11612.size();
 
     BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -11624,9 +11696,13 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_above_max)
     spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_11647(tx);
+    ctx.tx = &tvb_11647.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_11649 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_11649.data();
+    ctx.spent_output_count = sov_11649.size();
 
     BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -11660,9 +11736,13 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_weight_over_limit)
     spent_outputs.push_back(CTxOut(100000, CScript() << OP_RETURN));
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_11683(tx);
+    ctx.tx = &tvb_11683.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
-    ctx.spent_outputs = &spent_outputs;
+    std::vector<rung::api::LadderOutputView> sov_11685 = MakeOutputViews(spent_outputs);
+    ctx.spent_outputs = sov_11685.data();
+    ctx.spent_output_count = sov_11685.size();
 
     BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
@@ -13118,7 +13198,9 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
 
     // Minimal RungEvalContext — only the fields QABI_SPEND actually touches.
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_13141(tx);
+    ctx.tx = &tvb_13141.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -13241,7 +13323,9 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     }
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_13264(tx);
+    ctx.tx = &tvb_13264.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -13379,7 +13463,9 @@ static EvalResult EvalSetup(const QABISpendSetup& s)
 {
     CTransaction tx(s.mtx);
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_13402(tx);
+    ctx.tx = &tvb_13402.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = QABISpendSetup::TEST_BLOCK_HEIGHT;
 
@@ -14246,10 +14332,13 @@ BOOST_AUTO_TEST_CASE(qabi_prime_end_to_end_happy_path)
     // Set up RungEvalContext.
     CTransaction tx(mtx);
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_14269(tx);
+    ctx.tx = &tvb_14269.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
-    ctx.spending_output = &tx.vout[0];
+    rung::api::LadderOutputView ov_14272 = MakeOutputView(tx.vout[0]);
+    ctx.spending_output = &ov_14272;
     ctx.input_conditions = &input_conditions;
     ctx.rung_pubkeys = &rung_pubkeys;
 
@@ -14338,10 +14427,13 @@ BOOST_AUTO_TEST_CASE(qabi_prime_rejects_shallow_depth)
 
     CTransaction tx(mtx);
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_14361(tx);
+    ctx.tx = &tvb_14361.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
-    ctx.spending_output = &tx.vout[0];
+    rung::api::LadderOutputView ov_14364 = MakeOutputView(tx.vout[0]);
+    ctx.spending_output = &ov_14364;
     ctx.input_conditions = &input_conditions;
     ctx.rung_pubkeys = &rung_pubkeys;
 
@@ -14697,7 +14789,9 @@ static void RunMultiPartyBatch(size_t n_participants)
             participants[p], auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
 
         RungEvalContext ctx;
-        ctx.tx = &tx;
+        rung::LadderTxViewBuilder tvb_14720(tx);
+        ctx.tx = &tvb_14720.view;
+        ctx.tx_core = &tx;
         ctx.input_index = static_cast<uint32_t>(p);
         ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -14815,7 +14909,9 @@ BOOST_AUTO_TEST_CASE(adversarial_alice_not_in_block_rejected)
         alice, auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_14838(tx);
+    ctx.tx = &tvb_14838.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -14886,7 +14982,9 @@ BOOST_AUTO_TEST_CASE(adversarial_swap_preimage_across_participants_rejected)
         fake_alice, alice_auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_14909(tx);
+    ctx.tx = &tvb_14909.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -14992,7 +15090,9 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
         participants[0], wrong_auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_15015(tx);
+    ctx.tx = &tvb_15015.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -15352,7 +15452,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
     // First evaluation: cache miss, runs VerifyPQSignature, populates cache.
     {
         RungEvalContext ctx;
-        ctx.tx = &tx;
+        rung::LadderTxViewBuilder tvb_15375(tx);
+        ctx.tx = &tvb_15375.view;
+        ctx.tx_core = &tx;
         ctx.input_index = 0;
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;
@@ -15382,7 +15484,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
     // exactly one entry.
     {
         RungEvalContext ctx;
-        ctx.tx = &tx;
+        rung::LadderTxViewBuilder tvb_15405(tx);
+        ctx.tx = &tvb_15405.view;
+        ctx.tx_core = &tx;
         ctx.input_index = 0;
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;
@@ -15458,7 +15562,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_rejects_poisoned_entry)
     cache[sighash] = std::move(poisoned);
 
     RungEvalContext ctx;
-    ctx.tx = &tx;
+    rung::LadderTxViewBuilder tvb_15481(tx);
+    ctx.tx = &tvb_15481.view;
+    ctx.tx_core = &tx;
     ctx.input_index = 0;
     ctx.block_height = 500;
     ctx.qabo_sig_cache = &cache;
@@ -15549,7 +15655,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
     auto run_batch = [&](QABOSigCache* cache) {
         for (size_t p = 0; p < N; ++p) {
             RungEvalContext ctx;
-            ctx.tx = &tx;
+            rung::LadderTxViewBuilder tvb_15572(tx);
+            ctx.tx = &tvb_15572.view;
+            ctx.tx_core = &tx;
             ctx.input_index = static_cast<uint32_t>(p);
             ctx.block_height = 500;
             ctx.qabo_sig_cache = cache;
@@ -15671,7 +15779,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
         auto run_batch = [&](QABOSigCache* cache) {
             for (size_t p = 0; p < N; ++p) {
                 RungEvalContext ctx;
-                ctx.tx = &tx;
+                rung::LadderTxViewBuilder tvb_15694(tx);
+                ctx.tx = &tvb_15694.view;
+                ctx.tx_core = &tx;
                 ctx.input_index = static_cast<uint32_t>(p);
                 ctx.block_height = 500;
                 ctx.qabo_sig_cache = cache;
@@ -16569,7 +16679,9 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
             participants[p], auth_tip, committed_root, PRIME_DEPTH, EXPIRY);
 
         RungEvalContext ctx;
-        ctx.tx = &tx;
+        rung::LadderTxViewBuilder tvb_16592(tx);
+        ctx.tx = &tvb_16592.view;
+        ctx.tx_core = &tx;
         ctx.input_index = static_cast<uint32_t>(p);
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;
