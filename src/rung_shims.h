@@ -28,6 +28,7 @@
 #include <rung/api.h>
 #include <rung/conditions.h>
 #include <rung/policy.h>
+#include <rung/qabi.h>
 #include <rung/sighash.h>
 #include <script/interpreter.h>
 #include <script/script.h>
@@ -148,6 +149,11 @@ struct LadderTxViewBuilder {
         view.output_count = output_views.size();
         view.txid = nullptr;   // library computes on demand
         view.wtxid = nullptr;
+
+        // TX_MLSC: tx.conditions_root is a uint256 on CTransaction /
+        // CMutableTransaction. Pass its 32 raw bytes through.
+        view.conditions_root = tx.conditions_root.data();
+
 #ifdef ENABLE_QABIO
         view.qabi_block = tx.qabi_block.data();
         view.qabi_block_size = tx.qabi_block.size();
@@ -244,6 +250,15 @@ inline bool SignatureHashLadderKeyPath(const PrecomputedTransactionData& cache,
     return rung::api::SignatureHashLadderKeyPath(pcb.view, tvb.view, nIn, hash_type,
                                                  hash_out);
 }
+
+#ifdef ENABLE_QABIO
+template <class T>
+inline uint256 ComputeSighashQABO(const T& tx)
+{
+    LadderTxViewBuilder tvb(tx);
+    return rung::api::ComputeSighashQABO(tvb.view);
+}
+#endif
 
 }  // namespace rung
 

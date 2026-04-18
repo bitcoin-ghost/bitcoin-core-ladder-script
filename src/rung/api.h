@@ -202,6 +202,12 @@ struct LadderTxView {
     const uint8_t* txid{nullptr};     // 32 bytes or nullptr
     const uint8_t* wtxid{nullptr};    // 32 bytes or nullptr
 
+    // TX_MLSC extension: the per-tx conditions_root (32 bytes) that commits
+    // to every output's rung conditions via a Merkle tree. nullptr for
+    // v3 and earlier, or for v4 transactions without TX_MLSC (which must
+    // still be rejected at consensus).
+    const uint8_t* conditions_root{nullptr};  // 32 bytes or nullptr
+
     // QABIO extension: the per-tx serialised QABI batch block, if any.
     // Empty (data=nullptr, size=0) for non-QABIO v4 transactions.
     const uint8_t* qabi_block{nullptr};

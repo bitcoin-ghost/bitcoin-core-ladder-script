@@ -13,12 +13,13 @@
 #ifdef ENABLE_QABIO
 
 #include <rung/qabi.h>
+#include <rung/api.h>
 #include <rung/serialize.h>
 #include <rung/types.h>
+#include <rung/write_helpers.h>
 
 #include <crypto/sha256.h>
 #include <hash.h>
-#include <primitives/transaction.h>
 #include <serialize.h>
 #include <streams.h>
 #include <uint256.h>
@@ -350,48 +351,65 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block)
 
 /* ---------------- SIGHASH_QABO ---------------- */
 
-uint256 ComputeSighashQABO(const CTransaction& tx)
+namespace api {
+
+uint256 ComputeSighashQABO(const LadderTxView& tx)
 {
-    // Domain-separated tagged hash — same HashWriter pattern as the rest
-    // of the Ladder Script sighash family (HASHER_LADDERSIGHASH,
-    // HASHER_LADDERKEYPATH). The `<<` operator routes through the standard
-    // Bitcoin Core serializer which encodes integers little-endian on every
-    // supported architecture, so the resulting digest is portable.
+    // Domain-separated tagged hash. Bytes written manually to stay
+    // independent of Bitcoin Core's serialize framework — the digest
+    // is byte-identical to the prior << operator form for equivalent
+    // input data (version, prevouts, outputs, conditions_root,
+    // qabi_block, witness stacks, locktime).
     //
     // Coverage (see qabi.h for the rationale):
-    //   - tx.version, tx.nLockTime
-    //   - every vin's (prevout, nSequence) in order
-    //   - every vout (value + scriptPubKey) in order
-    //   - tx.conditions_root
-    //   - tx.qabi_block (length-prefixed, opaque blob)
-    //   - every vin's scriptWitness.stack (length-prefixed vector of
-    //     length-prefixed elements) — closes byte-level witness malleability
-    //   - EXCLUDES tx.aggregated_sig itself (chicken-and-egg: the sig signs
-    //     this hash)
+    //   - tx.version, tx.lock_time
+    //   - every input's (prevout, sequence) in order
+    //   - every output (value + scriptPubKey) in order
+    //   - tx.conditions_root (32 bytes)
+    //   - tx.qabi_block (CompactSize-prefixed, opaque blob)
+    //   - every input's scriptWitness.stack (CompactSize(count) +
+    //     CompactSize(len)+bytes per element) — closes byte-level
+    //     witness malleability
+    //   - EXCLUDES tx.aggregated_sig itself (chicken-and-egg: the sig
+    //     signs this hash)
     HashWriter ss{HASHER_QABOSIGHASH};
 
-    ss << tx.version;
+    wire::WriteS32LE(ss, tx.version);
 
-    for (const auto& in : tx.vin) {
-        ss << in.prevout;
-        ss << in.nSequence;
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        wire::WriteLadderOutPoint(ss, tx.inputs[i].prevout);
+        wire::WriteU32LE(ss, tx.inputs[i].sequence);
     }
 
-    for (const auto& o : tx.vout) {
-        ss << o;
+    for (size_t i = 0; i < tx.output_count; ++i) {
+        wire::WriteLadderOutput(ss, tx.outputs[i]);
     }
 
-    ss << tx.conditions_root;
-    ss << tx.qabi_block;
-
-    for (const auto& in : tx.vin) {
-        ss << in.scriptWitness.stack;
+    // conditions_root — 32-byte field on the tx.
+    static constexpr uint8_t ZERO_ROOT[32] = {};
+    if (tx.conditions_root) {
+        wire::WriteBytes(ss, tx.conditions_root, 32);
+    } else {
+        wire::WriteBytes(ss, ZERO_ROOT, 32);
     }
 
-    ss << tx.nLockTime;
+    // qabi_block — Bitcoin Core serialises std::vector<uint8_t> as
+    // CompactSize(len) + bytes, so match that layout exactly.
+    wire::WriteCompactSize(ss, tx.qabi_block_size);
+    wire::WriteBytes(ss, tx.qabi_block, tx.qabi_block_size);
+
+    // Witness stacks — per-input std::vector<std::vector<uint8_t>>
+    // = CompactSize(count) + for each element CompactSize(len) + bytes.
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        wire::WriteLadderWitnessStack(ss, tx.inputs[i].witness);
+    }
+
+    wire::WriteU32LE(ss, tx.lock_time);
 
     return ss.GetSHA256();
 }
+
+}  // namespace api
 
 } // namespace rung
 

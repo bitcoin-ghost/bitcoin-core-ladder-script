@@ -17,7 +17,7 @@
 #ifdef ENABLE_QABIO
 
 #include <hash.h>
-#include <primitives/transaction.h>
+#include <rung/api.h>
 #include <rung/types.h>
 #include <uint256.h>
 
@@ -222,7 +222,9 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
  *  The same sighash is produced for every input in the tx — the coordinator
  *  signs once, every primed input's QABI_SPEND evaluator verifies against
  *  the same hash. */
-uint256 ComputeSighashQABO(const CTransaction& tx);
+namespace api {
+uint256 ComputeSighashQABO(const LadderTxView& tx);
+}  // namespace api
 
 } // namespace rung
 

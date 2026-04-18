@@ -6,15 +6,17 @@
 #include <rung/sighash.h>
 #include <rung/api.h>
 #include <rung/serialize.h>
+#include <rung/write_helpers.h>
 
 #include <hash.h>
 #include <uint256.h>
 
 #include <cstdint>
 #include <cstring>
-#include <span>
 
 namespace rung {
+
+using namespace wire;
 
 // Sighash type constants (bit-compatible with Bitcoin Core's SIGHASH_* — duplicated
 // here so sighash.cpp does not need to include <script/interpreter.h>).
@@ -28,75 +30,8 @@ constexpr uint8_t LADDER_SIGHASH_INPUT_MASK    = 0x80;
 const HashWriter HASHER_LADDERSIGHASH{TaggedHash("LadderSighash/v1")};
 const HashWriter HASHER_LADDERKEYPATH{TaggedHash("LadderKeyPathSighash/v1")};
 
-// ------------------------------------------------------------
-// Byte-level serialisation helpers (library-internal).
-//
-// These produce EXACTLY the same bytes Bitcoin Core's << operator would
-// write for the equivalent types (int32, uint32, uint64, COutPoint,
-// CTxOut, CompactSize). Consensus equivalence depends on this.
-// ------------------------------------------------------------
-
-static void WriteBytes(HashWriter& ss, const uint8_t* data, size_t size) {
-    ss.write(std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), size});
-}
-
-static void WriteU8(HashWriter& ss, uint8_t v) {
-    WriteBytes(ss, &v, 1);
-}
-
-static void WriteU32LE(HashWriter& ss, uint32_t v) {
-    uint8_t buf[4] = {
-        static_cast<uint8_t>(v),
-        static_cast<uint8_t>(v >> 8),
-        static_cast<uint8_t>(v >> 16),
-        static_cast<uint8_t>(v >> 24),
-    };
-    WriteBytes(ss, buf, 4);
-}
-
-static void WriteS32LE(HashWriter& ss, int32_t v) {
-    WriteU32LE(ss, static_cast<uint32_t>(v));
-}
-
-static void WriteU64LE(HashWriter& ss, uint64_t v) {
-    uint8_t buf[8];
-    for (int i = 0; i < 8; ++i) buf[i] = static_cast<uint8_t>(v >> (8 * i));
-    WriteBytes(ss, buf, 8);
-}
-
-static void WriteS64LE(HashWriter& ss, int64_t v) {
-    WriteU64LE(ss, static_cast<uint64_t>(v));
-}
-
-static void WriteCompactSize(HashWriter& ss, uint64_t n) {
-    if (n < 253) {
-        WriteU8(ss, static_cast<uint8_t>(n));
-    } else if (n <= 0xFFFF) {
-        WriteU8(ss, 253);
-        uint8_t buf[2] = { static_cast<uint8_t>(n), static_cast<uint8_t>(n >> 8) };
-        WriteBytes(ss, buf, 2);
-    } else if (n <= 0xFFFFFFFFULL) {
-        WriteU8(ss, 254);
-        WriteU32LE(ss, static_cast<uint32_t>(n));
-    } else {
-        WriteU8(ss, 255);
-        WriteU64LE(ss, n);
-    }
-}
-
-static void WriteLadderOutPoint(HashWriter& ss, const api::LadderOutPoint& op) {
-    WriteBytes(ss, op.txid, 32);
-    WriteU32LE(ss, op.n);
-}
-
-static void WriteLadderOutput(HashWriter& ss, const api::LadderOutputView& out) {
-    WriteS64LE(ss, out.value);
-    WriteCompactSize(ss, out.script_pub_key.size);
-    WriteBytes(ss, out.script_pub_key.data, out.script_pub_key.size);
-}
-
 static void WriteU256(HashWriter& ss, const uint256& h) {
-    WriteBytes(ss, h.data(), 32);
+    wire::WriteBytes(ss, h.data(), 32);
 }
 
 /** Compute the conditions commitment used inside the sighash.
