@@ -15,8 +15,8 @@
 
 namespace rung {
 
-const HashWriter HASHER_LADDERSIGHASH{TaggedHash("LadderSighash")};
-const HashWriter HASHER_LADDERKEYPATH{TaggedHash("LadderKeyPathSighash")};
+const HashWriter HASHER_LADDERSIGHASH{TaggedHash("LadderSighash/v1")};
+const HashWriter HASHER_LADDERKEYPATH{TaggedHash("LadderKeyPathSighash/v1")};
 
 /** Compute the conditions commitment used inside the sighash.
  *  MLSC outputs already carry a conditions_root that commits to every

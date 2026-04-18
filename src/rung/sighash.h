@@ -34,7 +34,7 @@ extern const HashWriter HASHER_LADDERKEYPATH;
 /** Compute the signature hash for a v4 RUNG_TX input.
  *
  *  Similar to BIP341 sighash but without annex/tapscript/codeseparator extensions.
- *  Uses tagged hash: TaggedHash("LadderSighash").
+ *  Uses tagged hash: TaggedHash("LadderSighash/v1").
  *
  *  Commits to:
  *    - epoch (0)
@@ -65,7 +65,7 @@ bool SignatureHashLadder(const PrecomputedTransactionData& cache,
 
 /** Compute the key-path signature hash for a v4 RUNG_TX input.
  *  Same as SignatureHashLadder but:
- *  - Uses TaggedHash("LadderKeyPathSighash")
+ *  - Uses TaggedHash("LadderKeyPathSighash/v1")
  *  - Does NOT commit to conditions (conditions not revealed in key-path)
  *  - spend_type = 0x00 (key-path marker) */
 template <class T>

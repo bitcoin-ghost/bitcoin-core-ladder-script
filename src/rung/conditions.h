@@ -272,7 +272,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
  *  acceptance. The value_commitment = SHA256(field_values || pubkeys) is opaque —
  *  a hash output, not attacker-chosen data.
  *
- *  Together they form the leaf: TaggedHash("LadderLeaf", template || value_commitment). */
+ *  Together they form the leaf: TaggedHash("LadderLeaf/v1", template || value_commitment). */
 struct CreationProofRung {
     std::vector<std::pair<uint16_t, uint8_t>> blocks;  //!< Per-block: (block_type, inverted)
     RungCoil coil;                                      //!< Coil including output_index
@@ -284,7 +284,7 @@ struct CreationProofRung {
 std::vector<uint8_t> SerializeStructuralTemplate(const CreationProofRung& rung);
 
 /** Compute a TX_MLSC leaf from a rung's structural template + value commitment.
- *  leaf = TaggedHash("LadderLeaf", structural_template || value_commitment)
+ *  leaf = TaggedHash("LadderLeaf/v1", structural_template || value_commitment)
  *  Used at both creation (by RPC) and spend time (by evaluator). */
 uint256 ComputeTxMLSCLeaf(const CreationProofRung& rung);
 

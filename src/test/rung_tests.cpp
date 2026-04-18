@@ -8287,12 +8287,12 @@ BOOST_AUTO_TEST_CASE(musig_threshold_wire_size)
 
 BOOST_AUTO_TEST_CASE(mlsc_empty_leaf_is_deterministic)
 {
-    // MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "") — must be a specific constant
+    // MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "") — must be a specific constant
     BOOST_CHECK(MLSC_EMPTY_LEAF != uint256::ZERO);
 
-    // Recompute: SHA256(SHA256("LadderLeaf") || SHA256("LadderLeaf") || "")
+    // Recompute: SHA256(SHA256("LadderLeaf/v1") || SHA256("LadderLeaf/v1") || "")
     unsigned char tag_hash[CSHA256::OUTPUT_SIZE];
-    const char* leaf_tag = "LadderLeaf";
+    const char* leaf_tag = "LadderLeaf/v1";
     CSHA256().Write(reinterpret_cast<const unsigned char*>(leaf_tag), strlen(leaf_tag)).Finalize(tag_hash);
     uint256 expected;
     CSHA256().Write(tag_hash, 32).Write(tag_hash, 32).Finalize(expected.data());
@@ -8618,9 +8618,9 @@ BOOST_AUTO_TEST_CASE(mlsc_merkle_tree_two_leaves)
     // No padding needed for power of 2
     uint256 root = BuildMerkleTree({a, b});
 
-    // Manually compute: TaggedHash("LadderInternal", min(a,b) || max(a,b))
+    // Manually compute: TaggedHash("LadderInternal/v1", min(a,b) || max(a,b))
     unsigned char tag_hash[CSHA256::OUTPUT_SIZE];
-    const char* itag = "LadderInternal";
+    const char* itag = "LadderInternal/v1";
     CSHA256().Write(reinterpret_cast<const unsigned char*>(itag), strlen(itag)).Finalize(tag_hash);
     unsigned char children[64];
     if (memcmp(a.data(), b.data(), 32) <= 0) {

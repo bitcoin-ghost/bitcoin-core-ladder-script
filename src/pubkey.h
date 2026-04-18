@@ -282,7 +282,7 @@ public:
     /** Construct a Taproot tweaked output point with this point as internal key. */
     std::optional<std::pair<XOnlyPubKey, bool>> CreateTapTweak(const uint256* merkle_root) const;
 
-    /** Ladder Script: compute the tweak hash for Ladder conditions. Uses "LadderTweak" tag. */
+    /** Ladder Script: compute the tweak hash for Ladder conditions. Uses "LadderTweak/v1" tag. */
     uint256 ComputeLadderTweakHash(const uint256* merkle_root) const;
 
     /** Ladder Script: verify that this is a Ladder tweaked output point. */

@@ -279,7 +279,7 @@ std::optional<std::pair<XOnlyPubKey, bool>> XOnlyPubKey::CreateTapTweak(const ui
     return ret;
 }
 
-static const HashWriter HASHER_LADDERTWEAK{TaggedHash("LadderTweak")};
+static const HashWriter HASHER_LADDERTWEAK{TaggedHash("LadderTweak/v1")};
 
 uint256 XOnlyPubKey::ComputeLadderTweakHash(const uint256* merkle_root) const
 {

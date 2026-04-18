@@ -165,13 +165,13 @@ static CSHA256 InitTaggedHasher(const char* tag)
     return hasher;
 }
 
-static const CSHA256 LEAF_HASHER = InitTaggedHasher("LadderLeaf");
-static const CSHA256 INTERNAL_HASHER = InitTaggedHasher("LadderInternal");
+static const CSHA256 LEAF_HASHER = InitTaggedHasher("LadderLeaf/v1");
+static const CSHA256 INTERNAL_HASHER = InitTaggedHasher("LadderInternal/v1");
 
-/** Compute MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "") at startup. */
+/** Compute MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "") at startup. */
 static uint256 ComputeEmptyLeaf()
 {
-    return TaggedHash("LadderLeaf", nullptr, 0);
+    return TaggedHash("LadderLeaf/v1", nullptr, 0);
 }
 
 const uint256 MLSC_EMPTY_LEAF = ComputeEmptyLeaf();
@@ -275,7 +275,7 @@ uint256 ComputeRelayLeaf(const Relay& relay,
     return result;
 }
 
-/** Compute a sorted interior Merkle node: TaggedHash("LadderInternal", min(a,b) || max(a,b)). */
+/** Compute a sorted interior Merkle node: TaggedHash("LadderInternal/v1", min(a,b) || max(a,b)). */
 static uint256 MerkleInterior(const uint256& a, const uint256& b)
 {
     unsigned char children[32 + 32];
@@ -972,7 +972,7 @@ std::vector<uint8_t> SerializeStructuralTemplate(const CreationProofRung& rung)
 uint256 ComputeTxMLSCLeaf(const CreationProofRung& rung)
 {
     auto tmpl = SerializeStructuralTemplate(rung);
-    CSHA256 hasher = LEAF_HASHER; // copy pre-computed TaggedHash("LadderLeaf") prefix
+    CSHA256 hasher = LEAF_HASHER; // copy pre-computed TaggedHash("LadderLeaf/v1") prefix
     hasher.Write(tmpl.data(), tmpl.size());
     hasher.Write(rung.value_commitment.data(), 32);
     uint256 result;
