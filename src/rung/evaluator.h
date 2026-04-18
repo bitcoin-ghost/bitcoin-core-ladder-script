@@ -200,6 +200,14 @@ EvalResult EvalHashGuardedBlock(const RungBlock& block);
 
 // Covenant evaluators
 EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx);
+
+namespace api {
+/** BIP-119 CheckTemplateVerify template hash. Reads only the fields exposed
+ *  on the adapter view (version, lock_time, per-input script_sig and sequence,
+ *  per-output value and script_pub_key). Idempotent, side-effect free. */
+uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index);
+}  // namespace api
+
 EvalResult EvalVaultLockBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
 EvalResult EvalAmountLockBlock(const RungBlock& block, const RungEvalContext& ctx);
 EvalResult EvalAnchorBlock(const RungBlock& block);
@@ -295,9 +303,6 @@ bool EvalLadder(const LadderWitness& ladder,
                 ScriptExecutionData& execdata,
                 const RungEvalContext& ctx = {},
                 size_t* satisfied_rung_out = nullptr);
-
-/** Compute the BIP-119 CTV template hash for a transaction at a given input index. */
-uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index);
 
 /** Rung verification flags (use high bits to avoid collision with SCRIPT_VERIFY_* flags). */
 static constexpr unsigned int RUNG_VERIFY_MLSC_ONLY = (1U << 28); //!< Reject 0xC1 inline conditions (mainnet)

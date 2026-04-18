@@ -27,6 +27,7 @@
 #include <primitives/transaction.h>
 #include <rung/api.h>
 #include <rung/conditions.h>
+#include <rung/evaluator.h>
 #include <rung/policy.h>
 #include <rung/qabi.h>
 #include <rung/sighash.h>
@@ -277,6 +278,14 @@ inline uint256 ComputeSighashQABO(const T& tx)
     return rung::api::ComputeSighashQABO(tvb.view);
 }
 #endif
+
+// --- BIP-119 CTV shim (CTransaction -> LadderTxView) ----------------------
+
+inline uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index)
+{
+    LadderTxViewBuilder tvb(tx);
+    return rung::api::ComputeCTVHash(tvb.view, input_index);
+}
 
 }  // namespace rung
 

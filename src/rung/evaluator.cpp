@@ -678,50 +678,51 @@ EvalResult EvalHashGuardedBlock(const RungBlock& block)
 // Covenant evaluators
 // ============================================================================
 
-uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index)
+namespace api {
+
+uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index)
 {
     // BIP-119 template hash:
     // SHA256(version || locktime || scriptsigs_hash || num_inputs || sequences_hash ||
     //        num_outputs || outputs_hash || input_index)
 
-    // scriptsigs hash (SHA256 of all scriptSigs concatenated)
     CSHA256 scriptsigs_hasher;
-    for (const auto& vin : tx.vin) {
-        scriptsigs_hasher.Write(reinterpret_cast<const unsigned char*>(vin.scriptSig.data()), vin.scriptSig.size());
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        const auto& in = tx.inputs[i];
+        scriptsigs_hasher.Write(in.script_sig.data, in.script_sig.size);
     }
     unsigned char scriptsigs_hash[32];
     scriptsigs_hasher.Finalize(scriptsigs_hash);
 
-    // sequences hash
     CSHA256 sequences_hasher;
-    for (const auto& vin : tx.vin) {
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        uint32_t seq = tx.inputs[i].sequence;
         unsigned char seq_buf[4];
-        seq_buf[0] = vin.nSequence & 0xFF;
-        seq_buf[1] = (vin.nSequence >> 8) & 0xFF;
-        seq_buf[2] = (vin.nSequence >> 16) & 0xFF;
-        seq_buf[3] = (vin.nSequence >> 24) & 0xFF;
+        seq_buf[0] = seq & 0xFF;
+        seq_buf[1] = (seq >> 8) & 0xFF;
+        seq_buf[2] = (seq >> 16) & 0xFF;
+        seq_buf[3] = (seq >> 24) & 0xFF;
         sequences_hasher.Write(seq_buf, 4);
     }
     unsigned char sequences_hash[32];
     sequences_hasher.Finalize(sequences_hash);
 
-    // outputs hash
     CSHA256 outputs_hasher;
-    for (const auto& vout : tx.vout) {
+    for (size_t i = 0; i < tx.output_count; ++i) {
+        const auto& out = tx.outputs[i];
         unsigned char amt_buf[8];
-        uint64_t amt = static_cast<uint64_t>(vout.nValue);
-        for (int i = 0; i < 8; ++i) amt_buf[i] = (amt >> (8 * i)) & 0xFF;
+        uint64_t amt = static_cast<uint64_t>(out.value);
+        for (int j = 0; j < 8; ++j) amt_buf[j] = (amt >> (8 * j)) & 0xFF;
         outputs_hasher.Write(amt_buf, 8);
-        uint64_t spk_len = vout.scriptPubKey.size();
+        uint64_t spk_len = out.script_pub_key.size;
         unsigned char len_buf[8];
-        for (int i = 0; i < 8; ++i) len_buf[i] = (spk_len >> (8 * i)) & 0xFF;
+        for (int j = 0; j < 8; ++j) len_buf[j] = (spk_len >> (8 * j)) & 0xFF;
         outputs_hasher.Write(len_buf, 8);
-        outputs_hasher.Write(vout.scriptPubKey.data(), vout.scriptPubKey.size());
+        outputs_hasher.Write(out.script_pub_key.data, out.script_pub_key.size);
     }
     unsigned char outputs_hash[32];
     outputs_hasher.Finalize(outputs_hash);
 
-    // Compute final template hash
     CSHA256 hasher;
     unsigned char version_buf[4];
     uint32_t version = static_cast<uint32_t>(tx.version);
@@ -729,20 +730,20 @@ uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index)
     hasher.Write(version_buf, 4);
 
     unsigned char locktime_buf[4];
-    for (int i = 0; i < 4; ++i) locktime_buf[i] = (tx.nLockTime >> (8 * i)) & 0xFF;
+    for (int i = 0; i < 4; ++i) locktime_buf[i] = (tx.lock_time >> (8 * i)) & 0xFF;
     hasher.Write(locktime_buf, 4);
 
     hasher.Write(scriptsigs_hash, 32);
 
     unsigned char nins_buf[4];
-    uint32_t nins = static_cast<uint32_t>(tx.vin.size());
+    uint32_t nins = static_cast<uint32_t>(tx.input_count);
     for (int i = 0; i < 4; ++i) nins_buf[i] = (nins >> (8 * i)) & 0xFF;
     hasher.Write(nins_buf, 4);
 
     hasher.Write(sequences_hash, 32);
 
     unsigned char nouts_buf[4];
-    uint32_t nouts = static_cast<uint32_t>(tx.vout.size());
+    uint32_t nouts = static_cast<uint32_t>(tx.output_count);
     for (int i = 0; i < 4; ++i) nouts_buf[i] = (nouts >> (8 * i)) & 0xFF;
     hasher.Write(nouts_buf, 4);
 
@@ -760,6 +761,8 @@ uint256 ComputeCTVHash(const CTransaction& tx, uint32_t input_index)
     return result;
 }
 
+}  // namespace api
+
 EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx)
 {
     // CheckTemplateVerify: verify template hash matches spending transaction
@@ -768,11 +771,11 @@ EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx)
         return EvalResult::ERROR;
     }
 
-    if (!ctx.tx_core) {
+    if (!ctx.tx) {
         return EvalResult::UNSATISFIED;
     }
 
-    uint256 computed = ComputeCTVHash(*ctx.tx_core, ctx.input_index);
+    uint256 computed = rung::api::ComputeCTVHash(*ctx.tx, ctx.input_index);
 
     if (memcmp(computed.data(), template_hash->data.data(), 32) == 0) {
         return EvalResult::SATISFIED;

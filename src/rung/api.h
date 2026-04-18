@@ -502,6 +502,10 @@ bool IsValidRBDReplacement(
     const LadderTxView& old_tx,
     std::string& reason_out);
 
+// BIP-119 CTV template hash is adapter-typed too, but lives in
+// `rung/evaluator.h` under `rung::api` so it can return uint256 without
+// forcing api.h to include <uint256.h> (see design rule 1 above).
+
 // ============================================================================
 // End of libladder public API
 // ============================================================================
