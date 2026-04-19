@@ -827,6 +827,41 @@ BOOST_AUTO_TEST_CASE(eval_cltv_unsatisfied)
     BOOST_CHECK(EvalCLTVBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
+// Regression for commit 1a23fa32c8: an 8-byte NUMERIC encoding a value
+// outside uint32 range must fail UNSATISFIED, not silently wrap to the
+// low 32 bits (which would let a permanently-unsatisfiable lock become
+// spendable at the truncated value).
+BOOST_AUTO_TEST_CASE(eval_csv_rejects_value_above_uint32)
+{
+    MockSignatureChecker checker;
+    checker.sequence_result = true;  // mock would say "pass" if we got here
+
+    // NUMERIC encoding 0x100000005 — 8 bytes little-endian.
+    std::vector<uint8_t> big{0x05, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+    RungBlock block;
+    block.type = RungBlockType::CSV;
+    block.fields.push_back({RungDataType::NUMERIC, big});
+
+    // Must be UNSATISFIED (range reject), not SATISFIED (the mock's
+    // default answer). If this flips back to SATISFIED, the uint32 cast
+    // is silently truncating again.
+    BOOST_CHECK(EvalCSVBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_cltv_rejects_value_above_uint32)
+{
+    MockSignatureChecker checker;
+    checker.locktime_result = true;
+
+    // Same 0x100000005 construction.
+    std::vector<uint8_t> big{0x05, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+    RungBlock block;
+    block.type = RungBlockType::CLTV;
+    block.fields.push_back({RungDataType::NUMERIC, big});
+
+    BOOST_CHECK(EvalCLTVBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
 BOOST_AUTO_TEST_CASE(eval_csv_time_satisfied)
 {
     MockSignatureChecker checker;
