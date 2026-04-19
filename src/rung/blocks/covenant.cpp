@@ -19,6 +19,7 @@
 #include <rung_shims.h>
 
 #include <consensus/validation.h>
+#include <crypto/common.h>
 #include <crypto/sha256.h>
 #include <hash.h>
 #include <policy/policy.h>
@@ -55,12 +56,8 @@ uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index)
 
     CSHA256 sequences_hasher;
     for (size_t i = 0; i < tx.input_count; ++i) {
-        uint32_t seq = tx.inputs[i].sequence;
         unsigned char seq_buf[4];
-        seq_buf[0] = seq & 0xFF;
-        seq_buf[1] = (seq >> 8) & 0xFF;
-        seq_buf[2] = (seq >> 16) & 0xFF;
-        seq_buf[3] = (seq >> 24) & 0xFF;
+        WriteLE32(seq_buf, tx.inputs[i].sequence);
         sequences_hasher.Write(seq_buf, 4);
     }
     unsigned char sequences_hash[32];
@@ -70,12 +67,10 @@ uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index)
     for (size_t i = 0; i < tx.output_count; ++i) {
         const auto& out = tx.outputs[i];
         unsigned char amt_buf[8];
-        uint64_t amt = static_cast<uint64_t>(out.value);
-        for (int j = 0; j < 8; ++j) amt_buf[j] = (amt >> (8 * j)) & 0xFF;
+        WriteLE64(amt_buf, static_cast<uint64_t>(out.value));
         outputs_hasher.Write(amt_buf, 8);
-        uint64_t spk_len = out.script_pub_key.size;
         unsigned char len_buf[8];
-        for (int j = 0; j < 8; ++j) len_buf[j] = (spk_len >> (8 * j)) & 0xFF;
+        WriteLE64(len_buf, out.script_pub_key.size);
         outputs_hasher.Write(len_buf, 8);
         outputs_hasher.Write(out.script_pub_key.data, out.script_pub_key.size);
     }
@@ -84,32 +79,29 @@ uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index)
 
     CSHA256 hasher;
     unsigned char version_buf[4];
-    uint32_t version = static_cast<uint32_t>(tx.version);
-    for (int i = 0; i < 4; ++i) version_buf[i] = (version >> (8 * i)) & 0xFF;
+    WriteLE32(version_buf, static_cast<uint32_t>(tx.version));
     hasher.Write(version_buf, 4);
 
     unsigned char locktime_buf[4];
-    for (int i = 0; i < 4; ++i) locktime_buf[i] = (tx.lock_time >> (8 * i)) & 0xFF;
+    WriteLE32(locktime_buf, tx.lock_time);
     hasher.Write(locktime_buf, 4);
 
     hasher.Write(scriptsigs_hash, 32);
 
     unsigned char nins_buf[4];
-    uint32_t nins = static_cast<uint32_t>(tx.input_count);
-    for (int i = 0; i < 4; ++i) nins_buf[i] = (nins >> (8 * i)) & 0xFF;
+    WriteLE32(nins_buf, static_cast<uint32_t>(tx.input_count));
     hasher.Write(nins_buf, 4);
 
     hasher.Write(sequences_hash, 32);
 
     unsigned char nouts_buf[4];
-    uint32_t nouts = static_cast<uint32_t>(tx.output_count);
-    for (int i = 0; i < 4; ++i) nouts_buf[i] = (nouts >> (8 * i)) & 0xFF;
+    WriteLE32(nouts_buf, static_cast<uint32_t>(tx.output_count));
     hasher.Write(nouts_buf, 4);
 
     hasher.Write(outputs_hash, 32);
 
     unsigned char idx_buf[4];
-    for (int i = 0; i < 4; ++i) idx_buf[i] = (input_index >> (8 * i)) & 0xFF;
+    WriteLE32(idx_buf, input_index);
     hasher.Write(idx_buf, 4);
 
     unsigned char computed[32];

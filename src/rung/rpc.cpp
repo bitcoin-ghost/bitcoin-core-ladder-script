@@ -782,7 +782,6 @@ static RungConditions ParseConditionsSpec(const UniValue& rungs_arr,
 {
     RungConditions conditions;
 
-    // Parse relays (if provided)
     if (!relays_arr.isNull() && relays_arr.isArray()) {
         for (size_t i = 0; i < relays_arr.size(); ++i) {
             const UniValue& relay_obj = relays_arr[i];
@@ -1014,7 +1013,6 @@ static RPCHelpMan createrungtx()
     // Optional relays (4th param) — shared across all outputs
     UniValue relays_val = !request.params[3].isNull() ? request.params[3] : UniValue();
 
-    // Parse inputs
     for (size_t i = 0; i < inputs_arr.size(); ++i) {
         const UniValue& inp = inputs_arr[i];
         CTxIn txin;

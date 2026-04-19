@@ -242,7 +242,6 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
         return false;
     }
 
-    // Check for implicit field layout
     const auto& layout = GetImplicitLayout(block_out.type, ctx);
 
     if (layout.count > 0 && first_byte < MICRO_HEADER_ESCAPE) {
@@ -919,7 +918,6 @@ std::vector<uint8_t> SerializeLadderWitness(const LadderWitness& ladder,
         }
     }
 
-    // Extract serialized bytes
     std::vector<uint8_t> result(ss.size());
     ss.read(MakeWritableByteSpan(result));
     return result;

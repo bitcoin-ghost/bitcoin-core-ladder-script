@@ -143,7 +143,6 @@ bool ResolveTemplateReference(RungConditions& conditions,
  */
 static uint256 TaggedHash(const char* tag, const unsigned char* data, size_t len)
 {
-    // Compute SHA256(tag)
     unsigned char tag_hash[CSHA256::OUTPUT_SIZE];
     CSHA256().Write(reinterpret_cast<const unsigned char*>(tag), strlen(tag)).Finalize(tag_hash);
 
@@ -502,7 +501,6 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                 proof.total_relays = 0;
                 proof.rung_index = static_cast<uint16_t>(rung_index);
 
-                // Deserialize revealed rung blocks
                 uint64_t n_blocks = ReadCompactSize(ss);
                 if (n_blocks == 0 || n_blocks > MAX_BLOCKS_PER_RUNG) {
                     error = "MLSC shared proof rung block count invalid";
@@ -554,7 +552,6 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
         proof.total_relays = static_cast<uint16_t>(total_relays);
         proof.rung_index = static_cast<uint16_t>(rung_index);
 
-        // Deserialize revealed rung condition blocks
         uint64_t n_blocks = ReadCompactSize(ss);
         if (n_blocks > MAX_BLOCKS_PER_RUNG) {
             error = "MLSC proof rung block count invalid: " + std::to_string(n_blocks);
@@ -568,7 +565,6 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             return false;
         }
 
-        // Deserialize rung blocks via shared DeserializeBlock (CONDITIONS context)
         proof.revealed_rung.blocks.resize(n_blocks);
         for (uint64_t b = 0; b < n_blocks; ++b) {
             std::string block_error;
@@ -604,7 +600,6 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             }
             proof.revealed_relays[rl].first = static_cast<uint16_t>(relay_idx);
 
-            // Deserialize relay blocks via shared DeserializeBlock (CONDITIONS context)
             uint64_t rnb = ReadCompactSize(ss);
             if (rnb == 0 || rnb > MAX_BLOCKS_PER_RUNG) {
                 error = "MLSC proof relay block count invalid";
