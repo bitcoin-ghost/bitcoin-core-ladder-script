@@ -166,7 +166,7 @@ EvalResult EvalP2PKLegacyBlock(const RungBlock& block,
 {
     // P2PK_LEGACY: pubkey + sig, verified against Core's legacy ECDSA /
     // SegWit / Taproot sighash (not Ladder sighash — this is a legacy
-    // wrapper, see Phase 1E.3 design note).
+    // wrapper).
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;

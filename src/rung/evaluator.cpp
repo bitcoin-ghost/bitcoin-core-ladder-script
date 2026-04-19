@@ -11,7 +11,7 @@
 #include <rung/qabi.h>
 #include <rung/serialize.h>
 #include <rung/sighash.h>
-#include <rung_shims.h>  // transitional: CTransaction/PrecomputedTransactionData wrappers
+#include <rung_shims.h>  // Core↔library boundary adapters
 
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
@@ -58,212 +58,8 @@ static bool CheckLadderTweakRaw(const unsigned char output_pk[32],
                                                   &internal_key, tweak.begin());
 }
 
-
-
-
-/** Helper: check if a block has at least `count` PUBKEY fields.
- *  merkle_pub_key: pubkeys are in the witness, bound by Merkle proof. */
-
-/** Return PUBKEY fields from the block. Pubkeys travel in the witness
- *  and are bound to the Merkle leaf at fund time (merkle_pub_key). */
-
-
-// ============================================================================
-// PQ signature verification helper
-// ============================================================================
-
-/** Helper: pull the Ladder sighash from the adapter. Returns false if the
- *  adapter lacks precomputed data (library fuzzers, minimal test stubs). */
-
-/** Helper: extract the hash_type byte that a Schnorr signature commits to.
- *  64-byte sigs use SIGHASH_DEFAULT; 65-byte sigs carry hash_type in the last
- *  byte (which must not be SIGHASH_DEFAULT per BIP340). Returns false on an
- *  invalid 65-byte sig. */
-
-/** Verify a post-quantum signature using the SCHEME field routing.
- *  PQ schemes always sign the default Ladder sighash (SIGHASH_DEFAULT). */
-
-// ============================================================================
-// Single-sig verification helper
-// ============================================================================
-
-/** Helper: verify a single signature against a single pubkey, routing by scheme.
- *  Returns SATISFIED on valid sig, UNSATISFIED on invalid sig, ERROR on malformed data.
- *  If scheme_field is non-null and contains a PQ scheme, routes to PQ verifier.
- *  Otherwise routes by signature size (64-65 = Schnorr, 8-72 = ECDSA). */
-
-// ============================================================================
-// Signature evaluators
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ============================================================================
-// Covenant evaluators
-// ============================================================================
-
-
-
-
-
-
-
-// ============================================================================
-// Anchor evaluators
-// ============================================================================
-
-
-/** Verify that each HASH256 field in a block has a matching PREIMAGE field
- *  where SHA256(preimage) == hash. This binds hash content to revealed data,
- *  preventing arbitrary data embedding via unverified hash fields.
- *  Hashes and preimages are matched positionally (1st hash ↔ 1st preimage, etc.). */
-
-
-
-
-
-
-
-
-// ============================================================================
-// Leaf-centric covenant helpers
-// ============================================================================
-
-/** Check if an output's MLSC root matches the verified input root (identity check).
- *  Used by RECURSE_SAME and RECURSE_UNTIL (before deadline). */
-
-/** Compute expected MLSC root after replacing one leaf in the verified array.
- *  Used by RECURSE_COUNT/SPLIT/MODIFIED/DECAY for same-rung mutations. */
-
-// MutationSpec lives in rung/block_helpers.h (shared with RECURSE_* blocks).
-
-
-
-
-/** Leaf-centric mutation verification: apply mutations to a copy of the revealed rung,
- *  recompute the rung leaf, rebuild the tree, and compare against the output root.
- *  Cross-rung mutations use revealed_mutation_targets from the MLSC proof. */
-
-// ============================================================================
-// Recursion evaluators
-// ============================================================================
-
-
-/** Parse mutation specs from NUMERIC fields. Returns max_depth via out-param.
- *  Supports legacy (4 NUMERICs: rung 0, single mutation) and new format (6+ NUMERICs). */
-
-
-
-
-
-
-// ============================================================================
-// PLC evaluators
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ============================================================================
-// COSIGN — co-spend contact
-// ============================================================================
-
-
-// ============================================================================
-// Compound evaluators (multi-block patterns in single block)
-// ============================================================================
-
-
-
-
-
-
-
-// ============================================================================
-// Governance evaluators (transaction-level constraints)
-// ============================================================================
-
-
-
-
-
-
-
-// ============================================================================
-// OUTPUT_CHECK evaluator
-// ============================================================================
-
-
-// ============================================================================
-// KEY_REF_SIG evaluator
-// ============================================================================
-
-/** Evaluate a KEY_REF_SIG block: verify a signature using PUBKEY + SCHEME
- *  resolved from a relay block.
- *
- *  Conditions fields: NUMERIC(relay_index) + NUMERIC(block_index)
- *  Witness fields:    SIGNATURE
- *
- *  The referenced relay must be in the rung's relay_refs. The target block
- *  must contain PUBKEY (bound by Merkle proof, and optionally SCHEME).
- *  The signature is checked against the relay's PUBKEY. */
-
-// ============================================================================
-// Shared signature verification helper
-// ============================================================================
-
-/** Verify a signature using SCHEME routing + sig dispatch.
- *  Shared by SIG-like evaluators (P2PKH, P2WPKH, etc.).
- *  Assumes pubkey_field and sig_field are non-null. */
-
-// ============================================================================
-// Legacy evaluators (wrapped Bitcoin transaction types)
-// ============================================================================
-
-// MAX_LEGACY_INNER_DEPTH + EvalInnerConditions moved to src/rung/block_helpers.h
-// and src/rung/blocks/legacy.cpp respectively.
-
-
-
-
-
-
-
-
-// ============================================================================
-// QABI family — BIP-YYYY consensus evaluators
-// ============================================================================
-//
-// Everything from here to the matching `#endif // ENABLE_QABIO` is gated
-// on the ENABLE_QABIO compile flag. When the flag is off, the evaluator
-// dispatch above returns UNSATISFIED for QABI_PRIME and QABI_SPEND block
-// types (the base Ladder Script forward-compatibility rule) and these
-// function definitions are not compiled.
-#ifdef ENABLE_QABIO
-
-
-
-#endif // ENABLE_QABIO
+// Per-block evaluators live in src/rung/blocks/*.cpp; each TU self-registers
+// via `register_<family>_blocks()` called from block_registry.cpp.
 
 // ============================================================================
 // Block dispatch
@@ -1225,10 +1021,9 @@ bool VerifyRungTx(
     eval_ctx.qabo_sig_cache = qabo_sig_cache;
 
     // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
-    // wrapper family (see Phase 1E.3 design note). Fetch it from the opaque
-    // ctx field; fall back to a default-constructed checker (all four
-    // methods return false) when the host didn't provide one and the spend
-    // uses no legacy wrappers.
+    // wrapper family. Fetch it from the opaque ctx field; fall back to a
+    // default-constructed checker (all four methods return false) when the
+    // host didn't provide one and the spend uses no legacy wrappers.
     static BaseSignatureChecker kFallbackLegacyChecker{};
     const BaseSignatureChecker& legacy_checker =
         ctx.legacy_sig_checker

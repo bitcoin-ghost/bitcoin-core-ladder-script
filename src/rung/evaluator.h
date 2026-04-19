@@ -27,12 +27,11 @@ class CTxOut;
 
 namespace rung {
 
-// Prior `LadderSignatureChecker` (a subclass of `DeferringSignatureChecker`)
-// was replaced in Phase 1E.3 by `rung::api::LadderSigChecker` (adapter
-// interface in `rung/api.h`) plus the Core-side implementation
-// `rung::CoreLadderSigChecker` in `rung_shims.h`. Ladder-native Eval*Block
-// functions take the adapter; legacy P2* wrappers stay on
-// BaseSignatureChecker.
+// Ladder-native Eval*Block functions take the adapter sig checker
+// (`rung::api::LadderSigChecker` in `rung/api.h`, implemented Core-side by
+// `rung::CoreLadderSigChecker` in `rung_shims.h`). Legacy P2* wrapper
+// blocks stay on Core's `BaseSignatureChecker` because they verify legacy
+// / SegWit / Taproot sighashes, not Ladder sighash.
 
 // QABIO support types (BIP-YYYY). Gated on ENABLE_QABIO so the base
 // Ladder Script evaluator has no QABIO-specific machinery when the
@@ -166,8 +165,8 @@ EvalResult ApplyInversion(EvalResult raw, bool inverted);
 
 // Signature evaluators — Ladder-native blocks, adapter-typed sig checker.
 // Sig-bearing evaluators take a RungEvalContext so they can compute the
-// Ladder sighash via `api::SignatureHashLadder` (Phase 1E.5). Timelock-only
-// evaluators (CSV / CLTV / CSV_TIME / CLTV_TIME) don't need it.
+// Ladder sighash via `api::SignatureHashLadder`. Timelock-only evaluators
+// (CSV / CLTV / CSV_TIME / CLTV_TIME) don't need it.
 EvalResult EvalSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 EvalResult EvalMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 EvalResult EvalHashPreimageBlock(const RungBlock& block);
@@ -256,9 +255,8 @@ EvalResult EvalOutputCheckBlock(const RungBlock& block, const RungEvalContext& c
 
 /** Evaluate a single block by dispatching to the appropriate evaluator.
  *  Ladder-native blocks use `sig_checker` (adapter-typed). Legacy P2*
- *  wrapper blocks use `legacy_checker` + `sigversion` + `execdata` — these
- *  paths still need Core's legacy / SegWit / Taproot sighash machinery
- *  (see Phase 1E.3 design note in commit `rung: adapter-ise BaseSignatureChecker`). */
+ *  wrapper blocks use `legacy_checker` + `sigversion` + `execdata` — they
+ *  verify Core's legacy / SegWit / Taproot sighash, not Ladder sighash. */
 EvalResult EvalBlock(const RungBlock& block,
                      const api::LadderSigChecker& sig_checker,
                      const BaseSignatureChecker& legacy_checker,

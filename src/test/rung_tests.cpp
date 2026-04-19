@@ -4162,7 +4162,6 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_no_liboqs)
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(690, 0xBB)});
 
     ScriptExecutionData execdata;
-    // Without LadderSignatureChecker, dynamic_cast fails → ERROR
     BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::ERROR);
 }
 
@@ -4178,7 +4177,6 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_bad_sig)
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(690, 0xBB)});
 
     ScriptExecutionData execdata;
-    // MockSignatureChecker is not a LadderSignatureChecker, so dynamic_cast → ERROR
     auto result = EvalSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -4216,7 +4214,6 @@ BOOST_AUTO_TEST_CASE(eval_sig_schnorr_scheme_field_fallthrough)
 
 BOOST_AUTO_TEST_CASE(eval_multisig_pq_no_ladder_checker)
 {
-    // PQ multisig with MockSignatureChecker (not LadderSignatureChecker) → ERROR
     MockSignatureChecker checker;
 
     RungBlock block;
@@ -4429,7 +4426,6 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_falcon1024)
     BOOST_CHECK(SignPQ(RungScheme::FALCON1024, privkey, msg, sig));
     block.fields.push_back({RungDataType::SIGNATURE, sig});
 
-    // PQ path needs LadderSignatureChecker → ERROR (but commitment check passed)
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
     BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
@@ -4506,7 +4502,6 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_mismatch_dilithium3)
 
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
-    // PQ path requires LadderSignatureChecker; MockSignatureChecker → ERROR
     BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -4541,20 +4536,14 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_pubkey_commit)
     BOOST_CHECK(SignPQ(RungScheme::FALCON512, privkey, msg, sig));
     block.fields.push_back({RungDataType::SIGNATURE, sig});
 
-    // We need a LadderSignatureChecker that returns the right sighash.
-    // For this unit test we use the MockSignatureChecker — PQ path requires
-    // LadderSignatureChecker. The commitment check itself passes before PQ verify.
-    // Test the commitment logic alone: wrong checker → ERROR (but commitment passed).
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
-    // PQ path needs LadderSignatureChecker → gets ERROR (not UNSATISFIED from commit mismatch)
     BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pq_pubkey_commit_mismatch)
 {
     // merkle_pub_key: evaluator no longer checks PUBKEY_COMMIT.
-    // PQ path requires LadderSignatureChecker; MockSignatureChecker → ERROR.
     MockSignatureChecker checker;
 
     std::vector<uint8_t> wrong_pubkey(897, 0xBB);
