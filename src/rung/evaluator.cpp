@@ -500,8 +500,8 @@ static bool MergeConditionsAndWitness(const RungConditions& conditions,
  *  @param[out]    error       Error message on failure.
  *  @return true on success. */
 static bool ResolveWitnessReference(LadderWitness& witness,
-                                    const CTransaction& tx,
-                                    unsigned int nIn,
+                                    const api::LadderTxView& tx,
+                                    size_t nIn,
                                     std::string& error)
 {
     if (!witness.IsWitnessRef()) {
@@ -519,16 +519,20 @@ static bool ResolveWitnessReference(LadderWitness& witness,
     }
 
     // Deserialize the source input's witness
-    const auto& source_wit = tx.vin[ref.input_index].scriptWitness;
-    if (source_wit.stack.empty()) {
+    const auto& source_wit = tx.inputs[ref.input_index].witness;
+    if (source_wit.count == 0) {
         error = "witness reference source input " + std::to_string(ref.input_index) +
                 " has empty witness";
         return false;
     }
 
+    // Copy the first element bytes into a std::vector for the deserialiser.
+    std::vector<uint8_t> src_bytes(source_wit.elements[0].data,
+                                    source_wit.elements[0].data + source_wit.elements[0].size);
+
     LadderWitness source_ladder;
     std::string deser_error;
-    if (!DeserializeLadderWitness(source_wit.stack[0], source_ladder, deser_error)) {
+    if (!DeserializeLadderWitness(src_bytes, source_ladder, deser_error)) {
         error = "witness reference source deserialization failed: " + deser_error;
         return false;
     }
@@ -733,53 +737,47 @@ bool CheckRungTxLevel(const LadderTxView& tx, uint32_t flags, std::string& error
 
 } // namespace api
 
-bool VerifyRungTx(const CTransaction& tx,
-                  unsigned int nIn,
-                  const CTxOut& spent_output,
-                  unsigned int flags,
-                  const BaseSignatureChecker& checker,
-                  const PrecomputedTransactionData& txdata,
-                  ScriptError* serror,
-                  int32_t block_height,
-                  SharedTreeCache* shared_cache,
-                  QABOSigCache* qabo_sig_cache)
-{
-    if (nIn >= tx.vin.size()) {
-        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-        return false;
-    }
+namespace api {
 
-    // Per-transaction checks: only run on first input (same result for all inputs).
+bool VerifyRungTx(
+    const LadderTxView& tx,
+    size_t input_index,
+    const LadderOutputView& spent_output,
+    const LadderEvalContext& ctx,
+    LadderScriptError* error_out)
+{
+    auto fail = [&](LadderScriptError code) -> bool {
+        if (error_out) *error_out = code;
+        return false;
+    };
+
+    if (input_index >= tx.input_count) return fail(LadderScriptError::UNKNOWN_ERROR);
+    if (!ctx.sig_checker)              return fail(LadderScriptError::UNKNOWN_ERROR);
+    if (!ctx.precomputed)              return fail(LadderScriptError::UNKNOWN_ERROR);
+
+    // Per-transaction checks: only run on first input (same result for all).
     // Note: for wallet-funded v4 txs (where input 0 is a standard P2WPKH/P2TR
     // spend), VerifyRungTx is never called — the tx-level checks in
-    // CheckRungTxLevel must be invoked separately from the tx-level validator
-    // (src/validation.cpp CheckInputScripts) so the rules apply regardless
-    // of input types. The call here is a safety net for pure-MLSC txs and
-    // is redundant (but harmless) when CheckRungTxLevel has already run.
-    // Build adapter views once at function scope. RungEvalContext carries
-    // these to every EvalBlock and QABI_SPEND, keeping the library code
-    // on the api side of the boundary.
-    LadderTxViewBuilder tx_view_builder(tx);
-    LadderPrecomputedBuilder precomputed_builder(txdata);
-
-    if (nIn == 0) {
+    // CheckRungTxLevel must be invoked separately by the tx-level validator
+    // so the rules apply regardless of input types. The call here is a
+    // safety net for pure-MLSC txs (redundant but harmless when
+    // CheckRungTxLevel has already run).
+    if (input_index == 0) {
         std::string tx_error;
-        if (!api::CheckRungTxLevel(tx_view_builder.view, flags, tx_error)) {
+        if (!CheckRungTxLevel(tx, ctx.flags, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
-    } // end nIn == 0
+    }
 
-    const auto& witness = tx.vin[nIn].scriptWitness;
+    const auto& witness = tx.inputs[input_index].witness;
 
     // Witness stack size determines spending path:
     //   1 element  = key-path spend (signature only)
     //   2 elements = script-path, no tweak check (LadderWitness + MLSCProof)
     //   3 elements = script-path with tweak (LadderWitness + MLSCProof + internal_pubkey)
-    if (witness.stack.empty() || witness.stack.size() > 3) {
-        if (serror) *serror = SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY;
-        return false;
+    if (witness.count == 0 || witness.count > 3) {
+        return fail(LadderScriptError::WITNESS_PROGRAM_WITNESS_EMPTY);
     }
 
     // ================================================================
@@ -803,61 +801,72 @@ bool VerifyRungTx(const CTransaction& tx,
     // witness as ladder. Do not weaken or remove without auditing
     // every call site of VerifyRungTx.
     // ================================================================
-    if (!IsMLSCScript(spent_output.scriptPubKey)) {
+    if (!IsMLSCScript(spent_output.script_pub_key.as_span())) {
         LogPrintf("VerifyRungTx called on non-MLSC scriptPubKey — dispatch invariant violated\n");
-        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-        return false;
+        return fail(LadderScriptError::NON_MLSC_SCRIPT);
     }
+
+    // Local helpers to turn adapter witness elements into byte spans.
+    auto wit_span = [&](size_t i) -> std::span<const uint8_t> {
+        return {witness.elements[i].data, witness.elements[i].size};
+    };
+    auto wit_vec = [&](size_t i) -> std::vector<uint8_t> {
+        const auto& e = witness.elements[i];
+        return std::vector<uint8_t>(e.data, e.data + e.size);
+    };
+
+    // Convert the prevout txid at input `i` to a library Txid.
+    auto prevout_txid = [&](size_t i) -> Txid {
+        uint256 u;
+        std::memcpy(u.data(), tx.inputs[i].prevout.txid, 32);
+        return Txid::FromUint256(u);
+    };
+
+    auto* shared_cache   = static_cast<SharedTreeCache*>(ctx.shared_tree_cache);
+    auto* qabo_sig_cache = static_cast<QABOSigCache*>(ctx.qabo_sig_cache);
 
     // ================================================================
     // KEY-PATH SPEND: witness = [signature]
     // Verify Schnorr signature directly against the output's conditions_root
     // treated as an x-only public key. No conditions revealed, no Merkle proof.
     // ================================================================
-    if (witness.stack.size() == 1) {
+    if (witness.count == 1) {
         uint256 conditions_root;
-        if (!GetMLSCRoot(spent_output.scriptPubKey, conditions_root)) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+        if (!GetMLSCRoot(spent_output.script_pub_key.as_span(), conditions_root)) {
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
 
-        const auto& sig = witness.stack[0];
-        if (sig.size() != 64 && sig.size() != 65) {
-            if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_SIZE;
-            return false;
+        auto sig_full = wit_span(0);
+        if (sig_full.size() != 64 && sig_full.size() != 65) {
+            return fail(LadderScriptError::SCHNORR_SIG_SIZE);
         }
 
-        // Parse the conditions_root as an x-only public key
-        XOnlyPubKey output_key;
-        std::memcpy(output_key.begin(), conditions_root.data(), 32);
-        if (!output_key.IsFullyValid()) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
-        }
-
-        // Extract sighash type from trailing byte (BIP341 convention)
+        // Extract sighash type from trailing byte (BIP341 convention).
         uint8_t hashtype = SIGHASH_DEFAULT;
-        std::vector<unsigned char> sig_data(sig.begin(), sig.end());
+        std::vector<uint8_t> sig_data(sig_full.begin(), sig_full.end());
         if (sig_data.size() == 65) {
             hashtype = sig_data.back();
             sig_data.pop_back();
             if (hashtype == SIGHASH_DEFAULT) {
-                if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_HASHTYPE;
-                return false;
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
         }
 
-        // Compute key-path sighash (no conditions commitment)
+        // Compute key-path sighash (no conditions commitment).
         uint256 sighash;
-        if (!SignatureHashLadderKeyPath(txdata, tx, nIn, hashtype, sighash)) {
-            if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_HASHTYPE;
-            return false;
+        if (!SignatureHashLadderKeyPath(*ctx.precomputed, tx, input_index,
+                                          hashtype, sighash)) {
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
 
-        // Verify Schnorr signature against the output key
-        if (!output_key.VerifySchnorr(sighash, std::span<const unsigned char>{sig_data.data(), sig_data.size()})) {
-            if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG;
-            return false;
+        // Verify Schnorr signature against the output key (conditions_root
+        // interpreted as an x-only pubkey). Delegated to the host's sig
+        // checker — the library never handles XOnlyPubKey.
+        std::span<const uint8_t, 32> sighash_span{sighash.data(), 32};
+        std::span<const uint8_t, 32> pubkey_span{conditions_root.data(), 32};
+        std::span<const uint8_t> sig_span{sig_data.data(), sig_data.size()};
+        if (!ctx.sig_checker->CheckSchnorrSignature(sig_span, pubkey_span, sighash_span)) {
+            return fail(LadderScriptError::SIGNATURE_INVALID);
         }
 
         return true;
@@ -867,21 +876,19 @@ bool VerifyRungTx(const CTransaction& tx,
     // SCRIPT-PATH SPEND: witness = [LadderWitness, MLSCProof] or
     //                               [LadderWitness, MLSCProof, internal_pubkey]
     // ================================================================
-    const auto& witness_bytes = witness.stack[0];
+    const std::vector<uint8_t> witness_bytes = wit_vec(0);
 
     LadderWitness witness_ladder;
     std::string deser_error;
     if (!DeserializeLadderWitness(witness_bytes, witness_ladder, deser_error)) {
-        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-        return false;
+        return fail(LadderScriptError::WITNESS_MALFORMED);
     }
 
     // Resolve witness references if needed (diff witness mode)
     if (witness_ladder.IsWitnessRef()) {
         std::string ref_error;
-        if (!ResolveWitnessReference(witness_ladder, tx, nIn, ref_error)) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+        if (!ResolveWitnessReference(witness_ladder, tx, input_index, ref_error)) {
+            return fail(LadderScriptError::WITNESS_MALFORMED);
         }
     }
 
@@ -896,9 +903,8 @@ bool VerifyRungTx(const CTransaction& tx,
         // MLSC path: conditions come from witness, not scriptPubKey
         // ================================================================
         uint256 conditions_root;
-        if (!GetMLSCRoot(spent_output.scriptPubKey, conditions_root)) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+        if (!GetMLSCRoot(spent_output.script_pub_key.as_span(), conditions_root)) {
+            return fail(LadderScriptError::MLSC_ROOT_UNAVAILABLE);
         }
 
         // stack[0] = LadderWitness (already deserialized above)
@@ -906,55 +912,47 @@ bool VerifyRungTx(const CTransaction& tx,
         // (exact stack size already enforced at entry)
 
         // Deserialize MLSC proof from stack[1]
+        const std::vector<uint8_t> proof_bytes = wit_vec(1);
         std::string proof_error;
-        if (!DeserializeMLSCProof(witness.stack[1], mlsc_proof, proof_error)) {
+        if (!DeserializeMLSCProof(proof_bytes, mlsc_proof, proof_error)) {
             LogPrintf("MLSC proof deserialization failed: %s\n", proof_error);
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            return fail(LadderScriptError::PROOF_DESERIALISE_FAILED);
         }
 
         // SHARED proof mode: validate against a previously verified input from the same source tx
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
             if (!shared_cache) {
                 LogPrintf("MLSC shared proof: no cache available\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             uint16_t src_idx = mlsc_proof.shared_source_input;
-            if (src_idx >= nIn) {
-                LogPrintf("MLSC shared proof: source_input %u >= current input %u (must reference earlier input)\n",
-                          src_idx, nIn);
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+            if (src_idx >= input_index) {
+                LogPrintf("MLSC shared proof: source_input %u >= current input %zu (must reference earlier input)\n",
+                          src_idx, input_index);
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             // Verify same source tx
-            if (tx.vin[src_idx].prevout.hash != tx.vin[nIn].prevout.hash) {
+            if (std::memcmp(tx.inputs[src_idx].prevout.txid,
+                            tx.inputs[input_index].prevout.txid, 32) != 0) {
                 LogPrintf("MLSC shared proof: source input %u has different prevout hash\n", src_idx);
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             // Look up the verified root from the source input
-            auto it = shared_cache->find(tx.vin[src_idx].prevout.hash);
+            auto it = shared_cache->find(prevout_txid(src_idx));
             if (it == shared_cache->end()) {
                 LogPrintf("MLSC shared proof: source input %u not in cache\n", src_idx);
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             if (it->second.root != conditions_root) {
                 LogPrintf("MLSC shared proof: cached root mismatch\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
             }
-            // Root matches. Now verify the revealed leaf is actually in the cached tree.
-            // Without this check, an attacker could fabricate conditions that were never
-            // committed in the original Merkle tree.
-            // (my_leaf is computed below after pubkey extraction — defer check to after line 3786)
+            // Root matches. Leaf membership is checked below after pubkey extraction.
         }
 
         // Single rung rule: standard spends reveal exactly 1 rung
         if (witness_ladder.rungs.size() != 1) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
 
         // Extract pubkeys from witness for merkle_pub_key leaf computation
@@ -996,10 +994,9 @@ bool VerifyRungTx(const CTransaction& tx,
         // SHARED proofs: root was validated via cache. Now verify leaf membership —
         // the revealed rung's leaf must exist in the cached tree's leaf set.
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
-            auto cache_it = shared_cache->find(tx.vin[nIn].prevout.hash);
+            auto cache_it = shared_cache->find(prevout_txid(input_index));
             if (cache_it == shared_cache->end()) {
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             const auto& cached_leaves = cache_it->second.leaves;
             bool leaf_found = false;
@@ -1011,10 +1008,9 @@ bool VerifyRungTx(const CTransaction& tx,
             }
             if (!leaf_found) {
                 LogPrintf("MLSC shared proof: leaf not found in cached tree\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::MLSC_LEAF_MISMATCH);
             }
-        } else if (witness.stack.size() == 3) {
+        } else if (witness.count == 3) {
             // Compute raw Merkle root from proof, then verify tweak
             uint256 computed_merkle_root;
             if (mlsc_proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
@@ -1023,8 +1019,7 @@ bool VerifyRungTx(const CTransaction& tx,
                 size_t total_leaves = mlsc_proof.total_rungs;
                 if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
                     LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
-                    if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                    return false;
+                    return fail(LadderScriptError::UNKNOWN_ERROR);
                 }
                 std::vector<uint256> leaves(total_leaves);
                 leaves[mlsc_proof.rung_index] = my_leaf;
@@ -1033,34 +1028,34 @@ bool VerifyRungTx(const CTransaction& tx,
                     if (i == mlsc_proof.rung_index) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
-                        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                        return false;
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
                     }
                     leaves[i] = mlsc_proof.proof_hashes[ph_idx++];
                 }
                 computed_merkle_root = BuildMerkleTree(std::move(leaves));
             }
 
-            // Verify tweak: conditions_root == internal_pubkey + H(internal_pubkey || merkle_root) * G
-            if (witness.stack[2].size() != 32) {
+            // Verify tweak: conditions_root == internal_pubkey + H(internal_pubkey || merkle_root) * G.
+            // XOnlyPubKey is used as a local crypto helper — the library still
+            // links pubkey.h for this one check; a future commit could port
+            // `CheckLadderTweak` to call libsecp256k1 directly.
+            auto internal_pk_span = wit_span(2);
+            if (internal_pk_span.size() != 32) {
                 LogPrintf("MLSC tweak: internal pubkey must be 32 bytes\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::PUBKEY_INVALID);
             }
             XOnlyPubKey internal_key;
-            std::memcpy(internal_key.begin(), witness.stack[2].data(), 32);
+            std::memcpy(internal_key.begin(), internal_pk_span.data(), 32);
             if (!internal_key.IsFullyValid()) {
                 LogPrintf("MLSC tweak: invalid internal pubkey\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::PUBKEY_INVALID);
             }
             XOnlyPubKey output_key;
             std::memcpy(output_key.begin(), conditions_root.data(), 32);
             if (!output_key.CheckLadderTweak(internal_key, computed_merkle_root, false) &&
                 !output_key.CheckLadderTweak(internal_key, computed_merkle_root, true)) {
                 LogPrintf("MLSC tweak verification failed\n");
-                if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                return false;
+                return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
             }
         } else {
             // 2-element witness: verify the Merkle proof directly against conditions_root
@@ -1070,15 +1065,13 @@ bool VerifyRungTx(const CTransaction& tx,
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
                                       mlsc_proof.total_rungs, conditions_root, path_error)) {
                     LogPrintf("MLSC Merkle path verification failed: %s\n", path_error.c_str());
-                    if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                    return false;
+                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
                 }
             } else {
                 size_t total_leaves = mlsc_proof.total_rungs;
                 if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
                     LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
-                    if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                    return false;
+                    return fail(LadderScriptError::UNKNOWN_ERROR);
                 }
                 std::vector<uint256> leaves(total_leaves);
                 leaves[mlsc_proof.rung_index] = my_leaf;
@@ -1087,8 +1080,7 @@ bool VerifyRungTx(const CTransaction& tx,
                     if (i == mlsc_proof.rung_index) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
-                        if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                        return false;
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
                     }
                     leaves[i] = mlsc_proof.proof_hashes[ph_idx++];
                 }
@@ -1096,19 +1088,17 @@ bool VerifyRungTx(const CTransaction& tx,
                 if (computed_root != conditions_root) {
                     LogPrintf("MLSC root mismatch: computed %s != expected %s\n",
                               computed_root.GetHex(), conditions_root.GetHex());
-                    if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-                    return false;
+                    return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
                 }
             }
         }
 
         // Verify coil.output_index matches the output being spent
-        uint32_t spent_vout = tx.vin[nIn].prevout.n;
+        uint32_t spent_vout = tx.inputs[input_index].prevout.n;
         if (witness_ladder.coil.output_index != spent_vout) {
             LogPrintf("coil.output_index %u != spent vout %u\n",
                       witness_ladder.coil.output_index, spent_vout);
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
 
         // Populate verified_leaves_data for recursive covenant blocks.
@@ -1143,7 +1133,7 @@ bool VerifyRungTx(const CTransaction& tx,
             SharedTreeEntry entry;
             entry.root = conditions_root;
             entry.leaves = verified_leaves_data.leaves;
-            (*shared_cache)[tx.vin[nIn].prevout.hash] = std::move(entry);
+            (*shared_cache)[prevout_txid(input_index)] = std::move(entry);
         }
 
         // Build RungConditions from MLSC proof. conditions.rungs is
@@ -1170,23 +1160,28 @@ bool VerifyRungTx(const CTransaction& tx,
 
     } // end MLSC block
 
-    // Build evaluation context for covenant, anchor, recursion, and PLC blocks
+    // Build evaluation context for covenant, anchor, recursion, and PLC blocks.
     RungEvalContext eval_ctx;
-    eval_ctx.tx = &tx_view_builder.view;
-    eval_ctx.tx_core = &tx;
-    eval_ctx.precomputed = &precomputed_builder.view;
-    eval_ctx.input_index = nIn;
-    eval_ctx.input_amount = spent_output.nValue;
-    eval_ctx.block_height = block_height;
-    // Use the output matching coil.output_index for covenant amount checks
+    eval_ctx.tx = &tx;
+    // `tx_core` — Core-typed pointer for the handful of remaining Core-sizing
+    // call sites (GetVirtualTransactionSize / GetTransactionWeight) inside
+    // evaluator bodies. Left null on the adapter entry point; the Core-typed
+    // shim below sets it. A future commit ports those helpers to LadderTxView
+    // and `tx_core` goes away.
+    eval_ctx.tx_core = nullptr;
+    eval_ctx.precomputed = ctx.precomputed;
+    eval_ctx.input_index = static_cast<uint32_t>(input_index);
+    eval_ctx.input_amount = spent_output.value;
+    eval_ctx.block_height = ctx.block_height;
+    // Use the output matching coil.output_index for covenant amount checks.
     {
         uint32_t coil_out_idx = witness_ladder.coil.output_index;
-        if (coil_out_idx < tx_view_builder.output_views.size()) {
-            eval_ctx.output_amount = tx_view_builder.output_views[coil_out_idx].value;
-            eval_ctx.spending_output = &tx_view_builder.output_views[coil_out_idx];
-        } else if (!tx_view_builder.output_views.empty()) {
-            eval_ctx.output_amount = tx_view_builder.output_views[0].value;
-            eval_ctx.spending_output = &tx_view_builder.output_views[0];
+        if (coil_out_idx < tx.output_count) {
+            eval_ctx.output_amount = tx.outputs[coil_out_idx].value;
+            eval_ctx.spending_output = &tx.outputs[coil_out_idx];
+        } else if (tx.output_count > 0) {
+            eval_ctx.output_amount = tx.outputs[0].value;
+            eval_ctx.spending_output = &tx.outputs[0];
         }
     }
     if (has_conditions) {
@@ -1199,40 +1194,103 @@ bool VerifyRungTx(const CTransaction& tx,
         eval_ctx.verified_leaves = &verified_leaves_data;
         eval_ctx.mlsc_proof = &mlsc_proof;
     }
-    if (precomputed_builder.view.spent_output_count > 0) {
-        eval_ctx.spent_outputs = precomputed_builder.view.spent_outputs;
-        eval_ctx.spent_output_count = precomputed_builder.view.spent_output_count;
+    if (ctx.precomputed->spent_output_count > 0) {
+        eval_ctx.spent_outputs = ctx.precomputed->spent_outputs;
+        eval_ctx.spent_output_count = ctx.precomputed->spent_output_count;
     }
     // Plumb the QABO sig cache through so QABI_SPEND can short-circuit
     // duplicate FALCON verifications across primed inputs of the same tx.
     eval_ctx.qabo_sig_cache = qabo_sig_cache;
 
+    // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
+    // wrapper family (see Phase 1E.3 design note). Fetch it from the opaque
+    // ctx field; fall back to a default-constructed checker (all four
+    // methods return false) when the host didn't provide one and the spend
+    // uses no legacy wrappers.
+    static BaseSignatureChecker kFallbackLegacyChecker{};
+    const BaseSignatureChecker& legacy_checker =
+        ctx.legacy_sig_checker
+            ? *static_cast<const BaseSignatureChecker*>(ctx.legacy_sig_checker)
+            : kFallbackLegacyChecker;
+
     LadderWitness eval_ladder;
     ScriptExecutionData execdata;
 
     if (has_conditions) {
-        // Merge conditions with witness
+        // Merge conditions with witness.
         std::string merge_error;
         if (!MergeConditionsAndWitness(conditions, witness_ladder, eval_ladder, merge_error)) {
-            if (serror) *serror = SCRIPT_ERR_UNKNOWN_ERROR;
-            return false;
+            return fail(LadderScriptError::WITNESS_MALFORMED);
         }
 
-        CoreLadderSigChecker sig_checker(checker);
-        if (!EvalLadder(eval_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
-            if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
-            return false;
+        if (!EvalLadder(eval_ladder, *ctx.sig_checker, legacy_checker,
+                        SigVersion::LADDER, execdata, eval_ctx)) {
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
     } else {
-        // Bootstrap spend: v4 tx spending a v1/v2 UTXO
-        RungConditions empty_conditions;
-        CoreLadderSigChecker sig_checker(checker);
-        if (!EvalLadder(witness_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
-            if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
-            return false;
+        // Bootstrap spend: v4 tx spending a v1/v2 UTXO.
+        if (!EvalLadder(witness_ladder, *ctx.sig_checker, legacy_checker,
+                        SigVersion::LADDER, execdata, eval_ctx)) {
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
     }
 
+    return true;
+}
+
+} // namespace api
+
+// Core-typed entry point — builds the adapter views, constructs a
+// `CoreLadderSigChecker`, packages a `LadderEvalContext`, then forwards to
+// `rung::api::VerifyRungTx`. `ScriptError*` translation matches the prior
+// error surface (the Core validator only distinguishes a handful of codes,
+// so coarse mapping is sufficient).
+bool VerifyRungTx(const CTransaction& tx,
+                  unsigned int nIn,
+                  const CTxOut& spent_output,
+                  unsigned int flags,
+                  const BaseSignatureChecker& checker,
+                  const PrecomputedTransactionData& txdata,
+                  ScriptError* serror,
+                  int32_t block_height,
+                  SharedTreeCache* shared_cache,
+                  QABOSigCache* qabo_sig_cache)
+{
+    LadderTxViewBuilder tx_view_builder(tx);
+    LadderPrecomputedBuilder precomputed_builder(txdata);
+    api::LadderOutputView spent_view;
+    spent_view.value = spent_output.nValue;
+    spent_view.script_pub_key = {spent_output.scriptPubKey.data(),
+                                  spent_output.scriptPubKey.size()};
+
+    CoreLadderSigChecker sig_checker(checker);
+
+    api::LadderEvalContext adapter_ctx;
+    adapter_ctx.block_height = block_height;
+    adapter_ctx.flags = flags;
+    adapter_ctx.precomputed = &precomputed_builder.view;
+    adapter_ctx.sig_checker = &sig_checker;
+    adapter_ctx.shared_tree_cache = shared_cache;
+    adapter_ctx.qabo_sig_cache = qabo_sig_cache;
+    adapter_ctx.legacy_sig_checker = const_cast<BaseSignatureChecker*>(&checker);
+
+    api::LadderScriptError err = api::LadderScriptError::OK;
+    if (!api::VerifyRungTx(tx_view_builder.view, static_cast<size_t>(nIn),
+                            spent_view, adapter_ctx, &err)) {
+        if (serror) {
+            switch (err) {
+            case api::LadderScriptError::WITNESS_PROGRAM_WITNESS_EMPTY:
+                *serror = SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY; break;
+            case api::LadderScriptError::SCHNORR_SIG_SIZE:
+                *serror = SCRIPT_ERR_SCHNORR_SIG_SIZE; break;
+            case api::LadderScriptError::SIGNATURE_INVALID:
+                *serror = SCRIPT_ERR_SCHNORR_SIG; break;
+            default:
+                *serror = SCRIPT_ERR_UNKNOWN_ERROR; break;
+            }
+        }
+        return false;
+    }
     return true;
 }
 

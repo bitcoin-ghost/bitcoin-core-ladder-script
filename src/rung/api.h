@@ -331,11 +331,16 @@ struct LadderEvalContext {
     const LadderSigChecker* sig_checker{nullptr};
     const LadderBlockAccessor* block_accessor{nullptr};
 
-    // Caches — see note in Section 5. Typed as void* in api.h for now;
-    // library-internal code casts back to rung::SharedTreeCache* /
-    // rung::QABOSigCache*. A later phase will make these truly opaque.
+    // Opaque host pointers. Typed as void* so api.h stays Core-free; library-
+    // internal code casts back to the matching library types.
+    //   shared_tree_cache   -> rung::SharedTreeCache*
+    //   qabo_sig_cache      -> rung::QABOSigCache*
+    //   legacy_sig_checker  -> Core BaseSignatureChecker* (consumed only by
+    //                         the legacy P2* wrapper family; nullable when
+    //                         those blocks are compiled out or unused)
     void* shared_tree_cache{nullptr};
     void* qabo_sig_cache{nullptr};
+    void* legacy_sig_checker{nullptr};
 };
 
 // ============================================================================
