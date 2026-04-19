@@ -18,18 +18,45 @@
 #include <hash.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
-#include <pubkey.h>
 #include <script/script.h>
 #include <secp256k1.h>
 #include <secp256k1_schnorrsig.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <optional>
 
 namespace rung {
 using namespace api;  // Bring libladder public API (span-based) into file scope
+
+// Tagged hash for the Ladder-style x-only key tweak. Must match
+// `XOnlyPubKey::ComputeLadderTweakHash` in src/pubkey.cpp byte-for-byte —
+// consensus divergence on this tag would split the network.
+static const HashWriter HASHER_LADDERTWEAK{TaggedHash("LadderTweak/v1")};
+
+// Ladder tweak verification using raw libsecp256k1 — the library keeps this
+// self-contained rather than depending on Core's `XOnlyPubKey`. Returns true
+// iff output_pk == internal_pk + H(internal_pk || merkle_root) * G with the
+// given y-parity.
+static bool CheckLadderTweakRaw(const unsigned char output_pk[32],
+                                const unsigned char internal_pk[32],
+                                const uint256& merkle_root,
+                                int parity)
+{
+    secp256k1_xonly_pubkey internal_key;
+    if (!secp256k1_xonly_pubkey_parse(secp256k1_context_static, &internal_key, internal_pk)) {
+        return false;
+    }
+    HashWriter h{HASHER_LADDERTWEAK};
+    h.write(std::as_bytes(std::span<const unsigned char>{internal_pk, 32}));
+    h.write(std::as_bytes(std::span<const unsigned char>{merkle_root.begin(), 32}));
+    uint256 tweak = h.GetSHA256();
+    return secp256k1_xonly_pubkey_tweak_add_check(secp256k1_context_static,
+                                                  output_pk, parity,
+                                                  &internal_key, tweak.begin());
+}
 
 
 
@@ -1045,24 +1072,15 @@ bool VerifyRungTx(
             }
 
             // Verify tweak: conditions_root == internal_pubkey + H(internal_pubkey || merkle_root) * G.
-            // XOnlyPubKey is used as a local crypto helper — the library still
-            // links pubkey.h for this one check; a future commit could port
-            // `CheckLadderTweak` to call libsecp256k1 directly.
             auto internal_pk_span = wit_span(2);
             if (internal_pk_span.size() != 32) {
                 LogPrintf("MLSC tweak: internal pubkey must be 32 bytes\n");
                 return fail(LadderScriptError::PUBKEY_INVALID);
             }
-            XOnlyPubKey internal_key;
-            std::memcpy(internal_key.begin(), internal_pk_span.data(), 32);
-            if (!internal_key.IsFullyValid()) {
-                LogPrintf("MLSC tweak: invalid internal pubkey\n");
-                return fail(LadderScriptError::PUBKEY_INVALID);
-            }
-            XOnlyPubKey output_key;
-            std::memcpy(output_key.begin(), conditions_root.data(), 32);
-            if (!output_key.CheckLadderTweak(internal_key, computed_merkle_root, false) &&
-                !output_key.CheckLadderTweak(internal_key, computed_merkle_root, true)) {
+            if (!CheckLadderTweakRaw(conditions_root.data(), internal_pk_span.data(),
+                                     computed_merkle_root, 0) &&
+                !CheckLadderTweakRaw(conditions_root.data(), internal_pk_span.data(),
+                                     computed_merkle_root, 1)) {
                 LogPrintf("MLSC tweak verification failed\n");
                 return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
             }
