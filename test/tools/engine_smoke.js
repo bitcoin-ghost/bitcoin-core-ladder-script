@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const ENGINE_PATH = path.join(__dirname, '..', 'tools', 'ladder-engine', 'index.html');
+const ENGINE_PATH = path.join(__dirname, '..', '..', 'tools', 'ladder-engine', 'index.html');
 
 let errors = 0;
 function check(label, condition, detail) {
