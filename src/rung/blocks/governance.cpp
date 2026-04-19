@@ -75,10 +75,9 @@ EvalResult EvalWeightLimitBlock(const RungBlock& block, const RungEvalContext& c
     if (!max_weight_opt || *max_weight_opt <= 0) return EvalResult::ERROR;
     int64_t max_weight = *max_weight_opt;
 
-    if (!ctx.tx_core) return EvalResult::ERROR; // fail-safe: no tx context
+    if (ctx.tx_weight <= 0) return EvalResult::ERROR; // fail-safe: no tx weight
 
-    int64_t tx_weight = GetTransactionWeight(*ctx.tx_core);
-    if (tx_weight <= max_weight) {
+    if (ctx.tx_weight <= max_weight) {
         return EvalResult::SATISFIED;
     }
     return EvalResult::UNSATISFIED;

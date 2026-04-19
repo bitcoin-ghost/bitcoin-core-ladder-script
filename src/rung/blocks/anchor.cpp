@@ -126,8 +126,8 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     }
 
     // 4. Fee rate check (consensus-enforced anti-pinning)
-    if (!ctx.tx || !ctx.spent_outputs || !ctx.tx_core) {
-        return EvalResult::ERROR; // fail-closed: tx context required for fee/weight checks
+    if (!ctx.tx || !ctx.spent_outputs || ctx.tx_weight <= 0) {
+        return EvalResult::ERROR; // fail-closed: tx context + weight required
     }
     {
         int64_t total_in = 0;
@@ -141,7 +141,8 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
         int64_t fee = total_in - total_out;
         if (fee < 0) return EvalResult::UNSATISFIED;
 
-        int64_t vsize = GetVirtualTransactionSize(*ctx.tx_core);
+        // vsize = (weight + 3) / 4  (BIP 141 WITNESS_SCALE_FACTOR=4).
+        int64_t vsize = (ctx.tx_weight + 3) / 4;
         if (vsize <= 0) return EvalResult::ERROR;
 
         int64_t fee_rate = fee / vsize;
@@ -151,11 +152,8 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     }
 
     // 5. Weight limit check
-    {
-        int64_t tx_weight = GetTransactionWeight(*ctx.tx_core);
-        if (tx_weight > max_weight) {
-            return EvalResult::UNSATISFIED;
-        }
+    if (ctx.tx_weight > max_weight) {
+        return EvalResult::UNSATISFIED;
     }
 
     return EvalResult::SATISFIED;

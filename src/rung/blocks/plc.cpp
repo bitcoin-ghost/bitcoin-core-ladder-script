@@ -57,7 +57,7 @@ EvalResult EvalHysteresisFeeBlock(const RungBlock& block, const RungEvalContext&
         return EvalResult::UNSATISFIED;
     }
     // If no tx context, fail-safe to error
-    if (!ctx.tx || !ctx.spent_outputs || !ctx.tx_core) {
+    if (!ctx.tx || !ctx.spent_outputs || ctx.tx_weight <= 0) {
         return EvalResult::ERROR;
     }
     // Compute fee = sum(input values) - sum(output values)
@@ -73,8 +73,8 @@ EvalResult EvalHysteresisFeeBlock(const RungBlock& block, const RungEvalContext&
     if (fee < 0) {
         return EvalResult::UNSATISFIED;
     }
-    // fee_rate = fee / vsize (sat/vB)
-    int64_t vsize = GetVirtualTransactionSize(*ctx.tx_core);
+    // fee_rate = fee / vsize (sat/vB); vsize = (weight + 3) / 4 per BIP 141.
+    int64_t vsize = (ctx.tx_weight + 3) / 4;
     if (vsize <= 0) {
         return EvalResult::ERROR;
     }

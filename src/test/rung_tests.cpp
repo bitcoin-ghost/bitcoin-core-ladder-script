@@ -14,6 +14,7 @@
 #include <rung/types.h>
 
 #include <compressor.h>
+#include <consensus/validation.h>
 #include <crypto/sha256.h>
 #include <hash.h>
 #include <key.h>
@@ -5146,7 +5147,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_matching_input)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_5065(tx);
     ctx.tx = &tvb_5065.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 1;  // evaluating input 1 (the child)
     std::vector<rung::api::LadderOutputView> sov_5067 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_5067.data();
@@ -5185,7 +5186,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_no_matching_input)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_5100(tx);
     ctx.tx = &tvb_5100.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 1;
     std::vector<rung::api::LadderOutputView> sov_5102 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_5102.data();
@@ -5256,7 +5257,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_skips_self)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_5167(tx);
     ctx.tx = &tvb_5167.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;  // evaluating the only input — matches hash but is self
     std::vector<rung::api::LadderOutputView> sov_5169 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_5169.data();
@@ -5539,7 +5540,7 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_with_tx_context)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_5446(tx);
     ctx.tx = &tvb_5446.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     std::vector<rung::api::LadderOutputView> sov_5447 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_5447.data();
     ctx.spent_output_count = sov_5447.size();
@@ -6651,7 +6652,7 @@ BOOST_AUTO_TEST_CASE(weight_limit_within_bounds)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6554(tx);
     ctx.tx = &tvb_6554.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalWeightLimitBlock(block, ctx);
     // A minimal tx with 1 input and 1 output is well under 100000 WU
     BOOST_CHECK(result == EvalResult::SATISFIED);
@@ -6671,7 +6672,7 @@ BOOST_AUTO_TEST_CASE(weight_limit_exceeded)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6572(tx);
     ctx.tx = &tvb_6572.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalWeightLimitBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -6691,7 +6692,7 @@ BOOST_AUTO_TEST_CASE(input_count_within_bounds)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6590(tx);
     ctx.tx = &tvb_6590.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalInputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
@@ -6710,7 +6711,7 @@ BOOST_AUTO_TEST_CASE(input_count_below_min)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6607(tx);
     ctx.tx = &tvb_6607.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalInputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -6729,7 +6730,7 @@ BOOST_AUTO_TEST_CASE(output_count_within_bounds)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6624(tx);
     ctx.tx = &tvb_6624.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalOutputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
@@ -6748,7 +6749,7 @@ BOOST_AUTO_TEST_CASE(output_count_exceeds_max)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_6641(tx);
     ctx.tx = &tvb_6641.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     auto result = EvalOutputCountBlock(block, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -11639,7 +11640,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_satisfied)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_11528(tx);
     ctx.tx = &tvb_11528.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     std::vector<rung::api::LadderOutputView> sov_11530 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_11530.data();
@@ -11725,7 +11726,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_below_min)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_11610(tx);
     ctx.tx = &tvb_11610.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     std::vector<rung::api::LadderOutputView> sov_11612 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_11612.data();
@@ -11766,7 +11767,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_above_max)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_11647(tx);
     ctx.tx = &tvb_11647.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     std::vector<rung::api::LadderOutputView> sov_11649 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_11649.data();
@@ -11806,7 +11807,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_weight_over_limit)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_11683(tx);
     ctx.tx = &tvb_11683.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     std::vector<rung::api::LadderOutputView> sov_11685 = MakeOutputViews(spent_outputs);
     ctx.spent_outputs = sov_11685.data();
@@ -13268,7 +13269,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_13141(tx);
     ctx.tx = &tvb_13141.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -13395,7 +13396,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_13264(tx);
     ctx.tx = &tvb_13264.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -13537,7 +13538,7 @@ static EvalResult EvalSetup(const QABISpendSetup& s)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_13402(tx);
     ctx.tx = &tvb_13402.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = QABISpendSetup::TEST_BLOCK_HEIGHT;
 
@@ -14408,7 +14409,7 @@ BOOST_AUTO_TEST_CASE(qabi_prime_end_to_end_happy_path)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_14269(tx);
     ctx.tx = &tvb_14269.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
     rung::api::LadderOutputView ov_14272 = MakeOutputView(tx.vout[0]);
@@ -14505,7 +14506,7 @@ BOOST_AUTO_TEST_CASE(qabi_prime_rejects_shallow_depth)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_14361(tx);
     ctx.tx = &tvb_14361.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
     rung::api::LadderOutputView ov_14364 = MakeOutputView(tx.vout[0]);
@@ -14869,7 +14870,7 @@ static void RunMultiPartyBatch(size_t n_participants)
         RungEvalContext ctx;
         rung::LadderTxViewBuilder tvb_14720(tx);
         ctx.tx = &tvb_14720.view;
-        ctx.tx_core = &tx;
+        ctx.tx_weight = GetTransactionWeight(tx);
         ctx.input_index = static_cast<uint32_t>(p);
         ctx.block_height = TEST_BLOCK_HEIGHT;
 
@@ -14990,7 +14991,7 @@ BOOST_AUTO_TEST_CASE(adversarial_alice_not_in_block_rejected)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_14838(tx);
     ctx.tx = &tvb_14838.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -15064,7 +15065,7 @@ BOOST_AUTO_TEST_CASE(adversarial_swap_preimage_across_participants_rejected)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_14909(tx);
     ctx.tx = &tvb_14909.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -15173,7 +15174,7 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_15015(tx);
     ctx.tx = &tvb_15015.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
 
@@ -15536,7 +15537,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         RungEvalContext ctx;
         rung::LadderTxViewBuilder tvb_15375(tx);
         ctx.tx = &tvb_15375.view;
-        ctx.tx_core = &tx;
+        ctx.tx_weight = GetTransactionWeight(tx);
         ctx.input_index = 0;
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;
@@ -15569,7 +15570,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         RungEvalContext ctx;
         rung::LadderTxViewBuilder tvb_15405(tx);
         ctx.tx = &tvb_15405.view;
-        ctx.tx_core = &tx;
+        ctx.tx_weight = GetTransactionWeight(tx);
         ctx.input_index = 0;
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;
@@ -15648,7 +15649,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_rejects_poisoned_entry)
     RungEvalContext ctx;
     rung::LadderTxViewBuilder tvb_15481(tx);
     ctx.tx = &tvb_15481.view;
-    ctx.tx_core = &tx;
+    ctx.tx_weight = GetTransactionWeight(tx);
     ctx.input_index = 0;
     ctx.block_height = 500;
     ctx.qabo_sig_cache = &cache;
@@ -15744,7 +15745,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
             RungEvalContext ctx;
             rung::LadderTxViewBuilder tvb_15572(tx);
             ctx.tx = &tvb_15572.view;
-            ctx.tx_core = &tx;
+            ctx.tx_weight = GetTransactionWeight(tx);
             ctx.input_index = static_cast<uint32_t>(p);
             ctx.block_height = 500;
             ctx.qabo_sig_cache = cache;
@@ -15869,7 +15870,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
                 RungEvalContext ctx;
                 rung::LadderTxViewBuilder tvb_15694(tx);
                 ctx.tx = &tvb_15694.view;
-                ctx.tx_core = &tx;
+                ctx.tx_weight = GetTransactionWeight(tx);
                 ctx.input_index = static_cast<uint32_t>(p);
                 ctx.block_height = 500;
                 ctx.qabo_sig_cache = cache;
@@ -16768,7 +16769,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
         RungEvalContext ctx;
         rung::LadderTxViewBuilder tvb_16592(tx);
         ctx.tx = &tvb_16592.view;
-        ctx.tx_core = &tx;
+        ctx.tx_weight = GetTransactionWeight(tx);
         ctx.input_index = static_cast<uint32_t>(p);
         ctx.block_height = 500;
         ctx.qabo_sig_cache = &cache;

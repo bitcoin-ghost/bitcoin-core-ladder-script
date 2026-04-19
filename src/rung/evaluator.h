@@ -122,11 +122,13 @@ struct QABOSigCache {};
  *  recursion, and PLC evaluators. */
 struct RungEvalContext {
     const api::LadderTxView* tx{nullptr};  //!< The spending transaction (adapter view)
-    //! Core-typed pointer to the same transaction, kept transitional so
-    //! evaluators can still call Core sizing helpers
-    //! (GetVirtualTransactionSize / GetTransactionWeight) and CTV hash /
-    //! QABO sighash. Removed once those are adapter-typed.
-    const CTransaction* tx_core{nullptr};
+    //! BIP 141 transaction weight, populated by the host (Core shim computes
+    //! `GetTransactionWeight(CTransaction)` and the library-entry shim
+    //! forwards from `api::LadderEvalContext::tx_weight`). Consumed by
+    //! anchor / PLC / governance blocks that need weight or vsize =
+    //! (tx_weight + 3) / 4. Zero if the caller didn't populate it, in which
+    //! case weight-dependent blocks fail closed.
+    int64_t tx_weight{0};
     //! Precomputed sighash mid-state (hash_prevouts, hash_sequences, etc.).
     //! Used by library-internal sighash computation in `VerifySigWithScheme` /
     //! `EvalPQSig`. Nullable — test stubs without a real tx set this to

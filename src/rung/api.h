@@ -327,6 +327,13 @@ struct LadderEvalContext {
     int32_t block_height{0};
     uint32_t flags{0};  // script verification flags (bit-compatible with SCRIPT_VERIFY_*)
 
+    // BIP 141 transaction weight (stripped_size × 3 + total_size). Populated
+    // by the host before dispatch so Ladder blocks that need weight/vsize
+    // (anchor fee-rate bounds, hysteresis fee windows, weight-limit guard)
+    // don't need a Core-typed CTransaction inside the library. Host must
+    // compute this; the library never back-computes from the adapter view.
+    int64_t tx_weight{0};
+
     const LadderPrecomputedTxData* precomputed{nullptr};
     const LadderSigChecker* sig_checker{nullptr};
     const LadderBlockAccessor* block_accessor{nullptr};

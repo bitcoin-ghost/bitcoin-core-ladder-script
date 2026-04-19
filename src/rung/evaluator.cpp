@@ -1190,12 +1190,7 @@ bool VerifyRungTx(
     // Build evaluation context for covenant, anchor, recursion, and PLC blocks.
     RungEvalContext eval_ctx;
     eval_ctx.tx = &tx;
-    // `tx_core` — Core-typed pointer for the handful of remaining Core-sizing
-    // call sites (GetVirtualTransactionSize / GetTransactionWeight) inside
-    // evaluator bodies. Left null on the adapter entry point; the Core-typed
-    // shim below sets it. A future commit ports those helpers to LadderTxView
-    // and `tx_core` goes away.
-    eval_ctx.tx_core = nullptr;
+    eval_ctx.tx_weight = ctx.tx_weight;
     eval_ctx.precomputed = ctx.precomputed;
     eval_ctx.input_index = static_cast<uint32_t>(input_index);
     eval_ctx.input_amount = spent_output.value;
@@ -1295,6 +1290,7 @@ bool VerifyRungTx(const CTransaction& tx,
     api::LadderEvalContext adapter_ctx;
     adapter_ctx.block_height = block_height;
     adapter_ctx.flags = flags;
+    adapter_ctx.tx_weight = GetTransactionWeight(tx);
     adapter_ctx.precomputed = &precomputed_builder.view;
     adapter_ctx.sig_checker = &sig_checker;
     adapter_ctx.shared_tree_cache = shared_cache;
