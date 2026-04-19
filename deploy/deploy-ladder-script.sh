@@ -117,6 +117,11 @@ deploy_web() {
         ssh "$WEB_HOST" "sudo mkdir -p $WEB_ROOT/docs/blocks"
         rsync -avz "$ROOT/tools/block-docs/" "$WEB_HOST:$WEB_ROOT/block-docs/"
         rsync -avz "$ROOT/tools/block-docs/" "$WEB_HOST:$WEB_ROOT/docs/blocks/"
+        # docs/index.html fetches each *.md by bare filename (e.g.
+        # INTRODUCTION.md?v=5) relative to itself. Ship the ladder-script
+        # markdown alongside, or every sidebar click 404s.
+        rsync -avz --include='*.md' --exclude='*' \
+            "$ROOT/doc/ladder-script/" "$WEB_HOST:$WEB_ROOT/docs/"
     fi
 
     echo "--- Fixing ownership ---"
