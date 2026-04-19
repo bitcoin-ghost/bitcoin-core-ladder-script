@@ -4,6 +4,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <rung/evaluator.h>
+#include <rung/block_dispatch.h>
 #include <rung/conditions.h>
 #include <rung/pq_verify.h>
 #include <rung/qabi.h>
@@ -3280,237 +3281,26 @@ EvalResult EvalBlock(const RungBlock& block,
                      const RungEvalContext& ctx,
                      int depth)
 {
-    // Defense in depth: reject inverted key-consuming blocks
+    ladder_init();  // no-op after the first call
+
+    // Defense in depth: reject inverted key-consuming blocks.
     if (block.inverted && !IsInvertibleBlockType(block.type)) {
         return EvalResult::ERROR;
     }
 
-    EvalResult raw;
-    switch (block.type) {
-    // Signature
-    case RungBlockType::SIG:
-        raw = EvalSigBlock(block, sig_checker);
-        break;
-    case RungBlockType::MULTISIG:
-        raw = EvalMultisigBlock(block, sig_checker);
-        break;
-    case RungBlockType::ADAPTOR_SIG:
-        raw = EvalAdaptorSigBlock(block, sig_checker);
-        break;
-    case RungBlockType::MUSIG_THRESHOLD:
-        raw = EvalMusigThresholdBlock(block, sig_checker);
-        break;
-    case RungBlockType::KEY_REF_SIG:
-        raw = EvalKeyRefSigBlock(block, sig_checker, ctx);
-        break;
-    // Timelock
-    case RungBlockType::CSV:
-        raw = EvalCSVBlock(block, sig_checker);
-        break;
-    case RungBlockType::CSV_TIME:
-        raw = EvalCSVTimeBlock(block, sig_checker);
-        break;
-    case RungBlockType::CLTV:
-        raw = EvalCLTVBlock(block, sig_checker);
-        break;
-    case RungBlockType::CLTV_TIME:
-        raw = EvalCLTVTimeBlock(block, sig_checker);
-        break;
-    // Hash
-    case RungBlockType::TAGGED_HASH:
-        raw = EvalTaggedHashBlock(block);
-        break;
-    case RungBlockType::HASH_GUARDED:
-        raw = EvalHashGuardedBlock(block);
-        break;
-    // Covenant
-    case RungBlockType::CTV:
-        raw = EvalCTVBlock(block, ctx);
-        break;
-    case RungBlockType::VAULT_LOCK:
-        raw = EvalVaultLockBlock(block, sig_checker);
-        break;
-    case RungBlockType::AMOUNT_LOCK:
-        raw = EvalAmountLockBlock(block, ctx);
-        break;
-    // Anchor
-    case RungBlockType::ANCHOR:
-        raw = EvalAnchorBlock(block);
-        break;
-    case RungBlockType::ANCHOR_CHANNEL:
-        raw = EvalAnchorChannelBlock(block);
-        break;
-    case RungBlockType::ANCHOR_FEE:
-        raw = EvalAnchorFeeBlock(block, sig_checker, ctx);
-        break;
-    case RungBlockType::ANCHOR_POOL:
-        raw = EvalAnchorPoolBlock(block);
-        break;
-    case RungBlockType::ANCHOR_RESERVE:
-        raw = EvalAnchorReserveBlock(block);
-        break;
-    case RungBlockType::ANCHOR_SEAL:
-        raw = EvalAnchorSealBlock(block);
-        break;
-    case RungBlockType::ANCHOR_ORACLE:
-        raw = EvalAnchorOracleBlock(block);
-        break;
-    // Recursion
-    case RungBlockType::RECURSE_SAME:
-        raw = EvalRecurseSameBlock(block, ctx);
-        break;
-    case RungBlockType::RECURSE_MODIFIED:
-        raw = EvalRecurseModifiedBlock(block, ctx);
-        break;
-    case RungBlockType::RECURSE_UNTIL:
-        raw = EvalRecurseUntilBlock(block, ctx);
-        break;
-    case RungBlockType::RECURSE_COUNT:
-        raw = EvalRecurseCountBlock(block, ctx);
-        break;
-    case RungBlockType::RECURSE_SPLIT:
-        raw = EvalRecurseSplitBlock(block, ctx);
-        break;
-    case RungBlockType::RECURSE_DECAY:
-        raw = EvalRecurseDecayBlock(block, ctx);
-        break;
-    // PLC
-    case RungBlockType::HYSTERESIS_FEE:
-        raw = EvalHysteresisFeeBlock(block, ctx);
-        break;
-    case RungBlockType::HYSTERESIS_VALUE:
-        raw = EvalHysteresisValueBlock(block, ctx);
-        break;
-    case RungBlockType::TIMER_CONTINUOUS:
-        raw = EvalTimerContinuousBlock(block, ctx);
-        break;
-    case RungBlockType::TIMER_OFF_DELAY:
-        raw = EvalTimerOffDelayBlock(block, ctx);
-        break;
-    case RungBlockType::LATCH_SET:
-        raw = EvalLatchSetBlock(block, ctx);
-        break;
-    case RungBlockType::LATCH_RESET:
-        raw = EvalLatchResetBlock(block, ctx);
-        break;
-    case RungBlockType::COUNTER_DOWN:
-        raw = EvalCounterDownBlock(block, ctx);
-        break;
-    case RungBlockType::COUNTER_PRESET:
-        raw = EvalCounterPresetBlock(block, ctx);
-        break;
-    case RungBlockType::COUNTER_UP:
-        raw = EvalCounterUpBlock(block, ctx);
-        break;
-    case RungBlockType::COMPARE:
-        raw = EvalCompareBlock(block, ctx);
-        break;
-    case RungBlockType::SEQUENCER:
-        raw = EvalSequencerBlock(block, ctx);
-        break;
-    case RungBlockType::ONE_SHOT:
-        raw = EvalOneShotBlock(block, ctx);
-        break;
-    case RungBlockType::RATE_LIMIT:
-        raw = EvalRateLimitBlock(block, ctx);
-        break;
-    case RungBlockType::COSIGN:
-        raw = EvalCosignBlock(block, ctx);
-        break;
-    // Compound
-    case RungBlockType::TIMELOCKED_SIG:
-        raw = EvalTimelockedSigBlock(block, sig_checker);
-        break;
-    case RungBlockType::HTLC:
-        raw = EvalHTLCBlock(block, sig_checker);
-        break;
-    case RungBlockType::HASH_SIG:
-        raw = EvalHashSigBlock(block, sig_checker);
-        break;
-    case RungBlockType::PTLC:
-        raw = EvalPTLCBlock(block, sig_checker);
-        break;
-    case RungBlockType::CLTV_SIG:
-        raw = EvalCLTVSigBlock(block, sig_checker);
-        break;
-    case RungBlockType::TIMELOCKED_MULTISIG:
-        raw = EvalTimelockedMultisigBlock(block, sig_checker);
-        break;
-    // Governance
-    case RungBlockType::EPOCH_GATE:
-        raw = EvalEpochGateBlock(block, ctx);
-        break;
-    case RungBlockType::WEIGHT_LIMIT:
-        raw = EvalWeightLimitBlock(block, ctx);
-        break;
-    case RungBlockType::INPUT_COUNT:
-        raw = EvalInputCountBlock(block, ctx);
-        break;
-    case RungBlockType::OUTPUT_COUNT:
-        raw = EvalOutputCountBlock(block, ctx);
-        break;
-    case RungBlockType::RELATIVE_VALUE:
-        raw = EvalRelativeValueBlock(block, ctx);
-        break;
-    case RungBlockType::ACCUMULATOR:
-        raw = EvalAccumulatorBlock(block);
-        break;
-    case RungBlockType::OUTPUT_CHECK:
-        raw = EvalOutputCheckBlock(block, ctx);
-        break;
-    // Legacy wrappers — still take Core's BaseSignatureChecker (see Phase 1E.3).
-    case RungBlockType::P2PK_LEGACY:
-        raw = EvalP2PKLegacyBlock(block, legacy_checker, sigversion, execdata);
-        break;
-    case RungBlockType::P2PKH_LEGACY:
-        raw = EvalP2PKHLegacyBlock(block, legacy_checker, sigversion, execdata);
-        break;
-    case RungBlockType::P2SH_LEGACY:
-        raw = EvalP2SHLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
-        break;
-    case RungBlockType::P2WPKH_LEGACY:
-        raw = EvalP2WPKHLegacyBlock(block, legacy_checker, sigversion, execdata);
-        break;
-    case RungBlockType::P2WSH_LEGACY:
-        raw = EvalP2WSHLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
-        break;
-    case RungBlockType::P2TR_LEGACY:
-        raw = EvalP2TRLegacyBlock(block, legacy_checker, sigversion, execdata);
-        break;
-    case RungBlockType::P2TR_SCRIPT_LEGACY:
-        raw = EvalP2TRScriptLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
-        break;
-    // Utility family
-    case RungBlockType::DATA_RETURN:
-        // DATA_RETURN is unspendable — if we reach evaluation, the output should
-        // never have been spent. Return ERROR to make the transaction invalid.
-        raw = EvalResult::ERROR;
-        break;
-#ifdef ENABLE_QABIO
-    // QABI family — real logic when the extension is compiled in.
-    case RungBlockType::QABI_PRIME:
-        raw = EvalQABIPrimeBlock(block, sig_checker, ctx);
-        break;
-    case RungBlockType::QABI_SPEND:
-        raw = EvalQABISpendBlock(block, sig_checker, ctx);
-        break;
-#else
-    // When QABIO is disabled, the block types are still recognised for
-    // wire-format compatibility (so v4 txs carrying them still
-    // deserialise) but evaluate to UNSATISFIED. This matches the
-    // standard soft-fork forward-compatibility behaviour: old nodes see
-    // QABIO spends as anyone-can-spend at the Ladder Script layer and
-    // the QABI rules never fire.
-    case RungBlockType::QABI_PRIME:
-    case RungBlockType::QABI_SPEND:
-        raw = EvalResult::UNSATISFIED;
-        break;
-#endif
-    default:
-        raw = EvalResult::UNKNOWN_BLOCK_TYPE;
-        break;
+    BlockEvaluator fn = LookupBlockEvaluator(block.type);
+    if (!fn) {
+        // Not registered. Pre-soft-fork nodes must treat unknown block types as
+        // UNSATISFIED (forward-compat — newer BIPs can add block types, and old
+        // nodes see those spends as anyone-can-spend at the Ladder layer).
+        // ApplyInversion flips UNKNOWN to ERROR, which is the correct behaviour
+        // for an inverted unknown block: "unknown must not satisfy".
+        return ApplyInversion(EvalResult::UNKNOWN_BLOCK_TYPE, block.inverted);
     }
-    return ApplyInversion(raw, block.inverted);
+
+    const BlockDispatchContext dctx{sig_checker, legacy_checker, sigversion,
+                                     execdata, ctx, depth};
+    return ApplyInversion(fn(block, dctx), block.inverted);
 }
 
 bool EvalRelays(const std::vector<Relay>& relays,
@@ -4475,5 +4265,375 @@ bool VerifyRungTx(const CTransaction& tx,
 
     return true;
 }
+
+// ============================================================================
+// Block-type dispatch registry
+// ============================================================================
+//
+// Each Ladder block family exports a `register_<family>_blocks()` function
+// below. `ladder_init()` calls them all at first use. The goal is selective
+// compilation: a host that wants to ship a reduced block set (BIP sub-
+// proposal opt-out, fuzz harness, kernel library, etc.) defines the
+// corresponding `LADDER_NO_<FAMILY>` macro and that family is stripped from
+// the build. Block types whose evaluators never register behave as
+// UNKNOWN_BLOCK_TYPE at dispatch time — the same forward-compat semantics
+// used for genuinely unknown block types.
+
+namespace {
+// RungBlockType is a uint16_t enum (rung/types.h), using values up to at
+// least 0x0A02 (QABI_SPEND). A 65536-slot direct-lookup array costs ~512 KB
+// of BSS and amortises to a single load per dispatch — cheaper than a hash
+// map for a hot consensus path.
+std::array<BlockEvaluator, 0x10000> g_block_registry{};
+} // namespace
+
+void RegisterBlock(RungBlockType type, BlockEvaluator fn)
+{
+    g_block_registry[static_cast<uint16_t>(type)] = fn;
+}
+
+BlockEvaluator LookupBlockEvaluator(RungBlockType type)
+{
+    return g_block_registry[static_cast<uint16_t>(type)];
+}
+
+// ---- Family: signature ----
+#ifndef LADDER_NO_SIG
+void register_sig_blocks()
+{
+    RegisterBlock(RungBlockType::SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalSigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::MULTISIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalMultisigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::ADAPTOR_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalAdaptorSigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::MUSIG_THRESHOLD, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalMusigThresholdBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::KEY_REF_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalKeyRefSigBlock(b, d.sig_checker, d.ctx);
+    });
+    // EvalHashPreimageBlock / EvalHash160PreimageBlock have no dedicated
+    // RungBlockType — they are helpers invoked from inside other block
+    // evaluators (e.g. HTLC preimage check), not dispatched directly.
+}
+#else
+void register_sig_blocks() {}
+#endif
+
+// ---- Family: timelock ----
+#ifndef LADDER_NO_TIMELOCK
+void register_timelock_blocks()
+{
+    RegisterBlock(RungBlockType::CSV, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCSVBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::CSV_TIME, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCSVTimeBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::CLTV, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCLTVBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::CLTV_TIME, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCLTVTimeBlock(b, d.sig_checker);
+    });
+}
+#else
+void register_timelock_blocks() {}
+#endif
+
+// ---- Family: hash ----
+#ifndef LADDER_NO_HASH
+void register_hash_blocks()
+{
+    RegisterBlock(RungBlockType::TAGGED_HASH, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalTaggedHashBlock(b);
+    });
+    RegisterBlock(RungBlockType::HASH_GUARDED, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalHashGuardedBlock(b);
+    });
+}
+#else
+void register_hash_blocks() {}
+#endif
+
+// ---- Family: covenant ----
+#ifndef LADDER_NO_COVENANT
+void register_covenant_blocks()
+{
+    RegisterBlock(RungBlockType::CTV, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCTVBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::VAULT_LOCK, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalVaultLockBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::AMOUNT_LOCK, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalAmountLockBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::DATA_RETURN, [](const RungBlock&, const BlockDispatchContext&) {
+        // DATA_RETURN outputs are unspendable. If dispatch reaches here, the
+        // output should never have been spent — fail the tx.
+        return EvalResult::ERROR;
+    });
+}
+#else
+void register_covenant_blocks() {}
+#endif
+
+// ---- Family: anchor ----
+#ifndef LADDER_NO_ANCHOR
+void register_anchor_blocks()
+{
+    RegisterBlock(RungBlockType::ANCHOR, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorBlock(b);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_CHANNEL, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorChannelBlock(b);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_FEE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalAnchorFeeBlock(b, d.sig_checker, d.ctx);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_POOL, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorPoolBlock(b);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_RESERVE, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorReserveBlock(b);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_SEAL, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorSealBlock(b);
+    });
+    RegisterBlock(RungBlockType::ANCHOR_ORACLE, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAnchorOracleBlock(b);
+    });
+}
+#else
+void register_anchor_blocks() {}
+#endif
+
+// ---- Family: recursion ----
+#ifndef LADDER_NO_RECURSION
+void register_recursion_blocks()
+{
+    RegisterBlock(RungBlockType::RECURSE_SAME, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseSameBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RECURSE_MODIFIED, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseModifiedBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RECURSE_UNTIL, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseUntilBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RECURSE_COUNT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseCountBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RECURSE_SPLIT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseSplitBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RECURSE_DECAY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRecurseDecayBlock(b, d.ctx);
+    });
+}
+#else
+void register_recursion_blocks() {}
+#endif
+
+// ---- Family: PLC (hysteresis / timer / latch / counter / compare / sequencer / one-shot / rate-limit / cosign) ----
+#ifndef LADDER_NO_PLC
+void register_plc_blocks()
+{
+    RegisterBlock(RungBlockType::HYSTERESIS_FEE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalHysteresisFeeBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::HYSTERESIS_VALUE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalHysteresisValueBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::TIMER_CONTINUOUS, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalTimerContinuousBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::TIMER_OFF_DELAY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalTimerOffDelayBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::LATCH_SET, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalLatchSetBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::LATCH_RESET, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalLatchResetBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::COUNTER_DOWN, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCounterDownBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::COUNTER_PRESET, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCounterPresetBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::COUNTER_UP, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCounterUpBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::COMPARE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCompareBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::SEQUENCER, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalSequencerBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::ONE_SHOT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalOneShotBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RATE_LIMIT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRateLimitBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::COSIGN, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCosignBlock(b, d.ctx);
+    });
+}
+#else
+void register_plc_blocks() {}
+#endif
+
+// ---- Family: compound (combinations of sig + timelock + hash in one block) ----
+#ifndef LADDER_NO_COMPOUND
+void register_compound_blocks()
+{
+    RegisterBlock(RungBlockType::TIMELOCKED_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalTimelockedSigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::HTLC, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalHTLCBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::HASH_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalHashSigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::PTLC, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalPTLCBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::CLTV_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalCLTVSigBlock(b, d.sig_checker);
+    });
+    RegisterBlock(RungBlockType::TIMELOCKED_MULTISIG, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalTimelockedMultisigBlock(b, d.sig_checker);
+    });
+}
+#else
+void register_compound_blocks() {}
+#endif
+
+// ---- Family: governance (tx-level constraints) ----
+#ifndef LADDER_NO_GOVERNANCE
+void register_governance_blocks()
+{
+    RegisterBlock(RungBlockType::EPOCH_GATE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalEpochGateBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::WEIGHT_LIMIT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalWeightLimitBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::INPUT_COUNT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalInputCountBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::OUTPUT_COUNT, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalOutputCountBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::RELATIVE_VALUE, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalRelativeValueBlock(b, d.ctx);
+    });
+    RegisterBlock(RungBlockType::ACCUMULATOR, [](const RungBlock& b, const BlockDispatchContext&) {
+        return EvalAccumulatorBlock(b);
+    });
+    RegisterBlock(RungBlockType::OUTPUT_CHECK, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalOutputCheckBlock(b, d.ctx);
+    });
+}
+#else
+void register_governance_blocks() {}
+#endif
+
+// ---- Family: legacy P2* wrappers ----
+#ifndef LADDER_NO_LEGACY
+void register_legacy_blocks()
+{
+    RegisterBlock(RungBlockType::P2PK_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2PKLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+    });
+    RegisterBlock(RungBlockType::P2PKH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2PKHLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+    });
+    RegisterBlock(RungBlockType::P2SH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2SHLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);
+    });
+    RegisterBlock(RungBlockType::P2WPKH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2WPKHLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+    });
+    RegisterBlock(RungBlockType::P2WSH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2WSHLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);
+    });
+    RegisterBlock(RungBlockType::P2TR_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2TRLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+    });
+    RegisterBlock(RungBlockType::P2TR_SCRIPT_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalP2TRScriptLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);
+    });
+}
+#else
+void register_legacy_blocks() {}
+#endif
+
+// ---- Family: QABIO (BIP-YYYY) ----
+#ifdef ENABLE_QABIO
+void register_qabi_blocks()
+{
+    RegisterBlock(RungBlockType::QABI_PRIME, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalQABIPrimeBlock(b, d.sig_checker, d.ctx);
+    });
+    RegisterBlock(RungBlockType::QABI_SPEND, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalQABISpendBlock(b, d.sig_checker, d.ctx);
+    });
+}
+#else
+// Stub: QABIO types still parse on the wire but evaluate to UNSATISFIED on
+// nodes that didn't compile in the extension (soft-fork forward compat).
+static void register_qabi_stub()
+{
+    RegisterBlock(RungBlockType::QABI_PRIME, [](const RungBlock&, const BlockDispatchContext&) {
+        return EvalResult::UNSATISFIED;
+    });
+    RegisterBlock(RungBlockType::QABI_SPEND, [](const RungBlock&, const BlockDispatchContext&) {
+        return EvalResult::UNSATISFIED;
+    });
+}
+#endif
+
+namespace api {
+void ladder_init()
+{
+    static const bool initialised = []() {
+        register_sig_blocks();
+        register_timelock_blocks();
+        register_hash_blocks();
+        register_covenant_blocks();
+        register_anchor_blocks();
+        register_recursion_blocks();
+        register_plc_blocks();
+        register_compound_blocks();
+        register_governance_blocks();
+        register_legacy_blocks();
+#ifdef ENABLE_QABIO
+        register_qabi_blocks();
+#else
+        register_qabi_stub();
+#endif
+        return true;
+    }();
+    (void)initialised;
+}
+
+void ladder_shutdown()
+{
+    // No-op for now. The registry is constructed lazily inside ladder_init
+    // and persists for the process lifetime. Test fixtures that want a
+    // clean registry per run should live with this — re-registration
+    // overwrites previous entries.
+}
+}  // namespace api
 
 } // namespace rung
