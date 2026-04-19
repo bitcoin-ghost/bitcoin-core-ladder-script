@@ -179,7 +179,9 @@ EvalResult EvalVaultLockBlock(const RungBlock& block,
             if (ki == 0) {
                 return EvalResult::SATISFIED; // recovery key — cold sweep, no delay
             }
-            // Hot key — check CSV delay
+            // Hot key — check CSV delay. Out-of-uint32 values reject (see
+            // `1a23fa32c8`: the int64 -> uint32 cast silently truncates).
+            if (hot_delay < 0 || hot_delay > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
             if (!sig_checker.CheckSequence(static_cast<uint32_t>(hot_delay))) {
                 return EvalResult::UNSATISFIED; // delay not met
             }
