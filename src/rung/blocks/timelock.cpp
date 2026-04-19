@@ -56,6 +56,7 @@ EvalResult EvalCSVBlock(const RungBlock& block,
         return EvalResult::SATISFIED;
     }
 
+    if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) {
         return EvalResult::UNSATISFIED;
     }
@@ -83,6 +84,7 @@ EvalResult EvalCSVTimeBlock(const RungBlock& block,
         return EvalResult::SATISFIED;
     }
 
+    if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) {
         return EvalResult::UNSATISFIED;
     }
@@ -103,6 +105,7 @@ EvalResult EvalCLTVBlock(const RungBlock& block,
     }
     int64_t locktime_val = *locktime_opt;
 
+    if (locktime_val < 0 || locktime_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) {
         return EvalResult::UNSATISFIED;
     }
@@ -123,6 +126,7 @@ EvalResult EvalCLTVTimeBlock(const RungBlock& block,
     }
     int64_t locktime_val = *locktime_opt;
 
+    if (locktime_val < 0 || locktime_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) {
         return EvalResult::UNSATISFIED;
     }

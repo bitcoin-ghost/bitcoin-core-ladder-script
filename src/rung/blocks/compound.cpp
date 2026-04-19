@@ -62,6 +62,7 @@ EvalResult EvalTimelockedSigBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
+    if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
@@ -95,6 +96,7 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) == 0) {
+        if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
         if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
     }
 
@@ -174,6 +176,7 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
+    if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
@@ -203,6 +206,7 @@ EvalResult EvalCLTVSigBlock(const RungBlock& block,
     auto locktime_opt = ReadNumeric(*numeric_field);
     if (!locktime_opt) return EvalResult::ERROR;
     int64_t locktime_val = *locktime_opt;
+    if (locktime_val < 0 || locktime_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
@@ -262,6 +266,7 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
+    if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
     if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
