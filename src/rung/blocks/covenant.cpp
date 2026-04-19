@@ -220,7 +220,7 @@ void register_covenant_blocks()
         return EvalCTVBlock(b, d.ctx);
     });
     RegisterBlock(RungBlockType::VAULT_LOCK, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalVaultLockBlock(b, d.sig_checker);
+        return EvalVaultLockBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::AMOUNT_LOCK, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalAmountLockBlock(b, d.ctx);

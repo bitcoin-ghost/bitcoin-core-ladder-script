@@ -301,16 +301,16 @@ EvalResult EvalKeyRefSigBlock(const RungBlock& block,
 void register_sig_blocks()
 {
     RegisterBlock(RungBlockType::SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalSigBlock(b, d.sig_checker);
+        return EvalSigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::MULTISIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalMultisigBlock(b, d.sig_checker);
+        return EvalMultisigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::ADAPTOR_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalAdaptorSigBlock(b, d.sig_checker);
+        return EvalAdaptorSigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::MUSIG_THRESHOLD, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalMusigThresholdBlock(b, d.sig_checker);
+        return EvalMusigThresholdBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::KEY_REF_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalKeyRefSigBlock(b, d.sig_checker, d.ctx);

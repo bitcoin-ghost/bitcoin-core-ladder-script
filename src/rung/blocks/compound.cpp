@@ -270,22 +270,22 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
 void register_compound_blocks()
 {
     RegisterBlock(RungBlockType::TIMELOCKED_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalTimelockedSigBlock(b, d.sig_checker);
+        return EvalTimelockedSigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::HTLC, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalHTLCBlock(b, d.sig_checker);
+        return EvalHTLCBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::HASH_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalHashSigBlock(b, d.sig_checker);
+        return EvalHashSigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::PTLC, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalPTLCBlock(b, d.sig_checker);
+        return EvalPTLCBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::CLTV_SIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalCLTVSigBlock(b, d.sig_checker);
+        return EvalCLTVSigBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::TIMELOCKED_MULTISIG, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalTimelockedMultisigBlock(b, d.sig_checker);
+        return EvalTimelockedMultisigBlock(b, d.sig_checker, d.ctx);
     });
 }
 
