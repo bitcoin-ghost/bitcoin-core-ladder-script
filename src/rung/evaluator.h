@@ -27,41 +27,12 @@ class CTxOut;
 
 namespace rung {
 
-/** Signature checker that wraps an existing checker and adds rung conditions context.
- *  When CheckSchnorrSignature is called with SigVersion::LADDER, it computes
- *  SignatureHashLadder instead of SignatureHashSchnorr. */
-class LadderSignatureChecker : public DeferringSignatureChecker
-{
-private:
-    const RungConditions& m_conditions;
-    const PrecomputedTransactionData& m_txdata;
-    const CTransaction& m_tx;
-    unsigned int m_nIn;
-
-public:
-    LadderSignatureChecker(const BaseSignatureChecker& checker,
-                           const RungConditions& conditions,
-                           const PrecomputedTransactionData& txdata,
-                           const CTransaction& tx,
-                           unsigned int nIn)
-        : DeferringSignatureChecker(checker),
-          m_conditions(conditions),
-          m_txdata(txdata),
-          m_tx(tx),
-          m_nIn(nIn) {}
-
-    bool CheckSchnorrSignature(std::span<const unsigned char> sig,
-                               std::span<const unsigned char> pubkey,
-                               SigVersion sigversion,
-                               ScriptExecutionData& execdata,
-                               ScriptError* serror = nullptr) const override;
-
-    /** Compute the ladder sighash for PQ signature verification.
-     *  @param[in]  hash_type  Sighash type (SIGHASH_DEFAULT=0, etc.)
-     *  @param[out] hash_out   The computed sighash
-     *  @return true on success */
-    bool ComputeSighash(uint8_t hash_type, uint256& hash_out) const;
-};
+// Prior `LadderSignatureChecker` (a subclass of `DeferringSignatureChecker`)
+// was replaced in Phase 1E.3 by `rung::api::LadderSigChecker` (adapter
+// interface in `rung/api.h`) plus the Core-side implementation
+// `rung::CoreLadderSigChecker` in `rung_shims.h`. Ladder-native Eval*Block
+// functions take the adapter; legacy P2* wrappers stay on
+// BaseSignatureChecker.
 
 // QABIO support types (BIP-YYYY). Gated on ENABLE_QABIO so the base
 // Ladder Script evaluator has no QABIO-specific machinery when the
@@ -184,17 +155,17 @@ enum class EvalResult {
  *  SATISFIED↔UNSATISFIED, ERROR unchanged, UNKNOWN_BLOCK_TYPE inverted → SATISFIED. */
 EvalResult ApplyInversion(EvalResult raw, bool inverted);
 
-// Signature evaluators
-EvalResult EvalSigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalMultisigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+// Signature evaluators — Ladder-native blocks, adapter-typed sig checker.
+EvalResult EvalSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalHashPreimageBlock(const RungBlock& block);
 EvalResult EvalHash160PreimageBlock(const RungBlock& block);
-EvalResult EvalCSVBlock(const RungBlock& block, const BaseSignatureChecker& checker);
-EvalResult EvalCSVTimeBlock(const RungBlock& block, const BaseSignatureChecker& checker);
-EvalResult EvalCLTVBlock(const RungBlock& block, const BaseSignatureChecker& checker);
-EvalResult EvalCLTVTimeBlock(const RungBlock& block, const BaseSignatureChecker& checker);
-EvalResult EvalAdaptorSigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalMusigThresholdBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalCSVBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalCSVTimeBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalCLTVBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalCLTVTimeBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalAdaptorSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalMusigThresholdBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalTaggedHashBlock(const RungBlock& block);
 EvalResult EvalHashGuardedBlock(const RungBlock& block);
 
@@ -208,7 +179,7 @@ namespace api {
 uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index);
 }  // namespace api
 
-EvalResult EvalVaultLockBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalVaultLockBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalAmountLockBlock(const RungBlock& block, const RungEvalContext& ctx);
 EvalResult EvalAnchorBlock(const RungBlock& block);
 EvalResult EvalAnchorChannelBlock(const RungBlock& block);
@@ -242,21 +213,25 @@ EvalResult EvalRateLimitBlock(const RungBlock& block, const RungEvalContext& ctx
 EvalResult EvalCosignBlock(const RungBlock& block, const RungEvalContext& ctx);
 
 // Compound evaluators (multi-block patterns in single block)
-EvalResult EvalTimelockedSigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalHTLCBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalHashSigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalPTLCBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalCLTVSigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalTimelockedMultisigBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalTimelockedSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalHTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalHashSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalPTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalCLTVSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalTimelockedMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 
-// Legacy evaluators (wrapped Bitcoin transaction types)
+// Legacy evaluators (wrapped Bitcoin transaction types). These keep Core's
+// BaseSignatureChecker because they verify against Core's legacy / SegWit /
+// Taproot sighash. The P2SH / P2WSH / P2TR_SCRIPT wrappers also take the
+// adapter `sig_checker` so they can recurse into inner Ladder-native blocks
+// via EvalBlock.
 EvalResult EvalP2PKLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
 EvalResult EvalP2PKHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalP2SHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
+EvalResult EvalP2SHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
 EvalResult EvalP2WPKHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalP2WSHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
+EvalResult EvalP2WSHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
 EvalResult EvalP2TRLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
+EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
 
 // Governance evaluators (transaction-level constraints)
 EvalResult EvalEpochGateBlock(const RungBlock& block, const RungEvalContext& ctx);
@@ -267,9 +242,14 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
 EvalResult EvalAccumulatorBlock(const RungBlock& block);
 EvalResult EvalOutputCheckBlock(const RungBlock& block, const RungEvalContext& ctx);
 
-/** Evaluate a single block by dispatching to the appropriate evaluator. */
+/** Evaluate a single block by dispatching to the appropriate evaluator.
+ *  Ladder-native blocks use `sig_checker` (adapter-typed). Legacy P2*
+ *  wrapper blocks use `legacy_checker` + `sigversion` + `execdata` — these
+ *  paths still need Core's legacy / SegWit / Taproot sighash machinery
+ *  (see Phase 1E.3 design note in commit `rung: adapter-ise BaseSignatureChecker`). */
 EvalResult EvalBlock(const RungBlock& block,
-                     const BaseSignatureChecker& checker,
+                     const api::LadderSigChecker& sig_checker,
+                     const BaseSignatureChecker& legacy_checker,
                      SigVersion sigversion,
                      ScriptExecutionData& execdata,
                      const RungEvalContext& ctx = {},
@@ -279,7 +259,8 @@ EvalResult EvalBlock(const RungBlock& block,
  *  Relays are evaluated index 0 first; each relay checks its relay_refs
  *  against already-cached results before evaluating its own blocks. */
 bool EvalRelays(const std::vector<Relay>& relays,
-                const BaseSignatureChecker& checker,
+                const api::LadderSigChecker& sig_checker,
+                const BaseSignatureChecker& legacy_checker,
                 SigVersion sigversion,
                 ScriptExecutionData& execdata,
                 const RungEvalContext& ctx,
@@ -288,7 +269,8 @@ bool EvalRelays(const std::vector<Relay>& relays,
 /** Evaluate a single rung: all blocks must return SATISFIED (AND logic).
  *  If relay_results is non-null, checks rung.relay_refs against relay results first. */
 EvalResult EvalRung(const Rung& rung,
-                    const BaseSignatureChecker& checker,
+                    const api::LadderSigChecker& sig_checker,
+                    const BaseSignatureChecker& legacy_checker,
                     SigVersion sigversion,
                     ScriptExecutionData& execdata,
                     const RungEvalContext& ctx = {},
@@ -298,7 +280,8 @@ EvalResult EvalRung(const Rung& rung,
  *  Evaluates relays first, then passes results to each rung.
  *  @param[out] satisfied_rung_out  If non-null and a rung is satisfied, set to the rung index. */
 bool EvalLadder(const LadderWitness& ladder,
-                const BaseSignatureChecker& checker,
+                const api::LadderSigChecker& sig_checker,
+                const BaseSignatureChecker& legacy_checker,
                 SigVersion sigversion,
                 ScriptExecutionData& execdata,
                 const RungEvalContext& ctx = {},

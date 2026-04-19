@@ -29,63 +29,6 @@
 namespace rung {
 using namespace api;  // Bring libladder public API (span-based) into file scope
 
-bool LadderSignatureChecker::CheckSchnorrSignature(std::span<const unsigned char> sig,
-                                                    std::span<const unsigned char> pubkey_in,
-                                                    SigVersion sigversion,
-                                                    ScriptExecutionData& /*execdata*/,
-                                                    ScriptError* serror) const
-{
-    if (sigversion != SigVersion::LADDER) {
-        // Fall through to the wrapped checker for non-ladder sigversions
-        ScriptExecutionData fallback_execdata;
-        return m_checker.CheckSchnorrSignature(sig, pubkey_in, sigversion, fallback_execdata, serror);
-    }
-
-    // Schnorr signatures are 64 bytes (default hashtype) or 65 bytes (explicit hashtype)
-    if (sig.size() != 64 && sig.size() != 65) {
-        if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_SIZE;
-        return false;
-    }
-
-    if (pubkey_in.size() != 32) {
-        if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG;
-        return false;
-    }
-
-    XOnlyPubKey pubkey{pubkey_in};
-
-    uint8_t hashtype = SIGHASH_DEFAULT;
-    // For 65-byte sig, last byte is hashtype (copy sig to strip it)
-    std::vector<unsigned char> sig_data(sig.begin(), sig.end());
-    if (sig_data.size() == 65) {
-        hashtype = sig_data.back();
-        sig_data.pop_back();
-        if (hashtype == SIGHASH_DEFAULT) {
-            if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_HASHTYPE;
-            return false;
-        }
-    }
-
-    uint256 sighash;
-    if (!SignatureHashLadder(m_txdata, m_tx, m_nIn, hashtype, m_conditions, sighash)) {
-        LogPrintf("LadderSigCheck: SignatureHashLadder FAILED ladder_ready=%d spent_ready=%d\n",
-                  m_txdata.m_ladder_ready, m_txdata.m_spent_outputs_ready);
-        if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG_HASHTYPE;
-        return false;
-    }
-    std::span<const unsigned char> sig_span{sig_data.data(), sig_data.size()};
-    if (!pubkey.VerifySchnorr(sighash, sig_span)) {
-        if (serror) *serror = SCRIPT_ERR_SCHNORR_SIG;
-        return false;
-    }
-    return true;
-}
-
-bool LadderSignatureChecker::ComputeSighash(uint8_t hash_type, uint256& hash_out) const
-{
-    return SignatureHashLadder(m_txdata, m_tx, m_nIn, hash_type, m_conditions, hash_out);
-}
-
 /** Helper: find the first field of a given type in a block. Returns nullptr if not found. */
 static const RungField* FindField(const RungBlock& block, RungDataType type)
 {
@@ -147,24 +90,46 @@ EvalResult ApplyInversion(EvalResult raw, bool inverted)
 // PQ signature verification helper
 // ============================================================================
 
+/** Helper: pull the Ladder sighash from the adapter. Returns false if the
+ *  adapter lacks precomputed data (library fuzzers, minimal test stubs). */
+static bool FetchLadderSighash(const api::LadderSigChecker& sig_checker,
+                               uint8_t hash_type,
+                               uint8_t out[32])
+{
+    return sig_checker.ComputeSighash(hash_type, out);
+}
+
+/** Helper: extract the hash_type byte that a Schnorr signature commits to.
+ *  64-byte sigs use SIGHASH_DEFAULT; 65-byte sigs carry hash_type in the last
+ *  byte (which must not be SIGHASH_DEFAULT per BIP340). Returns false on an
+ *  invalid 65-byte sig. */
+static bool ExtractSchnorrHashType(std::span<const uint8_t> sig, uint8_t& hash_type)
+{
+    if (sig.size() == 64) { hash_type = SIGHASH_DEFAULT; return true; }
+    if (sig.size() == 65) {
+        hash_type = sig.back();
+        if (hash_type == SIGHASH_DEFAULT) return false;
+        return true;
+    }
+    return false;
+}
+
 /** Verify a post-quantum signature using the SCHEME field routing.
- *  Computes the ladder sighash via dynamic_cast to LadderSignatureChecker. */
+ *  PQ schemes always sign the default Ladder sighash (SIGHASH_DEFAULT). */
 static EvalResult EvalPQSig(RungScheme scheme,
                              const RungField& sig_field,
                              const RungField& pubkey_field,
-                             const BaseSignatureChecker& checker)
+                             const api::LadderSigChecker& sig_checker)
 {
-    auto* ladder_checker = dynamic_cast<const LadderSignatureChecker*>(&checker);
-    if (!ladder_checker) return EvalResult::ERROR;
     if (!HasPQSupport()) return EvalResult::ERROR;
 
-    uint256 sighash;
-    if (!ladder_checker->ComputeSighash(SIGHASH_DEFAULT, sighash)) {
+    uint8_t sighash[32];
+    if (!FetchLadderSighash(sig_checker, SIGHASH_DEFAULT, sighash)) {
         return EvalResult::ERROR;
     }
 
     std::span<const uint8_t> sig{sig_field.data.data(), sig_field.data.size()};
-    std::span<const uint8_t> msg{sighash.begin(), 32};
+    std::span<const uint8_t> msg{sighash, 32};
     std::span<const uint8_t> pubkey{pubkey_field.data.data(), pubkey_field.data.size()};
 
     if (VerifyPQSignature(scheme, sig, msg, pubkey)) {
@@ -184,66 +149,75 @@ static EvalResult EvalPQSig(RungScheme scheme,
 static EvalResult VerifySigWithScheme(const RungField& pubkey_field,
                                        const RungField& sig_field,
                                        const RungField* scheme_field,
-                                       const BaseSignatureChecker& checker,
-                                       SigVersion sigversion,
-                                       ScriptExecutionData& execdata)
+                                       const api::LadderSigChecker& sig_checker)
 {
+    auto try_schnorr = [&](std::span<const uint8_t> sig,
+                           std::span<const uint8_t> pubkey) -> EvalResult {
+        if (pubkey.size() != 32) return EvalResult::UNSATISFIED;
+        uint8_t hash_type;
+        if (!ExtractSchnorrHashType(sig, hash_type)) return EvalResult::UNSATISFIED;
+        uint8_t sighash[32];
+        if (!FetchLadderSighash(sig_checker, hash_type, sighash)) return EvalResult::ERROR;
+        std::span<const uint8_t, 32> sighash_span{sighash, 32};
+        if (sig_checker.CheckSchnorrSignature(sig, pubkey, sighash_span)) {
+            return EvalResult::SATISFIED;
+        }
+        return EvalResult::UNSATISFIED;
+    };
+
+    auto try_ecdsa = [&](std::span<const uint8_t> sig,
+                         std::span<const uint8_t> pubkey) -> EvalResult {
+        // Classical ECDSA sigs in v4 are DER + trailing 1-byte hash_type.
+        if (sig.empty()) return EvalResult::UNSATISFIED;
+        uint8_t hash_type = sig.back();
+        uint8_t sighash[32];
+        if (!FetchLadderSighash(sig_checker, hash_type, sighash)) return EvalResult::ERROR;
+        std::span<const uint8_t, 32> sighash_span{sighash, 32};
+        if (sig_checker.CheckECDSASignature(sig, pubkey, sighash_span)) {
+            return EvalResult::SATISFIED;
+        }
+        return EvalResult::UNSATISFIED;
+    };
+
     // Check for explicit SCHEME field — routes to PQ verifier if present
     if (scheme_field && !scheme_field->data.empty()) {
         auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
         if (IsPQScheme(scheme)) {
-            return EvalPQSig(scheme, sig_field, pubkey_field, checker);
+            return EvalPQSig(scheme, sig_field, pubkey_field, sig_checker);
         }
-        // Explicit SCHNORR/ECDSA routing when SCHEME is specified
         if (scheme == RungScheme::SCHNORR) {
-            std::span<const unsigned char> sig_span{sig_field.data.data(), sig_field.data.size()};
-            std::span<const unsigned char> pubkey_span{pubkey_field.data.data(), pubkey_field.data.size()};
-            std::vector<unsigned char> xonly;
+            std::span<const uint8_t> sig{sig_field.data.data(), sig_field.data.size()};
+            std::span<const uint8_t> pubkey{pubkey_field.data.data(), pubkey_field.data.size()};
+            std::vector<uint8_t> xonly;
             if (pubkey_field.data.size() == 33) {
                 xonly.assign(pubkey_field.data.begin() + 1, pubkey_field.data.end());
-                pubkey_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
+                pubkey = std::span<const uint8_t>{xonly.data(), xonly.size()};
             }
-            if (checker.CheckSchnorrSignature(sig_span, pubkey_span, sigversion, execdata, nullptr)) {
-                return EvalResult::SATISFIED;
-            }
-            return EvalResult::UNSATISFIED;
+            return try_schnorr(sig, pubkey);
         }
         if (scheme == RungScheme::ECDSA) {
-            std::vector<unsigned char> sig_vec(sig_field.data.begin(), sig_field.data.end());
-            std::vector<unsigned char> pubkey_vec(pubkey_field.data.begin(), pubkey_field.data.end());
-            CScript empty_script;
-            if (checker.CheckECDSASignature(sig_vec, pubkey_vec, empty_script, sigversion)) {
-                return EvalResult::SATISFIED;
-            }
-            return EvalResult::UNSATISFIED;
+            std::span<const uint8_t> sig{sig_field.data.data(), sig_field.data.size()};
+            std::span<const uint8_t> pubkey{pubkey_field.data.data(), pubkey_field.data.size()};
+            return try_ecdsa(sig, pubkey);
         }
         // Unknown classical scheme — fall through to size-based routing
     }
 
     // Size-based fallback: Schnorr (64-65 bytes) or ECDSA (8-72 bytes)
-    std::span<const unsigned char> sig_span{sig_field.data.data(), sig_field.data.size()};
-    std::span<const unsigned char> pubkey_span{pubkey_field.data.data(), pubkey_field.data.size()};
+    std::span<const uint8_t> sig{sig_field.data.data(), sig_field.data.size()};
+    std::span<const uint8_t> pubkey{pubkey_field.data.data(), pubkey_field.data.size()};
 
     if (sig_field.data.size() >= 64 && sig_field.data.size() <= 65) {
-        std::vector<unsigned char> xonly;
+        std::vector<uint8_t> xonly;
         if (pubkey_field.data.size() == 33) {
             xonly.assign(pubkey_field.data.begin() + 1, pubkey_field.data.end());
-            pubkey_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
+            pubkey = std::span<const uint8_t>{xonly.data(), xonly.size()};
         }
-        if (checker.CheckSchnorrSignature(sig_span, pubkey_span, sigversion, execdata, nullptr)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
+        return try_schnorr(sig, pubkey);
     }
 
     if (sig_field.data.size() >= 8 && sig_field.data.size() <= 72) {
-        std::vector<unsigned char> sig_vec(sig_field.data.begin(), sig_field.data.end());
-        std::vector<unsigned char> pubkey_vec(pubkey_field.data.begin(), pubkey_field.data.end());
-        CScript empty_script;
-        if (checker.CheckECDSASignature(sig_vec, pubkey_vec, empty_script, sigversion)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
+        return try_ecdsa(sig, pubkey);
     }
 
     return EvalResult::ERROR;
@@ -254,9 +228,7 @@ static EvalResult VerifySigWithScheme(const RungField& pubkey_field,
 // ============================================================================
 
 EvalResult EvalSigBlock(const RungBlock& block,
-                        const BaseSignatureChecker& checker,
-                        SigVersion sigversion,
-                        ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // merkle_pub_key: PUBKEY_COMMIT no longer in conditions. The pubkey is
     // in the witness (PUBKEY field). Merkle proof verification guarantees
@@ -269,13 +241,11 @@ EvalResult EvalSigBlock(const RungBlock& block,
     }
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
 }
 
 EvalResult EvalMultisigBlock(const RungBlock& block,
-                             const BaseSignatureChecker& checker,
-                             SigVersion sigversion,
-                             ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // Layout: NUMERIC(threshold M), N × PUBKEY (witness), M × SIGNATURE (witness).
     // Pubkeys are bound to the Merkle leaf — nothing leaks into conditions.
@@ -307,15 +277,12 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
         auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
         if (IsPQScheme(scheme)) {
             // PQ multisig: compute sighash once, verify each sig against pubkeys
-            auto* ladder_checker = dynamic_cast<const LadderSignatureChecker*>(&checker);
-            if (!ladder_checker) return EvalResult::ERROR;
-
-            uint256 sighash;
-            if (!ladder_checker->ComputeSighash(SIGHASH_DEFAULT, sighash)) {
+            uint8_t sighash[32];
+            if (!sig_checker.ComputeSighash(SIGHASH_DEFAULT, sighash)) {
                 return EvalResult::ERROR;
             }
 
-            std::span<const uint8_t> msg{sighash.begin(), 32};
+            std::span<const uint8_t> msg{sighash, 32};
             std::vector<bool> pubkey_used(pubkeys.size(), false);
             uint32_t valid_count = 0;
 
@@ -345,31 +312,15 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
             if (pubkey_used[k]) continue;
 
             const auto* pk = pubkeys[k];
-            std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-
-            bool verified = false;
-            if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-                // Schnorr
-                std::vector<unsigned char> xonly;
-                std::span<const unsigned char> pk_span{pk->data.data(), pk->data.size()};
-                if (pk->data.size() == 33) {
-                    xonly.assign(pk->data.begin() + 1, pk->data.end());
-                    pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-                }
-                verified = checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr);
-            } else if (sig_field->data.size() >= 8 && sig_field->data.size() <= 72) {
-                // ECDSA
-                std::vector<unsigned char> sig_vec(sig_field->data.begin(), sig_field->data.end());
-                std::vector<unsigned char> pk_vec(pk->data.begin(), pk->data.end());
-                CScript empty_script;
-                verified = checker.CheckECDSASignature(sig_vec, pk_vec, empty_script, sigversion);
-            }
-
-            if (verified) {
+            RungField single_sig = *sig_field;
+            RungField single_pk = *pk;
+            EvalResult r = VerifySigWithScheme(single_pk, single_sig, nullptr, sig_checker);
+            if (r == EvalResult::SATISFIED) {
                 pubkey_used[k] = true;
                 valid_count++;
                 break;
             }
+            if (r == EvalResult::ERROR) return EvalResult::ERROR;
         }
     }
 
@@ -419,7 +370,7 @@ EvalResult EvalHash160PreimageBlock(const RungBlock& block)
 }
 
 EvalResult EvalCSVBlock(const RungBlock& block,
-                        const BaseSignatureChecker& checker)
+                        const api::LadderSigChecker& sig_checker)
 {
     const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
     if (!numeric_field) {
@@ -432,21 +383,19 @@ EvalResult EvalCSVBlock(const RungBlock& block,
     }
     int64_t sequence_val = *seq_opt;
 
-    CScriptNum nSequence(sequence_val);
-
     // If the disable flag is set, sequence lock is satisfied unconditionally
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) {
         return EvalResult::SATISFIED;
     }
 
-    if (!checker.CheckSequence(nSequence)) {
+    if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) {
         return EvalResult::UNSATISFIED;
     }
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalCSVTimeBlock(const RungBlock& block,
-                            const BaseSignatureChecker& checker)
+                        const api::LadderSigChecker& sig_checker)
 {
     const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
     if (!numeric_field) {
@@ -462,20 +411,18 @@ EvalResult EvalCSVTimeBlock(const RungBlock& block,
     // CSV_TIME: enforce time-based relative locktime (BIP 68 type flag)
     sequence_val |= CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG;
 
-    CScriptNum nSequence(sequence_val);
-
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) {
         return EvalResult::SATISFIED;
     }
 
-    if (!checker.CheckSequence(nSequence)) {
+    if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) {
         return EvalResult::UNSATISFIED;
     }
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalCLTVBlock(const RungBlock& block,
-                         const BaseSignatureChecker& checker)
+                        const api::LadderSigChecker& sig_checker)
 {
     const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
     if (!numeric_field) {
@@ -488,16 +435,14 @@ EvalResult EvalCLTVBlock(const RungBlock& block,
     }
     int64_t locktime_val = *locktime_opt;
 
-    CScriptNum nLockTime(locktime_val);
-
-    if (!checker.CheckLockTime(nLockTime)) {
+    if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) {
         return EvalResult::UNSATISFIED;
     }
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalCLTVTimeBlock(const RungBlock& block,
-                             const BaseSignatureChecker& checker)
+                        const api::LadderSigChecker& sig_checker)
 {
     const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
     if (!numeric_field) {
@@ -510,18 +455,14 @@ EvalResult EvalCLTVTimeBlock(const RungBlock& block,
     }
     int64_t locktime_val = *locktime_opt;
 
-    CScriptNum nLockTime(locktime_val);
-
-    if (!checker.CheckLockTime(nLockTime)) {
+    if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) {
         return EvalResult::UNSATISFIED;
     }
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalMusigThresholdBlock(const RungBlock& block,
-                                    const BaseSignatureChecker& checker,
-                                    SigVersion sigversion,
-                                    ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // MuSig2/FROST aggregate threshold signature verification.
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -555,26 +496,12 @@ EvalResult EvalMusigThresholdBlock(const RungBlock& block,
         return EvalResult::ERROR;
     }
 
-    std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-    std::span<const unsigned char> pk_span{pubkey_field->data.data(), pubkey_field->data.size()};
-
-    // Convert compressed pubkey (33 bytes) to x-only (32 bytes)
-    std::vector<unsigned char> xonly;
-    if (pubkey_field->data.size() == 33) {
-        xonly.assign(pubkey_field->data.begin() + 1, pubkey_field->data.end());
-        pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-    }
-
-    if (checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr)) {
-        return EvalResult::SATISFIED;
-    }
-    return EvalResult::UNSATISFIED;
+    RungField pk_field = *pubkey_field;
+    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
 }
 
 EvalResult EvalAdaptorSigBlock(const RungBlock& block,
-                                const BaseSignatureChecker& checker,
-                                SigVersion sigversion,
-                                ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // Adaptor signature verification:
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -590,24 +517,13 @@ EvalResult EvalAdaptorSigBlock(const RungBlock& block,
     // The signing key is the resolved PUBKEY
     const RungField* signing_key = pubkeys[0];
 
-    // The adapted signature verifies against the signing key directly
-    std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-
-    if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-        std::vector<unsigned char> xonly;
-        std::span<const unsigned char> pk_span{signing_key->data.data(), signing_key->data.size()};
-        if (signing_key->data.size() == 33) {
-            xonly.assign(signing_key->data.begin() + 1, signing_key->data.end());
-            pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-        }
-
-        if (checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
+    if (sig_field->data.size() < 64 || sig_field->data.size() > 65) {
+        return EvalResult::ERROR;
     }
 
-    return EvalResult::ERROR;
+    // The adapted signature verifies against the signing key directly
+    RungField pk_field = *signing_key;
+    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
 }
 
 EvalResult EvalTaggedHashBlock(const RungBlock& block)
@@ -784,9 +700,7 @@ EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx)
 }
 
 EvalResult EvalVaultLockBlock(const RungBlock& block,
-                               const BaseSignatureChecker& checker,
-                               SigVersion sigversion,
-                               ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // Two-path vault:
     // - recovery_key sig → SATISFIED immediately (cold sweep)
@@ -814,28 +728,20 @@ EvalResult EvalVaultLockBlock(const RungBlock& block,
     int64_t hot_delay = *hot_delay_opt;
 
     // Try recovery key (first PUBKEY) then hot key (second PUBKEY)
-    std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-
     for (size_t ki = 0; ki < 2; ++ki) {
-        const RungField* pk = witness_pks[ki];
-        std::vector<unsigned char> xonly;
-        std::span<const unsigned char> pk_span{pk->data.data(), pk->data.size()};
-        if (pk->data.size() == 33) {
-            xonly.assign(pk->data.begin() + 1, pk->data.end());
-            pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-        }
-
-        if (checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr)) {
+        RungField pk_field = *witness_pks[ki];
+        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+        if (r == EvalResult::SATISFIED) {
             if (ki == 0) {
                 return EvalResult::SATISFIED; // recovery key — cold sweep, no delay
             }
             // Hot key — check CSV delay
-            CScriptNum nSequence(hot_delay);
-            if (!checker.CheckSequence(nSequence)) {
+            if (!sig_checker.CheckSequence(static_cast<uint32_t>(hot_delay))) {
                 return EvalResult::UNSATISFIED; // delay not met
             }
             return EvalResult::SATISFIED;
         }
+        if (r == EvalResult::ERROR) return EvalResult::ERROR;
     }
 
     return EvalResult::UNSATISFIED; // neither key verified
@@ -920,9 +826,7 @@ EvalResult EvalAnchorChannelBlock(const RungBlock& block)
 }
 
 EvalResult EvalAnchorFeeBlock(const RungBlock& block,
-                              const BaseSignatureChecker& checker,
-                              SigVersion sigversion,
-                              ScriptExecutionData& execdata,
+                        const api::LadderSigChecker& sig_checker,
                               const RungEvalContext& ctx)
 {
     // ANCHOR_FEE: compound anti-pinning block for L2 channels.
@@ -971,30 +875,15 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
     for (const auto* sig_field : sigs) {
         for (size_t k = 0; k < pubkeys.size(); ++k) {
             if (pubkey_used[k]) continue;
-            const auto* pk = pubkeys[k];
-            std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-            bool verified = false;
-            if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-                // Schnorr
-                std::vector<unsigned char> xonly;
-                std::span<const unsigned char> pk_span{pk->data.data(), pk->data.size()};
-                if (pk->data.size() == 33) {
-                    xonly.assign(pk->data.begin() + 1, pk->data.end());
-                    pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-                }
-                verified = checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr);
-            } else if (sig_field->data.size() >= 8 && sig_field->data.size() <= 72) {
-                // ECDSA
-                std::vector<unsigned char> sig_vec(sig_field->data.begin(), sig_field->data.end());
-                std::vector<unsigned char> pk_vec(pk->data.begin(), pk->data.end());
-                CScript empty_script;
-                verified = checker.CheckECDSASignature(sig_vec, pk_vec, empty_script, sigversion);
-            }
-            if (verified) {
+            RungField pk_field = *pubkeys[k];
+            RungField sig_copy = *sig_field;
+            EvalResult r = VerifySigWithScheme(pk_field, sig_copy, nullptr, sig_checker);
+            if (r == EvalResult::SATISFIED) {
                 pubkey_used[k] = true;
                 valid_count++;
                 break;
             }
+            if (r == EvalResult::ERROR) return EvalResult::ERROR;
         }
     }
     if (valid_count < 2) {
@@ -1960,9 +1849,7 @@ EvalResult EvalCosignBlock(const RungBlock& block, const RungEvalContext& ctx)
 // ============================================================================
 
 EvalResult EvalTimelockedSigBlock(const RungBlock& block,
-                                   const BaseSignatureChecker& checker,
-                                   SigVersion sigversion,
-                                   ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // TIMELOCKED_SIG = SIG + CSV in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -1977,7 +1864,7 @@ EvalResult EvalTimelockedSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field || !numeric_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
     if (sig_result != EvalResult::SATISFIED) return sig_result;
 
     // 2. Check CSV timelock (same logic as EvalCSVBlock)
@@ -1985,16 +1872,13 @@ EvalResult EvalTimelockedSigBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
-    CScriptNum nSequence(sequence_val);
-    if (!checker.CheckSequence(nSequence)) return EvalResult::UNSATISFIED;
+    if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalHTLCBlock(const RungBlock& block,
-                          const BaseSignatureChecker& checker,
-                          SigVersion sigversion,
-                          ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // HTLC = hash preimage + CSV + SIG in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -2020,8 +1904,7 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) == 0) {
-        CScriptNum nSequence(sequence_val);
-        if (!checker.CheckSequence(nSequence)) return EvalResult::UNSATISFIED;
+        if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
     }
 
     // 3. Verify signature
@@ -2031,13 +1914,11 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
 }
 
 EvalResult EvalHashSigBlock(const RungBlock& block,
-                             const BaseSignatureChecker& checker,
-                             SigVersion sigversion,
-                             ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // HASH_SIG = hash preimage + SIG in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -2063,13 +1944,11 @@ EvalResult EvalHashSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
 }
 
 EvalResult EvalPTLCBlock(const RungBlock& block,
-                          const BaseSignatureChecker& checker,
-                          SigVersion sigversion,
-                          ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // PTLC = ADAPTOR_SIG + CSV in one block
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -2087,21 +1966,14 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
 
     const RungField* signing_key = pubkeys[0];
 
-    std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-
-    if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-        std::vector<unsigned char> xonly;
-        std::span<const unsigned char> pk_span{signing_key->data.data(), signing_key->data.size()};
-        if (signing_key->data.size() == 33) {
-            xonly.assign(signing_key->data.begin() + 1, signing_key->data.end());
-            pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-        }
-
-        if (!checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr)) {
-            return EvalResult::UNSATISFIED;
-        }
-    } else {
+    if (sig_field->data.size() < 64 || sig_field->data.size() > 65) {
         return EvalResult::ERROR;
+    }
+    {
+        RungField pk_field = *signing_key;
+        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+        if (r == EvalResult::ERROR) return EvalResult::ERROR;
+        if (r != EvalResult::SATISFIED) return EvalResult::UNSATISFIED;
     }
 
     // 2. Check CSV timelock
@@ -2109,16 +1981,13 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
-    CScriptNum nSequence(sequence_val);
-    if (!checker.CheckSequence(nSequence)) return EvalResult::UNSATISFIED;
+    if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalCLTVSigBlock(const RungBlock& block,
-                              const BaseSignatureChecker& checker,
-                              SigVersion sigversion,
-                              ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // CLTV_SIG = SIG + CLTV in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -2133,23 +2002,20 @@ EvalResult EvalCLTVSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field || !numeric_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
     if (sig_result != EvalResult::SATISFIED) return sig_result;
 
     // 2. Check CLTV (absolute timelock)
     auto locktime_opt = ReadNumeric(*numeric_field);
     if (!locktime_opt) return EvalResult::ERROR;
     int64_t locktime_val = *locktime_opt;
-    CScriptNum nLockTime(locktime_val);
-    if (!checker.CheckLockTime(nLockTime)) return EvalResult::UNSATISFIED;
+    if (!sig_checker.CheckLockTime(static_cast<uint32_t>(locktime_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
 }
 
 EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
-                                        const BaseSignatureChecker& checker,
-                                        SigVersion sigversion,
-                                        ScriptExecutionData& execdata)
+                        const api::LadderSigChecker& sig_checker)
 {
     // TIMELOCKED_MULTISIG = MULTISIG + CSV in one block
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -2171,86 +2037,37 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
     if (pubkeys.empty() || threshold > pubkeys.size()) return EvalResult::ERROR;
     if (sigs.size() < threshold) return EvalResult::UNSATISFIED;
 
-    // Check for PQ scheme
+    // Multisig verification (VerifySigWithScheme handles SCHNORR / ECDSA /
+    // PQ routing via the optional SCHEME field).
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    if (scheme_field && !scheme_field->data.empty()) {
-        auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
-        if (IsPQScheme(scheme)) {
-            auto* ladder_checker = dynamic_cast<const LadderSignatureChecker*>(&checker);
-            if (!ladder_checker) return EvalResult::ERROR;
-
-            uint256 sighash;
-            if (!ladder_checker->ComputeSighash(SIGHASH_DEFAULT, sighash)) {
-                return EvalResult::ERROR;
-            }
-
-            std::span<const uint8_t> msg{sighash.begin(), 32};
-            std::vector<bool> pubkey_used(pubkeys.size(), false);
-            uint32_t valid_count = 0;
-
-            for (const auto* sig_f : sigs) {
-                std::span<const uint8_t> sig_span{sig_f->data.data(), sig_f->data.size()};
-                for (size_t k = 0; k < pubkeys.size(); ++k) {
-                    if (pubkey_used[k]) continue;
-                    std::span<const uint8_t> pk_span{pubkeys[k]->data.data(), pubkeys[k]->data.size()};
-                    if (VerifyPQSignature(scheme, sig_span, msg, pk_span)) {
-                        pubkey_used[k] = true;
-                        valid_count++;
-                        break;
-                    }
-                }
-            }
-            if (valid_count < threshold) return EvalResult::UNSATISFIED;
-            goto csv_check;
-        }
-    }
-
     {
         std::vector<bool> pubkey_used(pubkeys.size(), false);
         uint32_t valid_count = 0;
 
-        for (const auto* sig_field : sigs) {
+        for (const auto* sig_f : sigs) {
             for (size_t k = 0; k < pubkeys.size(); ++k) {
                 if (pubkey_used[k]) continue;
-
-                const auto* pk = pubkeys[k];
-                std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-
-                bool verified = false;
-                if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-                    std::vector<unsigned char> xonly;
-                    std::span<const unsigned char> pk_span{pk->data.data(), pk->data.size()};
-                    if (pk->data.size() == 33) {
-                        xonly.assign(pk->data.begin() + 1, pk->data.end());
-                        pk_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-                    }
-                    verified = checker.CheckSchnorrSignature(sig_span, pk_span, sigversion, execdata, nullptr);
-                } else if (sig_field->data.size() >= 8 && sig_field->data.size() <= 72) {
-                    std::vector<unsigned char> sig_vec(sig_field->data.begin(), sig_field->data.end());
-                    std::vector<unsigned char> pk_vec(pk->data.begin(), pk->data.end());
-                    CScript empty_script;
-                    verified = checker.CheckECDSASignature(sig_vec, pk_vec, empty_script, sigversion);
-                }
-
-                if (verified) {
+                RungField pk_field = *pubkeys[k];
+                RungField sig_copy = *sig_f;
+                EvalResult r = VerifySigWithScheme(pk_field, sig_copy, scheme_field, sig_checker);
+                if (r == EvalResult::SATISFIED) {
                     pubkey_used[k] = true;
                     valid_count++;
                     break;
                 }
+                if (r == EvalResult::ERROR) return EvalResult::ERROR;
             }
         }
 
         if (valid_count < threshold) return EvalResult::UNSATISFIED;
     }
 
-csv_check:
     // 2. Check CSV timelock (second NUMERIC field)
     auto seq_opt = ReadNumeric(*numerics[1]);
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;
-    CScriptNum nSequence(sequence_val);
-    if (!checker.CheckSequence(nSequence)) return EvalResult::UNSATISFIED;
+    if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
 
     return EvalResult::SATISFIED;
 }
@@ -2521,9 +2338,7 @@ EvalResult EvalOutputCheckBlock(const RungBlock& block, const RungEvalContext& c
  *  must contain PUBKEY (bound by Merkle proof, and optionally SCHEME).
  *  The signature is checked against the relay's PUBKEY. */
 EvalResult EvalKeyRefSigBlock(const RungBlock& block,
-                               const BaseSignatureChecker& checker,
-                               SigVersion sigversion,
-                               ScriptExecutionData& execdata,
+                               const api::LadderSigChecker& sig_checker,
                                const RungEvalContext& ctx)
 {
     // Extract reference fields (NUMERIC: relay_index, block_index)
@@ -2559,50 +2374,16 @@ EvalResult EvalKeyRefSigBlock(const RungBlock& block,
     const RungField* pubkey_field = FindField(target_block, RungDataType::PUBKEY);
     if (!pubkey_field) return EvalResult::ERROR;
 
-    // Extract SCHEME from target block (optional — defaults to Schnorr)
-    RungScheme scheme = RungScheme::SCHNORR;
+    // SCHEME from target block (optional — defaults to Schnorr)
     const RungField* target_scheme = FindField(target_block, RungDataType::SCHEME);
-    if (target_scheme && !target_scheme->data.empty()) {
-        scheme = static_cast<RungScheme>(target_scheme->data[0]);
-    }
 
     // Extract witness SIGNATURE from this block
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
     if (!sig_field) return EvalResult::ERROR;
 
-    // Verify signature using the resolved scheme
-    if (IsPQScheme(scheme)) {
-        return EvalPQSig(scheme, *sig_field, *pubkey_field, checker);
-    }
-
-    std::span<const unsigned char> sig_span{sig_field->data.data(), sig_field->data.size()};
-    std::span<const unsigned char> pubkey_span{pubkey_field->data.data(), pubkey_field->data.size()};
-
-    // Schnorr
-    if (sig_field->data.size() >= 64 && sig_field->data.size() <= 65) {
-        std::vector<unsigned char> xonly;
-        if (pubkey_field->data.size() == 33) {
-            xonly.assign(pubkey_field->data.begin() + 1, pubkey_field->data.end());
-            pubkey_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-        }
-        if (checker.CheckSchnorrSignature(sig_span, pubkey_span, sigversion, execdata, nullptr)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
-    }
-
-    // ECDSA
-    if (sig_field->data.size() >= 8 && sig_field->data.size() <= 72) {
-        std::vector<unsigned char> sig_vec(sig_field->data.begin(), sig_field->data.end());
-        std::vector<unsigned char> pubkey_vec(pubkey_field->data.begin(), pubkey_field->data.end());
-        CScript empty_script;
-        if (checker.CheckECDSASignature(sig_vec, pubkey_vec, empty_script, sigversion)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
-    }
-
-    return EvalResult::ERROR;
+    RungField pk_field = *pubkey_field;
+    RungField sig_copy = *sig_field;
+    return VerifySigWithScheme(pk_field, sig_copy, target_scheme, sig_checker);
 }
 
 // ============================================================================
@@ -2619,12 +2400,14 @@ static EvalResult VerifySigFromFields(const RungField& pubkey_field,
                                        SigVersion sigversion,
                                        ScriptExecutionData& execdata)
 {
-    // Check for explicit SCHEME field — routes to PQ verifier if present
+    // Legacy wrappers use Core's BaseSignatureChecker, which verifies against
+    // Core's legacy / SegWit / Taproot sighash — not the Ladder sighash that
+    // PQ signatures commit to. Reject PQ schemes here: PQ sigs belong in
+    // Ladder-native blocks (SIG, MULTISIG, etc.) and go through the
+    // LadderSigChecker adapter.
     if (scheme_field && !scheme_field->data.empty()) {
         auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
-        if (IsPQScheme(scheme)) {
-            return EvalPQSig(scheme, sig_field, pubkey_field, checker);
-        }
+        if (IsPQScheme(scheme)) return EvalResult::ERROR;
     }
 
     std::span<const unsigned char> sig_span{sig_field.data.data(), sig_field.data.size()};
@@ -2667,7 +2450,8 @@ static constexpr int MAX_LEGACY_INNER_DEPTH = 2;
  *  witness fields from the outer block. */
 static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
                                        const RungBlock& outer_block,
-                                       const BaseSignatureChecker& checker,
+                                       const api::LadderSigChecker& sig_checker,
+                                       const BaseSignatureChecker& legacy_checker,
                                        SigVersion sigversion,
                                        ScriptExecutionData& execdata,
                                        const RungEvalContext& ctx,
@@ -2726,7 +2510,7 @@ static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
                 }
             }
 
-            EvalResult result = EvalBlock(combined, checker, sigversion, execdata, ctx, depth);
+            EvalResult result = EvalBlock(combined, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
             if (result != EvalResult::SATISFIED) {
                 all_satisfied = false;
                 break;
@@ -2743,8 +2527,14 @@ EvalResult EvalP2PKLegacyBlock(const RungBlock& block,
                                 SigVersion sigversion,
                                 ScriptExecutionData& execdata)
 {
-    // P2PK_LEGACY: identical to SIG block — delegates directly
-    return EvalSigBlock(block, checker, sigversion, execdata);
+    // P2PK_LEGACY: pubkey + sig, verified against Core's legacy ECDSA /
+    // SegWit / Taproot sighash (not Ladder sighash — this is a legacy
+    // wrapper, see Phase 1E.3 design note).
+    const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
+    const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
+    if (!pubkey_field || !sig_field) return EvalResult::ERROR;
+    const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
+    return VerifySigFromFields(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
 }
 
 EvalResult EvalP2PKHLegacyBlock(const RungBlock& block,
@@ -2790,12 +2580,17 @@ EvalResult EvalP2TRLegacyBlock(const RungBlock& block,
                                 SigVersion sigversion,
                                 ScriptExecutionData& execdata)
 {
-    // P2TR_LEGACY key-path: identical to SIG block — delegates directly
-    return EvalSigBlock(block, checker, sigversion, execdata);
+    // P2TR_LEGACY key-path: pubkey + sig against Core's Taproot sighash.
+    const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
+    const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
+    if (!pubkey_field || !sig_field) return EvalResult::ERROR;
+    const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
+    return VerifySigFromFields(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
 }
 
 EvalResult EvalP2SHLegacyBlock(const RungBlock& block,
-                                const BaseSignatureChecker& checker,
+                                const api::LadderSigChecker& sig_checker,
+                                const BaseSignatureChecker& legacy_checker,
                                 SigVersion sigversion,
                                 ScriptExecutionData& execdata,
                                 const RungEvalContext& ctx,
@@ -2821,11 +2616,12 @@ EvalResult EvalP2SHLegacyBlock(const RungBlock& block,
     }
 
     // Deserialize and evaluate inner conditions
-    return EvalInnerConditions(preimage_field->data, block, checker, sigversion, execdata, ctx, depth + 1);
+    return EvalInnerConditions(preimage_field->data, block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth + 1);
 }
 
 EvalResult EvalP2WSHLegacyBlock(const RungBlock& block,
-                                 const BaseSignatureChecker& checker,
+                                 const api::LadderSigChecker& sig_checker,
+                                 const BaseSignatureChecker& legacy_checker,
                                  SigVersion sigversion,
                                  ScriptExecutionData& execdata,
                                  const RungEvalContext& ctx,
@@ -2851,11 +2647,12 @@ EvalResult EvalP2WSHLegacyBlock(const RungBlock& block,
     }
 
     // Deserialize and evaluate inner conditions
-    return EvalInnerConditions(preimage_field->data, block, checker, sigversion, execdata, ctx, depth + 1);
+    return EvalInnerConditions(preimage_field->data, block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth + 1);
 }
 
 EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
-                                      const BaseSignatureChecker& checker,
+                                      const api::LadderSigChecker& sig_checker,
+                                      const BaseSignatureChecker& legacy_checker,
                                       SigVersion sigversion,
                                       ScriptExecutionData& execdata,
                                       const RungEvalContext& ctx,
@@ -2886,7 +2683,7 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
     }
 
     // Deserialize and evaluate inner conditions
-    return EvalInnerConditions(preimage_field->data, block, checker, sigversion, execdata, ctx, depth + 1);
+    return EvalInnerConditions(preimage_field->data, block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth + 1);
 }
 
 // ============================================================================
@@ -2925,9 +2722,7 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
  *       other rungs, coil data) must be preserved bit-exact.
  */
 static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
-                                      const BaseSignatureChecker& /*checker*/,
-                                      SigVersion /*sigversion*/,
-                                      ScriptExecutionData& /*execdata*/,
+                                      const api::LadderSigChecker& /*sig_checker*/,
                                       const RungEvalContext& ctx)
 {
     // -- Witness field extraction ---------------------------------------
@@ -3204,9 +2999,7 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
  *                    tx.aggregated_sig) == VALID      (QABO sig valid)
  */
 static EvalResult EvalQABISpendBlock(const RungBlock& block,
-                                      const BaseSignatureChecker& /*checker*/,
-                                      SigVersion /*sigversion*/,
-                                      ScriptExecutionData& /*execdata*/,
+                                      const api::LadderSigChecker& /*sig_checker*/,
                                       const RungEvalContext& ctx)
 {
     // Context safety
@@ -3480,7 +3273,8 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
 // ============================================================================
 
 EvalResult EvalBlock(const RungBlock& block,
-                     const BaseSignatureChecker& checker,
+                     const api::LadderSigChecker& sig_checker,
+                     const BaseSignatureChecker& legacy_checker,
                      SigVersion sigversion,
                      ScriptExecutionData& execdata,
                      const RungEvalContext& ctx,
@@ -3495,32 +3289,32 @@ EvalResult EvalBlock(const RungBlock& block,
     switch (block.type) {
     // Signature
     case RungBlockType::SIG:
-        raw = EvalSigBlock(block, checker, sigversion, execdata);
+        raw = EvalSigBlock(block, sig_checker);
         break;
     case RungBlockType::MULTISIG:
-        raw = EvalMultisigBlock(block, checker, sigversion, execdata);
+        raw = EvalMultisigBlock(block, sig_checker);
         break;
     case RungBlockType::ADAPTOR_SIG:
-        raw = EvalAdaptorSigBlock(block, checker, sigversion, execdata);
+        raw = EvalAdaptorSigBlock(block, sig_checker);
         break;
     case RungBlockType::MUSIG_THRESHOLD:
-        raw = EvalMusigThresholdBlock(block, checker, sigversion, execdata);
+        raw = EvalMusigThresholdBlock(block, sig_checker);
         break;
     case RungBlockType::KEY_REF_SIG:
-        raw = EvalKeyRefSigBlock(block, checker, sigversion, execdata, ctx);
+        raw = EvalKeyRefSigBlock(block, sig_checker, ctx);
         break;
     // Timelock
     case RungBlockType::CSV:
-        raw = EvalCSVBlock(block, checker);
+        raw = EvalCSVBlock(block, sig_checker);
         break;
     case RungBlockType::CSV_TIME:
-        raw = EvalCSVTimeBlock(block, checker);
+        raw = EvalCSVTimeBlock(block, sig_checker);
         break;
     case RungBlockType::CLTV:
-        raw = EvalCLTVBlock(block, checker);
+        raw = EvalCLTVBlock(block, sig_checker);
         break;
     case RungBlockType::CLTV_TIME:
-        raw = EvalCLTVTimeBlock(block, checker);
+        raw = EvalCLTVTimeBlock(block, sig_checker);
         break;
     // Hash
     case RungBlockType::TAGGED_HASH:
@@ -3534,7 +3328,7 @@ EvalResult EvalBlock(const RungBlock& block,
         raw = EvalCTVBlock(block, ctx);
         break;
     case RungBlockType::VAULT_LOCK:
-        raw = EvalVaultLockBlock(block, checker, sigversion, execdata);
+        raw = EvalVaultLockBlock(block, sig_checker);
         break;
     case RungBlockType::AMOUNT_LOCK:
         raw = EvalAmountLockBlock(block, ctx);
@@ -3547,7 +3341,7 @@ EvalResult EvalBlock(const RungBlock& block,
         raw = EvalAnchorChannelBlock(block);
         break;
     case RungBlockType::ANCHOR_FEE:
-        raw = EvalAnchorFeeBlock(block, checker, sigversion, execdata, ctx);
+        raw = EvalAnchorFeeBlock(block, sig_checker, ctx);
         break;
     case RungBlockType::ANCHOR_POOL:
         raw = EvalAnchorPoolBlock(block);
@@ -3625,22 +3419,22 @@ EvalResult EvalBlock(const RungBlock& block,
         break;
     // Compound
     case RungBlockType::TIMELOCKED_SIG:
-        raw = EvalTimelockedSigBlock(block, checker, sigversion, execdata);
+        raw = EvalTimelockedSigBlock(block, sig_checker);
         break;
     case RungBlockType::HTLC:
-        raw = EvalHTLCBlock(block, checker, sigversion, execdata);
+        raw = EvalHTLCBlock(block, sig_checker);
         break;
     case RungBlockType::HASH_SIG:
-        raw = EvalHashSigBlock(block, checker, sigversion, execdata);
+        raw = EvalHashSigBlock(block, sig_checker);
         break;
     case RungBlockType::PTLC:
-        raw = EvalPTLCBlock(block, checker, sigversion, execdata);
+        raw = EvalPTLCBlock(block, sig_checker);
         break;
     case RungBlockType::CLTV_SIG:
-        raw = EvalCLTVSigBlock(block, checker, sigversion, execdata);
+        raw = EvalCLTVSigBlock(block, sig_checker);
         break;
     case RungBlockType::TIMELOCKED_MULTISIG:
-        raw = EvalTimelockedMultisigBlock(block, checker, sigversion, execdata);
+        raw = EvalTimelockedMultisigBlock(block, sig_checker);
         break;
     // Governance
     case RungBlockType::EPOCH_GATE:
@@ -3664,27 +3458,27 @@ EvalResult EvalBlock(const RungBlock& block,
     case RungBlockType::OUTPUT_CHECK:
         raw = EvalOutputCheckBlock(block, ctx);
         break;
-    // Legacy
+    // Legacy wrappers — still take Core's BaseSignatureChecker (see Phase 1E.3).
     case RungBlockType::P2PK_LEGACY:
-        raw = EvalP2PKLegacyBlock(block, checker, sigversion, execdata);
+        raw = EvalP2PKLegacyBlock(block, legacy_checker, sigversion, execdata);
         break;
     case RungBlockType::P2PKH_LEGACY:
-        raw = EvalP2PKHLegacyBlock(block, checker, sigversion, execdata);
+        raw = EvalP2PKHLegacyBlock(block, legacy_checker, sigversion, execdata);
         break;
     case RungBlockType::P2SH_LEGACY:
-        raw = EvalP2SHLegacyBlock(block, checker, sigversion, execdata, ctx, depth);
+        raw = EvalP2SHLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
         break;
     case RungBlockType::P2WPKH_LEGACY:
-        raw = EvalP2WPKHLegacyBlock(block, checker, sigversion, execdata);
+        raw = EvalP2WPKHLegacyBlock(block, legacy_checker, sigversion, execdata);
         break;
     case RungBlockType::P2WSH_LEGACY:
-        raw = EvalP2WSHLegacyBlock(block, checker, sigversion, execdata, ctx, depth);
+        raw = EvalP2WSHLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
         break;
     case RungBlockType::P2TR_LEGACY:
-        raw = EvalP2TRLegacyBlock(block, checker, sigversion, execdata);
+        raw = EvalP2TRLegacyBlock(block, legacy_checker, sigversion, execdata);
         break;
     case RungBlockType::P2TR_SCRIPT_LEGACY:
-        raw = EvalP2TRScriptLegacyBlock(block, checker, sigversion, execdata, ctx, depth);
+        raw = EvalP2TRScriptLegacyBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx, depth);
         break;
     // Utility family
     case RungBlockType::DATA_RETURN:
@@ -3695,10 +3489,10 @@ EvalResult EvalBlock(const RungBlock& block,
 #ifdef ENABLE_QABIO
     // QABI family — real logic when the extension is compiled in.
     case RungBlockType::QABI_PRIME:
-        raw = EvalQABIPrimeBlock(block, checker, sigversion, execdata, ctx);
+        raw = EvalQABIPrimeBlock(block, sig_checker, ctx);
         break;
     case RungBlockType::QABI_SPEND:
-        raw = EvalQABISpendBlock(block, checker, sigversion, execdata, ctx);
+        raw = EvalQABISpendBlock(block, sig_checker, ctx);
         break;
 #else
     // When QABIO is disabled, the block types are still recognised for
@@ -3720,7 +3514,8 @@ EvalResult EvalBlock(const RungBlock& block,
 }
 
 bool EvalRelays(const std::vector<Relay>& relays,
-                const BaseSignatureChecker& checker,
+                const api::LadderSigChecker& sig_checker,
+                const BaseSignatureChecker& legacy_checker,
                 SigVersion sigversion,
                 ScriptExecutionData& execdata,
                 const RungEvalContext& ctx,
@@ -3758,7 +3553,7 @@ bool EvalRelays(const std::vector<Relay>& relays,
 
         EvalResult relay_result = EvalResult::SATISFIED;
         for (const auto& block : relay.blocks) {
-            EvalResult result = EvalBlock(block, checker, sigversion, execdata, relay_ctx);
+            EvalResult result = EvalBlock(block, sig_checker, legacy_checker, sigversion, execdata, relay_ctx);
             if (result != EvalResult::SATISFIED) {
                 relay_result = result;
                 break;
@@ -3774,7 +3569,8 @@ bool EvalRelays(const std::vector<Relay>& relays,
 }
 
 EvalResult EvalRung(const Rung& rung,
-                    const BaseSignatureChecker& checker,
+                    const api::LadderSigChecker& sig_checker,
+                    const BaseSignatureChecker& legacy_checker,
                     SigVersion sigversion,
                     ScriptExecutionData& execdata,
                     const RungEvalContext& ctx,
@@ -3794,7 +3590,7 @@ EvalResult EvalRung(const Rung& rung,
     }
 
     for (const auto& block : rung.blocks) {
-        EvalResult result = EvalBlock(block, checker, sigversion, execdata, ctx);
+        EvalResult result = EvalBlock(block, sig_checker, legacy_checker, sigversion, execdata, ctx);
         if (result != EvalResult::SATISFIED) {
             return result;
         }
@@ -3803,7 +3599,8 @@ EvalResult EvalRung(const Rung& rung,
 }
 
 bool EvalLadder(const LadderWitness& ladder,
-                const BaseSignatureChecker& checker,
+                const api::LadderSigChecker& sig_checker,
+                const BaseSignatureChecker& legacy_checker,
                 SigVersion sigversion,
                 ScriptExecutionData& execdata,
                 const RungEvalContext& ctx,
@@ -3816,7 +3613,7 @@ bool EvalLadder(const LadderWitness& ladder,
     // Evaluate relays first, cache results
     std::vector<EvalResult> relay_results;
     if (!ladder.relays.empty()) {
-        if (!EvalRelays(ladder.relays, checker, sigversion, execdata, ctx, relay_results)) {
+        if (!EvalRelays(ladder.relays, sig_checker, legacy_checker, sigversion, execdata, ctx, relay_results)) {
             return false;
         }
     }
@@ -3830,7 +3627,7 @@ bool EvalLadder(const LadderWitness& ladder,
     for (size_t r = 0; r < ladder.rungs.size(); ++r) {
         const auto& rung = ladder.rungs[r];
         rung_ctx.rung_relay_refs = rung.relay_refs.empty() ? nullptr : &rung.relay_refs;
-        EvalResult result = EvalRung(rung, checker, sigversion, execdata, rung_ctx, relay_ptr);
+        EvalResult result = EvalRung(rung, sig_checker, legacy_checker, sigversion, execdata, rung_ctx, relay_ptr);
         if (result == EvalResult::SATISFIED) {
             if (satisfied_rung_out) *satisfied_rung_out = r;
             return true;
@@ -4661,16 +4458,16 @@ bool VerifyRungTx(const CTransaction& tx,
             return false;
         }
 
-        LadderSignatureChecker ladder_checker(checker, conditions, txdata, tx, nIn);
-        if (!EvalLadder(eval_ladder, ladder_checker, SigVersion::LADDER, execdata, eval_ctx)) {
+        CoreLadderSigChecker sig_checker(checker, txdata, tx, nIn, conditions);
+        if (!EvalLadder(eval_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
             if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
             return false;
         }
     } else {
         // Bootstrap spend: v4 tx spending a v1/v2 UTXO
         RungConditions empty_conditions;
-        LadderSignatureChecker ladder_checker(checker, empty_conditions, txdata, tx, nIn);
-        if (!EvalLadder(witness_ladder, ladder_checker, SigVersion::LADDER, execdata, eval_ctx)) {
+        CoreLadderSigChecker sig_checker(checker, txdata, tx, nIn, empty_conditions);
+        if (!EvalLadder(witness_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
             if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
             return false;
         }

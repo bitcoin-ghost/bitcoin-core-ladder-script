@@ -591,14 +591,22 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_trailing_bytes)
 // Evaluator tests (using mock checker)
 // ============================================================================
 
-class MockSignatureChecker : public BaseSignatureChecker
+// Mock checker that implements both `BaseSignatureChecker` (for legacy P2*
+// wrapper paths) and `rung::api::LadderSigChecker` (for Ladder-native blocks).
+// A single instance can be passed into any Eval*Block entry point.
+class MockSignatureChecker : public BaseSignatureChecker,
+                              public rung::api::LadderSigChecker
 {
 public:
     bool schnorr_result{false};
     bool ecdsa_result{false};
     bool locktime_result{false};
     bool sequence_result{false};
+    // Deterministic stub sighash returned by ComputeSighash — tests can
+    // leave this zero; the mock doesn't care what the library passes back.
+    std::array<uint8_t, 32> sighash_stub{};
 
+    // --- BaseSignatureChecker (legacy path) ---
     bool CheckSchnorrSignature(std::span<const unsigned char> /*sig*/,
                                std::span<const unsigned char> /*pubkey*/,
                                SigVersion /*sigversion*/,
@@ -625,6 +633,37 @@ public:
     {
         return sequence_result;
     }
+
+    // --- rung::api::LadderSigChecker (adapter path) ---
+    bool CheckECDSASignature(std::span<const uint8_t> /*sig*/,
+                             std::span<const uint8_t> /*pubkey*/,
+                             std::span<const uint8_t, 32> /*sighash*/) const override
+    {
+        return ecdsa_result;
+    }
+
+    bool CheckSchnorrSignature(std::span<const uint8_t> /*sig*/,
+                               std::span<const uint8_t> /*pubkey*/,
+                               std::span<const uint8_t, 32> /*sighash*/) const override
+    {
+        return schnorr_result;
+    }
+
+    bool ComputeSighash(uint8_t /*hash_type*/, uint8_t out[32]) const override
+    {
+        std::memcpy(out, sighash_stub.data(), 32);
+        return true;
+    }
+
+    bool CheckLockTime(uint32_t /*lock_time*/) const override
+    {
+        return locktime_result;
+    }
+
+    bool CheckSequence(uint32_t /*sequence*/) const override
+    {
+        return sequence_result;
+    }
 };
 
 BOOST_AUTO_TEST_CASE(eval_sig_block_satisfied)
@@ -638,7 +677,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_block_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_block_unsatisfied)
@@ -652,7 +691,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_block_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_block_missing_field)
@@ -664,7 +703,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_block_missing_field)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_multisig_2_of_3_satisfied)
@@ -682,7 +721,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_2_of_3_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_multisig_insufficient_sigs)
@@ -699,7 +738,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_insufficient_sigs)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hash_preimage_sha256_satisfied)
@@ -850,10 +889,10 @@ BOOST_AUTO_TEST_CASE(inversion_sig_normal_satisfied_inverted_unsatisfied)
     ScriptExecutionData execdata;
     // Normal: satisfied
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     // Inverted: ERROR (key-consuming blocks can't be inverted)
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_sig_normal_unsatisfied_inverted_satisfied)
@@ -868,9 +907,9 @@ BOOST_AUTO_TEST_CASE(inversion_sig_normal_unsatisfied_inverted_satisfied)
 
     ScriptExecutionData execdata;
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_csv)
@@ -884,9 +923,9 @@ BOOST_AUTO_TEST_CASE(inversion_csv)
 
     ScriptExecutionData execdata;
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_hash_preimage)
@@ -900,10 +939,10 @@ BOOST_AUTO_TEST_CASE(inversion_hash_preimage)
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNKNOWN_BLOCK_TYPE);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNKNOWN_BLOCK_TYPE);
     block.inverted = true;
     // Non-invertible block with inverted flag → ERROR (defense in depth)
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_cltv)
@@ -917,9 +956,9 @@ BOOST_AUTO_TEST_CASE(inversion_cltv)
 
     ScriptExecutionData execdata;
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_multisig)
@@ -935,9 +974,9 @@ BOOST_AUTO_TEST_CASE(inversion_multisig)
 
     ScriptExecutionData execdata;
     block.inverted = false;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(inversion_error_never_flips)
@@ -952,7 +991,7 @@ BOOST_AUTO_TEST_CASE(inversion_error_never_flips)
 
     ScriptExecutionData execdata;
     block.inverted = true;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -967,7 +1006,7 @@ BOOST_AUTO_TEST_CASE(eval_ctv_missing_hash)
     RungBlock ctv_block;
     ctv_block.type = RungBlockType::CTV;
     // No HASH256 field → ERROR
-    BOOST_CHECK(EvalBlock(ctv_block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(ctv_block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_vault_lock_missing_fields)
@@ -978,7 +1017,7 @@ BOOST_AUTO_TEST_CASE(eval_vault_lock_missing_fields)
     RungBlock vault_block;
     vault_block.type = RungBlockType::VAULT_LOCK;
     // No pubkeys or signature → ERROR
-    BOOST_CHECK(EvalBlock(vault_block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(vault_block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_amount_lock_in_range)
@@ -993,7 +1032,7 @@ BOOST_AUTO_TEST_CASE(eval_amount_lock_in_range)
 
     RungEvalContext ctx;
     ctx.output_amount = 25000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_amount_lock_below_min)
@@ -1008,7 +1047,7 @@ BOOST_AUTO_TEST_CASE(eval_amount_lock_below_min)
 
     RungEvalContext ctx;
     ctx.output_amount = 500;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_amount_lock_above_max)
@@ -1023,7 +1062,7 @@ BOOST_AUTO_TEST_CASE(eval_amount_lock_above_max)
 
     RungEvalContext ctx;
     ctx.output_amount = 60000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
@@ -1035,11 +1074,11 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
     RungBlock anchor;
     anchor.type = RungBlockType::ANCHOR;
     anchor.fields.push_back({RungDataType::HASH256, MakeHash256()});
-    BOOST_CHECK(EvalBlock(anchor, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(anchor, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     RungBlock anchor_empty;
     anchor_empty.type = RungBlockType::ANCHOR;
-    BOOST_CHECK(EvalBlock(anchor_empty, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(anchor_empty, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
     // ANCHOR_CHANNEL: needs 2 pubkeys
     RungBlock channel;
@@ -1047,7 +1086,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
     channel.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     channel.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     channel.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
-    BOOST_CHECK(EvalBlock(channel, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(channel, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // ANCHOR_POOL: needs hash + preimage + count (hash-preimage binding)
     {
@@ -1057,7 +1096,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
         pool.fields.push_back({RungDataType::HASH256, h});
         pool.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
         pool.fields.push_back({RungDataType::PREIMAGE, p});
-        BOOST_CHECK(EvalBlock(pool, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(pool, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // ANCHOR_RESERVE: needs 2 numerics + hash + preimage
@@ -1069,7 +1108,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
         reserve.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});  // m
         reserve.fields.push_back({RungDataType::HASH256, h});
         reserve.fields.push_back({RungDataType::PREIMAGE, p});
-        BOOST_CHECK(EvalBlock(reserve, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(reserve, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // ANCHOR_SEAL: needs 2 hashes + 2 preimages
@@ -1082,7 +1121,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
         seal.fields.push_back({RungDataType::HASH256, h2});
         seal.fields.push_back({RungDataType::PREIMAGE, p1});
         seal.fields.push_back({RungDataType::PREIMAGE, p2});
-        BOOST_CHECK(EvalBlock(seal, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(seal, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // ANCHOR_ORACLE: needs pubkey + count
@@ -1090,7 +1129,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
     oracle.type = RungBlockType::ANCHOR_ORACLE;
     oracle.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     oracle.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});
-    BOOST_CHECK(EvalBlock(oracle, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(oracle, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -1105,12 +1144,12 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_structural)
     RungBlock block;
     block.type = RungBlockType::RECURSE_SAME;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // Missing max_depth → ERROR
     RungBlock bad;
     bad.type = RungBlockType::RECURSE_SAME;
-    BOOST_CHECK(EvalBlock(bad, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(bad, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -1444,7 +1483,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_until_height_reached)
 
     RungEvalContext ctx;
     ctx.block_height = 150; // >= until_height
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_split_min_sats)
@@ -1459,10 +1498,10 @@ BOOST_AUTO_TEST_CASE(eval_recurse_split_min_sats)
 
     RungEvalContext ctx;
     ctx.output_amount = 500; // below min_split_sats
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     ctx.output_amount = 2000; // above min
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -1486,28 +1525,28 @@ BOOST_AUTO_TEST_CASE(eval_compare_operators)
     ctx.input_amount = 5000;
 
     // EQ (0x01)
-    BOOST_CHECK(EvalBlock(make_compare(0x01, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x01, 4000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x01, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x01, 4000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     // NEQ (0x02)
-    BOOST_CHECK(EvalBlock(make_compare(0x02, 4000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x02, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x02, 4000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x02, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     // GT (0x03)
-    BOOST_CHECK(EvalBlock(make_compare(0x03, 4000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x03, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x03, 4000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x03, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     // LT (0x04)
-    BOOST_CHECK(EvalBlock(make_compare(0x04, 6000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x04, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x04, 6000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x04, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     // GTE (0x05)
-    BOOST_CHECK(EvalBlock(make_compare(0x05, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x05, 5001), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x05, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x05, 5001), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     // LTE (0x06)
-    BOOST_CHECK(EvalBlock(make_compare(0x06, 5000), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
-    BOOST_CHECK(EvalBlock(make_compare(0x06, 4999), checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x06, 5000), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(make_compare(0x06, 4999), checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_compare_in_range)
@@ -1524,13 +1563,13 @@ BOOST_AUTO_TEST_CASE(eval_compare_in_range)
 
     RungEvalContext ctx;
     ctx.input_amount = 5000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     ctx.input_amount = 500;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     ctx.input_amount = 15000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hysteresis_value_band)
@@ -1545,10 +1584,10 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_value_band)
 
     RungEvalContext ctx;
     ctx.input_amount = 5000; // within band
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     ctx.input_amount = 500; // below band
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_rate_limit_single_tx)
@@ -1564,10 +1603,10 @@ BOOST_AUTO_TEST_CASE(eval_rate_limit_single_tx)
 
     RungEvalContext ctx;
     ctx.output_amount = 5000; // under limit
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     ctx.output_amount = 15000; // over limit
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sequencer_structural)
@@ -1579,14 +1618,14 @@ BOOST_AUTO_TEST_CASE(eval_sequencer_structural)
     block.type = RungBlockType::SEQUENCER;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});  // current_step
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});  // total_steps
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // current >= total → unsatisfied
     RungBlock bad;
     bad.type = RungBlockType::SEQUENCER;
     bad.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
     bad.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
-    BOOST_CHECK(EvalBlock(bad, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(bad, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_plc_structural_validation)
@@ -1598,24 +1637,24 @@ BOOST_AUTO_TEST_CASE(eval_plc_structural_validation)
     RungBlock timer;
     timer.type = RungBlockType::TIMER_CONTINUOUS;
     timer.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-    BOOST_CHECK(EvalBlock(timer, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(timer, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     RungBlock timer_bad;
     timer_bad.type = RungBlockType::TIMER_CONTINUOUS;
-    BOOST_CHECK(EvalBlock(timer_bad, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(timer_bad, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
     // Latches need pubkey
     RungBlock latch;
     latch.type = RungBlockType::LATCH_SET;
     latch.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    BOOST_CHECK(EvalBlock(latch, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(latch, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // Counters need pubkey + numeric
     RungBlock counter;
     counter.type = RungBlockType::COUNTER_DOWN;
     counter.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     counter.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
-    BOOST_CHECK(EvalBlock(counter, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(counter, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // ONE_SHOT needs numeric + hash + preimage; state=0 → can fire
     {
@@ -1625,7 +1664,7 @@ BOOST_AUTO_TEST_CASE(eval_plc_structural_validation)
         oneshot.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
         oneshot.fields.push_back({RungDataType::HASH256, h});
         oneshot.fields.push_back({RungDataType::PREIMAGE, p});
-        BOOST_CHECK(EvalBlock(oneshot, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(oneshot, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 }
 
@@ -1777,7 +1816,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_adaptor_sig_unsatisfied)
@@ -1794,7 +1833,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -2365,7 +2404,7 @@ BOOST_AUTO_TEST_CASE(eval_rung_and_logic)
     rung.blocks.push_back(csv_block);
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalRung(rung, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalRung(rung, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_rung_and_logic_one_fails)
@@ -2387,7 +2426,7 @@ BOOST_AUTO_TEST_CASE(eval_rung_and_logic_one_fails)
     rung.blocks.push_back(csv_block);
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalRung(rung, checker, SigVersion::LADDER, execdata) != EvalResult::SATISFIED);
+    BOOST_CHECK(EvalRung(rung, checker, checker, SigVersion::LADDER, execdata) != EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_ladder_or_logic_first_rung_wins)
@@ -2414,7 +2453,7 @@ BOOST_AUTO_TEST_CASE(eval_ladder_or_logic_first_rung_wins)
     ladder.rungs.push_back(rung1);
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalLadder(ladder, checker, SigVersion::LADDER, execdata));
+    BOOST_CHECK(EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata));
 }
 
 BOOST_AUTO_TEST_CASE(eval_ladder_or_logic_fallback_rung)
@@ -2441,7 +2480,7 @@ BOOST_AUTO_TEST_CASE(eval_ladder_or_logic_fallback_rung)
     ladder.rungs.push_back(rung1);
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalLadder(ladder, checker, SigVersion::LADDER, execdata));
+    BOOST_CHECK(EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata));
 }
 
 BOOST_AUTO_TEST_CASE(eval_ladder_all_rungs_fail)
@@ -2468,7 +2507,7 @@ BOOST_AUTO_TEST_CASE(eval_ladder_all_rungs_fail)
     ladder.rungs.push_back(rung1);
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(!EvalLadder(ladder, checker, SigVersion::LADDER, execdata));
+    BOOST_CHECK(!EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata));
 }
 
 BOOST_AUTO_TEST_CASE(eval_ladder_empty_fails)
@@ -2476,7 +2515,7 @@ BOOST_AUTO_TEST_CASE(eval_ladder_empty_fails)
     MockSignatureChecker checker;
     LadderWitness ladder;
     ScriptExecutionData execdata;
-    BOOST_CHECK(!EvalLadder(ladder, checker, SigVersion::LADDER, execdata));
+    BOOST_CHECK(!EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata));
 }
 
 // ============================================================================
@@ -3078,7 +3117,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_empty_rejected)
     RungBlock block;
     block.type = RungBlockType::ANCHOR;
     // No fields → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_channel_missing_pubkey)
@@ -3090,7 +3129,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_channel_missing_pubkey)
     RungBlock block;
     block.type = RungBlockType::ANCHOR_CHANNEL;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_channel_zero_commitment)
@@ -3103,7 +3142,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_channel_zero_commitment)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // commitment = 0 → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_channel_no_commitment_ok)
@@ -3116,7 +3155,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_channel_no_commitment_ok)
     block.type = RungBlockType::ANCHOR_CHANNEL;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_pool_missing_hash)
@@ -3127,7 +3166,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_pool_missing_hash)
     RungBlock block;
     block.type = RungBlockType::ANCHOR_POOL;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)}); // count but no hash → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_pool_zero_count)
@@ -3139,7 +3178,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_pool_zero_count)
     block.type = RungBlockType::ANCHOR_POOL;
     block.fields.push_back({RungDataType::HASH256, MakeHash256()});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // count = 0 → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_reserve_n_gt_m)
@@ -3152,7 +3191,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_reserve_n_gt_m)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)}); // n
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)}); // m (n > m → UNSATISFIED)
     block.fields.push_back({RungDataType::HASH256, MakeHash256()});
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_reserve_missing_hash)
@@ -3165,7 +3204,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_reserve_missing_hash)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});
     // No hash → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_seal_missing_hash)
@@ -3177,7 +3216,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_seal_missing_hash)
     block.type = RungBlockType::ANCHOR_SEAL;
     block.fields.push_back({RungDataType::HASH256, MakeHash256()});
     // Only 1 hash (needs 2) → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_oracle_missing_pubkey)
@@ -3188,7 +3227,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_oracle_missing_pubkey)
     RungBlock block;
     block.type = RungBlockType::ANCHOR_ORACLE;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // count but no pubkey → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_oracle_zero_count)
@@ -3200,7 +3239,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_oracle_zero_count)
     block.type = RungBlockType::ANCHOR_ORACLE;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // count = 0 → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -3218,7 +3257,7 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_low_gt_high)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)}); // low = 100 > high → UNSATISFIED
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_missing_field)
@@ -3231,7 +3270,7 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_missing_field)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)}); // only 1 numeric (needs 2)
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hysteresis_value_outside_band)
@@ -3246,13 +3285,13 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_value_outside_band)
 
     RungEvalContext ctx;
     ctx.input_amount = 3000; // below low band → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     ctx.input_amount = 15000; // above high band → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 
     ctx.input_amount = 7500; // within band → SATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_continuous_zero)
@@ -3265,7 +3304,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_continuous_zero)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // 0 → UNSATISFIED
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_off_delay_zero)
@@ -3278,7 +3317,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_off_delay_zero)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // 0 → UNSATISFIED
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_off_delay_missing)
@@ -3291,7 +3330,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_off_delay_missing)
     // No numeric → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_set_missing_pubkey)
@@ -3304,7 +3343,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_missing_pubkey)
     // No pubkey → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_missing_delay)
@@ -3318,7 +3357,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_reset_missing_delay)
     // No numeric → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_missing_pubkey)
@@ -3332,7 +3371,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_reset_missing_pubkey)
     // No pubkey → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_set_state_unset_satisfied)
@@ -3347,7 +3386,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_state_unset_satisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // state=0
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_set_state_already_set_unsatisfied)
@@ -3362,7 +3401,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_state_already_set_unsatisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)}); // state=1
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_backward_compat)
@@ -3376,7 +3415,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_backward_compat)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_satisfied)
@@ -3392,7 +3431,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_satisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(6)}); // delay=6
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_state_unset_unsatisfied)
@@ -3408,7 +3447,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_reset_state_unset_unsatisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(6)}); // delay=6
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_down_missing_pubkey)
@@ -3422,7 +3461,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_down_missing_pubkey)
     // No pubkey → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_down_missing_numeric)
@@ -3436,7 +3475,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_down_missing_numeric)
     // No numeric → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_preset_missing_field)
@@ -3449,7 +3488,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_preset_missing_field)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)}); // only 1 (needs 2)
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_up_missing_pubkey)
@@ -3463,7 +3502,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_up_missing_pubkey)
     // No pubkey → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_one_shot_missing_hash)
@@ -3477,7 +3516,7 @@ BOOST_AUTO_TEST_CASE(eval_one_shot_missing_hash)
     // No hash → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_one_shot_missing_numeric)
@@ -3491,7 +3530,7 @@ BOOST_AUTO_TEST_CASE(eval_one_shot_missing_numeric)
     // No numeric → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_second_pubkey)
@@ -3505,7 +3544,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_second_pubkey)
     block.type = RungBlockType::ADAPTOR_SIG;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_signature)
@@ -3518,7 +3557,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_signature)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     // No signature → ERROR
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -3537,7 +3576,7 @@ BOOST_AUTO_TEST_CASE(eval_compare_unknown_operator)
 
     RungEvalContext ctx;
     ctx.input_amount = 5000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_compare_in_range_missing_upper)
@@ -3552,7 +3591,7 @@ BOOST_AUTO_TEST_CASE(eval_compare_in_range_missing_upper)
 
     RungEvalContext ctx;
     ctx.input_amount = 5000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_compare_missing_operand)
@@ -3566,7 +3605,7 @@ BOOST_AUTO_TEST_CASE(eval_compare_missing_operand)
 
     RungEvalContext ctx;
     ctx.input_amount = 5000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -3584,7 +3623,7 @@ BOOST_AUTO_TEST_CASE(eval_sequencer_at_last_step)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)}); // total = 3 → current < total → SATISFIED
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sequencer_current_equals_total)
@@ -3598,7 +3637,7 @@ BOOST_AUTO_TEST_CASE(eval_sequencer_current_equals_total)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sequencer_total_zero)
@@ -3612,7 +3651,7 @@ BOOST_AUTO_TEST_CASE(eval_sequencer_total_zero)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // total = 0 → UNSATISFIED
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -3632,7 +3671,7 @@ BOOST_AUTO_TEST_CASE(eval_rate_limit_exceeds_max)
 
     RungEvalContext ctx;
     ctx.output_amount = 15000; // exceeds max_per_block → UNSATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_rate_limit_missing_fields)
@@ -3647,7 +3686,7 @@ BOOST_AUTO_TEST_CASE(eval_rate_limit_missing_fields)
     // Only 2 numerics (needs 3) → ERROR
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -4038,7 +4077,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_below_threshold)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hash160_preimage_wrong)
@@ -4068,7 +4107,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_ecdsa_wrong_key)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(71)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -4094,7 +4133,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_no_liboqs)
 
     ScriptExecutionData execdata;
     // Without LadderSignatureChecker, dynamic_cast fails → ERROR
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pq_bad_sig)
@@ -4110,8 +4149,8 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_bad_sig)
 
     ScriptExecutionData execdata;
     // MockSignatureChecker is not a LadderSignatureChecker, so dynamic_cast → ERROR
-    auto result = EvalSigBlock(block, checker, SigVersion::LADDER, execdata);
-    BOOST_CHECK(result == EvalResult::ERROR);
+    auto result = EvalSigBlock(block, checker);
+    BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pq_missing_scheme_field)
@@ -4126,7 +4165,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_missing_scheme_field)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_schnorr_scheme_field_fallthrough)
@@ -4142,7 +4181,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_schnorr_scheme_field_fallthrough)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_multisig_pq_no_ladder_checker)
@@ -4158,7 +4197,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_pq_no_ladder_checker)
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(690, 0xBB)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(field_size_pq_pubkey)
@@ -4363,7 +4402,7 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_falcon1024)
     // PQ path needs LadderSignatureChecker → ERROR (but commitment check passed)
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(pq_pubkey_commit_dilithium3)
@@ -4390,7 +4429,7 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_dilithium3)
 
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(pq_pubkey_commit_sphincs_sha)
@@ -4417,7 +4456,7 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_sphincs_sha)
 
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(pq_pubkey_commit_mismatch_dilithium3)
@@ -4438,7 +4477,7 @@ BOOST_AUTO_TEST_CASE(pq_pubkey_commit_mismatch_dilithium3)
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
     // PQ path requires LadderSignatureChecker; MockSignatureChecker → ERROR
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -4479,7 +4518,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_pubkey_commit)
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
     // PQ path needs LadderSignatureChecker → gets ERROR (not UNSATISFIED from commit mismatch)
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pq_pubkey_commit_mismatch)
@@ -4497,7 +4536,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pq_pubkey_commit_mismatch)
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(690, 0xCC)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pubkey_commit_no_pubkey_error)
@@ -4511,7 +4550,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pubkey_commit_no_pubkey_error)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_pubkey_commit_schnorr)
@@ -4532,7 +4571,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pubkey_commit_schnorr)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -4588,7 +4627,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_legacy_compat)
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});   // param_idx
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});   // delta
 
-    BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(rm_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_modified_cross_rung)
@@ -4660,7 +4699,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_cross_rung)
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});   // param_idx
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});   // delta
 
-    BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(rm_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
@@ -4740,7 +4779,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(rm_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     // Wrong delta for mutation 1 → UNSATISFIED
     RungConditions bad_output_conds;
@@ -4772,7 +4811,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_multi_mutation)
     rung::api::LadderOutputView ov_4763 = MakeOutputView(bad_output);
     ctx.spending_output = &ov_4763;
 
-    BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(rm_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_modified_no_context_error)
@@ -4789,7 +4828,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_modified_no_context_error)
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
     rm_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
 
-    BOOST_CHECK(EvalBlock(rm_block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(rm_block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -4806,7 +4845,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_satisfied)
     block.type = RungBlockType::RECURSE_COUNT;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
@@ -4855,7 +4894,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
     rung::api::LadderOutputView ov_4845 = MakeOutputView(good_output);
     ctx.spending_output = &ov_4845;
 
-    BOOST_CHECK(EvalBlock(eval_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(eval_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     // Bad output: RECURSE_COUNT(count=1) — decremented by 2 instead of 1
     RungConditions bad_output_conds;
@@ -4877,7 +4916,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_unsatisfied)
 
     rung::api::LadderOutputView ov_4867 = MakeOutputView(bad_output);
     ctx.spending_output = &ov_4867;
-    BOOST_CHECK(EvalBlock(eval_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(eval_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_count_missing_fields)
@@ -4889,13 +4928,13 @@ BOOST_AUTO_TEST_CASE(eval_recurse_count_missing_fields)
     RungBlock block;
     block.type = RungBlockType::RECURSE_COUNT;
     // No fields at all
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
     // Oversized NUMERIC (9 bytes, exceeds 8-byte max) → ERROR via ReadNumeric returning -1
     RungBlock bad_block;
     bad_block.type = RungBlockType::RECURSE_COUNT;
     bad_block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>(9, 0xFF)});
-    BOOST_CHECK(EvalBlock(bad_block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(bad_block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_decay_legacy_compat)
@@ -4947,7 +4986,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_legacy_compat)
     decay_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});   // param_idx
     decay_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(7)});   // decay_per_step
 
-    BOOST_CHECK(EvalBlock(decay_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(decay_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_decay_multi_mutation)
@@ -5025,7 +5064,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_decay_multi_mutation)
     decay_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
     decay_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalBlock(decay_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(decay_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -5084,7 +5123,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_matching_input)
     ctx.spent_outputs = sov_5067.data();
     ctx.spent_output_count = sov_5067.size();
 
-    BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(cosign_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cosign_no_matching_input)
@@ -5123,7 +5162,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_no_matching_input)
     ctx.spent_outputs = sov_5102.data();
     ctx.spent_output_count = sov_5102.size();
 
-    BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(cosign_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cosign_no_hash_error)
@@ -5137,7 +5176,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_no_hash_error)
     // No fields
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(cosign_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cosign_no_context_error)
@@ -5152,7 +5191,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_no_context_error)
     cosign_block.fields.push_back({RungDataType::HASH256, some_hash});
 
     RungEvalContext ctx;  // no tx, no spent_outputs
-    BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(cosign_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cosign_skips_self)
@@ -5194,7 +5233,7 @@ BOOST_AUTO_TEST_CASE(eval_cosign_skips_self)
     ctx.spent_outputs = sov_5169.data();
     ctx.spent_output_count = sov_5169.size();
 
-    BOOST_CHECK(EvalBlock(cosign_block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(cosign_block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -5213,7 +5252,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_down_count_positive)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_down_count_zero)
@@ -5228,7 +5267,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_down_count_zero)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_preset_below_preset)
@@ -5243,7 +5282,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_preset_below_preset)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // preset
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_preset_at_preset)
@@ -5258,7 +5297,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_preset_at_preset)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // preset
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_preset_above_preset)
@@ -5273,7 +5312,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_preset_above_preset)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // preset
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_up_below_target)
@@ -5289,7 +5328,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_up_below_target)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // target
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_up_at_target)
@@ -5305,7 +5344,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_up_at_target)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // target
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_counter_up_single_numeric_error)
@@ -5320,7 +5359,7 @@ BOOST_AUTO_TEST_CASE(eval_counter_up_single_numeric_error)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_one_shot_state_zero)
@@ -5337,7 +5376,7 @@ BOOST_AUTO_TEST_CASE(eval_one_shot_state_zero)
     block.fields.push_back({RungDataType::PREIMAGE, p});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_one_shot_state_nonzero)
@@ -5354,7 +5393,7 @@ BOOST_AUTO_TEST_CASE(eval_one_shot_state_nonzero)
     block.fields.push_back({RungDataType::PREIMAGE, p});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_continuous_two_field_elapsed)
@@ -5369,7 +5408,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_continuous_two_field_elapsed)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});  // target
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_continuous_two_field_not_elapsed)
@@ -5384,7 +5423,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_continuous_two_field_not_elapsed)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)}); // target
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_continuous_single_field_compat)
@@ -5398,7 +5437,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_continuous_single_field_compat)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_off_delay_remaining_positive)
@@ -5412,7 +5451,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_off_delay_remaining_positive)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timer_off_delay_remaining_zero)
@@ -5426,7 +5465,7 @@ BOOST_AUTO_TEST_CASE(eval_timer_off_delay_remaining_zero)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_no_context_error)
@@ -5441,7 +5480,7 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_no_context_error)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});   // low = 5 sat/vB
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_with_tx_context)
@@ -5478,7 +5517,7 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_with_tx_context)
 
     // fee_rate = 10000 / vsize. vsize is small for this tx, so fee_rate will be high.
     // With high=100, this should be UNSATISFIED (fee rate exceeds band)
-    EvalResult result = EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx);
+    EvalResult result = EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx);
     // The exact result depends on tx weight, but fee is 10000 sats which for a tiny tx
     // gives a very high fee rate (>100), so it should be UNSATISFIED
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
@@ -5497,7 +5536,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_invalid_adaptor_point_size)
     block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(33, 0x02)}); // extra pubkey (ignored)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_adaptor_sig_valid_adaptor_point)
@@ -5514,7 +5553,7 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_valid_adaptor_point)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     // With mock checker returning true for schnorr, should be SATISFIED
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -5575,7 +5614,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_pubkey_commit_resolution)
     block.fields.push_back({RungDataType::PUBKEY, pk});             // from witness
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_sig_ignores_pubkey_commit)
@@ -5593,7 +5632,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_ignores_pubkey_commit)
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_multisig_pubkey_commit_resolution)
@@ -5620,7 +5659,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_pubkey_commit_resolution)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // 2 sigs
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    EvalResult result = EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    EvalResult result = EvalMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -5640,7 +5679,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_ignores_pubkey_commit)
     block.fields.push_back({RungDataType::PUBKEY, pk1});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    EvalResult result = EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    EvalResult result = EvalMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -5777,7 +5816,7 @@ BOOST_AUTO_TEST_CASE(spam_embed_fake_pubkey_commit_unrecoverable)
 
     // Commitment verifies (SHA256 matches), but signature fails
     // → spam is in the FAILED spending witness, never mined
-    EvalResult result = EvalSigBlock(block, checker, SigVersion::LADDER, execdata);
+    EvalResult result = EvalSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -5962,7 +6001,7 @@ BOOST_AUTO_TEST_CASE(relay_eval_satisfied)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
 
-    BOOST_CHECK(EvalLadder(ladder, checker, SigVersion::LADDER, execdata, ctx));
+    BOOST_CHECK(EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata, ctx));
 }
 
 BOOST_AUTO_TEST_CASE(relay_eval_unsatisfied_blocks_rung)
@@ -5999,7 +6038,7 @@ BOOST_AUTO_TEST_CASE(relay_eval_unsatisfied_blocks_rung)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
 
-    BOOST_CHECK(!EvalLadder(ladder, checker, SigVersion::LADDER, execdata, ctx));
+    BOOST_CHECK(!EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata, ctx));
 }
 
 BOOST_AUTO_TEST_CASE(relay_chain_satisfied)
@@ -6036,7 +6075,7 @@ BOOST_AUTO_TEST_CASE(relay_chain_satisfied)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
 
-    BOOST_CHECK(EvalLadder(ladder, checker, SigVersion::LADDER, execdata, ctx));
+    BOOST_CHECK(EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata, ctx));
 }
 
 BOOST_AUTO_TEST_CASE(relay_chain_broken)
@@ -6073,7 +6112,7 @@ BOOST_AUTO_TEST_CASE(relay_chain_broken)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
 
-    BOOST_CHECK(!EvalLadder(ladder, checker, SigVersion::LADDER, execdata, ctx));
+    BOOST_CHECK(!EvalLadder(ladder, checker, checker, SigVersion::LADDER, execdata, ctx));
 }
 
 BOOST_AUTO_TEST_CASE(relay_backward_compat)
@@ -6179,7 +6218,7 @@ BOOST_AUTO_TEST_CASE(timelocked_sig_satisfied)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6196,7 +6235,7 @@ BOOST_AUTO_TEST_CASE(timelocked_sig_csv_fails)
     checker.schnorr_result = true;
     checker.sequence_result = false;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6213,7 +6252,7 @@ BOOST_AUTO_TEST_CASE(timelocked_sig_sig_fails)
     checker.schnorr_result = false;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6237,7 +6276,7 @@ BOOST_AUTO_TEST_CASE(htlc_satisfied)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalHTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalHTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6262,7 +6301,7 @@ BOOST_AUTO_TEST_CASE(htlc_wrong_preimage)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalHTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalHTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6282,7 +6321,7 @@ BOOST_AUTO_TEST_CASE(hash_sig_satisfied)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalHashSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalHashSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6301,7 +6340,7 @@ BOOST_AUTO_TEST_CASE(hash_sig_bad_hash)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalHashSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalHashSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6325,7 +6364,7 @@ BOOST_AUTO_TEST_CASE(ptlc_satisfied)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalPTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6344,7 +6383,7 @@ BOOST_AUTO_TEST_CASE(ptlc_sig_fails)
     checker.schnorr_result = false;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalPTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6363,7 +6402,7 @@ BOOST_AUTO_TEST_CASE(ptlc_csv_fails)
     checker.schnorr_result = true;
     checker.sequence_result = false;
     ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalPTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6381,7 +6420,7 @@ BOOST_AUTO_TEST_CASE(ptlc_missing_adaptor_point)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalPTLCBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6402,7 +6441,7 @@ BOOST_AUTO_TEST_CASE(cltv_sig_satisfied)
     checker.schnorr_result = true;
     checker.locktime_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalCLTVSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalCLTVSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6419,7 +6458,7 @@ BOOST_AUTO_TEST_CASE(cltv_sig_locktime_fails)
     checker.schnorr_result = true;
     checker.locktime_result = false;
     ScriptExecutionData execdata;
-    auto result = EvalCLTVSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalCLTVSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6436,7 +6475,7 @@ BOOST_AUTO_TEST_CASE(cltv_sig_sig_fails)
     checker.schnorr_result = false;
     checker.locktime_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalCLTVSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalCLTVSigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6461,7 +6500,7 @@ BOOST_AUTO_TEST_CASE(timelocked_multisig_satisfied)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::SATISFIED);
 }
 
@@ -6482,7 +6521,7 @@ BOOST_AUTO_TEST_CASE(timelocked_multisig_csv_fails)
     checker.schnorr_result = true;
     checker.sequence_result = false;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6501,7 +6540,7 @@ BOOST_AUTO_TEST_CASE(timelocked_multisig_insufficient_sigs)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -6518,7 +6557,7 @@ BOOST_AUTO_TEST_CASE(timelocked_multisig_missing_csv_numeric)
     checker.schnorr_result = true;
     checker.sequence_result = true;
     ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalTimelockedMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::ERROR);
 }
 
@@ -6820,7 +6859,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_sig_satisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
     block.fields.push_back({RungDataType::SCHEME, {0x01}});
 
-    BOOST_CHECK(EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalTimelockedSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timelocked_sig_bad_sig)
@@ -6840,7 +6879,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_sig_bad_sig)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
     block.fields.push_back({RungDataType::SCHEME, {0x01}});
 
-    BOOST_CHECK(EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timelocked_sig_csv_fails)
@@ -6860,7 +6899,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_sig_csv_fails)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
     block.fields.push_back({RungDataType::SCHEME, {0x01}});
 
-    BOOST_CHECK(EvalTimelockedSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_htlc_satisfied)
@@ -6886,7 +6925,7 @@ BOOST_AUTO_TEST_CASE(eval_htlc_satisfied)
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalHTLCBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_htlc_wrong_preimage)
@@ -6913,7 +6952,7 @@ BOOST_AUTO_TEST_CASE(eval_htlc_wrong_preimage)
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalHTLCBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hash_sig_satisfied)
@@ -6936,7 +6975,7 @@ BOOST_AUTO_TEST_CASE(eval_hash_sig_satisfied)
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalHashSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalHashSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_hash_sig_wrong_preimage)
@@ -6960,7 +6999,7 @@ BOOST_AUTO_TEST_CASE(eval_hash_sig_wrong_preimage)
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalHashSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalHashSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_ptlc_satisfied)
@@ -6981,7 +7020,7 @@ BOOST_AUTO_TEST_CASE(eval_ptlc_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_ptlc_bad_sig)
@@ -7002,7 +7041,7 @@ BOOST_AUTO_TEST_CASE(eval_ptlc_bad_sig)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalPTLCBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cltv_sig_satisfied)
@@ -7022,7 +7061,7 @@ BOOST_AUTO_TEST_CASE(eval_cltv_sig_satisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(500000)});
     block.fields.push_back({RungDataType::SCHEME, {0x01}});
 
-    BOOST_CHECK(EvalCLTVSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalCLTVSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_cltv_sig_locktime_fails)
@@ -7042,7 +7081,7 @@ BOOST_AUTO_TEST_CASE(eval_cltv_sig_locktime_fails)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(500000)});
     block.fields.push_back({RungDataType::SCHEME, {0x01}});
 
-    BOOST_CHECK(EvalCLTVSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalCLTVSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_satisfied)
@@ -7066,7 +7105,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});  // CSV
 
-    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_too_few_sigs)
@@ -7089,7 +7128,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_too_few_sigs)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // only 1 sig (need 2)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_csv_fails)
@@ -7113,7 +7152,7 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_csv_fails)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
 
-    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(compound_serialize_roundtrip)
@@ -8134,7 +8173,7 @@ BOOST_AUTO_TEST_CASE(musig_threshold_basic_eval)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMusigThresholdBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalMusigThresholdBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(musig_threshold_ignores_pubkey_commit)
@@ -8154,7 +8193,7 @@ BOOST_AUTO_TEST_CASE(musig_threshold_ignores_pubkey_commit)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMusigThresholdBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalMusigThresholdBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(musig_threshold_wrong_signature)
@@ -8175,7 +8214,7 @@ BOOST_AUTO_TEST_CASE(musig_threshold_wrong_signature)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMusigThresholdBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalMusigThresholdBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(musig_threshold_missing_fields)
@@ -8189,14 +8228,14 @@ BOOST_AUTO_TEST_CASE(musig_threshold_missing_fields)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMusigThresholdBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalMusigThresholdBlock(block, checker) == EvalResult::ERROR);
 
     // Missing signature → ERROR
     RungBlock block2;
     block2.type = RungBlockType::MUSIG_THRESHOLD;
     block2.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
 
-    BOOST_CHECK(EvalMusigThresholdBlock(block2, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalMusigThresholdBlock(block2, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(musig_threshold_invalid_mn)
@@ -8217,7 +8256,7 @@ BOOST_AUTO_TEST_CASE(musig_threshold_invalid_mn)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalMusigThresholdBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalMusigThresholdBlock(block, checker) == EvalResult::ERROR);
 
     // M > N → ERROR
     RungBlock block2;
@@ -8228,7 +8267,7 @@ BOOST_AUTO_TEST_CASE(musig_threshold_invalid_mn)
     block2.fields.push_back({RungDataType::PUBKEY, pk});
     block2.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
-    BOOST_CHECK(EvalMusigThresholdBlock(block2, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalMusigThresholdBlock(block2, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(musig_threshold_serialization_roundtrip)
@@ -9068,7 +9107,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_xonly_key_schnorr)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalSigBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 // Gap 1b: Zero-byte PUBKEY in witness → ERROR (no key to verify)
@@ -9083,7 +9122,7 @@ BOOST_AUTO_TEST_CASE(eval_sig_empty_pubkey_error)
 
     ScriptExecutionData execdata;
     // Empty pubkey — size-based routing fails, should not crash
-    auto result = EvalSigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalSigBlock(block, checker);
     // Either ERROR or UNSATISFIED is acceptable — must not crash or SATISFIED
     BOOST_CHECK(result != EvalResult::SATISFIED);
 }
@@ -9107,7 +9146,7 @@ BOOST_AUTO_TEST_CASE(eval_multisig_wrong_sig_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    auto result = EvalMultisigBlock(block, checker, SigVersion::LADDER, execdata);
+    auto result = EvalMultisigBlock(block, checker);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -9124,7 +9163,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_large_depth_no_dos)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2000000000)});
 
     RungEvalContext ctx{};
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 // Gap 2b: Policy rejects too many relays (MAX_RELAYS = 8)
@@ -10230,7 +10269,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_missing_fields)
     // Missing PREIMAGE
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_wrong_hash)
@@ -10242,7 +10281,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_wrong_hash)
     block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xEE)});
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // -- Evaluator tests: P2WSH_LEGACY --
@@ -10256,7 +10295,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_missing_fields)
     // Missing PREIMAGE
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_wrong_hash)
@@ -10268,7 +10307,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_wrong_hash)
     block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xEE)});
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // -- Evaluator tests: P2TR_SCRIPT_LEGACY --
@@ -10283,7 +10322,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_missing_fields)
     // Missing PREIMAGE
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_wrong_hash)
@@ -10296,7 +10335,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_wrong_hash)
     block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xEE)});
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // -- EvalBlock dispatch tests --
@@ -10317,7 +10356,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy)
         block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // P2PKH_LEGACY via EvalBlock
@@ -10331,7 +10370,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy)
         block.fields.push_back({RungDataType::HASH160, hash160_vec});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // P2WPKH_LEGACY via EvalBlock
@@ -10345,7 +10384,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy)
         block.fields.push_back({RungDataType::HASH160, hash160_vec});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 
     // P2TR_LEGACY via EvalBlock
@@ -10356,7 +10395,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy)
         block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
     }
 }
 
@@ -10381,7 +10420,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_inverted)
 
     ScriptExecutionData execdata;
     // Key-consuming blocks cannot be inverted → ERROR
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 // -- Policy test --
@@ -10522,7 +10561,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_inner_conditions_satisfied)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_malformed_inner_conditions)
@@ -10545,7 +10584,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_malformed_inner_conditions)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
     // Hash matches but deserialization of inner conditions should fail → ERROR
-    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // -- P2WSH_LEGACY: successful inner-conditions evaluation --
@@ -10582,7 +10621,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_inner_conditions_satisfied)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_malformed_inner_conditions)
@@ -10601,7 +10640,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_malformed_inner_conditions)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // -- P2TR_SCRIPT_LEGACY: successful inner-conditions evaluation --
@@ -10638,7 +10677,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_inner_conditions_satisfied)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_malformed_inner)
@@ -10657,7 +10696,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_malformed_inner)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // -- Recursion depth limit tests --
@@ -10707,7 +10746,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_recursion_depth_limit)
     RungEvalContext ctx;
     // Outer starts at depth 1, middle at depth 2, innermost would be depth 3 > MAX_LEGACY_INNER_DEPTH(2)
     // The middle P2SH deserialization succeeds but its inner evaluation hits depth limit
-    EvalResult result = EvalP2SHLegacyBlock(outer_block, checker, SigVersion::LADDER, execdata, ctx);
+    EvalResult result = EvalP2SHLegacyBlock(outer_block, checker, checker, SigVersion::LADDER, execdata, ctx);
     // Should not be SATISFIED — either ERROR from depth limit or UNSATISFIED
     BOOST_CHECK(result != EvalResult::SATISFIED);
 }
@@ -10754,7 +10793,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_recursion_depth_limit)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    EvalResult result = EvalP2WSHLegacyBlock(outer_block, checker, SigVersion::LADDER, execdata, ctx);
+    EvalResult result = EvalP2WSHLegacyBlock(outer_block, checker, checker, SigVersion::LADDER, execdata, ctx);
     BOOST_CHECK(result != EvalResult::SATISFIED);
 }
 
@@ -10789,7 +10828,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_inner_sig_unsatisfied)
     ScriptExecutionData execdata;
     RungEvalContext ctx;
     // Hash matches, inner deserializes OK, but sig fails
-    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_inner_sig_unsatisfied)
@@ -10820,7 +10859,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_inner_sig_unsatisfied)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // -- P2TR_SCRIPT_LEGACY inner sig unsatisfied --
@@ -10853,7 +10892,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_script_legacy_inner_sig_unsatisfied)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2TRScriptLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // -- P2SH/P2WSH/P2TR_SCRIPT dispatch through EvalBlock --
@@ -10889,7 +10928,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy_inner_conditions)
         block.fields.push_back({RungDataType::PREIMAGE, inner_bytes});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
     }
 
     // P2WSH via EvalBlock
@@ -10903,7 +10942,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy_inner_conditions)
         block.fields.push_back({RungDataType::PREIMAGE, inner_bytes});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
     }
 
     // P2TR_SCRIPT via EvalBlock
@@ -10917,7 +10956,7 @@ BOOST_AUTO_TEST_CASE(eval_block_dispatch_legacy_inner_conditions)
         block.fields.push_back({RungDataType::PREIMAGE, inner_bytes});
         block.fields.push_back({RungDataType::PUBKEY, pk});
         block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-        BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+        BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
     }
 }
 
@@ -10953,7 +10992,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_bad_hash256_size)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // -- P2TR_SCRIPT_LEGACY conditions roundtrip with HASH256 only --
@@ -11061,7 +11100,7 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_script_body)
     RungEvalContext ctx;
     // The sig won't verify with MockSignatureChecker, but the hash should match
     // and inner deserialization should succeed — result depends on inner eval
-    EvalResult result = EvalP2SHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx);
+    EvalResult result = EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx);
     // MockSignatureChecker returns false for sigs, so inner SIG block → UNSATISFIED
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
@@ -11099,7 +11138,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wsh_legacy_script_body)
 
     ScriptExecutionData execdata;
     RungEvalContext ctx;
-    EvalResult result = EvalP2WSHLegacyBlock(block, checker, SigVersion::LADDER, execdata, ctx);
+    EvalResult result = EvalP2WSHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx);
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
@@ -11133,7 +11172,7 @@ BOOST_AUTO_TEST_CASE(data_return_eval_always_error)
     RungBlock block;
     block.type = RungBlockType::DATA_RETURN;
     block.fields.push_back({RungDataType::DATA, std::vector<uint8_t>(11, 0x42)});
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(data_return_eval_empty_error)
@@ -11144,7 +11183,7 @@ BOOST_AUTO_TEST_CASE(data_return_eval_empty_error)
     RungBlock block;
     block.type = RungBlockType::DATA_RETURN;
     // No fields at all
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(data_return_field_valid_range)
@@ -11285,7 +11324,7 @@ BOOST_AUTO_TEST_CASE(output_check_eval_missing_fields)
     RungBlock block;
     block.type = RungBlockType::OUTPUT_CHECK;
     // No fields
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(output_check_eval_no_tx)
@@ -11302,7 +11341,7 @@ BOOST_AUTO_TEST_CASE(output_check_eval_no_tx)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2000)});
     block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0x00)});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(output_check_serialize_roundtrip)
@@ -11577,7 +11616,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_satisfied)
     ctx.spent_outputs = sov_11530.data();
     ctx.spent_output_count = sov_11530.size();
 
-    auto result = EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx);
+    auto result = EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx);
     BOOST_CHECK_MESSAGE(result == EvalResult::SATISFIED,
         "Expected SATISFIED, got " + std::to_string(static_cast<int>(result)));
 }
@@ -11600,7 +11639,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_missing_fields)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_fee_sig1_invalid)
@@ -11622,7 +11661,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_sig1_invalid)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_below_min)
@@ -11663,7 +11702,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_below_min)
     ctx.spent_outputs = sov_11612.data();
     ctx.spent_output_count = sov_11612.size();
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_above_max)
@@ -11704,7 +11743,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_fee_above_max)
     ctx.spent_outputs = sov_11649.data();
     ctx.spent_output_count = sov_11649.size();
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_fee_weight_over_limit)
@@ -11744,7 +11783,7 @@ BOOST_AUTO_TEST_CASE(eval_anchor_fee_weight_over_limit)
     ctx.spent_outputs = sov_11685.data();
     ctx.spent_output_count = sov_11685.size();
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 // ============================================================================
@@ -11762,7 +11801,7 @@ BOOST_AUTO_TEST_CASE(read_numeric_empty_returns_nullopt)
     block.type = RungBlockType::CSV;
     block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>{}});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(read_numeric_oversized_returns_nullopt)
@@ -11776,7 +11815,7 @@ BOOST_AUTO_TEST_CASE(read_numeric_oversized_returns_nullopt)
     block.type = RungBlockType::CSV;
     block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>(9, 0x01)});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(read_numeric_one_byte)
@@ -11791,7 +11830,7 @@ BOOST_AUTO_TEST_CASE(read_numeric_one_byte)
     block.fields.push_back({RungDataType::NUMERIC, {42}});
 
     // The value 42 should be read correctly and used as the sequence check
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(read_numeric_max_8_bytes)
@@ -11812,7 +11851,7 @@ BOOST_AUTO_TEST_CASE(read_numeric_max_8_bytes)
 
     RungEvalContext ctx;
     ctx.output_amount = 5000;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -11833,7 +11872,7 @@ BOOST_AUTO_TEST_CASE(verify_sig_scheme_schnorr_explicit)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(verify_sig_scheme_ecdsa_explicit)
@@ -11851,7 +11890,7 @@ BOOST_AUTO_TEST_CASE(verify_sig_scheme_ecdsa_explicit)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(40)});
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::ECDSA)}});
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(verify_sig_scheme_fallback_size)
@@ -11868,7 +11907,7 @@ BOOST_AUTO_TEST_CASE(verify_sig_scheme_fallback_size)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     // No SCHEME field — falls back to size-based routing
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // Now with ECDSA-range signature (40 bytes) and only ecdsa_result = true
     MockSignatureChecker checker2;
@@ -11880,7 +11919,7 @@ BOOST_AUTO_TEST_CASE(verify_sig_scheme_fallback_size)
     block2.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block2.fields.push_back({RungDataType::SIGNATURE, MakeSignature(40)});
 
-    BOOST_CHECK(EvalBlock(block2, checker2, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block2, checker2, checker2, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -12075,11 +12114,11 @@ BOOST_AUTO_TEST_CASE(relative_value_large_amounts_no_overflow)
     ctx.input_amount = 2100000000000000LL;
     // output = input * 9/10 = 1890000000000000 → exactly at boundary
     ctx.output_amount = 1890000000000000LL;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 
     // Just below → UNSATISFIED
     ctx.output_amount = 1890000000000000LL - 1;
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(relative_value_zero_numerator)
@@ -12097,7 +12136,7 @@ BOOST_AUTO_TEST_CASE(relative_value_zero_numerator)
     ctx.input_amount = 100000;
     ctx.output_amount = 0;
     // 0 * 10 >= 100000 * 0 → 0 >= 0 → SATISFIED
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 // ============================================================================
@@ -12116,7 +12155,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_no_context_satisfied)
 
     RungEvalContext ctx;
     // No covenant context — structural check only (depth > 0)
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_same_with_leaves_no_output_error)
@@ -12139,7 +12178,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_with_leaves_no_output_error)
     RungEvalContext ctx;
     ctx.verified_leaves = &verified;
     // spending_output is nullptr → ERROR (fail-closed)
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -12174,7 +12213,7 @@ BOOST_AUTO_TEST_CASE(eval_key_ref_sig_valid)
     ctx.relays = &relays;
     ctx.rung_relay_refs = &relay_refs;
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_key_ref_sig_invalid_relay)
@@ -12203,7 +12242,7 @@ BOOST_AUTO_TEST_CASE(eval_key_ref_sig_invalid_relay)
     ctx.relays = &relays;
     ctx.rung_relay_refs = &relay_refs;
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_key_ref_sig_oversized_index)
@@ -12231,7 +12270,7 @@ BOOST_AUTO_TEST_CASE(eval_key_ref_sig_oversized_index)
     ctx.relays = &relays;
     ctx.rung_relay_refs = &relay_refs;
 
-    BOOST_CHECK(EvalBlock(block, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -13207,10 +13246,12 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     // Dummy checker and execdata (QABI_SPEND doesn't use them).
     PrecomputedTransactionData txdata;
     MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
     // Evaluate via the public dispatch so the full path is exercised.
-    EvalResult result = EvalBlock(spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::SATISFIED));
 }
 
@@ -13331,9 +13372,11 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
 
     PrecomputedTransactionData txdata;
     MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     // Check 2 (expiry) fails because TEST_BLOCK_HEIGHT > EXPIRY_HEIGHT.
     BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::UNSATISFIED));
 }
@@ -13472,9 +13515,11 @@ static EvalResult EvalSetup(const QABISpendSetup& s)
     PrecomputedTransactionData txdata;
     CMutableTransaction mtx_copy = s.mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    return EvalBlock(s.spend_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    return EvalBlock(s.spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
 }
 
 BOOST_AUTO_TEST_CASE(qabi_spend_happy_path_sanity)
@@ -14345,9 +14390,11 @@ BOOST_AUTO_TEST_CASE(qabi_prime_end_to_end_happy_path)
     PrecomputedTransactionData txdata;
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(prime_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(prime_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::SATISFIED));
 }
 
@@ -14440,9 +14487,11 @@ BOOST_AUTO_TEST_CASE(qabi_prime_rejects_shallow_depth)
     PrecomputedTransactionData txdata;
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(prime_block, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(prime_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     // Check 3 (monotonic depth) rejects: prime_depth must be > committed_depth.
     BOOST_CHECK_EQUAL(static_cast<int>(result), static_cast<int>(EvalResult::UNSATISFIED));
 }
@@ -14799,10 +14848,11 @@ static void RunMultiPartyBatch(size_t n_participants)
         CMutableTransaction mtx_copy = mtx;
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
         ScriptExecutionData execdata;
 
-        EvalResult result = EvalBlock(spend_block, checker,
-                                       SigVersion::TAPSCRIPT, execdata, ctx, 0);
+        EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
         BOOST_CHECK_MESSAGE(
             result == EvalResult::SATISFIED,
             "Participant " << p << " of " << n_participants
@@ -14919,10 +14969,11 @@ BOOST_AUTO_TEST_CASE(adversarial_alice_not_in_block_rejected)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(spend_block, checker,
-                                   SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     BOOST_CHECK_EQUAL(static_cast<int>(result),
                       static_cast<int>(EvalResult::UNSATISFIED));
 }
@@ -14992,10 +15043,11 @@ BOOST_AUTO_TEST_CASE(adversarial_swap_preimage_across_participants_rejected)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(spend_block, checker,
-                                   SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     // Check 3 (preimage against auth_tip) fails: Bob's preimage doesn't
     // hash to Alice's auth_tip.
     BOOST_CHECK_EQUAL(static_cast<int>(result),
@@ -15100,10 +15152,11 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
-    EvalResult result = EvalBlock(spend_block, checker,
-                                   SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     BOOST_CHECK_EQUAL(static_cast<int>(result),
                       static_cast<int>(EvalResult::UNSATISFIED));
 }
@@ -15463,10 +15516,11 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         CMutableTransaction mtx_copy = mtx;
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
         ScriptExecutionData execdata;
 
-        EvalResult result = EvalBlock(spend_block, checker,
-                                       SigVersion::TAPSCRIPT, execdata, ctx, 0);
+        EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
         BOOST_CHECK_EQUAL(static_cast<int>(result),
                           static_cast<int>(EvalResult::SATISFIED));
     }
@@ -15495,10 +15549,11 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         CMutableTransaction mtx_copy = mtx;
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
         ScriptExecutionData execdata;
 
-        EvalResult result = EvalBlock(spend_block, checker,
-                                       SigVersion::TAPSCRIPT, execdata, ctx, 0);
+        EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
         BOOST_CHECK_EQUAL(static_cast<int>(result),
                           static_cast<int>(EvalResult::SATISFIED));
     }
@@ -15573,11 +15628,12 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_rejects_poisoned_entry)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
     // Cache hit with false → UNSATISFIED even though the sig is valid.
-    EvalResult result = EvalBlock(spend_block, checker,
-                                   SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
     BOOST_CHECK_EQUAL(static_cast<int>(result),
                       static_cast<int>(EvalResult::UNSATISFIED));
 }
@@ -15650,6 +15706,8 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
     PrecomputedTransactionData txdata;
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
     ScriptExecutionData execdata;
 
     auto run_batch = [&](QABOSigCache* cache) {
@@ -15662,8 +15720,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
             ctx.block_height = 500;
             ctx.qabo_sig_cache = cache;
 
-            EvalResult result = EvalBlock(spend_blocks[p], checker,
-                                           SigVersion::TAPSCRIPT, execdata, ctx, 0);
+            EvalResult result = EvalBlock(spend_blocks[p], _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
             BOOST_REQUIRE(result == EvalResult::SATISFIED);
         }
     };
@@ -15774,6 +15831,8 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
         PrecomputedTransactionData txdata;
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
         ScriptExecutionData execdata;
 
         auto run_batch = [&](QABOSigCache* cache) {
@@ -15785,8 +15844,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
                 ctx.input_index = static_cast<uint32_t>(p);
                 ctx.block_height = 500;
                 ctx.qabo_sig_cache = cache;
-                EvalResult result = EvalBlock(spend_blocks[p], checker,
-                                               SigVersion::TAPSCRIPT, execdata, ctx, 0);
+                EvalResult result = EvalBlock(spend_blocks[p], _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
                 BOOST_REQUIRE(result == EvalResult::SATISFIED);
             }
         };
@@ -16690,10 +16748,11 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
         CMutableTransaction mtx_copy = mtx;
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::RungConditions _bridge_empty_conditions;
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
         ScriptExecutionData execdata;
 
-        EvalResult result = EvalBlock(spend_block, checker,
-                                       SigVersion::TAPSCRIPT, execdata, ctx, 0);
+        EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
         BOOST_CHECK_MESSAGE(
             result == EvalResult::SATISFIED,
             "Participant " << p << " of " << N

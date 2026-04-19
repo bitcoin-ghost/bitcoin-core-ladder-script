@@ -273,6 +273,14 @@ public:
         std::span<const uint8_t> pubkey,
         std::span<const uint8_t, 32> sighash) const = 0;
 
+    // Compute the Ladder sighash for the input this checker is bound to,
+    // so the library can call the sighash-based Check*Signature above.
+    // hash_type is the SIGHASH_* byte; 32 bytes are written to `out` on
+    // success. Returns false only when the wrapper lacks precomputed tx
+    // data (library fuzzer / test harness without a backing tx). Core's
+    // consensus adapter always succeeds.
+    virtual bool ComputeSighash(uint8_t hash_type, uint8_t out[32]) const = 0;
+
     // Locktime / sequence checks. These read state the library doesn't have
     // (current block height / MTP vs the tx's nLockTime). Host-provided.
     virtual bool CheckLockTime(uint32_t lock_time) const = 0;

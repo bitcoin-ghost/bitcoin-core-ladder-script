@@ -25,6 +25,7 @@
 // deps stay limited to crypto / util / secp256k1 / oqs).
 
 #include <primitives/transaction.h>
+#include <pubkey.h>
 #include <rung/api.h>
 #include <rung/conditions.h>
 #include <rung/evaluator.h>
@@ -33,6 +34,7 @@
 #include <rung/sighash.h>
 #include <script/interpreter.h>
 #include <script/script.h>
+#include <script/script_error.h>
 #include <uint256.h>
 
 #include <cstdint>
@@ -239,6 +241,87 @@ struct LadderPrecomputedBuilder {
             view.spent_output_count = spent_output_views.size();
         }
     }
+};
+
+// --- Signature-checker adapter (BaseSignatureChecker -> LadderSigChecker) -----
+//
+// Implements the library-side `rung::api::LadderSigChecker` interface on top
+// of Core's `BaseSignatureChecker`. Bound to a single (tx, nIn, conditions)
+// tuple — rebuild per input. Signature verification goes directly through
+// `XOnlyPubKey::VerifySchnorr` / `CPubKey::Verify`, so the wrapped
+// `BaseSignatureChecker` is only needed for `CheckLockTime` / `CheckSequence`
+// (which read state the library doesn't have: current block height / MTP).
+class CoreLadderSigChecker final : public rung::api::LadderSigChecker {
+public:
+    template <class T>
+    CoreLadderSigChecker(const BaseSignatureChecker& base,
+                         const PrecomputedTransactionData& txdata,
+                         const T& tx,
+                         unsigned int nIn,
+                         const rung::RungConditions& conditions)
+        : m_base(base),
+          m_tvb(tx),
+          m_pcb(txdata),
+          m_conditions(conditions),
+          m_nIn(nIn) {}
+
+    bool CheckECDSASignature(std::span<const uint8_t> sig,
+                             std::span<const uint8_t> pubkey,
+                             std::span<const uint8_t, 32> sighash) const override
+    {
+        if (sig.empty() || pubkey.empty()) return false;
+        CPubKey pk{pubkey.begin(), pubkey.end()};
+        if (!pk.IsValid()) return false;
+        uint256 hash;
+        std::memcpy(hash.data(), sighash.data(), 32);
+        std::vector<unsigned char> sig_vec(sig.begin(), sig.end());
+        // ECDSA sigs carry a trailing 1-byte sighash marker; strip it.
+        if (!sig_vec.empty()) sig_vec.pop_back();
+        return pk.Verify(hash, sig_vec);
+    }
+
+    bool CheckSchnorrSignature(std::span<const uint8_t> sig,
+                               std::span<const uint8_t> pubkey,
+                               std::span<const uint8_t, 32> sighash) const override
+    {
+        if (pubkey.size() != 32) return false;
+        if (sig.size() != 64 && sig.size() != 65) return false;
+        XOnlyPubKey pk{std::span<const unsigned char>{pubkey.data(), pubkey.size()}};
+        uint256 hash;
+        std::memcpy(hash.data(), sighash.data(), 32);
+        std::span<const unsigned char> sig_span{sig.data(), 64};
+        return pk.VerifySchnorr(hash, sig_span);
+    }
+
+    bool ComputeSighash(uint8_t hash_type, uint8_t out[32]) const override
+    {
+        uint256 hash;
+        if (!rung::api::SignatureHashLadder(m_pcb.view, m_tvb.view, m_nIn,
+                                            hash_type, m_conditions, hash)) {
+            return false;
+        }
+        std::memcpy(out, hash.data(), 32);
+        return true;
+    }
+
+    bool CheckLockTime(uint32_t lock_time) const override
+    {
+        CScriptNum n(static_cast<int64_t>(lock_time));
+        return m_base.CheckLockTime(n);
+    }
+
+    bool CheckSequence(uint32_t sequence) const override
+    {
+        CScriptNum n(static_cast<int64_t>(sequence));
+        return m_base.CheckSequence(n);
+    }
+
+private:
+    const BaseSignatureChecker& m_base;
+    LadderTxViewBuilder m_tvb;
+    LadderPrecomputedBuilder m_pcb;
+    const rung::RungConditions& m_conditions;
+    unsigned int m_nIn;
 };
 
 // --- Sighash shims (CTransaction / CMutableTransaction + PrecomputedTransactionData) -----
