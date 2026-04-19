@@ -69,7 +69,8 @@ html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
 .hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 32px; text-align: center; }
 .hero-title { font-size: 72px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); margin-bottom: 24px; line-height: 1.05; }
 .hero-title .accent { color: var(--accent); }
-.hero-lede { font-size: 19px; color: var(--text-body); max-width: 720px; margin: 0 auto 20px; line-height: 1.6; }
+.hero-lede { font-size: 20px; color: var(--text-body); max-width: 720px; margin: 0 auto 16px; line-height: 1.6; }
+.hero-stat { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: var(--text-dim); max-width: 720px; margin: 0 auto 32px; }
 .hero-call { font-size: 16px; color: var(--text-dim); max-width: 680px; margin: 0 auto; line-height: 1.7; }
 .hero-call a { font-weight: 500; }
 
@@ -120,7 +121,8 @@ html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
 
 <main class="hero">
   <h1 class="hero-title">Ladder Script</h1>
-  <p class="hero-lede">714 LOC touched in Bitcoin Core — 18,755 LOC in a dedicated Ladder library.</p>
+  <p class="hero-lede">A proposal for a new transaction type: v4 RUNG_TX.</p>
+  <p class="hero-stat">714 LOC in Bitcoin Core · 18,755 LOC in a dedicated library.</p>
   <p class="hero-call">Open for <a href="docs/">review</a>. <a href="explorer.html">Live on signet</a>.</p>
 </main>
 
