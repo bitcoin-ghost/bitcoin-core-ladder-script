@@ -153,6 +153,14 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
     int64_t numerator = *numerator_opt;
     int64_t denominator = *denominator_opt;
     if (numerator < 0 || denominator <= 0) return EvalResult::ERROR;
+    // Reject numerator / denominator outside uint32. The cross-division below
+    // relies on `(a % n) * d` staying inside int64; that holds only when n
+    // and d each fit in 32 bits. Without this guard an 8-byte NUMERIC with
+    // a large value triggers signed-overflow UB and a consensus split between
+    // platforms that wrap differently.
+    if (numerator > 0xFFFFFFFFLL || denominator > 0xFFFFFFFFLL) {
+        return EvalResult::ERROR;
+    }
 
     // Compare output_amount * denominator >= input_amount * numerator without overflow.
     // Both sides can exceed int64_t range (amounts up to ~2.1e15, num/denom up to ~2^32).
