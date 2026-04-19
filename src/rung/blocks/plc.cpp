@@ -244,6 +244,10 @@ EvalResult EvalCompareBlock(const RungBlock& block, const RungEvalContext& ctx)
     auto op_opt = ReadNumeric(*numerics[0]);
     auto value_b_opt = ReadNumeric(*numerics[1]);
     if (!op_opt || !value_b_opt) return EvalResult::ERROR;
+    // Op codes are 0x01-0x07. Reject anything outside that range so a
+    // malformed NUMERIC like 0x101 can't alias down to 0x01 via uint8
+    // truncation.
+    if (*op_opt < 0x01 || *op_opt > 0x07) return EvalResult::ERROR;
     uint8_t op = static_cast<uint8_t>(*op_opt);
     int64_t value_b = *value_b_opt;
     if (value_b < 0) return EvalResult::ERROR;
