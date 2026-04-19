@@ -1,6 +1,6 @@
 # Ladder Script Soft Fork Guide
 
-How Ladder Script activates as a soft fork on Bitcoin. All 62 block types activate
+How Ladder Script activates as a soft fork on Bitcoin. All 64 block types activate
 together in a single deployment. Transactions use `RUNG_TX_VERSION = 4`.
 
 ## Phased Approach
@@ -13,7 +13,7 @@ Live signet at `85.9.213.194` with all 62 active block types verified end-to-end
 Engine, descriptor notation, and RPC tooling operational. External review and testing
 invited. BIP-XXXX submitted for community feedback.
 
-**Status:** All 62 block types have fund+spend proof with recorded transaction IDs.
+**Status:** All 64 block types have fund+spend proof with recorded transaction IDs.
 The signet mines every 10 minutes with real wall-clock timestamps.
 
 ### Phase 2: External Review
@@ -177,7 +177,7 @@ Valid hash types: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}`.
 
 ## Block Types
 
-All 62 block types activate simultaneously:
+All 64 block types activate simultaneously:
 
 | Family | Types | Count |
 |--------|-------|-------|
@@ -213,8 +213,8 @@ The soft fork limits user-chosen arbitrary data to 112 bytes per transaction. Th
 
 | Suite | Count | Purpose |
 |-------|-------|---------|
-| Unit tests | 542 | All block evaluators, serialization, Merkle tree, sighash, anti-spam |
-| Functional tests | 7 | End-to-end regtest: create, sign, broadcast, verify v4 transactions |
+| Unit tests | 613 | All block evaluators, serialization, Merkle tree, sighash, anti-spam (rung + qabi + tx_mlsc boost suites combined) |
+| Functional tests | 37 | End-to-end regtest: create, sign, broadcast, verify v4 transactions (feature_rung_tx.py, feature_rung_p2p.py, feature_rung_fuzz.py, feature_qabi.py) |
 | Signet verification | 62/62 | All active block types: fund + mine + spend on live signet with recorded txids |
 | Documentation accuracy | 43 | types.h consistency, engine templates, block reference pages, markdown docs |
 | Proxy unit tests | 15 | BIP32 derivation, base58, RIPEMD-160, WIF encoding |

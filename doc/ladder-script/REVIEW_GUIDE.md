@@ -1,7 +1,7 @@
 # Ladder Script Review Guide
 
 This guide walks code reviewers through the Ladder Script implementation. The system
-comprises 62 block types across 10 families, implemented in
+comprises 64 block types across 10 families, implemented in
 22 source files under `src/rung/`.
 
 ## File-by-File Walkthrough
@@ -10,7 +10,7 @@ comprises 62 block types across 10 families, implemented in
 The largest header. Defines all block types (`RungBlockType` enum), all data types
 (`RungDataType` enum), structural types (`RungCoil`, `RungField`, `RungBlock`, `Rung`,
 `Relay`, `LadderWitness`, `WitnessReference`), and metadata functions:
-- `IsKnownBlockType()` — allowlist of 62 types (codes 0x0201/0x0202 reserved, not known)
+- `IsKnownBlockType()` — allowlist of 64 types (codes 0x0201/0x0202 reserved, not known)
 - `IsInvertibleBlockType()` — explicit allowlist; key-consuming blocks excluded
 - `IsKeyConsumingBlockType()` — blocks whose pubkeys fold into Merkle leaves
 - `PubkeyCountForBlock()` — fixed or variable pubkey count per block type
@@ -31,12 +31,11 @@ Core evaluation engine. Key review points:
 - `EvalLadder()`: OR logic; evaluates relays first via `EvalRelays()`, then tries rungs; `satisfied_rung_out` reports which rung passed
 - `VerifyRungTx()`: top-level entry point. Per-tx (first input only): `ValidateRungOutputs()`, creation proof (3+ outputs), PREIMAGE count. Per-input: key-path (1 elem) or script-path (2-3 elem), Merkle proof, merge, evaluate.
 - `ValidateRungOutputs()`: consensus rule — every output must be MLSC (`0xDF`), max 1 DATA_RETURN, dust threshold (546 sats). Runs first, not last.
-- `BatchVerifier`: infrastructure for deferred Schnorr batch verification. Half-aggregated signatures via `AGGREGATE` attestation mode.
-- `LadderSignatureChecker`: wraps `BaseSignatureChecker`; dispatches to `SignatureHashLadder` for `SigVersion::LADDER`
+- `api::LadderSigChecker` (in `rung/api.h`): adapter interface for Ladder-native sig verification. Core-side impl is `CoreLadderSigChecker` in `rung_shims.h`. Library computes the Ladder sighash via `api::SignatureHashLadder`; the checker no longer carries conditions.
 - `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes ERROR
 
 **What to look for:** Fail-closed behaviour for unknown types. Correct relay evaluation
-order (index 0 first, forward-only). Batch verifier fallback on failure.
+order (index 0 first, forward-only).
 
 ### sighash.h / sighash.cpp
 Sighash computation. Tagged hash `"LadderSighash"`. Commits to epoch, hash_type, tx data,

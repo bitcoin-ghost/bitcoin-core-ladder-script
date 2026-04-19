@@ -354,5 +354,5 @@ The sighash is deterministic over all tx fields **except** `tx.aggregated_sig`. 
   - RPC: `src/rung/rpc.cpp` (5 QABI commands + signrungtx/createtxmlsc extensions)
   - Descriptors: `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens)
 - **Tests**:
-  - C++: `src/test/rung_tests.cpp` — 70 test cases in the `qabi_tests` suite covering serialisation, root determinism, sighash, full FALCON end-to-end, per-check failure modes, RBD policy, multi-party scale (up to 1000 participants), and adversarial edge cases
-  - Python: `test/functional/feature_qabi.py` — 17 test cases covering the full RPC surface on regtest
+  - C++: `src/test/rung_tests.cpp` — 86 test cases in the `qabi_tests` suite covering serialisation, root determinism, sighash, full FALCON end-to-end, per-check failure modes, RBD policy, multi-party scale (up to 1000 participants), and adversarial edge cases
+  - Python: `test/functional/feature_qabi.py` — 24 test cases covering the full RPC surface on regtest

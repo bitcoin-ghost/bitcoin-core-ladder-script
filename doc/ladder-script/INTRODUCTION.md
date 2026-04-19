@@ -1,6 +1,6 @@
 # Ladder Script
 
-Ladder Script replaces Bitcoin Script with 62 typed function blocks. Instead of
+Ladder Script replaces Bitcoin Script with 64 typed function blocks. Instead of
 an untyped stack machine, every spending condition is a named block with declared
 fields. Blocks are grouped into rungs (AND — all must pass) and ladders (OR —
 first satisfied rung wins). Every byte in a transaction belongs to one of 11 typed

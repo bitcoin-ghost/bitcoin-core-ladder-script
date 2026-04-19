@@ -39,13 +39,13 @@ Ladder:
 2. Finds PUBKEY field (32-byte x-only pubkey from witness).
 3. Finds SIGNATURE field (64-byte Schnorr sig from witness).
 4. Finds SCHEME field (0x01 = SCHNORR).
-5. Calls `checker.CheckSchnorrSignature(sig, pubkey, SigVersion::LADDER, ...)`.
-6. Internally, `LadderSignatureChecker` computes `SignatureHashLadder` with
+5. Library computes the Ladder sighash via `api::SignatureHashLadder` using
    `TaggedHash("LadderSighash")`, committing to epoch, hash_type, tx version,
    locktime, prevouts, amounts, sequences, outputs, spend_type, input index,
    and conditions hash.
-7. Verifies the 64-byte Schnorr signature against the x-only pubkey and sighash.
-8. Returns SATISFIED on valid signature.
+6. Calls `sig_checker.CheckSchnorrSignature(sig, pubkey, sighash)` on the
+   supplied `api::LadderSigChecker` adapter.
+7. Returns SATISFIED on valid signature.
 
 ### Wire format size (TX_MLSC)
 
@@ -525,14 +525,14 @@ Ladder:
 
 1. `EvalSigBlock` is called.
 2. SIGNATURE field is 65 bytes: 64-byte sig + 1-byte sighash type.
-3. `LadderSignatureChecker::CheckSchnorrSignature` extracts hashtype = `0x41`
-   (ANYPREVOUT | ALL).
-4. `SignatureHashLadder` is called with `hash_type = 0x41`:
+3. The library extracts the trailing byte as hashtype = `0x41`
+   (ANYPREVOUT | ALL) and computes the sighash via `api::SignatureHashLadder`:
    - `anyprevout = true` (bit 0x40 set).
    - Skips `m_prevouts_single_hash` in the sighash computation.
    - Still commits to amounts, sequences, outputs, and conditions.
-5. The signature is verified against the pubkey using the APO sighash.
-6. Returns SATISFIED.
+4. `sig_checker.CheckSchnorrSignature(sig, pubkey, sighash)` on the supplied
+   `api::LadderSigChecker` adapter verifies the signature against the APO sighash.
+5. Returns SATISFIED.
 
 ### Why ANYPREVOUT matters
 
@@ -574,11 +574,10 @@ Ladder:
 2. Finds SCHEME field: `0x10` = FALCON512.
 3. `IsPQScheme(FALCON512)` returns true.
 4. Routes to `EvalPQSig`:
-   a. Casts checker to `LadderSignatureChecker`.
-   b. Calls `ComputeSighash(SIGHASH_DEFAULT, sighash)` to get the 32-byte
-      ladder sighash.
-   c. Calls `VerifyPQSignature(FALCON512, sig, sighash, pubkey)`.
-   d. liboqs FALCON-512 verifier checks the signature.
+   a. Computes the 32-byte ladder sighash via `api::SignatureHashLadder`
+      (always `SIGHASH_DEFAULT` for PQ schemes).
+   b. Calls `VerifyPQSignature(FALCON512, sig, sighash, pubkey)`.
+   c. liboqs FALCON-512 verifier checks the signature.
 5. Returns SATISFIED on valid PQ signature.
 
 ### Field sizes

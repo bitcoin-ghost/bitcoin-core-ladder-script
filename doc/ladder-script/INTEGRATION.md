@@ -172,7 +172,7 @@ rung = block | and(block, ...)      single block or AND composition
 
 ### Block Syntax
 
-All 62 block types are supported in descriptors. Common examples:
+All 64 block types are supported in descriptors. Common examples:
 
 | Block | Syntax |
 |-------|--------|

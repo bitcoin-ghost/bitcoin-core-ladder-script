@@ -752,7 +752,8 @@ All block type enum values. Unrecognised blocks return `UNSATISFIED` — forward
 | `0x0806` | `ACCUMULATOR` | Governance | Merkle set membership proof. Max 10 HASH256 fields (root + 8 proof nodes + leaf). |
 | `0x0807` | `OUTPUT_CHECK` | Governance | Per-output value and script constraint. Non-invertible (HASH256 field). Fields: NUMERIC(output_index) + NUMERIC(min_sats) + NUMERIC(max_sats) + HASH256(script_hash). Script_hash all-zeros = skip script check. |
 
-**Total: 62 block types across 10 families.**
+**Total: 64 block types across 10 families (62 listed here, plus `QABI_PRIME` and
+`QABI_SPEND` documented in [QABIO.md](QABIO.md)).**
 
 ---
 

@@ -159,7 +159,7 @@ Despite the v2b elimination looking attractive on the numbers,
    rule. This is a real audit cost, not a drive-by edit.
 
 3. **v1 is proven and shipped.** Full mined lifecycle works on
-   regtest and live signet. 77 qabi_tests + 513 rung_tests pass.
+   regtest and live signet. 86 qabi_tests + 517 rung_tests + 10 tx_mlsc_tests pass.
    QABI_PRIME covenant covenant works across both a pure QABIO
    tree and a 3-rung `[SIG_escape, QABI_PRIME, QABI_SPEND]` tree
    with real Schnorr escape keys. Adding v2 to the pre-launch

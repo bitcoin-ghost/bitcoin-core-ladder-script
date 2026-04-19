@@ -2,7 +2,7 @@
 
 Ladder Script (TX_MLSC / RUNG_TX v4) is a typed transaction condition system for Bitcoin,
 implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack machine with
-62 declarative function blocks, 11 typed fields, and Merkelised conditions (MLSC).
+64 declarative function blocks, 11 typed fields, and Merkelised conditions (MLSC).
 
 ## Documentation Index
 
@@ -10,7 +10,7 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 
 | Document | Description |
 |----------|-------------|
-| [BIP-XXXX.md](BIP-XXXX.md) | Full BIP specification (62 block types, wire format, sighash, evaluation) |
+| [BIP-XXXX.md](BIP-XXXX.md) | Full BIP specification (64 block types, wire format, sighash, evaluation) |
 | [TX_MLSC_SPEC.md](TX_MLSC_SPEC.md) | TX_MLSC transaction format specification |
 | [MERKLE-UTXO-SPEC.md](MERKLE-UTXO-SPEC.md) | Merkle tree, UTXO dedup, proof verification |
 
@@ -19,11 +19,11 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 | Document | Description |
 |----------|-------------|
 | [INTRODUCTION.md](INTRODUCTION.md) | What Ladder Script is, key properties, and design rationale |
-| [BLOCK_LIBRARY.md](BLOCK_LIBRARY.md) | Complete table of all 62 block types with fields and properties |
+| [BLOCK_LIBRARY.md](BLOCK_LIBRARY.md) | Complete table of all 64 block types with fields and properties |
 | [BLOCK_LIBRARY_IMPL.md](BLOCK_LIBRARY_IMPL.md) | Detailed block reference with evaluation rules |
 | [EXAMPLES.md](EXAMPLES.md) | 12 worked examples from simple spends to recursive covenants |
 | [GLOSSARY.md](GLOSSARY.md) | Alphabetical glossary of every term and block type |
-| [FAQ.md](FAQ.md) | 24 detailed Q&A covering all aspects of the system |
+| [FAQ.md](FAQ.md) | 23 detailed Q&A covering all aspects of the system |
 
 ### Integration & Review
 
@@ -32,7 +32,7 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 | [INTEGRATION.md](INTEGRATION.md) | Wallet integration, RPC commands, descriptor language |
 | [REVIEW_GUIDE.md](REVIEW_GUIDE.md) | Code reviewer's walkthrough with file-by-file guide |
 | [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Annotated diff explaining every change to Bitcoin Core v30.0 |
-| [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) | Implementation details and spec deviations |
+| [MEASUREMENTS.md](MEASUREMENTS.md) | Empirical tx / vsize / UTXO measurements vs P2WPKH and P2TR |
 
 ### Deployment
 
@@ -45,29 +45,30 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 
 ### Web Pages
 
-Interactive HTML pages in [`web/`](web/):
-- [`web/ladder-script.html`](web/ladder-script.html) — Overview and philosophy
-- [`web/rung-tx-anatomy.html`](web/rung-tx-anatomy.html) — Transaction structure byte-by-byte
-- [`web/blocks/`](web/blocks/) — 63 block reference pages (one per block type + index)
-- [`web/txs/`](web/txs/) — 41 transaction example pages
-- [`web/descriptor-notation.html`](web/descriptor-notation.html) — Descriptor language reference
-- [`web/comparison.html`](web/comparison.html) — Bitcoin Script vs Ladder Script
-- [`web/patch-overview.html`](web/patch-overview.html) — Patch impact analysis
-- [`web/get-started.html`](web/get-started.html) — Getting started guide
-- [`web/ladder-data-flow.html`](web/ladder-data-flow.html) — Data flow and anti-spam visualization
-- [`web/mainnet-checklist.html`](web/mainnet-checklist.html) — Mainnet readiness tracker
-- [`web/explorer.html`](web/explorer.html) — Live signet block explorer
-- [`web/dashboard.html`](web/dashboard.html) — Telemetry dashboard
+Interactive HTML pages in [`tools/`](../../tools/) (served at `ladder-script.org` by
+`deploy/deploy-ladder-script.sh`):
+- [`tools/ladder-script.html`](../../tools/ladder-script.html) — Overview and philosophy
+- [`tools/rung-tx-anatomy.html`](../../tools/rung-tx-anatomy.html) — Transaction structure byte-by-byte
+- [`tools/block-docs/`](../../tools/block-docs/) — 65 block reference pages (one per block type + index)
+- [`tools/docs/txs/`](../../tools/docs/txs/) — 40 transaction example pages
+- [`tools/descriptor-notation.html`](../../tools/descriptor-notation.html) — Descriptor language reference
+- [`tools/comparison.html`](../../tools/comparison.html) — Bitcoin Script vs Ladder Script
+- [`tools/patch-overview.html`](../../tools/patch-overview.html) — Patch impact analysis
+- [`tools/get-started.html`](../../tools/get-started.html) — Getting started guide
+- [`tools/ladder-data-flow.html`](../../tools/ladder-data-flow.html) — Data flow and anti-spam visualization
+- [`tools/mainnet-checklist.html`](../../tools/mainnet-checklist.html) — Mainnet readiness tracker
+- [`tools/explorer.html`](../../tools/explorer.html) — Live signet block explorer
+- [`tools/qabio-playground.html`](../../tools/qabio-playground.html) — QABIO sandbox
 
 ## Source Files
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/rung/types.h` | 1,428 | 62 block types, 11 data types, implicit layouts, micro-header table |
-| `src/rung/evaluator.cpp` | 4,217 | All 62 block evaluators, EvalBlock dispatch, VerifyRungTx |
-| `src/rung/rpc.cpp` | 3,370 | 15 RPC commands |
-| `src/rung/descriptor.cpp` | 1,711 | Descriptor language parser and formatter |
-| `src/rung/conditions.cpp` | 1,045 | MLSC proof verification, Merkle tree, creation proofs |
+| `src/rung/types.h` | 1,496 | 64 block types, 11 data types, implicit layouts, micro-header table |
+| `src/rung/evaluator.cpp` | 1,244 | Block dispatch + VerifyRungTx (per-block evaluators moved to `src/rung/blocks/*.cpp`) |
+| `src/rung/rpc.cpp` | 4,283 | JSON-RPC command handlers |
+| `src/rung/descriptor.cpp` | 1,841 | Descriptor language parser and formatter |
+| `src/rung/conditions.cpp` | 1,027 | MLSC proof verification, Merkle tree, creation proofs |
 | `src/rung/serialize.cpp` | 984 | Wire format, micro-headers, anti-spam validation |
 | `src/rung/sighash.cpp` | 234 | LadderSighash with ANYPREVOUT/ANYPREVOUTANYSCRIPT |
 | `src/rung/adaptor.cpp` | 187 | Adaptor signature utilities |
@@ -80,8 +81,8 @@ Interactive HTML pages in [`web/`](web/):
 
 | Suite | Count |
 |-------|-------|
-| Unit tests (`rung_tests.cpp`) | 528 |
-| Functional tests | 60 |
+| Unit tests (`rung_tests` + `qabi_tests` + `tx_mlsc_tests` boost suites in `rung_tests.cpp`) | 613 |
+| Functional tests (`feature_rung_tx`, `feature_rung_p2p`, `feature_rung_fuzz`, `feature_qabi`) | 37 |
 | TLA+ formal specs (`spec/`) | 21 specs |
 
 ## Repository

@@ -38,7 +38,6 @@ The transaction version for Ladder Script transactions is **4** (`RUNG_TX_VERSIO
 | Post-quantum | Not supported | FALCON-512, FALCON-1024, Dilithium3, SPHINCS+ |
 | Wire efficiency | Variable opcode sizes | Micro-headers (1 byte) + implicit field layouts |
 | Covenants | Limited (OP_CTV proposal) | Native CTV, recursion, VAULT_LOCK, AMOUNT_LOCK, OUTPUT_CHECK |
-| Batch verification | Not supported | BatchVerifier collects Schnorr sigs for batch verify |
 | Anti-spam | Script size limits only | Typed fields, max sizes, PREIMAGE cap, data-embedding rejection |
 | Inversion | No equivalent | Selective inversion (per-block negation, restricted to safe types) |
 | State machines | Not possible | PLC family: latches, counters, timers, sequencers, rate limiters |
@@ -285,7 +284,7 @@ for each rung:
 ```
 
 **Diff witness mode**: When `n_rungs == 0`, the witness is a reference to
-another input's witness with field-level diffs (see Q19).
+another input's witness with field-level diffs (see Q18).
 
 ---
 
@@ -476,9 +475,10 @@ Ladder Script supports four post-quantum signature schemes via liboqs:
 PQ schemes are identified by `IsPQScheme()`: any scheme with value >= `0x10`.
 
 PQ signature verification is handled by `VerifyPQSignature()` in `pq_verify.h`.
-The ladder sighash is computed first via `LadderSignatureChecker::ComputeSighash`,
-then passed as the message to the PQ verifier. If PQ support is not compiled in
-(`HasPQSupport()` returns false), verification returns ERROR.
+The ladder sighash is computed first via `api::SignatureHashLadder` (see
+`src/rung/sighash.h`), then passed as the message to the PQ verifier. If PQ
+support is not compiled in (`HasPQSupport()` returns false), verification
+returns ERROR.
 
 PQ schemes work with: SIG, MULTISIG, TIMELOCKED_SIG, CLTV_SIG,
 TIMELOCKED_MULTISIG, and KEY_REF_SIG blocks. The SCHEME field in conditions
@@ -556,42 +556,7 @@ alias map to produce readable output.
 
 ---
 
-## Q17: What is batch Schnorr verification?
-
-`BatchVerifier` is a structure that collects `(sighash, pubkey, signature)`
-tuples during evaluation and verifies them all in a single batch after all
-inputs pass.
-
-```cpp
-struct BatchVerifier {
-    struct Entry {
-        uint256 sighash;
-        XOnlyPubKey pubkey;
-        std::vector<unsigned char> sig;
-    };
-    std::vector<Entry> entries;
-    bool active{false};
-};
-```
-
-When `batch->active` is true in `LadderSignatureChecker::CheckSchnorrSignature`,
-the signature is not verified immediately. Instead, it is added to the batch via
-`batch->Add()` and the function returns true (deferred).
-
-After all inputs are evaluated, `batch->Verify()` verifies all entries. The
-current implementation falls back to individual verification (the secp256k1
-batch API is not yet available), but the interface is ready for true batch
-verification.
-
-On batch failure, `batch->FindFailure()` identifies the first invalid entry by
-testing each individually, enabling precise error reporting.
-
-Batch verification applies only to BIP-340 Schnorr signatures. ECDSA and PQ
-signatures are always verified immediately.
-
----
-
-## Q18: How does COSIGN work?
+## Q17: How does COSIGN work?
 
 `COSIGN` (`0x0681`) is a cross-input spending constraint in the PLC family. It
 requires that another input in the same transaction is spending a UTXO whose
@@ -615,7 +580,7 @@ conditions layout of `[HASH256(32)]` and micro-header slot `0x26`.
 
 ---
 
-## Q19: What is a witness reference (diff witness)?
+## Q18: What is a witness reference (diff witness)?
 
 A **witness reference** (also called a **diff witness**) allows an input to
 inherit its witness structure from another input in the same transaction,
@@ -654,7 +619,7 @@ different signatures.
 
 ---
 
-## Q20: How does CTV work in Ladder Script?
+## Q19: How does CTV work in Ladder Script?
 
 CTV (CheckTemplateVerify, `0x0301`) implements BIP-119 template verification as
 a native block type.
@@ -686,7 +651,7 @@ CTV has an implicit conditions layout of `[HASH256(32)]` (1 byte micro-header +
 
 ---
 
-## Q21: What legacy Bitcoin types are supported?
+## Q20: What legacy Bitcoin types are supported?
 
 The Legacy family (`0x0900`-`0x09FF`) wraps 7 traditional Bitcoin transaction
 types as Ladder Script block types:
@@ -708,7 +673,7 @@ then evaluated with remaining outer witness fields. Maximum recursion depth is 2
 
 ---
 
-## Q22: How is DATA_RETURN handled?
+## Q21: How is DATA_RETURN handled?
 
 `DATA_RETURN` (`0x0507`) replaces `OP_RETURN` for data commitments. It is an
 **unspendable** block type: if evaluation reaches a DATA_RETURN block, it
@@ -729,7 +694,7 @@ transaction. The maximum data payload is 80 bytes.
 
 ---
 
-## Q23: What are the consensus limits?
+## Q22: What are the consensus limits?
 
 | Limit | Value | Source |
 |-------|-------|--------|
@@ -763,7 +728,7 @@ transaction. The maximum data payload is 80 bytes.
 
 ---
 
-## Q24: How does the block descriptor table work?
+## Q23: How does the block descriptor table work?
 
 The **block descriptor table** is the combination of the micro-header lookup
 table and the implicit field layouts that together define the complete wire

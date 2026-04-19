@@ -1,7 +1,9 @@
 # Block Library
 
-Ladder Script defines 62 block types across 10 families. Each block type has a
-uint16_t type code encoded little-endian on the wire.
+Ladder Script defines 64 block types across 10 families (62 listed here, plus
+`QABI_PRIME` and `QABI_SPEND` in the QABIO family documented in
+[QABIO.md](QABIO.md)). Each block type has a uint16_t type code encoded
+little-endian on the wire.
 
 ## Legend
 

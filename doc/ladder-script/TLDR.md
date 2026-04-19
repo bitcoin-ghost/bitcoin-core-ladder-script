@@ -48,9 +48,9 @@ is structurally impossible. Conditions contain zero user-chosen bytes.
 | **Descriptor notation** | Human-readable: `ladder(or(sig(@alice), and(csv(1000), sig(@bob))))` |
 | **15 RPCs** | Full programmatic access — create, sign, broadcast, parse, decode, validate |
 | **Block explorer** | Live signet explorer with mempool viewer |
-| **Block reference** | Documentation for all 62 block types |
+| **Block reference** | Documentation for all 64 block types |
 
-## What the 62 Blocks Cover
+## What the 64 Blocks Cover
 
 Signatures. Timelocks. Hash locks. Covenants. Recursive covenants. Vaults. Rate limiters.
 Counters. Latches. Timers. Sequencers. Multi-party signing. Adaptor signatures. Atomic

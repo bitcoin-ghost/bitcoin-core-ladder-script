@@ -668,7 +668,7 @@ All public APIs are in the `rung::` namespace.
 
 #### Purpose and scope
 
-Defines the complete type system for Ladder Script: 62 block types across 10 families,
+Defines the complete type system for Ladder Script: 64 block types across 10 families,
 11 data types, and all structural types (RungBlock, RungField, Rung, Relay, RungCoil,
 LadderWitness).
 
@@ -680,7 +680,7 @@ etc.) and the low byte indicating the specific block within that family. This al
 efficient range checks for family membership and reserves space for future block types
 within each family.
 
-**Alternative considered**: Use uint8_t (256 max types). Rejected because 62 types are
+**Alternative considered**: Use uint8_t (256 max types). Rejected because 64 types are
 already defined and future expansion (especially in the PLC family with 14 types) would
 quickly exhaust the space.
 
@@ -724,8 +724,8 @@ The evaluator is the consensus engine. It implements:
 - `EvalLadder()`: evaluates all rungs (OR logic -- first satisfied rung wins)
 - `EvalRung()`: evaluates all blocks in a rung (AND logic -- all must pass)
 - `EvalBlock()`: dispatches to the appropriate block-type evaluator
-- 62 individual block evaluators (EvalSigBlock, EvalMultisigBlock, etc.)
-- `BatchVerifier`: collects Schnorr signatures for batch verification
+- 63 individual block evaluators across `src/rung/blocks/*.cpp` (each block
+  family is a self-registering translation unit; see `block_registry.cpp`)
 
 #### Key design decisions
 
@@ -734,23 +734,14 @@ are evaluated in order. The first satisfied rung wins. This is deterministic and
 reproducible across all nodes. There is no "score" or "best match" -- the first passing
 rung is canonical.
 
-**Batch signature verification** (`evaluator.h:33-61`): All Schnorr signatures encountered
-during evaluation are collected in a `BatchVerifier`. After all inputs pass individual
-evaluation, signatures are verified in a single batch. This is faster than individual
-verification for transactions with many signatures. On batch failure, `FindFailure()`
-identifies the first invalid entry for error reporting.
+**Adapter sig checker** (`src/rung/api.h`): Ladder-native blocks take an
+`api::LadderSigChecker` abstract interface. The Core-side implementation
+`CoreLadderSigChecker` in `src/rung_shims.h` wraps a standard
+`BaseSignatureChecker`. The library computes the Ladder sighash itself via
+`api::SignatureHashLadder` and passes it to the checker — the checker is
+stateless w.r.t. conditions, which keeps the library Core-type-free.
 
-**Half-aggregation support**: Entries with `aggregated=true` contain only the R point
-(32 bytes). The s value comes from the transaction-level `aggregated_sig` field. This
-enables cross-input signature aggregation: N signatures contribute N R-points (32 bytes
-each) but share a single s value (32 bytes), saving 32*(N-1) bytes.
-
-**LadderSignatureChecker** (`evaluator.h:66-100`): Wraps the existing `BaseSignatureChecker`
-and intercepts `CheckSchnorrSignature` calls. When `SigVersion::LADDER` is set, it computes
-`SignatureHashLadder` instead of `SignatureHashSchnorr`. This reuses all of Bitcoin Core's
-signature checking infrastructure while providing ladder-specific sighash computation.
-
-**RungEvalContext** (`evaluator.h:105-118`): Extended context for block types that need
+**RungEvalContext** (`evaluator.h`): Extended context for block types that need
 transaction data. Not all blocks need this (simple signature blocks don't), so it's passed
 separately to avoid bloating the common case. Contains:
 - Transaction and amount data for covenants (CTV, AMOUNT_LOCK)
@@ -1023,10 +1014,10 @@ exists for forward compatibility but is not activated.
 
 ---
 
-## Tests: src/test/rung_tests.cpp (12,755 lines, 542 test cases)
+## Tests: src/test/rung_tests.cpp (17,053 lines, 517 test cases in rung_tests; 86 in qabi_tests; 10 in tx_mlsc_tests)
 
-542 test cases covering:
-- All 62 block type evaluators individually
+Covers:
+- All 63 block type evaluators individually
 - Serialization roundtrips (witness + conditions, all implicit layouts)
 - Merkle tree construction, path generation, and verification
 - User-chosen data field restrictions (IsDataEmbeddingType, MAX_PREIMAGE_FIELDS)
@@ -1057,7 +1048,7 @@ exists for forward compatibility but is not activated.
    No existing Script opcodes are modified. No existing transaction versions are
    reinterpreted. The changes to existing Bitcoin Core files are purely additive.
 
-2. **No new opcodes, no stack machine**: 62 typed blocks replace opcodes entirely.
+2. **No new opcodes, no stack machine**: 64 typed blocks replace opcodes entirely.
    Evaluation is a bounded loop: for each rung, for each block, check typed fields.
    No stack manipulation, no `OP_IF` nesting, no `OP_CODESEPARATOR`. The absence of
    a stack eliminates entire classes of bugs (stack overflow, alt-stack confusion,

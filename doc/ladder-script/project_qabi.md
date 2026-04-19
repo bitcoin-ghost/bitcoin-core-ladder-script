@@ -8,7 +8,7 @@
 > **Related docs:**
 > - `bip-qabio.md` — BIP-format adaptation of this spec, ready to merge into the main Ladder Script BIP (`BIP-XXXX.md`) as a subsection.
 > - Reference implementation: `src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp` (EvalQABIPrimeBlock / EvalQABISpendBlock), `src/rung/policy.cpp` (RBD helpers), `src/validation.cpp` (RBD mempool integration), `src/rung/rpc.cpp` (5 QABI JSON-RPC commands), `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens).
-> - Tests: `src/test/rung_tests.cpp` (53 cases in `qabi_tests` suite), `test/functional/feature_qabi.py` (12 Python functional test cases).
+> - Tests: `src/test/rung_tests.cpp` (86 cases in `qabi_tests` suite), `test/functional/feature_qabi.py` (24 Python functional test cases).
 
 ---
 
@@ -664,7 +664,7 @@ Raise the `aggregated_sig` cap from 32 to exactly 666 (FALCON-512 sig size).
 
 1. **SIGHASH_QABO scope:** ~~open~~ **decided** (refined in Phase 18): **per-input witnesses ARE covered** as defence-in-depth against byte-level witness malleability. An attacker with the mempool-visible tx cannot modify LadderWitness framing, spend preimages, Merkle proofs, or extra stack padding without invalidating the coordinator's FALCON signature. SIGHASH_QABO covers: version, vin (prevouts + sequences), vout (values + scripts), conditions_root, qabi_block (length-prefixed), per-input scriptWitness stacks (count + length-prefixed elements), nLockTime. Excludes: aggregated_sig (chicken-and-egg), creation_proof. See `ComputeSighashQABO` in `src/rung/qabi.cpp`.
 
-2. **Covenant primitive:** does `RECURSE_MODIFIED` support mutating three fields (`committed_root`, `committed_depth`, `committed_expiry`) simultaneously while preserving everything else? Or do we need a `QABI_PRIME`-specific covenant path? Decision in Phase 5.
+2. **Covenant primitive:** ~~open~~ **decided**: `QABI_PRIME` carries its own covenant check (see `EvalQABIPrimeBlock` in `src/rung/blocks/qabi.cpp`, check 5 — rebuild with mutated QABI_SPEND state) rather than reusing `RECURSE_MODIFIED`. The QABI case needs to mutate three committed fields in one step while preserving everything else in the input tree, which `RECURSE_MODIFIED` doesn't express directly.
 
 3. **Priming tx fee source:** each participant pays their own priming tx fee. No shared fee accounting needed.
 

@@ -59,16 +59,11 @@ Sighash flag `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT = 0xC0`. When set, the sighash 
 both prevout and conditions commitments. Enables rebindable signatures across different
 scripts. Defined in `sighash.h`.
 
-### BatchVerifier
-Struct in `evaluator.h`. Collects (sighash, pubkey, signature) tuples during evaluation.
-After all inputs pass, `Verify()` checks them all in a single batch. On batch failure,
-`FindFailure()` identifies the first invalid entry by individual verification.
-
 ### BlockDescriptor
 Compile-time descriptor struct in `types.h`. Contains block type metadata: type code, name,
 known/invertible/key-consuming flags, pubkey count, pointers to conditions and witness
 implicit layouts, and a `conditions_only` flag. The `LookupBlockDescriptor()` function
-provides a runtime lookup table of all 62 block types.
+provides a runtime lookup table of all 64 block types.
 
 ### CLTV
 Block type 0x0103 (Timelock family). Absolute timelock checking nLockTime against a
@@ -246,11 +241,13 @@ auto-detects single-SIG ladders and tweaks automatically. Functions:
 `ComputeLadderTweakHash()`, `CheckLadderTweak()`, `CreateLadderTweak()` in `pubkey.cpp`.
 `SignSchnorrLadder()` in `key.cpp` signs with the tweaked keypair.
 
-### LadderSignatureChecker
-Class in `evaluator.h`. Wraps an existing `BaseSignatureChecker` and adds rung conditions
-context. When `CheckSchnorrSignature()` is called with `SigVersion::LADDER`, it computes
-`SignatureHashLadder` instead of `SignatureHashSchnorr`. Supports batch verification via
-an optional `m_batch` pointer to `BatchVerifier`.
+### LadderSigChecker
+Adapter interface `rung::api::LadderSigChecker` in `src/rung/api.h`. The library-side sig
+checker for Ladder-native blocks; callers implement the three methods (Schnorr check, ECDSA
+check, and sighash retrieval) to plug in their own verifier. Core ships `CoreLadderSigChecker`
+in `src/rung_shims.h` which delegates to a standard `BaseSignatureChecker`. The library computes
+the Ladder sighash itself via `api::SignatureHashLadder`; the checker no longer carries
+conditions state.
 
 ### LATCH_RESET
 Block type 0x0622 (PLC family). Latch reset (state deactivation). Key-consuming with

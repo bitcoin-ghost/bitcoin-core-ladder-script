@@ -13,9 +13,9 @@ Conditions are revealed only at spend time. Simple payment: 647 WU / 162 vB. Bat
 Public keys are folded into Merkle leaves via `merkle_pub_key`, and key-consuming blocks
 are never invertible, closing data-embedding vectors. The system supports post-quantum
 signatures (FALCON-512/1024, Dilithium3, SPHINCS+), ANYPREVOUT sighash flags for
-LN-Symmetry, batch Schnorr verification, relays for cross-rung composition, and recursive
-covenants. Transactions use `RUNG_TX_VERSION = 4`. Test coverage: 480 unit tests,
-60 functional tests, 10 TLA+ specs with 80+ checked properties (6.14M states verified, zero errors).
+LN-Symmetry, relays for cross-rung composition, and recursive covenants.
+Transactions use `RUNG_TX_VERSION = 4`. Test coverage: 613 unit tests, 37 functional
+tests, 10 TLA+ specs with 80+ checked properties (6.14M states verified, zero errors).
 
 - [Full Documentation](README.md)
 - [Block Library](BLOCK_LIBRARY.md)

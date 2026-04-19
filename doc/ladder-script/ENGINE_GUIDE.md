@@ -109,7 +109,7 @@ an entry to view, copy, or compare the raw JSON.
 
 ## 3. Block Palette
 
-The left sidebar organises **62 block types** into
+The left sidebar organises **64 block types** into
 **10 families**. Each family has a colour-coded dot. Groups are collapsible.
 Hovering a palette item shows a tooltip with the block description and hex
 type code.
