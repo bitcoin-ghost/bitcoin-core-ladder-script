@@ -38,7 +38,8 @@ namespace rung {
 using namespace api;
 
 EvalResult EvalSigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // merkle_pub_key: PUBKEY_COMMIT no longer in conditions. The pubkey is
     // in the witness (PUBKEY field). Merkle proof verification guarantees
@@ -51,11 +52,12 @@ EvalResult EvalSigBlock(const RungBlock& block,
     }
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalMultisigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // Layout: NUMERIC(threshold M), N × PUBKEY (witness), M × SIGNATURE (witness).
     // Pubkeys are bound to the Merkle leaf — nothing leaks into conditions.
@@ -86,11 +88,12 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
     if (scheme_field && !scheme_field->data.empty()) {
         auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
         if (IsPQScheme(scheme)) {
-            // PQ multisig: compute sighash once, verify each sig against pubkeys
+            // PQ multisig: compute sighash once, verify each sig against pubkeys.
             uint8_t sighash[32];
-            if (!sig_checker.ComputeSighash(SIGHASH_DEFAULT, sighash)) {
+            if (!FetchLadderSighash(ctx, SIGHASH_DEFAULT, sighash)) {
                 return EvalResult::ERROR;
             }
+            (void)sig_checker;  // PQ path bypasses the Core sig checker.
 
             std::span<const uint8_t> msg{sighash, 32};
             std::vector<bool> pubkey_used(pubkeys.size(), false);
@@ -124,7 +127,7 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
             const auto* pk = pubkeys[k];
             RungField single_sig = *sig_field;
             RungField single_pk = *pk;
-            EvalResult r = VerifySigWithScheme(single_pk, single_sig, nullptr, sig_checker);
+            EvalResult r = VerifySigWithScheme(single_pk, single_sig, nullptr, sig_checker, ctx);
             if (r == EvalResult::SATISFIED) {
                 pubkey_used[k] = true;
                 valid_count++;
@@ -180,7 +183,8 @@ EvalResult EvalHash160PreimageBlock(const RungBlock& block)
 }
 
 EvalResult EvalMusigThresholdBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // MuSig2/FROST aggregate threshold signature verification.
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -215,11 +219,12 @@ EvalResult EvalMusigThresholdBlock(const RungBlock& block,
     }
 
     RungField pk_field = *pubkey_field;
-    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
 }
 
 EvalResult EvalAdaptorSigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // Adaptor signature verification:
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -241,7 +246,7 @@ EvalResult EvalAdaptorSigBlock(const RungBlock& block,
 
     // The adapted signature verifies against the signing key directly
     RungField pk_field = *signing_key;
-    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+    return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
 }
 
 EvalResult EvalKeyRefSigBlock(const RungBlock& block,
@@ -290,7 +295,7 @@ EvalResult EvalKeyRefSigBlock(const RungBlock& block,
 
     RungField pk_field = *pubkey_field;
     RungField sig_copy = *sig_field;
-    return VerifySigWithScheme(pk_field, sig_copy, target_scheme, sig_checker);
+    return VerifySigWithScheme(pk_field, sig_copy, target_scheme, sig_checker, ctx);
 }
 
 void register_sig_blocks()

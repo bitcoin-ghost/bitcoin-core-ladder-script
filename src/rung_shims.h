@@ -246,24 +246,17 @@ struct LadderPrecomputedBuilder {
 // --- Signature-checker adapter (BaseSignatureChecker -> LadderSigChecker) -----
 //
 // Implements the library-side `rung::api::LadderSigChecker` interface on top
-// of Core's `BaseSignatureChecker`. Bound to a single (tx, nIn, conditions)
-// tuple — rebuild per input. Signature verification goes directly through
-// `XOnlyPubKey::VerifySchnorr` / `CPubKey::Verify`, so the wrapped
-// `BaseSignatureChecker` is only needed for `CheckLockTime` / `CheckSequence`
-// (which read state the library doesn't have: current block height / MTP).
+// of Core's `BaseSignatureChecker`. Stateless w.r.t. conditions and the
+// transaction — the library computes its own sighash via
+// `rung::api::SignatureHashLadder` from its `LadderPrecomputedTxData` +
+// `RungConditions` context, and passes the 32-byte hash in to `Check*`
+// here. Signature verification goes directly through `XOnlyPubKey::VerifySchnorr`
+// / `CPubKey::Verify`; the wrapped `BaseSignatureChecker` is only consulted
+// for `CheckLockTime` / `CheckSequence` (which read Core-side state the
+// library doesn't have: current block height / MTP vs the tx's nLockTime).
 class CoreLadderSigChecker final : public rung::api::LadderSigChecker {
 public:
-    template <class T>
-    CoreLadderSigChecker(const BaseSignatureChecker& base,
-                         const PrecomputedTransactionData& txdata,
-                         const T& tx,
-                         unsigned int nIn,
-                         const rung::RungConditions& conditions)
-        : m_base(base),
-          m_tvb(tx),
-          m_pcb(txdata),
-          m_conditions(conditions),
-          m_nIn(nIn) {}
+    explicit CoreLadderSigChecker(const BaseSignatureChecker& base) : m_base(base) {}
 
     bool CheckECDSASignature(std::span<const uint8_t> sig,
                              std::span<const uint8_t> pubkey,
@@ -293,17 +286,6 @@ public:
         return pk.VerifySchnorr(hash, sig_span);
     }
 
-    bool ComputeSighash(uint8_t hash_type, uint8_t out[32]) const override
-    {
-        uint256 hash;
-        if (!rung::api::SignatureHashLadder(m_pcb.view, m_tvb.view, m_nIn,
-                                            hash_type, m_conditions, hash)) {
-            return false;
-        }
-        std::memcpy(out, hash.data(), 32);
-        return true;
-    }
-
     bool CheckLockTime(uint32_t lock_time) const override
     {
         CScriptNum n(static_cast<int64_t>(lock_time));
@@ -318,10 +300,6 @@ public:
 
 private:
     const BaseSignatureChecker& m_base;
-    LadderTxViewBuilder m_tvb;
-    LadderPrecomputedBuilder m_pcb;
-    const rung::RungConditions& m_conditions;
-    unsigned int m_nIn;
 };
 
 // --- Sighash shims (CTransaction / CMutableTransaction + PrecomputedTransactionData) -----

@@ -45,7 +45,7 @@ bool VerifyHashPreimageBinding(const RungBlock& block);
 // Signature helpers — Ladder-native path
 // ----------------------------------------------------------------------------
 
-bool FetchLadderSighash(const api::LadderSigChecker& sig_checker,
+bool FetchLadderSighash(const RungEvalContext& ctx,
                         uint8_t hash_type,
                         uint8_t out[32]);
 bool ExtractSchnorrHashType(std::span<const uint8_t> sig, uint8_t& hash_type);
@@ -53,12 +53,14 @@ bool ExtractSchnorrHashType(std::span<const uint8_t> sig, uint8_t& hash_type);
 EvalResult EvalPQSig(RungScheme scheme,
                      const RungField& sig_field,
                      const RungField& pubkey_field,
-                     const api::LadderSigChecker& sig_checker);
+                     const api::LadderSigChecker& sig_checker,
+                     const RungEvalContext& ctx);
 
 EvalResult VerifySigWithScheme(const RungField& pubkey_field,
                                const RungField& sig_field,
                                const RungField* scheme_field,
-                               const api::LadderSigChecker& sig_checker);
+                               const api::LadderSigChecker& sig_checker,
+                               const RungEvalContext& ctx);
 
 // Note: VerifySigFromFields + EvalInnerConditions + MAX_LEGACY_INNER_DEPTH
 // are file-local to `src/rung/blocks/legacy.cpp`. They only bridge legacy

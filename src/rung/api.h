@@ -255,8 +255,15 @@ struct LadderPrecomputedTxData {
 // Everything else is pure-functional over bytes.
 
 // Signature verification. The host (Core) wraps its BaseSignatureChecker
-// in an adapter that implements this interface. Test harnesses and fuzzers
-// provide mocks. The library never sees Core's signature checker directly.
+// in a thin stateless adapter that implements this interface. Test harnesses
+// and fuzzers provide mocks. The library never sees Core's signature checker
+// directly.
+//
+// Sighash computation is NOT on this interface — the library computes its
+// own sighash via `api::SignatureHashLadder` / `api::SignatureHashLadderKeyPath`
+// using the `LadderPrecomputedTxData` + `RungConditions` it already carries
+// in its eval context. The checker's job is purely cryptographic: verify a
+// signature against a pubkey and a hash.
 class LadderSigChecker {
 public:
     virtual ~LadderSigChecker() = default;
@@ -272,14 +279,6 @@ public:
         std::span<const uint8_t> sig,
         std::span<const uint8_t> pubkey,
         std::span<const uint8_t, 32> sighash) const = 0;
-
-    // Compute the Ladder sighash for the input this checker is bound to,
-    // so the library can call the sighash-based Check*Signature above.
-    // hash_type is the SIGHASH_* byte; 32 bytes are written to `out` on
-    // success. Returns false only when the wrapper lacks precomputed tx
-    // data (library fuzzer / test harness without a backing tx). Core's
-    // consensus adapter always succeeds.
-    virtual bool ComputeSighash(uint8_t hash_type, uint8_t out[32]) const = 0;
 
     // Locktime / sequence checks. These read state the library doesn't have
     // (current block height / MTP vs the tx's nLockTime). Host-provided.

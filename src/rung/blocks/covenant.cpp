@@ -143,7 +143,8 @@ EvalResult EvalCTVBlock(const RungBlock& block, const RungEvalContext& ctx)
 }
 
 EvalResult EvalVaultLockBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // Two-path vault:
     // - recovery_key sig → SATISFIED immediately (cold sweep)
@@ -173,7 +174,7 @@ EvalResult EvalVaultLockBlock(const RungBlock& block,
     // Try recovery key (first PUBKEY) then hot key (second PUBKEY)
     for (size_t ki = 0; ki < 2; ++ki) {
         RungField pk_field = *witness_pks[ki];
-        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
         if (r == EvalResult::SATISFIED) {
             if (ki == 0) {
                 return EvalResult::SATISFIED; // recovery key — cold sweep, no delay

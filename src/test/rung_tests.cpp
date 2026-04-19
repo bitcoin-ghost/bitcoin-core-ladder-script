@@ -649,12 +649,6 @@ public:
         return schnorr_result;
     }
 
-    bool ComputeSighash(uint8_t /*hash_type*/, uint8_t out[32]) const override
-    {
-        std::memcpy(out, sighash_stub.data(), 32);
-        return true;
-    }
-
     bool CheckLockTime(uint32_t /*lock_time*/) const override
     {
         return locktime_result;
@@ -13247,7 +13241,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     PrecomputedTransactionData txdata;
     MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     // Evaluate via the public dispatch so the full path is exercised.
@@ -13373,7 +13367,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     PrecomputedTransactionData txdata;
     MutableTransactionSignatureChecker checker(&mtx, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -13516,7 +13510,7 @@ static EvalResult EvalSetup(const QABISpendSetup& s)
     CMutableTransaction mtx_copy = s.mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     return EvalBlock(s.spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -14391,7 +14385,7 @@ BOOST_AUTO_TEST_CASE(qabi_prime_end_to_end_happy_path)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(prime_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -14488,7 +14482,7 @@ BOOST_AUTO_TEST_CASE(qabi_prime_rejects_shallow_depth)
     CMutableTransaction mtx_copy = mtx;
     MutableTransactionSignatureChecker checker(&mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(prime_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -14849,7 +14843,7 @@ static void RunMultiPartyBatch(size_t n_participants)
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
         ScriptExecutionData execdata;
 
         EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -14970,7 +14964,7 @@ BOOST_AUTO_TEST_CASE(adversarial_alice_not_in_block_rejected)
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -15044,7 +15038,7 @@ BOOST_AUTO_TEST_CASE(adversarial_swap_preimage_across_participants_rejected)
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -15153,7 +15147,7 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -15517,7 +15511,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
         ScriptExecutionData execdata;
 
         EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -15550,7 +15544,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_hit_skips_falcon_verify)
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
         ScriptExecutionData execdata;
 
         EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);
@@ -15629,7 +15623,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_rejects_poisoned_entry)
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     // Cache hit with false → UNSATISFIED even though the sig is valid.
@@ -15707,7 +15701,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_1000_inputs)
     MutableTransactionSignatureChecker checker(
         &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
     ScriptExecutionData execdata;
 
     auto run_batch = [&](QABOSigCache* cache) {
@@ -15832,7 +15826,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_benchmark_sweep)
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
         ScriptExecutionData execdata;
 
         auto run_batch = [&](QABOSigCache* cache) {
@@ -16749,7 +16743,7 @@ BOOST_AUTO_TEST_CASE(qabi_sig_cache_amortises_multi_input_batch)
         MutableTransactionSignatureChecker checker(
             &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
         rung::RungConditions _bridge_empty_conditions;
-        rung::CoreLadderSigChecker _bridge_sig_checker(checker, txdata, mtx_copy, 0, _bridge_empty_conditions);
+        rung::CoreLadderSigChecker _bridge_sig_checker(checker);
         ScriptExecutionData execdata;
 
         EvalResult result = EvalBlock(spend_block, _bridge_sig_checker, checker, SigVersion::TAPSCRIPT, execdata, ctx, 0);

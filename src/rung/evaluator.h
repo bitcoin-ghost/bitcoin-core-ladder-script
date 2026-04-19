@@ -127,6 +127,13 @@ struct RungEvalContext {
     //! (GetVirtualTransactionSize / GetTransactionWeight) and CTV hash /
     //! QABO sighash. Removed once those are adapter-typed.
     const CTransaction* tx_core{nullptr};
+    //! Precomputed sighash mid-state (hash_prevouts, hash_sequences, etc.).
+    //! Used by library-internal sighash computation in `VerifySigWithScheme` /
+    //! `EvalPQSig`. Nullable — test stubs without a real tx set this to
+    //! nullptr and the sighash path falls back to an all-zero hash (the mock
+    //! checker ignores the hash bytes anyway). In production
+    //! `VerifyRungTx` always populates this before dispatching.
+    const api::LadderPrecomputedTxData* precomputed{nullptr};
     uint32_t input_index{0};               //!< Index of the input being evaluated
     int64_t input_amount{0};               //!< Amount of the UTXO being spent (satoshis)
     int64_t output_amount{0};              //!< Amount of the output being created (for AMOUNT_LOCK)
@@ -156,16 +163,19 @@ enum class EvalResult {
 EvalResult ApplyInversion(EvalResult raw, bool inverted);
 
 // Signature evaluators — Ladder-native blocks, adapter-typed sig checker.
-EvalResult EvalSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+// Sig-bearing evaluators take a RungEvalContext so they can compute the
+// Ladder sighash via `api::SignatureHashLadder` (Phase 1E.5). Timelock-only
+// evaluators (CSV / CLTV / CSV_TIME / CLTV_TIME) don't need it.
+EvalResult EvalSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 EvalResult EvalHashPreimageBlock(const RungBlock& block);
 EvalResult EvalHash160PreimageBlock(const RungBlock& block);
 EvalResult EvalCSVBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalCSVTimeBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalCLTVBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
 EvalResult EvalCLTVTimeBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalAdaptorSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalMusigThresholdBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalAdaptorSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalMusigThresholdBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 EvalResult EvalTaggedHashBlock(const RungBlock& block);
 EvalResult EvalHashGuardedBlock(const RungBlock& block);
 
@@ -179,7 +189,7 @@ namespace api {
 uint256 ComputeCTVHash(const LadderTxView& tx, uint32_t input_index);
 }  // namespace api
 
-EvalResult EvalVaultLockBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalVaultLockBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 EvalResult EvalAmountLockBlock(const RungBlock& block, const RungEvalContext& ctx);
 EvalResult EvalAnchorBlock(const RungBlock& block);
 EvalResult EvalAnchorChannelBlock(const RungBlock& block);
@@ -213,12 +223,12 @@ EvalResult EvalRateLimitBlock(const RungBlock& block, const RungEvalContext& ctx
 EvalResult EvalCosignBlock(const RungBlock& block, const RungEvalContext& ctx);
 
 // Compound evaluators (multi-block patterns in single block)
-EvalResult EvalTimelockedSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalHTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalHashSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalPTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalCLTVSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
-EvalResult EvalTimelockedMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker);
+EvalResult EvalTimelockedSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalHTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalHashSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalPTLCBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalCLTVSigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
+EvalResult EvalTimelockedMultisigBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx = {});
 
 // Legacy evaluators (wrapped Bitcoin transaction types). These keep Core's
 // BaseSignatureChecker because they verify against Core's legacy / SegWit /

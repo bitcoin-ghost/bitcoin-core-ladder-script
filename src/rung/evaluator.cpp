@@ -1174,6 +1174,7 @@ bool VerifyRungTx(const CTransaction& tx,
     RungEvalContext eval_ctx;
     eval_ctx.tx = &tx_view_builder.view;
     eval_ctx.tx_core = &tx;
+    eval_ctx.precomputed = &precomputed_builder.view;
     eval_ctx.input_index = nIn;
     eval_ctx.input_amount = spent_output.nValue;
     eval_ctx.block_height = block_height;
@@ -1217,7 +1218,7 @@ bool VerifyRungTx(const CTransaction& tx,
             return false;
         }
 
-        CoreLadderSigChecker sig_checker(checker, txdata, tx, nIn, conditions);
+        CoreLadderSigChecker sig_checker(checker);
         if (!EvalLadder(eval_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
             if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
             return false;
@@ -1225,7 +1226,7 @@ bool VerifyRungTx(const CTransaction& tx,
     } else {
         // Bootstrap spend: v4 tx spending a v1/v2 UTXO
         RungConditions empty_conditions;
-        CoreLadderSigChecker sig_checker(checker, txdata, tx, nIn, empty_conditions);
+        CoreLadderSigChecker sig_checker(checker);
         if (!EvalLadder(witness_ladder, sig_checker, checker, SigVersion::LADDER, execdata, eval_ctx)) {
             if (serror) *serror = SCRIPT_ERR_EVAL_FALSE;
             return false;

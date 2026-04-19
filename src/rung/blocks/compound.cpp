@@ -38,7 +38,8 @@ namespace rung {
 using namespace api;
 
 EvalResult EvalTimelockedSigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // TIMELOCKED_SIG = SIG + CSV in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -53,7 +54,7 @@ EvalResult EvalTimelockedSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field || !numeric_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
+    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
     if (sig_result != EvalResult::SATISFIED) return sig_result;
 
     // 2. Check CSV timelock (same logic as EvalCSVBlock)
@@ -67,7 +68,8 @@ EvalResult EvalTimelockedSigBlock(const RungBlock& block,
 }
 
 EvalResult EvalHTLCBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // HTLC = hash preimage + CSV + SIG in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -103,11 +105,12 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalHashSigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // HASH_SIG = hash preimage + SIG in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -133,11 +136,12 @@ EvalResult EvalHashSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalPTLCBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // PTLC = ADAPTOR_SIG + CSV in one block
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -160,7 +164,7 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
     }
     {
         RungField pk_field = *signing_key;
-        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker);
+        EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
         if (r == EvalResult::ERROR) return EvalResult::ERROR;
         if (r != EvalResult::SATISFIED) return EvalResult::UNSATISFIED;
     }
@@ -176,7 +180,8 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
 }
 
 EvalResult EvalCLTVSigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // CLTV_SIG = SIG + CLTV in one block
     // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
@@ -191,7 +196,7 @@ EvalResult EvalCLTVSigBlock(const RungBlock& block,
     if (!pubkey_field || !sig_field || !numeric_field) return EvalResult::ERROR;
 
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker);
+    EvalResult sig_result = VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
     if (sig_result != EvalResult::SATISFIED) return sig_result;
 
     // 2. Check CLTV (absolute timelock)
@@ -204,7 +209,8 @@ EvalResult EvalCLTVSigBlock(const RungBlock& block,
 }
 
 EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
-                        const api::LadderSigChecker& sig_checker)
+                        const api::LadderSigChecker& sig_checker,
+                        const RungEvalContext& ctx)
 {
     // TIMELOCKED_MULTISIG = MULTISIG + CSV in one block
     // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
@@ -238,7 +244,7 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
                 if (pubkey_used[k]) continue;
                 RungField pk_field = *pubkeys[k];
                 RungField sig_copy = *sig_f;
-                EvalResult r = VerifySigWithScheme(pk_field, sig_copy, scheme_field, sig_checker);
+                EvalResult r = VerifySigWithScheme(pk_field, sig_copy, scheme_field, sig_checker, ctx);
                 if (r == EvalResult::SATISFIED) {
                     pubkey_used[k] = true;
                     valid_count++;

@@ -112,7 +112,7 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
             if (pubkey_used[k]) continue;
             RungField pk_field = *pubkeys[k];
             RungField sig_copy = *sig_field;
-            EvalResult r = VerifySigWithScheme(pk_field, sig_copy, nullptr, sig_checker);
+            EvalResult r = VerifySigWithScheme(pk_field, sig_copy, nullptr, sig_checker, ctx);
             if (r == EvalResult::SATISFIED) {
                 pubkey_used[k] = true;
                 valid_count++;

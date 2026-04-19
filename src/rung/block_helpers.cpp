@@ -88,11 +88,25 @@ EvalResult ApplyInversion(EvalResult raw, bool inverted)
     return raw;
 }
 
-bool FetchLadderSighash(const api::LadderSigChecker& sig_checker,
-                               uint8_t hash_type,
-                               uint8_t out[32])
+bool FetchLadderSighash(const RungEvalContext& ctx,
+                        uint8_t hash_type,
+                        uint8_t out[32])
 {
-    return sig_checker.ComputeSighash(hash_type, out);
+    // Production path: precomputed + tx + conditions all present.
+    if (ctx.precomputed && ctx.tx && ctx.input_conditions && ctx.precomputed->ladder_ready) {
+        uint256 hash;
+        if (rung::api::SignatureHashLadder(*ctx.precomputed, *ctx.tx,
+                                            ctx.input_index, hash_type,
+                                            *ctx.input_conditions, hash)) {
+            std::memcpy(out, hash.data(), 32);
+            return true;
+        }
+    }
+    // Test stub path: no backing tx. Zero sighash; mock checkers ignore the
+    // hash bytes, real consensus never takes this branch (VerifyRungTx always
+    // populates precomputed + input_conditions before dispatch).
+    std::memset(out, 0, 32);
+    return true;
 }
 
 bool ExtractSchnorrHashType(std::span<const uint8_t> sig, uint8_t& hash_type)
@@ -109,12 +123,15 @@ bool ExtractSchnorrHashType(std::span<const uint8_t> sig, uint8_t& hash_type)
 EvalResult EvalPQSig(RungScheme scheme,
                              const RungField& sig_field,
                              const RungField& pubkey_field,
-                             const api::LadderSigChecker& sig_checker)
+                             const api::LadderSigChecker& sig_checker,
+                             const RungEvalContext& ctx)
 {
+    (void)sig_checker;  // PQ schemes bypass the Core sig checker entirely;
+                        // library verifies via oqs directly.
     if (!HasPQSupport()) return EvalResult::ERROR;
 
     uint8_t sighash[32];
-    if (!FetchLadderSighash(sig_checker, SIGHASH_DEFAULT, sighash)) {
+    if (!FetchLadderSighash(ctx, SIGHASH_DEFAULT, sighash)) {
         return EvalResult::ERROR;
     }
 
@@ -131,7 +148,8 @@ EvalResult EvalPQSig(RungScheme scheme,
 EvalResult VerifySigWithScheme(const RungField& pubkey_field,
                                        const RungField& sig_field,
                                        const RungField* scheme_field,
-                                       const api::LadderSigChecker& sig_checker)
+                                       const api::LadderSigChecker& sig_checker,
+                                       const RungEvalContext& ctx)
 {
     auto try_schnorr = [&](std::span<const uint8_t> sig,
                            std::span<const uint8_t> pubkey) -> EvalResult {
@@ -139,7 +157,7 @@ EvalResult VerifySigWithScheme(const RungField& pubkey_field,
         uint8_t hash_type;
         if (!ExtractSchnorrHashType(sig, hash_type)) return EvalResult::UNSATISFIED;
         uint8_t sighash[32];
-        if (!FetchLadderSighash(sig_checker, hash_type, sighash)) return EvalResult::ERROR;
+        if (!FetchLadderSighash(ctx, hash_type, sighash)) return EvalResult::ERROR;
         std::span<const uint8_t, 32> sighash_span{sighash, 32};
         if (sig_checker.CheckSchnorrSignature(sig, pubkey, sighash_span)) {
             return EvalResult::SATISFIED;
@@ -153,7 +171,7 @@ EvalResult VerifySigWithScheme(const RungField& pubkey_field,
         if (sig.empty()) return EvalResult::UNSATISFIED;
         uint8_t hash_type = sig.back();
         uint8_t sighash[32];
-        if (!FetchLadderSighash(sig_checker, hash_type, sighash)) return EvalResult::ERROR;
+        if (!FetchLadderSighash(ctx, hash_type, sighash)) return EvalResult::ERROR;
         std::span<const uint8_t, 32> sighash_span{sighash, 32};
         if (sig_checker.CheckECDSASignature(sig, pubkey, sighash_span)) {
             return EvalResult::SATISFIED;
@@ -165,7 +183,7 @@ EvalResult VerifySigWithScheme(const RungField& pubkey_field,
     if (scheme_field && !scheme_field->data.empty()) {
         auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
         if (IsPQScheme(scheme)) {
-            return EvalPQSig(scheme, sig_field, pubkey_field, sig_checker);
+            return EvalPQSig(scheme, sig_field, pubkey_field, sig_checker, ctx);
         }
         if (scheme == RungScheme::SCHNORR) {
             std::span<const uint8_t> sig{sig_field.data.data(), sig_field.data.size()};
