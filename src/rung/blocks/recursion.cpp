@@ -141,6 +141,12 @@ EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& 
     if (count == 0) {
         return EvalResult::SATISFIED; // countdown reached zero — covenant terminates
     }
+    if (count < 0) {
+        // Malformed: countdown values are always non-negative. Rejecting
+        // here also prevents signed-overflow UB on `cur - 1` below if `cur`
+        // were `INT64_MIN`.
+        return EvalResult::ERROR;
+    }
     // Count > 0: output must re-encumber with count-1.
     if (ctx.input_conditions && ctx.spending_output) {
         if (ctx.input_conditions->rungs.empty()) return EvalResult::UNSATISFIED;
@@ -153,7 +159,7 @@ EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& 
                 for (auto& f : blk.fields) {
                     if (f.type == RungDataType::NUMERIC) {
                         auto cur = ReadNumeric(f);
-                        if (!cur) return EvalResult::ERROR;
+                        if (!cur || *cur <= 0) return EvalResult::ERROR;
                         WriteNumericField(f, *cur - 1);
                         found = true;
                         break;
