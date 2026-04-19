@@ -43,13 +43,24 @@ set(_rung_sources
   conditions.cpp
   sighash.cpp
   evaluator.cpp
+  block_helpers.cpp
+  blocks/sig.cpp
+  blocks/timelock.cpp
+  blocks/hash.cpp
+  blocks/covenant.cpp
+  blocks/anchor.cpp
+  blocks/recursion.cpp
+  blocks/plc.cpp
+  blocks/compound.cpp
+  blocks/governance.cpp
+  blocks/legacy.cpp
   policy.cpp
   rpc.cpp
   pq_verify.cpp
   descriptor.cpp
 )
 if(ENABLE_QABIO)
-  list(APPEND _rung_sources qabi.cpp)
+  list(APPEND _rung_sources qabi.cpp blocks/qabi.cpp)
 endif()
 
 add_library(bitcoin_rung STATIC EXCLUDE_FROM_ALL ${_rung_sources})
