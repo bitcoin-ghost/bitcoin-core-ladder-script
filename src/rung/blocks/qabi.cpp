@@ -89,6 +89,11 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
     if (prime_depth >= static_cast<int64_t>(rung::QABI_AUTH_CHAIN_DEFAULT_LENGTH * 10)) {
         return EvalResult::ERROR;
     }
+    // Block heights fit in 32 bits. `WriteNumericField` stores the low 32
+    // bits of its input, so an 8-byte NUMERIC with a value > 0xFFFFFFFF
+    // would silently lose its high bits when covenant-written into the
+    // output rung. Reject such malformed primes up front.
+    if (new_committed_expiry > 0xFFFFFFFFLL) return EvalResult::ERROR;
 
     // -- Locate the QABI_SPEND block ------------------------------------
     //
