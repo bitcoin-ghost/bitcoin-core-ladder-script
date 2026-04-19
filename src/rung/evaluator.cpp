@@ -805,6 +805,15 @@ bool VerifyRungTx(
         LogPrintf("VerifyRungTx called on non-MLSC scriptPubKey — dispatch invariant violated\n");
         return fail(LadderScriptError::NON_MLSC_SCRIPT);
     }
+    // Defense in depth: MLSC outputs carrying a DATA_RETURN payload
+    // (scriptPubKey 34-73 bytes, 0xDF prefix + root + data) are marked
+    // IsUnspendable() by Core and are not tracked in the UTXO set, so this
+    // path should be unreachable in practice. Reject explicitly in case a
+    // future CScript refactor changes the IsUnspendable rule.
+    if (HasMLSCData(spent_output.script_pub_key.as_span())) {
+        LogPrintf("VerifyRungTx called on MLSC+DATA_RETURN output — unspendable\n");
+        return fail(LadderScriptError::NON_MLSC_SCRIPT);
+    }
 
     // Local helpers to turn adapter witness elements into byte spans.
     auto wit_span = [&](size_t i) -> std::span<const uint8_t> {
