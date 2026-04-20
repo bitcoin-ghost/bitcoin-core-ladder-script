@@ -294,6 +294,7 @@ BASE_SCRIPTS = [
     'feature_reindex_init.py',
     'feature_cltv.py',
     'feature_rung_tx.py',
+    'feature_rung_legacy.py',
     'feature_qabi.py',
     'feature_rung_p2p.py',
     'feature_rung_fuzz.py',
