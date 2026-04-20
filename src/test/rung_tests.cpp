@@ -10104,7 +10104,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pk_legacy_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, {}) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2pk_legacy_unsatisfied)
@@ -10121,7 +10121,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pk_legacy_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, {}) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2pk_legacy_missing_field)
@@ -10132,7 +10132,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pk_legacy_missing_field)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     // Missing SIGNATURE
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2PKLegacyBlock(block, checker, {}) == EvalResult::ERROR);
 }
 
 // -- Evaluator tests: P2PKH_LEGACY --
@@ -10155,7 +10155,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_wrong_hash)
@@ -10170,7 +10170,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_wrong_hash)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_missing_field)
@@ -10181,7 +10181,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_missing_field)
     block.fields.push_back({RungDataType::HASH160, MakeHash160()});
     // Missing PUBKEY and SIGNATURE
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_sig_unsatisfied)
@@ -10201,7 +10201,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_sig_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::UNSATISFIED);
 }
 
 // -- Evaluator tests: P2WPKH_LEGACY --
@@ -10223,7 +10223,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wpkh_legacy_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2WPKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2WPKHLegacyBlock(block, checker, {}) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2wpkh_legacy_wrong_hash)
@@ -10238,7 +10238,7 @@ BOOST_AUTO_TEST_CASE(eval_p2wpkh_legacy_wrong_hash)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2WPKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2WPKHLegacyBlock(block, checker, {}) == EvalResult::UNSATISFIED);
 }
 
 // -- Evaluator tests: P2TR_LEGACY --
@@ -10257,7 +10257,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_legacy_satisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2TRLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2TRLegacyBlock(block, checker, {}) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_p2tr_legacy_unsatisfied)
@@ -10274,7 +10274,7 @@ BOOST_AUTO_TEST_CASE(eval_p2tr_legacy_unsatisfied)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2TRLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalP2TRLegacyBlock(block, checker, {}) == EvalResult::UNSATISFIED);
 }
 
 // -- Evaluator tests: P2SH_LEGACY --
@@ -10475,7 +10475,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_ecdsa)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(71)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::SATISFIED);
 }
 
 // -- Missing serialization roundtrips: P2WPKH and P2TR --
@@ -10994,7 +10994,7 @@ BOOST_AUTO_TEST_CASE(eval_p2pkh_legacy_bad_hash160_size)
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
-    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    BOOST_CHECK(EvalP2PKHLegacyBlock(block, checker, {}) == EvalResult::ERROR);
 }
 
 // -- P2WSH_LEGACY with wrong-size HASH256 --

@@ -40,51 +40,6 @@ using namespace api;
 /** Maximum recursion depth for P2SH/P2WSH/P2TR_SCRIPT inner condition evaluation. */
 static constexpr int MAX_LEGACY_INNER_DEPTH = 2;
 
-static EvalResult VerifySigFromFields(const RungField& pubkey_field,
-                                       const RungField& sig_field,
-                                       const RungField* scheme_field,
-                                       const BaseSignatureChecker& checker,
-                                       SigVersion sigversion,
-                                       ScriptExecutionData& execdata)
-{
-    // Legacy wrappers use Core's BaseSignatureChecker, which verifies against
-    // Core's legacy / SegWit / Taproot sighash — not the Ladder sighash that
-    // PQ signatures commit to. Reject PQ schemes here: PQ sigs belong in
-    // Ladder-native blocks (SIG, MULTISIG, etc.) and go through the
-    // LadderSigChecker adapter.
-    if (scheme_field && !scheme_field->data.empty()) {
-        auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
-        if (IsPQScheme(scheme)) return EvalResult::ERROR;
-    }
-
-    std::span<const unsigned char> sig_span{sig_field.data.data(), sig_field.data.size()};
-    std::span<const unsigned char> pubkey_span{pubkey_field.data.data(), pubkey_field.data.size()};
-
-    if (sig_field.data.size() >= 64 && sig_field.data.size() <= 65) {
-        std::vector<unsigned char> xonly;
-        if (pubkey_field.data.size() == 33) {
-            xonly.assign(pubkey_field.data.begin() + 1, pubkey_field.data.end());
-            pubkey_span = std::span<const unsigned char>{xonly.data(), xonly.size()};
-        }
-        if (checker.CheckSchnorrSignature(sig_span, pubkey_span, sigversion, execdata, nullptr)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
-    }
-
-    if (sig_field.data.size() >= 8 && sig_field.data.size() <= 72) {
-        std::vector<unsigned char> sig_vec(sig_field.data.begin(), sig_field.data.end());
-        std::vector<unsigned char> pubkey_vec(pubkey_field.data.begin(), pubkey_field.data.end());
-        CScript empty_script;
-        if (checker.CheckECDSASignature(sig_vec, pubkey_vec, empty_script, sigversion)) {
-            return EvalResult::SATISFIED;
-        }
-        return EvalResult::UNSATISFIED;
-    }
-
-    return EvalResult::ERROR;
-}
-
 static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
                                        const RungBlock& outer_block,
                                        const api::LadderSigChecker& sig_checker,
@@ -159,25 +114,30 @@ static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
     return EvalResult::UNSATISFIED;
 }
 
+// Legacy P2* wrapper sig verification runs through the Ladder sig_checker
+// adapter (same path as EvalSigBlock). Core's BaseSignatureChecker asserts
+// hard on non-Taproot tx state when handed a Schnorr sig (interpreter.cpp
+// CheckSchnorrSignature + SignatureHashSchnorr require m_bip341_taproot_ready
+// which a RUNG_TX does not set), so we cannot hand Schnorr sigs to Core's
+// checker from inside Ladder evaluation. The signing side already commits
+// to the Ladder sighash (see SignSingleKey in rung/rpc.cpp), so the legacy
+// wrappers are effectively "SIG-block semantics + HASH160 commitment check"
+// at this point.
+
 EvalResult EvalP2PKLegacyBlock(const RungBlock& block,
-                                const BaseSignatureChecker& checker,
-                                SigVersion sigversion,
-                                ScriptExecutionData& execdata)
+                                const api::LadderSigChecker& sig_checker,
+                                const RungEvalContext& ctx)
 {
-    // P2PK_LEGACY: pubkey + sig, verified against Core's legacy ECDSA /
-    // SegWit / Taproot sighash (not Ladder sighash — this is a legacy
-    // wrapper).
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigFromFields(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalP2PKHLegacyBlock(const RungBlock& block,
-                                 const BaseSignatureChecker& checker,
-                                 SigVersion sigversion,
-                                 ScriptExecutionData& execdata)
+                                 const api::LadderSigChecker& sig_checker,
+                                 const RungEvalContext& ctx)
 {
     // P2PKH_LEGACY: HASH160(pubkey) == committed hash, then verify sig
     const RungField* hash160_field = FindField(block, RungDataType::HASH160);
@@ -191,38 +151,33 @@ EvalResult EvalP2PKHLegacyBlock(const RungBlock& block,
         return EvalResult::ERROR;
     }
 
-    // Compute HASH160(pubkey) and compare
     unsigned char computed[CHash160::OUTPUT_SIZE];
     CHash160().Write(pubkey_field->data).Finalize(computed);
     if (memcmp(computed, hash160_field->data.data(), 20) != 0) {
         return EvalResult::UNSATISFIED;
     }
 
-    // Verify signature
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigFromFields(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalP2WPKHLegacyBlock(const RungBlock& block,
-                                  const BaseSignatureChecker& checker,
-                                  SigVersion sigversion,
-                                  ScriptExecutionData& execdata)
+                                  const api::LadderSigChecker& sig_checker,
+                                  const RungEvalContext& ctx)
 {
     // P2WPKH_LEGACY: identical evaluation to P2PKH
-    return EvalP2PKHLegacyBlock(block, checker, sigversion, execdata);
+    return EvalP2PKHLegacyBlock(block, sig_checker, ctx);
 }
 
 EvalResult EvalP2TRLegacyBlock(const RungBlock& block,
-                                const BaseSignatureChecker& checker,
-                                SigVersion sigversion,
-                                ScriptExecutionData& execdata)
+                                const api::LadderSigChecker& sig_checker,
+                                const RungEvalContext& ctx)
 {
-    // P2TR_LEGACY key-path: pubkey + sig against Core's Taproot sighash.
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
     if (!pubkey_field || !sig_field) return EvalResult::ERROR;
     const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigFromFields(*pubkey_field, *sig_field, scheme_field, checker, sigversion, execdata);
+    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
 }
 
 EvalResult EvalP2SHLegacyBlock(const RungBlock& block,
@@ -326,22 +281,22 @@ EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block,
 void register_legacy_blocks()
 {
     RegisterBlock(RungBlockType::P2PK_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalP2PKLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+        return EvalP2PKLegacyBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::P2PKH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalP2PKHLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+        return EvalP2PKHLegacyBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::P2SH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalP2SHLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);
     });
     RegisterBlock(RungBlockType::P2WPKH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalP2WPKHLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+        return EvalP2WPKHLegacyBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::P2WSH_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalP2WSHLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);
     });
     RegisterBlock(RungBlockType::P2TR_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
-        return EvalP2TRLegacyBlock(b, d.legacy_checker, d.sigversion, d.execdata);
+        return EvalP2TRLegacyBlock(b, d.sig_checker, d.ctx);
     });
     RegisterBlock(RungBlockType::P2TR_SCRIPT_LEGACY, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalP2TRScriptLegacyBlock(b, d.sig_checker, d.legacy_checker, d.sigversion, d.execdata, d.ctx, d.depth);

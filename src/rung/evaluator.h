@@ -236,12 +236,12 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block, const api::Ladder
 // Taproot sighash. The P2SH / P2WSH / P2TR_SCRIPT wrappers also take the
 // adapter `sig_checker` so they can recurse into inner Ladder-native blocks
 // via EvalBlock.
-EvalResult EvalP2PKLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
-EvalResult EvalP2PKHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalP2PKLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx);
+EvalResult EvalP2PKHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx);
 EvalResult EvalP2SHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
-EvalResult EvalP2WPKHLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalP2WPKHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx);
 EvalResult EvalP2WSHLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
-EvalResult EvalP2TRLegacyBlock(const RungBlock& block, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata);
+EvalResult EvalP2TRLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const RungEvalContext& ctx);
 EvalResult EvalP2TRScriptLegacyBlock(const RungBlock& block, const api::LadderSigChecker& sig_checker, const BaseSignatureChecker& legacy_checker, SigVersion sigversion, ScriptExecutionData& execdata, const RungEvalContext& ctx, int depth = 0);
 
 // Governance evaluators (transaction-level constraints)
