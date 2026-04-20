@@ -37,7 +37,7 @@ Major child components:
 - **SimulationPanel** (right panel, Context tab in Simulate mode)
 - **HighlightedJson** (right panel, RPC tab with line-level simulation annotations)
 - **RegisterTable** (collapsible bottom table)
-- **SignetPanel** (Send tab full-panel view)
+- **SignetPanel** (Fund tab full-panel view)
 - **SpendPanel** (Spend tab full-panel view)
 - **ReviewPanel** (Review tab full-panel view)
 - **ConvertPanel** (Convert tab full-panel view)

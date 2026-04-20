@@ -10941,7 +10941,7 @@ function SpendPanel() {
       {!online && (
         <div style={{ ...sty.section, borderColor: 'var(--amber-dim)', background: 'var(--amber-glow)' }}>
           <div style={{ color: 'var(--amber)', fontSize: 11, lineHeight: 1.6 }}>
-            Signet proxy is not available. Spending RUNG outputs requires a ghost-core node. Create and send RUNG outputs first using the SEND tab.
+            Signet proxy is not available. Spending RUNG outputs requires a ghost-core node. Create RUNG outputs first using the FUND tab.
           </div>
         </div>
       )}
@@ -11273,7 +11273,7 @@ function ReviewPanel() {
           {sessionLog.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-dim)', fontSize: 11 }}>
               No transactions yet.<br/><br/>
-              <span style={{ fontSize: 10 }}>Use the SEND tab to fund outputs, then SPEND to spend them. Both JSONs will appear here side by side.</span>
+              <span style={{ fontSize: 10 }}>Use the FUND tab to create outputs, then SPEND to spend them. Both JSONs will appear here side by side.</span>
             </div>
           ) : sessionLog.map((tx, i) => (
             <div key={i}
@@ -11624,7 +11624,7 @@ const WALKTHROUGH_STEPS = [
   },
   {
     title: 'Generate Keys',
-    body: 'In the SEND tab, use <code>GENERATE NEW ADDRESS</code> to create a fresh signet keypair. The engine supports Schnorr, ECDSA, and post-quantum signature schemes (Falcon, Dilithium, SPHINCS+).',
+    body: 'In the FUND tab, use <code>GENERATE NEW ADDRESS</code> to create a fresh signet keypair. The engine supports Schnorr, ECDSA, and post-quantum signature schemes (Falcon, Dilithium, SPHINCS+).',
     targetSelector: '.mode-tabs',
   },
   {
@@ -12785,7 +12785,7 @@ ${ladderRows.map(r => `
           <button className={`mode-tab ${mode === 'build' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'build' })} title={showTooltips ? 'Construct ladder rungs --drag blocks from palette' : undefined}>BUILD</button>
           <button className={`mode-tab ${mode === 'simulate' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'simulate' })} title={showTooltips ? 'Test rungs --click rung labels to step through, Alt+click blocks to force' : undefined}>SIMULATE</button>
           <button className={`mode-tab ${mode === 'convert' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'convert' })} title={showTooltips ? 'Paste RPC JSON output to convert back to ladder diagram' : undefined}>CONVERT</button>
-          <button className={`mode-tab ${mode === 'send' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'send' })} title={showTooltips ? 'Create and fund Ladder Script outputs on signet' : undefined} style={mode === 'send' ? { color: 'var(--green-bright)', borderBottomColor: 'var(--green-bright)' } : {}}>SEND</button>
+          <button className={`mode-tab ${mode === 'send' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'send' })} title={showTooltips ? 'Build a v4 fund tx that creates MLSC outputs gated on the current ladder' : undefined} style={mode === 'send' ? { color: 'var(--green-bright)', borderBottomColor: 'var(--green-bright)' } : {}}>FUND</button>
           <button className={`mode-tab ${mode === 'spend' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'spend' })} title={showTooltips ? 'Spend existing RUNG outputs on signet' : undefined} style={mode === 'spend' ? { color: 'var(--cyan)', borderBottomColor: 'var(--cyan)' } : {}}>SPEND</button>
           <button className={`mode-tab ${mode === 'review' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_MODE', value: 'review' })} title={showTooltips ? 'Review fund and spend JSON for session transactions' : undefined} style={mode === 'review' ? { color: 'var(--amber)', borderBottomColor: 'var(--amber)' } : {}}>REVIEW</button>
         </div>
