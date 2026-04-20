@@ -9464,26 +9464,15 @@ function SignetPanel() {
     if (!txHex) { setError('No transaction hex. Create first.'); return; }
     if (!signingData) { setError('No signing data. Click FUND FROM WALLET first.'); return; }
 
-    // Bootstrap signing: the wallet UTXOs are standard wpkh outputs, not ladder outputs.
-    // The ladder conditions define the new OUTPUT spending rules (already encoded by createtxmlsc).
-    // For INPUT signing, we use the standard wallet key (even when outputs use PQ schemes).
-    const inputKey = signingData.walletKey || signingData.keypairs[0];
-    const signers = signingData.selectedUtxos.map((u, inputIdx) => ({
-      input: inputIdx,
-      privkey: inputKey.privkey,
-    }));
-
-    // Build spent_outputs
-    const spent_outputs = signingData.selectedUtxos.map(u => ({
-      amount: u.amount,
-      scriptPubKey: u.scriptPubKey,
-    }));
-
-    const data = await apiCall('/api/ladder/sign', {
-      hex: txHex,
-      signers,
-      spent_outputs,
-    });
+    // FUND tx: inputs are wallet-owned P2WPKH outputs, not MLSC. The proxy's
+    // /api/ladder/sign routes to signrungtx only when `signers` and
+    // `spent_outputs` are present, and signrungtx skips non-MLSC inputs —
+    // which would leave the wallet input unsigned and the broadcast would
+    // fail with "Witness program hash mismatch" (txid == wtxid). Pass just
+    // `hex` so the proxy routes to signrawtransactionwithwallet; the wallet
+    // already holds the privkey because we got the address/keypair from it
+    // during handleFundFromWallet.
+    const data = await apiCall('/api/ladder/sign', { hex: txHex });
     if (data) setSignedHex(data.hex || txHex);
   };
   const handleBroadcast = async () => {
