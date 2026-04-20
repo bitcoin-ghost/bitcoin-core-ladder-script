@@ -10761,9 +10761,20 @@ function SpendPanel() {
       // broadcast.
       const rungsForMerkle = (allRungs && allRungs.length > 0) ? allRungs : voutRungs;
       if (rungsForMerkle.length > 0) {
-        signerEntry.conditions = rungsForMerkle.map(r => ({
-          blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
-        }));
+        // Each sibling rung's `output_index` must match what was committed
+        // at fund time — the library folds output_index into the leaf
+        // template. If we omit it, signrungtx defaults every sibling to
+        // the spent vout, producing different leaves and a wrong
+        // computed root ("MLSC Merkle path verification failed: computed
+        // root does not match expected root"). `r.vout` in the saved
+        // record holds the fund-time vout binding.
+        signerEntry.conditions = rungsForMerkle.map(r => {
+          const condSpec = {
+            blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
+          };
+          if (typeof r.vout === 'number') condSpec.output_index = r.vout;
+          return condSpec;
+        });
       }
       if (rec.relays && rec.relays.length > 0) {
         signerEntry.relays = rec.relays.map(r => ({
