@@ -3343,7 +3343,13 @@ BlockRegistry.MULTISIG.buildSigner = (block, keyLookup, preimages, opts) => {
 BlockRegistry.ADAPTOR_SIG.buildSigner = (block, keyLookup) => {
   const key = keyLookup(block.values.signing_key);
   if (!key) return null;
-  return { type: 'ADAPTOR_SIG', privkey: key.privkey, adaptor_point: block.values.adaptor_point };
+  // ADAPTOR_SIG folds two PUBKEYs into the merkle leaf (signing_key +
+  // adaptor_point). The library's signrungtx extractor walks condition-
+  // side PUBKEY fields in positional order via a `pubkeys` array — a
+  // named `adaptor_point` key is dropped on the floor, the leaf is
+  // committed with only one pubkey at fund time, and the spend's
+  // recomputed leaf never matches the on-chain root.
+  return { type: 'ADAPTOR_SIG', privkey: key.privkey, pubkeys: [block.values.adaptor_point] };
 };
 
 BlockRegistry.MUSIG_THRESHOLD.buildSigner = (block, keyLookup) => {
