@@ -7068,43 +7068,41 @@ const FAKE = {
 const EXAMPLES = [
   {
     title: '2-of-3 MULTISIG VAULT',
-    desc: 'Corporate treasury with 2-of-3 multisig spending and a time-locked recovery path using a single backup key after 1 year.\n\nSPEND: Any 2 of 3 directors sign to release funds.\nRECOVER: After ~1 year (52,560 blocks), a backup key can sweep.',
+    desc: 'Corporate treasury — one vault UTXO with two spending paths over the same coin. 2-of-3 multisig is the normal path; after ~1 year (52,560 blocks) a single backup key can sweep.\n\nSPEND: Any 2 of 3 directors sign to release funds.\nRECOVER: After ~1 year, a backup key can sweep.\n\nOR-logic across the two rungs means the first satisfied path wins. Compare to P2WSH 2-of-3 multisig + CSV recovery in a single script.',
     tags: [['MULTISIG', 'sig'], ['CSV', 'time'], ['SIG', 'sig']],
     rungs: [
       { label: 'SPEND', blocks: [
         { type: 'MULTISIG', values: { threshold: '2', pubkeys: `${FAKE.pk1}, ${FAKE.pk2}, ${FAKE.pk3}` } },
-      ], output: { name: 'NORMAL_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'RECOVER', blocks: [
         { type: 'CSV', values: { blocks: '52560' } },
         { type: 'SIG', values: { pubkey: FAKE.pk4 } },
-      ], output: { name: 'RECOVERY', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 45000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr1, amount: 50000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'ATOMIC SWAP (HTLC)',
-    desc: 'Cross-chain atomic swap via hash time-locked contract. Alice claims with preimage + signature; Bob recovers after 144 blocks if unclaimed.\n\nCLAIM: HASH_SIG requires Alice to reveal the SHA-256 preimage and sign.\nREFUND: After 144 blocks (~1 day), Bob can reclaim with his key.',
+    desc: 'Canonical Lightning-style HTLC — one UTXO, two spending paths over the same coin. Alice claims with preimage + signature; Bob refunds after 144 blocks if unclaimed.\n\nCLAIM: HASH_SIG requires Alice to reveal the SHA-256 preimage and sign.\nREFUND: After 144 blocks (~1 day), Bob can reclaim with his key.\n\nOR-logic across the two rungs means the first satisfied path wins. Sized to compare against P2WSH HTLC (1 output, 2 script paths).',
     tags: [['HASH_SIG', 'hash'], ['SIG', 'sig'], ['CSV', 'time']],
     rungs: [
       { label: 'CLAIM', blocks: [
         { type: 'HASH_SIG', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1 } },
-      ], output: { name: 'ALICE_CLAIM', type: 'standard' } },
+      ], output: { name: 'HTLC', type: 'standard' } },
       { label: 'REFUND', blocks: [
         { type: 'CSV', values: { blocks: '144' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'BOB_REFUND', type: 'standard' } },
+      ], output: { name: 'HTLC', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 1 }],
     txOutputs: [
       { address: FAKE.addr3, amount: 10000 },
-      { address: FAKE.addr4, amount: 9900 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'ADAPTOR SIG SWAP',
@@ -7113,19 +7111,18 @@ const EXAMPLES = [
     rungs: [
       { label: 'EXECUTE', blocks: [
         { type: 'ADAPTOR_SIG', values: { signing_key: FAKE.pk1, adaptor_point: FAKE.hash1.substring(0, 64) } },
-      ], output: { name: 'SWAP_EXEC', type: 'standard' } },
+      ], output: { name: 'SWAP', type: 'standard' } },
       { label: 'CANCEL', blocks: [
         { type: 'CSV', values: { blocks: '288' } },
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'SWAP_CANCEL', type: 'standard' } },
+      ], output: { name: 'SWAP', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 25000 },
-      { address: FAKE.addr2, amount: 24800 },
+      { address: FAKE.addr1, amount: 50000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'DCA COVENANT CHAIN',
@@ -7156,17 +7153,16 @@ const EXAMPLES = [
     rungs: [
       { label: 'UNVAULT', blocks: [
         { type: 'VAULT_LOCK', values: { recovery_key: FAKE.pk3, hot_key: FAKE.pk1, delay: '10' } },
-      ], output: { name: 'HOT_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'CLAWBACK', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk3 } },
-      ], output: { name: 'COLD_CLAWBACK', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 0 }],
     txOutputs: [
       { address: FAKE.addr3, amount: 100000 },
-      { address: FAKE.addr6, amount: 99900 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'RATE-LIMITED WALLET',
@@ -7176,18 +7172,17 @@ const EXAMPLES = [
       { label: 'DAY_SPEND', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'RATE_LIMIT', values: { max_per_block: '50000', acc_cap: '200000', refill_blocks: '144' } },
-      ], output: { name: 'DAILY_OUT', type: 'standard' } },
+      ], output: { name: 'WALLET', type: 'standard' } },
       { label: 'OVERRIDE', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'FULL_SWEEP', type: 'standard' } },
+      ], output: { name: 'WALLET', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr4, amount: 50000 },
-      { address: FAKE.addr1, amount: 50000 },
+      { address: FAKE.addr4, amount: 100000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'DEAD MAN\'S SWITCH (INHERITANCE)',
@@ -7198,18 +7193,17 @@ const EXAMPLES = [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'LATCH_SET', values: { pubkey: FAKE.pk1, state: '0' } },
         { type: 'RECURSE_SAME', values: { max_depth: '10' } },
-      ], output: { name: 'KEEPALIVE', type: 'latch' } },
+      ], output: { name: 'ESTATE', type: 'latch' } },
       { label: 'INHERIT', blocks: [
         { type: 'CSV', values: { blocks: '26000' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'HEIR_CLAIM', type: 'standard' } },
+      ], output: { name: 'ESTATE', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 250000 },
-      { address: FAKE.addr5, amount: 249900 },
+      { address: FAKE.addr1, amount: 500000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'ESCROW WITH ORACLE',
@@ -7220,24 +7214,22 @@ const EXAMPLES = [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'ANCHOR_ORACLE', values: { oracle_pk: FAKE.oracle, outcome_count: '2' } },
         { type: 'COSIGN', values: { conditions_hash: FAKE.hash3 } },
-      ], output: { name: 'TO_SELLER', type: 'standard' } },
+      ], output: { name: 'ESCROW', type: 'standard' } },
       { label: 'DISPUTE', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
         { type: 'ANCHOR_ORACLE', values: { oracle_pk: FAKE.oracle, outcome_count: '2' } },
         { type: 'COSIGN', values: { conditions_hash: FAKE.hash4 } },
-      ], output: { name: 'TO_BUYER', type: 'standard' } },
+      ], output: { name: 'ESCROW', type: 'standard' } },
       { label: 'SETTLE', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'MUTUAL', type: 'standard' } },
+      ], output: { name: 'ESCROW', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 7500 },
-      { address: FAKE.addr4, amount: 7500 },
-      { address: FAKE.addr5, amount: 7400 },
+      { address: FAKE.addr3, amount: 20000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
   {
     title: 'PAYMENT CHANNEL',
@@ -7300,18 +7292,17 @@ const EXAMPLES = [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'HYSTERESIS_FEE', values: { high_sat_vb: '50', low_sat_vb: '5' } },
         { type: 'AMOUNT_LOCK', values: { min: '10000', max: '500000' } },
-      ], output: { name: 'FEE_GATE', type: 'standard' } },
+      ], output: { name: 'COVENANT', type: 'standard' } },
       { label: 'EMERG', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'SIG', values: { pubkey: FAKE.pk3 } },
-      ], output: { name: 'EMERGENCY', type: 'standard' } },
+      ], output: { name: 'COVENANT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr2, amount: 50000 },
-      { address: FAKE.addr6, amount: 30000 },
+      { address: FAKE.addr2, amount: 80000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'ONE-SHOT TRIGGER + LATCH',
@@ -7407,23 +7398,21 @@ const EXAMPLES = [
       { label: 'PQ_SPEND', blocks: [
         { type: 'SIG', values: { pubkey: FAKE_PQ.falcon1, scheme: 'FALCON512' } },
         { type: 'AMOUNT_LOCK', values: { min: '10000', max: '5000000' } },
-      ], output: { name: 'QUANTUM_HOT', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'PQ_RECOVER', blocks: [
         { type: 'CSV', values: { blocks: '52560' } },
         { type: 'SIG', values: { pubkey: FAKE_PQ.dilith1, scheme: 'DILITHIUM3' } },
-      ], output: { name: 'QUANTUM_COLD', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'HYBRID', blocks: [
         { type: 'SIG', values: { pubkey: FAKE_PQ.falcon1, scheme: 'FALCON512' } },
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-      ], output: { name: 'HYBRID_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 150000 },
-      { address: FAKE.addr6, amount: 149900 },
-      { address: FAKE.addr3, amount: 50000 },
+      { address: FAKE.addr1, amount: 200000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
   {
     title: 'QUANTUM VAULT + CHILDREN',
@@ -7483,18 +7472,17 @@ const EXAMPLES = [
     rungs: [
       { label: 'SPEND', blocks: [
         { type: 'MUSIG_THRESHOLD', values: { agg_pubkey: FAKE.pk1, threshold: '3', group_size: '5' } },
-      ], output: { name: 'TREASURY_SPEND', type: 'standard' } },
+      ], output: { name: 'TREASURY', type: 'standard' } },
       { label: 'RECOVER', blocks: [
         { type: 'CSV', values: { blocks: '52560' } },
         { type: 'SIG', values: { pubkey: FAKE.pk4 } },
-      ], output: { name: 'RECOVERY', type: 'standard' } },
+      ], output: { name: 'TREASURY', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 95000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr1, amount: 100000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'PTLC PAYMENT CHANNEL',
@@ -7503,17 +7491,16 @@ const EXAMPLES = [
     rungs: [
       { label: 'COOP', blocks: [
         { type: 'MUSIG_THRESHOLD', values: { agg_pubkey: FAKE.pk1, threshold: '2', group_size: '2' } },
-      ], output: { name: 'COOP_CLOSE', type: 'standard' } },
+      ], output: { name: 'CHANNEL', type: 'standard' } },
       { label: 'FORCE', blocks: [
         { type: 'PTLC', values: { signing_key: FAKE.pk2, adaptor_point: FAKE.hash1.substring(0, 64), blocks: '144' } },
-      ], output: { name: 'FORCE_CLOSE', type: 'standard' } },
+      ], output: { name: 'CHANNEL', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 30000 },
-      { address: FAKE.addr4, amount: 20000 },
+      { address: FAKE.addr3, amount: 50000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'CLTV_SIG VESTING SCHEDULE',
@@ -7548,22 +7535,20 @@ const EXAMPLES = [
       { label: 'HOT', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'AMOUNT_LOCK', values: { min: '546', max: '1000000' } },
-      ], output: { name: 'HOT_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'BOARD', blocks: [
         { type: 'TIMELOCKED_MULTISIG', values: { threshold: '2', pubkeys: `${FAKE.pk2}, ${FAKE.pk3}, ${FAKE.pk4}`, blocks: '1008' } },
-      ], output: { name: 'BOARD_RECOVERY', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'COLD', blocks: [
         { type: 'CSV', values: { blocks: '52560' } },
         { type: 'SIG', values: { pubkey: FAKE.pk5 } },
-      ], output: { name: 'COLD_SWEEP', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 5000 },
-      { address: FAKE.addr3, amount: 45000 },
-      { address: FAKE.addr5, amount: 50000 },
+      { address: FAKE.addr1, amount: 100000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
 
   {
@@ -7573,17 +7558,16 @@ const EXAMPLES = [
     rungs: [
       { label: 'CLAIM', blocks: [
         { type: 'HTLC', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1, blocks: '144' } },
-      ], output: { name: 'ALICE_CLAIM', type: 'standard' } },
+      ], output: { name: 'HTLC', type: 'standard' } },
       { label: 'REFUND', blocks: [
         { type: 'TIMELOCKED_SIG', values: { pubkey: FAKE.pk2, blocks: '288' } },
-      ], output: { name: 'BOB_REFUND', type: 'standard' } },
+      ], output: { name: 'HTLC', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 2 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 10000 },
-      { address: FAKE.addr2, amount: 9900 },
+      { address: FAKE.addr1, amount: 20000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7593,18 +7577,17 @@ const EXAMPLES = [
     rungs: [
       { label: 'CLAIM', blocks: [
         { type: 'HASH_SIG', values: { preimage: FAKE.preimage2, pubkey: FAKE.pk1 } },
-      ], output: { name: 'CLAIM_OUTPUT', type: 'standard' } },
+      ], output: { name: 'CLAIM', type: 'standard' } },
       { label: 'REFUND', blocks: [
         { type: 'CSV', values: { blocks: '432' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'REFUND_OUTPUT', type: 'standard' } },
+      ], output: { name: 'CLAIM', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 3 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 5000 },
-      { address: FAKE.addr4, amount: 4900 },
+      { address: FAKE.addr3, amount: 10000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7619,17 +7602,16 @@ const EXAMPLES = [
         { type: 'OUTPUT_COUNT', values: { min: '1', max: '2' } },
         { type: 'WEIGHT_LIMIT', values: { max_weight: '400000' } },
         { type: 'RELATIVE_VALUE', values: { numerator: '9', denominator: '10' } },
-      ], output: { name: 'GOVERNED_SPEND', type: 'standard' } },
+      ], output: { name: 'TREASURY', type: 'standard' } },
       { label: 'OVERRIDE', blocks: [
         { type: 'MULTISIG', values: { threshold: '3', pubkeys: `${FAKE.pk1}, ${FAKE.pk2}, ${FAKE.pk3}, ${FAKE.pk4}` } },
-      ], output: { name: 'BOARD_OVERRIDE', type: 'standard' } },
+      ], output: { name: 'TREASURY', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 90000 },
-      { address: FAKE.addr5, amount: 9500 },
+      { address: FAKE.addr1, amount: 100000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7641,17 +7623,16 @@ const EXAMPLES = [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'ACCUMULATOR', values: { merkle_root: '', merkle_leaves: FAKE.hash1 + ', ' + FAKE.hash2 + ', ' + FAKE.hash3 } },
         { type: 'AMOUNT_LOCK', values: { min: '10000', max: '5000000' } },
-      ], output: { name: 'ALLOWLISTED', type: 'standard' } },
+      ], output: { name: 'ALLOWLIST', type: 'standard' } },
       { label: 'ADMIN', blocks: [
         { type: 'MULTISIG', values: { threshold: '2', pubkeys: `${FAKE.pk2}, ${FAKE.pk3}, ${FAKE.pk4}` } },
-      ], output: { name: 'ADMIN_SWEEP', type: 'standard' } },
+      ], output: { name: 'ALLOWLIST', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid4, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr2, amount: 25000 },
-      { address: FAKE.addr6, amount: 70000 },
+      { address: FAKE.addr2, amount: 100000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7662,18 +7643,17 @@ const EXAMPLES = [
       { label: 'UNLOCK', blocks: [
         { type: 'CLTV_TIME', values: { timestamp: '1798761600' } },
         { type: 'HASH_SIG', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1 } },
-      ], output: { name: 'DATE_UNLOCK', type: 'standard' } },
+      ], output: { name: 'LOCKED', type: 'standard' } },
       { label: 'CANCEL', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
         { type: 'SIG', values: { pubkey: FAKE.pk3 } },
-      ], output: { name: 'CANCEL_LOCK', type: 'standard' } },
+      ], output: { name: 'LOCKED', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 30000 },
-      { address: FAKE.addr4, amount: 29800 },
+      { address: FAKE.addr3, amount: 60000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7685,23 +7665,21 @@ const EXAMPLES = [
         { type: 'TIMER_CONTINUOUS', values: { accumulated: '0', target: '144' }, inverted: true },
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'RECURSE_MODIFIED', values: { max_depth: '200', block_idx: '0', param_idx: '0', delta: '1' } },
-      ], output: { name: 'WATCHDOG_OK', type: 'standard' } },
+      ], output: { name: 'WATCHDOG', type: 'standard' } },
       { label: 'HELD', blocks: [
         { type: 'TIMER_OFF_DELAY', values: { remaining: '72' } },
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-      ], output: { name: 'HOLD_WINDOW', type: 'standard' } },
+      ], output: { name: 'WATCHDOG', type: 'standard' } },
       { label: 'EMERG', blocks: [
         { type: 'CSV', values: { blocks: '1008' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'TIMEOUT_SWEEP', type: 'standard' } },
+      ], output: { name: 'WATCHDOG', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 2 }],
     txOutputs: [
       { address: FAKE.addr1, amount: 500000 },
-      { address: FAKE.addr5, amount: 7000 },
-      { address: FAKE.addr6, amount: 5000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
 
   {
@@ -7850,18 +7828,17 @@ const EXAMPLES = [
     rungs: [
       { label: 'SPEND', blocks: [
         { type: 'P2PKH_LEGACY', values: { pubkey: FAKE.pk1, signature: '', scheme: 'SCHNORR' } },
-      ], output: { name: 'NORMAL_SPEND', type: 'standard' } },
+      ], output: { name: 'WALLET', type: 'standard' } },
       { label: 'RECOVER', blocks: [
         { type: 'CSV', values: { blocks: '52560' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2, scheme: 'SCHNORR' } },
-      ], output: { name: 'RECOVERY', type: 'standard' } },
+      ], output: { name: 'WALLET', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 45000 },
-      { address: FAKE.addr2, amount: 5000 },
+      { address: FAKE.addr1, amount: 50000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
 
   {
@@ -7871,23 +7848,21 @@ const EXAMPLES = [
     rungs: [
       { label: 'HOT', blocks: [
         { type: 'P2WPKH_LEGACY', values: { pubkey: FAKE.pk1, signature: '', scheme: 'SCHNORR' } },
-      ], output: { name: 'HOT_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'VAULT', blocks: [
         { type: 'P2SH_LEGACY', values: { script_body: '' },
           innerBlocks: [{ id: uid(), type: 'SIG', values: { pubkey: FAKE.pk2, scheme: 'SCHNORR' } }] },
-      ], output: { name: 'VAULT_UNLOCK', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'COLD', blocks: [
         { type: 'CLTV', values: { height: '900000' } },
         { type: 'SIG', values: { pubkey: FAKE.pk3, scheme: 'SCHNORR' } },
-      ], output: { name: 'COLD_SWEEP', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr3, amount: 40000 },
-      { address: FAKE.addr4, amount: 30000 },
-      { address: FAKE.addr5, amount: 29500 },
+      { address: FAKE.addr3, amount: 100000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
 
   {
@@ -7897,23 +7872,21 @@ const EXAMPLES = [
     rungs: [
       { label: 'KEY', blocks: [
         { type: 'P2TR_LEGACY', values: { pubkey: FAKE.pk1, signature: '', scheme: 'SCHNORR' } },
-      ], output: { name: 'KEY_PATH', type: 'standard' } },
+      ], output: { name: 'TAPROOT', type: 'standard' } },
       { label: 'SCRIPT', blocks: [
         { type: 'P2TR_SCRIPT_LEGACY', values: { script_body: '', internal_key: FAKE.pk2 },
           innerBlocks: [{ id: uid(), type: 'SIG', values: { pubkey: FAKE.pk3, scheme: 'SCHNORR' } }] },
-      ], output: { name: 'SCRIPT_PATH', type: 'standard' } },
+      ], output: { name: 'TAPROOT', type: 'standard' } },
       { label: 'PQ_SAFE', blocks: [
         { type: 'CSV', values: { blocks: '26000' } },
         { type: 'SIG', values: { pubkey: FAKE_PQ.falcon1, scheme: 'FALCON512' } },
-      ], output: { name: 'PQ_RECOVERY', type: 'standard' } },
+      ], output: { name: 'TAPROOT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 1 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 50000 },
-      { address: FAKE.addr2, amount: 30000 },
-      { address: FAKE.addr6, amount: 19500 },
+      { address: FAKE.addr1, amount: 100000 },
     ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
+    inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
 
   {
@@ -7987,18 +7960,17 @@ const EXAMPLES = [
       { label: 'SPEND', blocks: [
         { type: 'P2WSH_LEGACY', values: { script_body: '' },
           innerBlocks: [{ id: uid(), type: 'SIG', values: { pubkey: FAKE.pk1, scheme: 'SCHNORR' } }] },
-      ], output: { name: 'WSH_SPEND', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'FALLBACK', blocks: [
         { type: 'CSV', values: { blocks: '144' } },
         { type: 'SIG', values: { pubkey: FAKE.pk2 } },
-      ], output: { name: 'RECOVERY', type: 'standard' } },
+      ], output: { name: 'VAULT', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid2, vout: 0 }],
     txOutputs: [
-      { address: FAKE.addr1, amount: 30000 },
-      { address: FAKE.addr2, amount: 29500 },
+      { address: FAKE.addr1, amount: 50000 },
     ],
-    inputMap: [[0], [0]], outputMap: [0, 1],
+    inputMap: [[0], [0]], outputMap: [0, 0],
   },
   {
     title: 'ANCHOR TAG',
