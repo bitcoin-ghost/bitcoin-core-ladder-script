@@ -376,7 +376,14 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                 CHash160().Write(field.data).Finalize(commit_field.data);
                 block.fields.push_back(std::move(commit_field));
             } else if (pubkeys_out) {
-                pubkeys_out->push_back(field.data);
+                // Normalize x-only (32 bytes) → compressed (33 bytes, even-Y)
+                // so the Merkle leaf binds a canonical pubkey encoding regardless
+                // of whether the client sent x-only or compressed.
+                auto pk = field.data;
+                if (pk.size() == 32) {
+                    pk.insert(pk.begin(), 0x02);
+                }
+                pubkeys_out->push_back(std::move(pk));
             }
             continue;
         }
@@ -1119,6 +1126,18 @@ static bool ParsePQScheme(const std::string& s, RungScheme& out)
     return false;
 }
 
+/** Push an externally-supplied pubkey into a spend block, normalizing
+ *  x-only (32-byte) keys to compressed (33-byte, even-Y) so the spend-time
+ *  leaf hash matches the fund-time leaf produced by createtxmlsc (which
+ *  does the same normalization on rung-level pubkeys). */
+static void PushWitnessPubkey(RungBlock& block, std::vector<uint8_t> pk)
+{
+    if (pk.size() == 32) {
+        pk.insert(pk.begin(), 0x02);
+    }
+    block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+}
+
 /** Sign with PQ or Schnorr, routing based on block_spec fields.
  *  - If "pq_privkey" + "scheme" → PQ sign, push PUBKEY (if pq_pubkey given) + SIGNATURE.
  *  - If "privkey" → Schnorr sign, push PUBKEY + SIGNATURE.
@@ -1277,8 +1296,7 @@ static void SignMultiKey(const UniValue& block_spec,
     if (block_spec.exists("pubkeys")) {
         const UniValue& all_pubkeys = block_spec["pubkeys"].get_array();
         for (size_t p = 0; p < all_pubkeys.size(); ++p) {
-            auto pk_bytes = ParseHex(all_pubkeys[p].get_str());
-            block.fields.push_back({RungDataType::PUBKEY, std::move(pk_bytes)});
+            PushWitnessPubkey(block, ParseHex(all_pubkeys[p].get_str()));
         }
         // Sign with each privkey (M of N)
         for (size_t s = 0; s < privkeys_arr.size(); ++s) {
@@ -1382,12 +1400,11 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
                 block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
             }
         }
-        // merkle_pub_key: add remaining pubkeys (e.g., adaptor_point) after signing key
+        // merkle_pub_key: add remaining pubkeys (e.g., adaptor_point) after signing key.
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
-                auto pk = ParseHex(pk_arr[i].get_str());
-                block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         }
         break;
@@ -1404,8 +1421,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
-                auto pk = ParseHex(pk_arr[i].get_str());
-                block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         }
         // Copy NUMERIC(delay) from conditions
@@ -1569,8 +1585,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
-                auto pk = ParseHex(pk_arr[i].get_str());
-                block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         }
         std::string preimage_hex = block_spec["preimage"].get_str();
@@ -1640,8 +1655,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
-                auto pk = ParseHex(pk_arr[i].get_str());
-                block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         }
         break;
@@ -1921,12 +1935,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
-                auto pk = ParseHex(pk_arr[i].get_str());
-                block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         } else if (block_spec.exists("pubkey")) {
-            auto pk = ParseHex(block_spec["pubkey"].get_str());
-            block.fields.push_back({RungDataType::PUBKEY, std::move(pk)});
+            PushWitnessPubkey(block, ParseHex(block_spec["pubkey"].get_str()));
         }
         // Do NOT auto-copy condition fields — MergeConditionsAndWitness combines
         // conditions + witness, so copying would duplicate fields. Only add

@@ -181,7 +181,7 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_hex, bool i
     //   0xDF + 32-byte conditions_root + data (MLSC + DATA_RETURN payload).
     if (!script.empty() && script[0] == 0xDF &&
         (script.size() == 1 || script.size() >= 33)) {
-        out.pushKV("type", "rung_mlsc");
+        out.pushKV("type", "mlsc");
         return;
     }
 
