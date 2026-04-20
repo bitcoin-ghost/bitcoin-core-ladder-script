@@ -97,6 +97,21 @@ std::string SighashToStr(unsigned char sighash_type)
  */
 std::string ScriptToAsmStr(const CScript& script, const bool fAttemptSighashDecode)
 {
+    // MLSC (Ladder Script) outputs are 0xDF || 32-byte conditions_root
+    // (sometimes followed by a DATA_RETURN payload, or a single 0xDF when
+    // the UTXO compressor has stripped the root). The generic Bitcoin
+    // opcode walker treats 0xDF as OP_UNKNOWN and produces garbage — pretty-
+    // print these before the walker sees them.
+    if (!script.empty() && script[0] == 0xDF) {
+        if (script.size() == 1) return "MLSC <compact>";
+        if (script.size() >= 33) {
+            std::string root_hex = HexStr(std::span<const unsigned char>(script.data() + 1, 32));
+            if (script.size() == 33) return "MLSC " + root_hex;
+            std::string data_hex = HexStr(std::span<const unsigned char>(script.data() + 33, script.size() - 33));
+            return "MLSC " + root_hex + " DATA_RETURN " + data_hex;
+        }
+    }
+
     std::string str;
     opcodetype opcode;
     std::vector<unsigned char> vch;
@@ -157,6 +172,17 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_hex, bool i
     }
     if (include_hex) {
         out.pushKV("hex", HexStr(script));
+    }
+
+    // Short-circuit MLSC (Ladder Script) outputs before the opcode-oriented
+    // Solver mis-classifies them as "nonstandard". Three shapes to recognise:
+    //   0xDF only (compact UTXO-compressor form),
+    //   0xDF + 32-byte conditions_root (plain MLSC),
+    //   0xDF + 32-byte conditions_root + data (MLSC + DATA_RETURN payload).
+    if (!script.empty() && script[0] == 0xDF &&
+        (script.size() == 1 || script.size() >= 33)) {
+        out.pushKV("type", "rung_mlsc");
+        return;
     }
 
     std::vector<std::vector<unsigned char>> solns;
