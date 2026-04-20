@@ -9311,6 +9311,7 @@ function planSpend(record, options) {
     rungIdx,
     rungBlocks,
     voutRungs,
+    allRungs,
     signerBlocks,
     timelocks: { inputSequence, txLocktime, csvBlocks, csvTimeSeconds },
     outputClassification: { recurseBlocks, mutationBlocks, validationBlocks, ctvBlock, splitBlock },
@@ -10493,7 +10494,7 @@ function SpendPanel() {
       plan.warnings.forEach(msg => addLog(msg, 'warn'));
       if (plan.errors.length > 0) throw new Error(plan.errors.join('; '));
 
-      const { targetRung, rungIdx, rungBlocks, voutRungs, signerBlocks, timelocks, outputClassification, validationResults, needsAccumulatorProof, accumulatorLeaves } = plan;
+      const { targetRung, rungIdx, rungBlocks, voutRungs, allRungs, signerBlocks, timelocks, outputClassification, validationResults, needsAccumulatorProof, accumulatorLeaves } = plan;
       const { inputSequence, txLocktime, csvBlocks, csvTimeSeconds } = timelocks;
       const { recurseBlocks, mutationBlocks, validationBlocks, ctvBlock, splitBlock } = outputClassification;
 
@@ -10751,10 +10752,16 @@ function SpendPanel() {
       // 5. Sign using blocks-based signer format
       addLog('Signing with ' + signerBlocks.length + ' block(s), ' + scheme + ' scheme...');
       const signerEntry = { input: 0, blocks: signerBlocks };
-      // MLSC inputs require conditions for Merkle proof computation.
-      // Pass conditions exactly as they were when the output was created.
-      if (voutRungs.length > 0) {
-        signerEntry.conditions = voutRungs.map(r => ({
+      // MLSC inputs need the FULL tx-level rung tree for Merkle proof
+      // computation — not just the rungs assigned to this vout. TX_MLSC
+      // commits one shared conditions_root across every output in the
+      // fund tx, so the spender must replay the same rung list the fund
+      // submitted. Passing only `voutRungs` leaves the node building a
+      // single-leaf tree and "MLSC Merkle path verification failed" on
+      // broadcast.
+      const rungsForMerkle = (allRungs && allRungs.length > 0) ? allRungs : voutRungs;
+      if (rungsForMerkle.length > 0) {
+        signerEntry.conditions = rungsForMerkle.map(r => ({
           blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
         }));
       }
@@ -10763,9 +10770,14 @@ function SpendPanel() {
           blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
         }));
       }
-      if (voutRungs.length > 1) {
-        signerEntry.rung = rungIdx;
-        addLog('Passing rung index ' + rungIdx + ' to signladder (condition ' + (rungIdx + 1) + ' of ' + voutRungs.length + ')', 'info');
+      // rungIdx from planSpend is relative to voutRungs — re-index against
+      // the full rung list so signrungtx picks the right leaf.
+      const fullRungIdx = (rungsForMerkle === allRungs)
+        ? Math.max(0, allRungs.indexOf(targetRung))
+        : rungIdx;
+      if (rungsForMerkle.length > 1) {
+        signerEntry.rung = fullRungIdx;
+        addLog('Passing rung index ' + fullRungIdx + ' to signrungtx (leaf ' + (fullRungIdx + 1) + ' of ' + rungsForMerkle.length + ')', 'info');
       }
       // Pass coil if non-default (PQ scheme, UNLOCK_TO, etc.) — must match fund-time coil for Merkle leaf
       const coilScheme = targetRung.coilScheme || rec.scheme || 'SCHNORR';
