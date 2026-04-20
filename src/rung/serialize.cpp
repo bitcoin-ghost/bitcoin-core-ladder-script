@@ -3,6 +3,59 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+// ============================================================================
+// REVIEWER BLOCK — Wire-format serialisation for LadderWitness and MLSCProof
+// ============================================================================
+//
+// PURPOSE
+//   Serialize/deserialize the per-input witness stream. This is the consensus
+//   parser — anything that gets past it is considered structurally valid.
+//
+// KEY SYMBOLS
+//   DeserializeLadderWitness / SerializeLadderWitness
+//     Full witness stream (rungs + relays + MLSC proof).
+//   DeserializeBlock / SerializeBlock
+//     Shared by witness parsing and MLSC-proof revealed_rung parsing.
+//     Accepts micro-header (1 byte, table-indexed) or explicit encoding.
+//   DeserializeRelay / DeserializeMutationTarget
+//     Subcomponent parsers.
+//
+// LOAD-BEARING INVARIANTS
+//   1. Size caps are consensus rules:
+//        MAX_RUNGS, MAX_BLOCKS_PER_RUNG, MAX_FIELDS_PER_BLOCK,
+//        MAX_LADDER_WITNESS_SIZE, MAX_PREIMAGE_FIELDS_PER_WITNESS,
+//        MAX_PREIMAGE_FIELDS_PER_TX, MAX_RELAYS, MAX_RELAY_DEPTH.
+//      Changing any changes anti-spam posture.
+//   2. Fail-closed on every unknown or malformed input:
+//        - unknown block type → reject
+//        - unknown data type → reject
+//        - non-invertible type with inverted=true → reject
+//        - data-embedding type in a block without implicit layout → reject
+//        - trailing bytes after the expected end → reject
+//        - deprecated blocks (e.g. 0x0201/0x0202 reserved slots) → reject
+//   3. PREIMAGE/SCRIPT_BODY caps: max 2 per witness, max 2 per transaction
+//      (binding). This closes the data-embedding vector that would otherwise
+//      allow unbounded payload via preimage reveal.
+//   4. Micro-header slot must match ImplicitLayoutFor(type, context); runtime
+//      init check (VerifyImplicitLayoutPairing in types.h) enforces this.
+//   5. Diff witness (n_rungs == 0 in witness stream): template reference to
+//      another input's conditions with per-field diff overlays. Diffs
+//      restricted to witness-side types (PUBKEY/SIGNATURE/PREIMAGE/SCRIPT_BODY/
+//      SCHEME) to prevent condition-field smuggling.
+//
+// OPTIONAL / REMOVABLE
+//   - Micro-header encoding is a size optimisation (~2 bytes per block). A
+//     minimum-viable BIP could specify explicit-only encoding. If dropped,
+//     VerifyImplicitLayoutPairing can also be stripped.
+//   - Diff witness mode (template reference) is only needed for the
+//     cross-input condition-sharing optimisation. Can be removed if every
+//     input carries full conditions.
+//
+// REFERENCES
+//   Wire format: doc/ladder-script/RUNG_TX_SPEC.md
+//   Reviewer guide: doc/ladder-script/REVIEW_GUIDE.md (Part 3, serialize section).
+// ============================================================================
+
 #include <rung/serialize.h>
 #include <rung/conditions.h>
 

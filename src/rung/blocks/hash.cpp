@@ -6,6 +6,13 @@
 // Ladder Script block family: hash.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Hash family (0x0203..0x0204)
+//   Members: TAGGED_HASH (BIP-340), HASH_GUARDED (raw SHA-256 preimage).
+//   Reserved slots 0x0201/0x0202 are never to be reused — documented in
+//   types.h. HASH_GUARDED is non-invertible (see IsInvertibleBlockType).
+//   Optional for MVP: HASH_GUARDED can be removed (compose via PREIMAGE +
+//   HASH256 if needed). TAGGED_HASH is used by PTLC and is recommended.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

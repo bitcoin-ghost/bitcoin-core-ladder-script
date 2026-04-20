@@ -3,6 +3,36 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+// ============================================================================
+// REVIEWER BLOCK — Ladder signature hash
+// ============================================================================
+//
+// PURPOSE
+//   Compute the digest that Ladder-native signatures commit to. Two variants:
+//     SignatureHashLadder         — script-path, TaggedHash("LadderSighash/v1")
+//     SignatureHashLadderKeyPath  — key-path, TaggedHash("LadderKeyPathSighash/v1")
+//
+// LOAD-BEARING INVARIANTS
+//   1. Tagged-hash domain strings are versioned (/v1). Must match whatever
+//      the wallet/signer library uses exactly.
+//   2. Allowed hash_type set: {0x00..0x03, 0x40..0x43, 0x81..0x83, 0xC0..0xC3}.
+//      Anything outside is rejected — no SIGHASH_FORKID, no undefined bits.
+//   3. For MLSC inputs the conditions_root is hashed AS-IS (no
+//      re-serialisation). The root is a 32-byte field already; re-hashing
+//      would only add cost.
+//   4. Key-path sighash (LadderKeyPathSighash/v1) deliberately does NOT
+//      commit to conditions. The x-only tweak already binds them via
+//      CheckLadderTweakRaw; including them again would create a
+//      cross-protocol signing-oracle risk.
+//   5. ANYPREVOUTANYSCRIPT (0xC0..0xC3) skips both prevout and conditions —
+//      preserves pre-signed template-reuse patterns.
+//
+// OPTIONAL / REMOVABLE
+//   - ANYPREVOUT variants (0x40..0x43, 0xC0..0xC3) enable channel-style
+//     patterns (eltoo-like). A minimum-viable BIP can ship with 0x00..0x03
+//     and 0x81..0x83 only.
+// ============================================================================
+
 #include <rung/sighash.h>
 #include <rung/api.h>
 #include <rung/serialize.h>

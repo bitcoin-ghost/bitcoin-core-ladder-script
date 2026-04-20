@@ -1090,3 +1090,203 @@ Covers:
    upgrade mechanism). Post-activation, the ladder evaluator enforces the conditions.
    Unknown block types within an activated Ladder evaluation return UNSATISFIED,
    enabling sub-protocol soft forks.
+
+---
+
+## Part 2 — Additional Patch Sections (not previously enumerated)
+
+### 17. src/core_write.cpp (~26 lines added) — MLSC decoder shims
+
+#### What was added
+
+Two guards before the generic opcode walker, teaching Core's JSON/ASM decoders to
+recognise MLSC scriptPubKeys (0xDF prefix):
+
+- **`ScriptToAsmStr`** (`core_write.cpp:97`): short-circuits the opcode walker. Before
+  the change, `decoderawtransaction` would render an MLSC output as
+  `OP_UNKNOWN <garbage-push>` because 0xDF isn't a known opcode. Now it renders
+  `MLSC <root-hex>` (or `MLSC <root-hex> DATA_RETURN <data-hex>` when a data tail is
+  present, or `MLSC <compact>` when the UTXO compressor has stripped the root).
+
+- **`ScriptToUniv`** (`core_write.cpp:159`): emits `"type": "mlsc"` for MLSC
+  scriptPubKeys. Without this, the Solver-backed path tags them as `"nonstandard"`,
+  which is correct from Core's opcode-perspective but misleading for Ladder-aware
+  tooling.
+
+#### Why both paths
+
+`ScriptToAsmStr` is consumed by `decodescript`, block explorers, and wallet UI
+tooling that wants a human-readable asm rendering. `ScriptToUniv` is consumed by
+`decoderawtransaction`, `getrawtransaction verbose`, and all JSON serialisation of
+`CTxOut::scriptPubKey`. Both paths must recognise MLSC or tooling diverges.
+
+#### Output type naming (`"mlsc"`)
+
+Matches Core's lowercase convention for script types (e.g. `witness_v0_keyhash`,
+`witness_v1_taproot`). The transaction type (RUNG_TX, v4) is carried separately in
+`tx.version`; this field is strictly the *script-level* output type.
+
+#### Load-bearing vs Optional
+
+- **Load-bearing**: neither section is consensus-critical. MLSC outputs would validate
+  and spend fine without either change — this only affects *reporting*.
+- **Optional**: both sections are convenience shims for Core-only tooling. For a
+  BIP submission, they can be omitted; reviewers who want to see MLSC decoded
+  properly would need a Ladder-aware tool instead. Keeping them in the reference
+  implementation is recommended because they cost ~26 LOC and remove a frequent
+  point of confusion.
+
+---
+
+### 18. src/rpc/client.cpp (~16 lines added) — RPC argument converter
+
+#### What was added
+
+Entries in `vRPCConvertParams` for the Ladder/QABIO RPCs (`createtxmlsc`,
+`signrungtx`, `qabi_authchain`, `qabi_buildblock`) specifying which positional args
+are numbers / arrays / objects rather than strings.
+
+#### Why this is necessary
+
+`bitcoin-cli` receives all args as strings from the shell. Without converter entries,
+it forwards them verbatim to the server, which rejects them with
+`JSON value of type string is not of expected type number`. Every new RPC that takes
+non-string args needs entries here.
+
+#### Load-bearing vs Optional
+
+- **Load-bearing**: this is ergonomics for CLI users. Not consensus-critical.
+- **Optional**: can be omitted if reviewers reach the Ladder RPCs via JSON-RPC
+  directly (e.g. `curl`) rather than `bitcoin-cli`. Strongly recommended for a
+  reference implementation — debugging without it is painful.
+
+---
+
+### 19. src/rpc/mining.cpp (~19 lines modified) — generatetoaddress operator note
+
+#### What was added
+
+A `LogPrintf` in `generateBlocks` that fires when the shared `nMaxTries` budget is
+exhausted mid-batch, plus an expanded docstring on `generatetoaddress`'s `maxtries`
+argument explaining the shared-budget semantics.
+
+#### Why this was needed
+
+On chains harder than regtest (signet, testnet, mainnet) a `generatetoaddress N addr`
+call frequently returns fewer than N block hashes with no error — the nonce-attempt
+budget is a *total*, not a per-block, so difficult blocks exhaust it early. Test
+infrastructure on signet was tripping on this silently. The log line makes the
+early exit visible; the docstring tells operators to raise `maxtries` or loop on
+single blocks.
+
+#### Load-bearing vs Optional
+
+- **Load-bearing**: zero consensus impact. This is a pure operator-quality-of-life
+  improvement.
+- **Optional**: can be dropped entirely. Recommended to keep because it prevents
+  silent test-infrastructure failures and costs ~19 LOC.
+
+---
+
+### 20. src/script/script.h — IsUnspendable extension for MLSC DATA_RETURN
+
+#### What was added
+
+`CScript::IsUnspendable()` now additionally returns true for scripts matching the
+pattern `0xDF` prefix with size in `(33, 73]` — i.e. `0xDF` + 32-byte conditions_root
++ 1-to-40-byte data tail. Bare MLSC (exactly 33 bytes: prefix + root) is **not**
+marked unspendable (those are normal MLSC outputs).
+
+#### Why this specific size range
+
+- MLSC DATA_RETURN: 1 marker byte + 32-byte root + 1..40 bytes DATA payload.
+  Total range: 34..73 bytes.
+- Bare MLSC: exactly 33 bytes (no data tail). Spendable.
+- The DATA_RETURN block evaluator returns `ERROR` on every spend attempt, so outputs
+  of this shape are *consensus-unspendable*. Marking them so via `IsUnspendable`
+  keeps them out of the UTXO set (parity with OP_RETURN).
+
+#### Why out-of-UTXO matters
+
+Unspendable outputs are pruned immediately on block connection and don't contribute
+to the UTXO set's memory footprint. For MLSC+DATA_RETURN (a common pattern for
+anchoring / commitment payloads) this matters — without the exemption, every
+DATA_RETURN output would sit in the UTXO set forever.
+
+#### Load-bearing vs Optional
+
+- **Load-bearing for economic soundness**: without this, DATA_RETURN payloads would
+  bloat the UTXO set forever. With it, they behave exactly like OP_RETURN — stored in
+  block data, not in the UTXO set.
+- **Load-bearing for policy**: also exempts these outputs from the dust-threshold
+  check in `sendrawtransaction` (standard policy refuses dust, but unspendable
+  outputs are exempted by definition).
+- **Not strictly consensus**: transactions with DATA_RETURN would still validate
+  without this change. The UTXO-set implication is the reason this matters.
+
+---
+
+### 21. src/rpc/mempool.cpp (~5 lines added) — MLSC burn-amount exemption
+
+#### What was added
+
+Skip the "burn-amount" check for MLSC outputs in `sendrawtransaction` and
+`submitpackage`. The burn check rejects txs that send more than some threshold to
+`IsUnspendable()` scripts; with MLSC DATA_RETURN now in `IsUnspendable()`, normal
+MLSC data-anchor txs would hit it.
+
+#### Load-bearing vs Optional
+
+- **Load-bearing**: without this, MLSC DATA_RETURN txs with non-zero output amounts
+  get rejected by the relay policy, even though they're valid at consensus level.
+- **Optional**: the burn check itself is policy, not consensus. A node could relax
+  it differently.
+
+---
+
+## Part 3 — Load-Bearing vs Optional Summary
+
+For a BIP reviewer deciding what must appear in the reference implementation vs what
+can be trimmed:
+
+### Must keep (consensus or economic soundness)
+
+| File | Sections | Reason |
+|------|----------|--------|
+| `src/primitives/transaction.{h,cpp}` | RUNG_TX wire format, flag byte 0x02, UTXO inflation | Consensus tx format |
+| `src/script/interpreter.{h,cpp}` | `SigVersion::LADDER`, `m_ladder_ready` | Consensus sig dispatch |
+| `src/script/script.h` | `IsUnspendable` extension for DATA_RETURN | UTXO-set economic soundness |
+| `src/script/script_error.{h,cpp}` | Ladder error codes | Consensus error propagation |
+| `src/validation.{cpp,h}` | TX_MLSC dispatch into `VerifyRungTx`, block-height plumbing | Consensus validation seam |
+| `src/policy/policy.cpp` | MLSC standardness gate | Mempool policy |
+| `src/compressor.{h,cpp}` | MLSC output compression for UTXO set | UTXO-set compression (breaks fork if diverges) |
+| `src/coins.{h,cpp}` | UTXO set handling for MLSC | Consensus UTXO semantics |
+| `src/pubkey.{h,cpp}` | `ComputeLadderTweak`, x-only Ladder tweak check | Consensus key-path spend |
+| `src/key.{h,cpp}` | Ladder-signature signing helpers | Wallet-side parity |
+| `src/rpc/register.h` | Register rung RPC | RPC surface |
+| `src/rpc/mempool.cpp` | Burn-amount exemption for MLSC | Relay policy |
+
+### Can be omitted from a minimum-viable BIP
+
+| File | Sections | What is lost |
+|------|----------|--------------|
+| `src/core_write.cpp` | MLSC decoder shims | Human-readable JSON/ASM output — ladder-aware tooling still works |
+| `src/rpc/client.cpp` | ConvertParams entries | `bitcoin-cli` ergonomics for Ladder/QABIO RPCs |
+| `src/rpc/mining.cpp` | `generatetoaddress` operator note | Operator quality-of-life (exhaustion log + clarified docstring) |
+| `src/rpc/util.cpp` | Help-output formatting tweak | Minor help-text cosmetic |
+
+Removing everything in the "can be omitted" column saves ~66 LOC from the 740-LOC
+patch, leaving ~674 LOC of consensus-critical / economic-soundness material.
+
+---
+
+## Part 4 — Cross-References
+
+For library-side review, see [`REVIEW_GUIDE.md`](REVIEW_GUIDE.md), which annotates
+every file under `src/rung/` with the same Load-bearing / Optional structure.
+
+For the full transaction-format specification, see [`RUNG_TX_SPEC.md`](RUNG_TX_SPEC.md).
+
+For the MLSC output format and Merkle tree spec, see [`TX_MLSC_SPEC.md`](TX_MLSC_SPEC.md).
+
+For the soft-fork activation path, see [`SOFT_FORK_GUIDE.md`](SOFT_FORK_GUIDE.md).

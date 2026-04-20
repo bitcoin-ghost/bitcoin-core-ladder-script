@@ -3,6 +3,61 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+// ============================================================================
+// REVIEWER BLOCK — MLSC conditions, Merkle tree, proof verification
+// ============================================================================
+//
+// PURPOSE
+//   The MLSC (Merkle Ladder Script Conditions) consensus surface. Defines the
+//   0xDF output format, leaf computation, Merkle tree, key-path tweak, and
+//   proof serialisation.
+//
+// KEY SYMBOLS
+//   IsMLSCScript / GetMLSCRoot / HasMLSCData
+//     scriptPubKey classification — recognises 0xDF prefix with or without
+//     a DATA_RETURN tail.
+//   ComputeTxMLSCLeaf(cp_rung)
+//     leaf = TaggedHash("LadderLeaf/v1", structural_template || value_commitment).
+//   ComputeValueCommitment(rung, pubkeys)
+//     SHA256(all condition field bytes || all pubkey bytes). Pubkeys are
+//     fold-in-order — changing order changes the leaf.
+//   BuildMerkleTree / VerifyMerklePath
+//     Sorted-pair interior hashing, TaggedHash("LadderInternal/v1").
+//     MLSC_EMPTY_LEAF (tagged all-zero) pads to the next power of 2.
+//   ComputeTweakedConditionsRoot
+//     Key-path tweak: output_pk = internal_pk + H(internal_pk || merkle_root)*G.
+//     Tag: "LadderTweak/v1".
+//   SerializeMLSCProof / DeserializeMLSCProof
+//     Wire format for the proof witness stack element.
+//
+// LOAD-BEARING INVARIANTS
+//   1. Tagged-hash domain strings are versioned (/v1). Changing any of them
+//      splits consensus. Must match evaluator.cpp and pubkey.cpp exactly.
+//   2. Interior hashing is SORTED-pair (smaller sibling first). This is NOT
+//      the parity-based scheme used by BIP-340 taproot — Ladder paths are
+//      commutative to save a direction bit per level.
+//   3. Empty-leaf padding uses MLSC_EMPTY_LEAF (a specific tagged hash), not
+//      raw zeros. Never substitute.
+//   4. PUBKEY fields are stripped from block.fields during conditions
+//      parsing and folded into value_commitment via rung_pks in POSITIONAL
+//      ORDER (as they appear across block-then-field iteration). Changing
+//      the iteration order changes the leaf → changes the root.
+//   5. NUMERIC fields are normalised to 4-byte little-endian in
+//      ComputeValueCommitment. Smaller NUMERIC fields are zero-padded; the
+//      evaluator and RPC layer do the same.
+//
+// OPTIONAL / REMOVABLE
+//   - SHARED proof mode is an optimisation for multi-input txs referencing
+//     the same source UTXO. MERKLE_PATH is sufficient for single-input spends.
+//   - revealed_mutation_targets (trailing proof field) is only needed for
+//     cross-rung covenant mutations. Remove with RECURSE_MODIFIED targeting
+//     non-self rungs if that scope is dropped.
+//
+// REFERENCES
+//   Wire format: doc/ladder-script/TX_MLSC_SPEC.md
+//   Reviewer guide: doc/ladder-script/REVIEW_GUIDE.md (Part 3, conditions section).
+// ============================================================================
+
 #include <rung/conditions.h>
 #include <rung/serialize.h>
 

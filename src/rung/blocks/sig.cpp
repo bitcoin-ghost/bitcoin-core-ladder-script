@@ -6,6 +6,17 @@
 // Ladder Script block family: sig.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Signature family (0x0001..0x0005)
+//   Members: SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG.
+//   All consensus-critical. Sig verification flows through the span-based
+//   api::LadderSigChecker interface (not Core's BaseSignatureChecker),
+//   so the library stays Core-free and the TAPROOT-only asserts in
+//   Core's CheckSchnorrSignature do not fire.
+//   Load-bearing: signature-size checks run before curve math (per BIP-340);
+//   KEY_REF_SIG bounds-checks the relay index before dereferencing the cache.
+//   Optional: ADAPTOR_SIG/MUSIG_THRESHOLD can be dropped for a minimum-viable
+//   BIP, but SIG and MULTISIG are required.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

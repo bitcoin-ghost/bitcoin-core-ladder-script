@@ -6,6 +6,19 @@
 // Ladder Script block family: plc.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — PLC (Programmable Logic Controller) family (0x06xx)
+//   14 members: HYSTERESIS_FEE, HYSTERESIS_VALUE, TIMER_CONTINUOUS,
+//   TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET,
+//   COUNTER_UP, COMPARE, SEQUENCER, ONE_SHOT, RATE_LIMIT, COSIGN.
+//   Pattern: stateful or state-like NUMERIC-field comparators over tx
+//   context. COSIGN is cross-input (requires another input whose spent SPK
+//   hashes to the given conditions_hash).
+//   Optional for MVP: the entire family is optional. Removing it drops
+//   expressiveness (rate-limit wallets, dead-man's switch, DCA covenants,
+//   board voting, etc.) but does not affect non-PLC tx patterns.
+//   Reviewer consideration: this is where Ladder Script's unique
+//   expressiveness lives. A BIP can defer PLC to a second soft-fork step.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

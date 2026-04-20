@@ -30,8 +30,8 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 | Document | Description |
 |----------|-------------|
 | [INTEGRATION.md](INTEGRATION.md) | Wallet integration, RPC commands, descriptor language |
-| [REVIEW_GUIDE.md](REVIEW_GUIDE.md) | Code reviewer's walkthrough with file-by-file guide |
-| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Annotated diff explaining every change to Bitcoin Core v30.0 |
+| [REVIEW_GUIDE.md](REVIEW_GUIDE.md) | Full library walkthrough: purpose / behaviour / load-bearing invariants / optional-for-MVP, per file |
+| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Core Integration Patch (~740 LOC) walkthrough, with load-bearing vs optional summary table |
 | [MEASUREMENTS.md](MEASUREMENTS.md) | Empirical tx / vsize / UTXO measurements vs P2WPKH and P2TR |
 
 ### Deployment

@@ -6,6 +6,18 @@
 // Ladder Script block family: anchor.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Anchor family (0x0501..0x0507)
+//   Members: ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE,
+//   ANCHOR_SEAL, ANCHOR_ORACLE, DATA_RETURN.
+//   DATA_RETURN is the MLSC equivalent of OP_RETURN — ERROR on every spend
+//   attempt, making the output consensus-unspendable (see IsUnspendable
+//   extension in src/script/script.h). Max 40 bytes of DATA payload; only
+//   block type where a DATA field is valid (enforced in IsDataEmbeddingType).
+//   Load-bearing: DATA_RETURN — without it, no first-class data anchor.
+//   Optional for MVP: everything except DATA_RETURN. The ANCHOR_* variants
+//   are L2-bridge primitives (channel anchors, pool/reserve commitments,
+//   seal markers, oracle attestations) — useful but not consensus-required.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

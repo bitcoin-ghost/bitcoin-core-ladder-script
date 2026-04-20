@@ -6,6 +6,24 @@
 // Ladder Script block family: recursion.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Recursion family (0x0401..0x0406)
+//   Members: RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT,
+//   RECURSE_SPLIT, RECURSE_DECAY.
+//   Two semantics:
+//     - Identity (SAME / UNTIL): output root must equal spent-UTXO root;
+//       carry-forward carries the FULL committed tree.
+//     - Leaf-centric (MODIFIED / COUNT / DECAY / SPLIT): expected root is
+//       the input tree with one leaf mutated per MutationSpec.
+//   Load-bearing invariants:
+//     - max_depth field is the covenant termination guard. Reject if 0.
+//     - VerifyMutatedLeaves reuses BuildCPRung + ComputeTxMLSCLeaf to
+//       recompute the mutated leaf; no shortcut hashes.
+//     - Mutation param_idx counts POST-FOLD condition fields (after PUBKEYs
+//       are stripped into the Merkle leaf) — must match engine-side mutation
+//       targeting logic.
+//   Optional for MVP: COUNT, SPLIT, DECAY are syntactic sugar over MODIFIED.
+//   Minimum-viable covenant surface is SAME + MODIFIED + UNTIL.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

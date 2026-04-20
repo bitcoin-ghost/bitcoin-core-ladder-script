@@ -6,6 +6,16 @@
 // Ladder Script block family: compound.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Compound family (0x0701..0x0706)
+//   Members: TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG,
+//   TIMELOCKED_MULTISIG.
+//   These are COMPOSITIONS of base blocks that share a dedicated implicit
+//   layout for compactness. Example: HTLC = SIG + PREIMAGE reveal + CSV
+//   (receiver path) fused into one block.
+//   Optional for MVP: the entire family can be expressed as base-block
+//   compositions at larger witness cost. Retained in the reference
+//   implementation as a size optimisation for common L2 patterns.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

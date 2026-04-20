@@ -3,6 +3,64 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+// ============================================================================
+// REVIEWER BLOCK — Ladder Script evaluator (consensus entry point)
+// ============================================================================
+//
+// PURPOSE
+//   Top-level validation for v4 (RUNG_TX) inputs spending MLSC outputs. This
+//   file is the single seam Core dispatches into from validation.cpp.
+//
+// KEY SYMBOLS
+//   VerifyRungTx(tx, input_idx, spent_output, ctx, error_out)
+//     The only public entry point. Handles key-path (1-elem witness),
+//     script-path (2 or 3 elem witness), per-tx checks (run on first input).
+//   EvalLadder / EvalRung / EvalBlock
+//     OR / AND / type-dispatch primitives for script-path evaluation.
+//   CheckLadderTweakRaw
+//     Key-path tweak verification via libsecp256k1's xonly_pubkey_tweak_add_check.
+//     MUST match XOnlyPubKey::ComputeLadderTweakHash in src/pubkey.cpp byte-for-byte.
+//   ValidateRungOutputs
+//     Per-tx rule: every output must be MLSC (0xDF) or MLSC+DATA_RETURN,
+//     max 1 DATA_RETURN, dust threshold applies.
+//   ExtractBlockPubkeys
+//     Reads the first N PUBKEY fields from each block's witness, where N =
+//     PubkeyCountForBlock. The ordering matches what fund-time ComputeValueCommitment
+//     folded into the Merkle leaf; deviating breaks root reconstruction.
+//
+// LOAD-BEARING INVARIANTS (must not change without consensus analysis)
+//   1. Unknown block types return UNSATISFIED (not ERROR) in the non-inverted
+//      case — this is the soft-fork-friendly forward-compat behaviour (mirrors
+//      Taproot's unknown-leaf-version semantics). Inverted UNKNOWN becomes
+//      ERROR via ApplyInversion (fail-closed on "NOT unknown").
+//   2. Every rejected spend returns false AND sets error_out. Never return
+//      true on an error path.
+//   3. Per-tx checks (ValidateRungOutputs, creation proof, PREIMAGE count)
+//      run on the first input before per-input evaluation.
+//   4. LadderTweak/v1 tagged hash must be computed identically in both
+//      CheckLadderTweakRaw (here) and ComputeLadderTweakHash (pubkey.cpp).
+//      Any divergence splits the network.
+//   5. Merkle proof verification is byte-strict: VerifyMerklePath rejects
+//      path-length mismatches, FULL_LEAVES rejects wrong leaf count.
+//
+// OPTIONAL / REMOVABLE
+//   - Diagnostic LogPrintf calls on fail paths are debugging aids, not
+//     consensus-critical. Can be removed or gated behind a log category.
+//   - SHARED proof mode (cached-tree cross-input reference) is an optimisation
+//     — MERKLE_PATH and FULL_LEAVES are the minimum set.
+//   - QABIO/QABI_SPEND handling (gated by #ifdef LADDER_ENABLE_QABIO) is
+//     scoped to that feature; removing QABIO excises it entirely.
+//
+// TEST COVERAGE
+//   Boost: build/bin/test_bitcoin --run_test=rung_tests (517 cases).
+//   Functional: feature_rung_tx.py, feature_rung_p2p.py, feature_rung_legacy.py.
+//   End-to-end: tools/test-presets.py (56 presets, all paths exercised).
+//
+// REFERENCES
+//   Library reviewer guide: doc/ladder-script/REVIEW_GUIDE.md (Part 3,
+//   "src/rung/evaluator.{h,cpp}" section).
+// ============================================================================
+
 #include <rung/evaluator.h>
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>
@@ -569,14 +627,14 @@ bool VerifyRungTx(
     const LadderEvalContext& ctx,
     LadderScriptError* error_out)
 {
-    auto fail = [&](LadderScriptError code) -> bool {
+    auto fail = [&](LadderScriptError code, const char* /*tag*/ = "") -> bool {
         if (error_out) *error_out = code;
         return false;
     };
 
-    if (input_index >= tx.input_count) return fail(LadderScriptError::UNKNOWN_ERROR);
-    if (!ctx.sig_checker)              return fail(LadderScriptError::UNKNOWN_ERROR);
-    if (!ctx.precomputed)              return fail(LadderScriptError::UNKNOWN_ERROR);
+    if (input_index >= tx.input_count) return fail(LadderScriptError::UNKNOWN_ERROR, "L579");
+    if (!ctx.sig_checker)              return fail(LadderScriptError::UNKNOWN_ERROR, "L580");
+    if (!ctx.precomputed)              return fail(LadderScriptError::UNKNOWN_ERROR, "L581");
 
     // Per-transaction checks: only run on first input (same result for all).
     // Note: for wallet-funded v4 txs (where input 0 is a standard P2WPKH/P2TR
@@ -589,7 +647,7 @@ bool VerifyRungTx(
         std::string tx_error;
         if (!CheckRungTxLevel(tx, ctx.flags, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L594");
         }
     }
 
@@ -600,7 +658,7 @@ bool VerifyRungTx(
     //   2 elements = script-path, no tweak check (LadderWitness + MLSCProof)
     //   3 elements = script-path with tweak (LadderWitness + MLSCProof + internal_pubkey)
     if (witness.count == 0 || witness.count > 3) {
-        return fail(LadderScriptError::WITNESS_PROGRAM_WITNESS_EMPTY);
+        return fail(LadderScriptError::WITNESS_PROGRAM_WITNESS_EMPTY, "L605");
     }
 
     // ================================================================
@@ -626,7 +684,7 @@ bool VerifyRungTx(
     // ================================================================
     if (!IsMLSCScript(spent_output.script_pub_key.as_span())) {
         LogPrintf("VerifyRungTx called on non-MLSC scriptPubKey — dispatch invariant violated\n");
-        return fail(LadderScriptError::NON_MLSC_SCRIPT);
+        return fail(LadderScriptError::NON_MLSC_SCRIPT, "L631");
     }
     // Defense in depth: MLSC outputs carrying a DATA_RETURN payload
     // (scriptPubKey 34-73 bytes, 0xDF prefix + root + data) are marked
@@ -635,7 +693,7 @@ bool VerifyRungTx(
     // future CScript refactor changes the IsUnspendable rule.
     if (HasMLSCData(spent_output.script_pub_key.as_span())) {
         LogPrintf("VerifyRungTx called on MLSC+DATA_RETURN output — unspendable\n");
-        return fail(LadderScriptError::NON_MLSC_SCRIPT);
+        return fail(LadderScriptError::NON_MLSC_SCRIPT, "L640");
     }
 
     // Local helpers to turn adapter witness elements into byte spans.
@@ -665,12 +723,12 @@ bool VerifyRungTx(
     if (witness.count == 1) {
         uint256 conditions_root;
         if (!GetMLSCRoot(spent_output.script_pub_key.as_span(), conditions_root)) {
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L670");
         }
 
         auto sig_full = wit_span(0);
         if (sig_full.size() != 64 && sig_full.size() != 65) {
-            return fail(LadderScriptError::SCHNORR_SIG_SIZE);
+            return fail(LadderScriptError::SCHNORR_SIG_SIZE, "L675");
         }
 
         // Extract sighash type from trailing byte (BIP341 convention).
@@ -680,7 +738,7 @@ bool VerifyRungTx(
             hashtype = sig_data.back();
             sig_data.pop_back();
             if (hashtype == SIGHASH_DEFAULT) {
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L685");
             }
         }
 
@@ -688,7 +746,7 @@ bool VerifyRungTx(
         uint256 sighash;
         if (!SignatureHashLadderKeyPath(*ctx.precomputed, tx, input_index,
                                           hashtype, sighash)) {
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L693");
         }
 
         // Verify Schnorr signature against the output key (conditions_root
@@ -698,7 +756,7 @@ bool VerifyRungTx(
         std::span<const uint8_t, 32> pubkey_span{conditions_root.data(), 32};
         std::span<const uint8_t> sig_span{sig_data.data(), sig_data.size()};
         if (!ctx.sig_checker->CheckSchnorrSignature(sig_span, pubkey_span, sighash_span)) {
-            return fail(LadderScriptError::SIGNATURE_INVALID);
+            return fail(LadderScriptError::SIGNATURE_INVALID, "L703");
         }
 
         return true;
@@ -713,14 +771,14 @@ bool VerifyRungTx(
     LadderWitness witness_ladder;
     std::string deser_error;
     if (!DeserializeLadderWitness(witness_bytes, witness_ladder, deser_error)) {
-        return fail(LadderScriptError::WITNESS_MALFORMED);
+        return fail(LadderScriptError::WITNESS_MALFORMED, "L718");
     }
 
     // Resolve witness references if needed (diff witness mode)
     if (witness_ladder.IsWitnessRef()) {
         std::string ref_error;
         if (!ResolveWitnessReference(witness_ladder, tx, input_index, ref_error)) {
-            return fail(LadderScriptError::WITNESS_MALFORMED);
+            return fail(LadderScriptError::WITNESS_MALFORMED, "L725");
         }
     }
 
@@ -736,7 +794,7 @@ bool VerifyRungTx(
         // ================================================================
         uint256 conditions_root;
         if (!GetMLSCRoot(spent_output.script_pub_key.as_span(), conditions_root)) {
-            return fail(LadderScriptError::MLSC_ROOT_UNAVAILABLE);
+            return fail(LadderScriptError::MLSC_ROOT_UNAVAILABLE, "L741");
         }
 
         // stack[0] = LadderWitness (already deserialized above)
@@ -748,43 +806,43 @@ bool VerifyRungTx(
         std::string proof_error;
         if (!DeserializeMLSCProof(proof_bytes, mlsc_proof, proof_error)) {
             LogPrintf("MLSC proof deserialization failed: %s\n", proof_error);
-            return fail(LadderScriptError::PROOF_DESERIALISE_FAILED);
+            return fail(LadderScriptError::PROOF_DESERIALISE_FAILED, "L753");
         }
 
         // SHARED proof mode: validate against a previously verified input from the same source tx
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
             if (!shared_cache) {
                 LogPrintf("MLSC shared proof: no cache available\n");
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L760");
             }
             uint16_t src_idx = mlsc_proof.shared_source_input;
             if (src_idx >= input_index) {
                 LogPrintf("MLSC shared proof: source_input %u >= current input %zu (must reference earlier input)\n",
                           src_idx, input_index);
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L766");
             }
             // Verify same source tx
             if (std::memcmp(tx.inputs[src_idx].prevout.txid,
                             tx.inputs[input_index].prevout.txid, 32) != 0) {
                 LogPrintf("MLSC shared proof: source input %u has different prevout hash\n", src_idx);
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L772");
             }
             // Look up the verified root from the source input
             auto it = shared_cache->find(prevout_txid(src_idx));
             if (it == shared_cache->end()) {
                 LogPrintf("MLSC shared proof: source input %u not in cache\n", src_idx);
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L778");
             }
             if (it->second.root != conditions_root) {
                 LogPrintf("MLSC shared proof: cached root mismatch\n");
-                return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
+                return fail(LadderScriptError::MLSC_ROOT_MISMATCH, "L782");
             }
             // Root matches. Leaf membership is checked below after pubkey extraction.
         }
 
         // Single rung rule: standard spends reveal exactly 1 rung
         if (witness_ladder.rungs.size() != 1) {
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L789");
         }
 
         // Extract pubkeys from witness for merkle_pub_key leaf computation
@@ -828,7 +886,7 @@ bool VerifyRungTx(
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
             auto cache_it = shared_cache->find(prevout_txid(input_index));
             if (cache_it == shared_cache->end()) {
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+                return fail(LadderScriptError::UNKNOWN_ERROR, "L833");
             }
             const auto& cached_leaves = cache_it->second.leaves;
             bool leaf_found = false;
@@ -840,7 +898,7 @@ bool VerifyRungTx(
             }
             if (!leaf_found) {
                 LogPrintf("MLSC shared proof: leaf not found in cached tree\n");
-                return fail(LadderScriptError::MLSC_LEAF_MISMATCH);
+                return fail(LadderScriptError::MLSC_LEAF_MISMATCH, "L845");
             }
         } else if (witness.count == 3) {
             // Compute raw Merkle root from proof, then verify tweak
@@ -851,7 +909,7 @@ bool VerifyRungTx(
                 size_t total_leaves = mlsc_proof.total_rungs;
                 if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
                     LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
-                    return fail(LadderScriptError::UNKNOWN_ERROR);
+                    return fail(LadderScriptError::UNKNOWN_ERROR, "L856");
                 }
                 std::vector<uint256> leaves(total_leaves);
                 leaves[mlsc_proof.rung_index] = my_leaf;
@@ -860,7 +918,7 @@ bool VerifyRungTx(
                     if (i == mlsc_proof.rung_index) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
-                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH, "L865");
                     }
                     leaves[i] = mlsc_proof.proof_hashes[ph_idx++];
                 }
@@ -871,14 +929,14 @@ bool VerifyRungTx(
             auto internal_pk_span = wit_span(2);
             if (internal_pk_span.size() != 32) {
                 LogPrintf("MLSC tweak: internal pubkey must be 32 bytes\n");
-                return fail(LadderScriptError::PUBKEY_INVALID);
+                return fail(LadderScriptError::PUBKEY_INVALID, "L876");
             }
             if (!CheckLadderTweakRaw(conditions_root.data(), internal_pk_span.data(),
                                      computed_merkle_root, 0) &&
                 !CheckLadderTweakRaw(conditions_root.data(), internal_pk_span.data(),
                                      computed_merkle_root, 1)) {
                 LogPrintf("MLSC tweak verification failed\n");
-                return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
+                return fail(LadderScriptError::MLSC_ROOT_MISMATCH, "L883");
             }
         } else {
             // 2-element witness: verify the Merkle proof directly against conditions_root
@@ -888,13 +946,34 @@ bool VerifyRungTx(
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
                                       mlsc_proof.total_rungs, conditions_root, path_error)) {
                     LogPrintf("MLSC Merkle path verification failed: %s\n", path_error.c_str());
-                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                    LogPrintf("  my_leaf=%s expected_root=%s rung_idx=%u total=%u\n",
+                              my_leaf.GetHex().c_str(), conditions_root.GetHex().c_str(),
+                              (unsigned)mlsc_proof.rung_index, (unsigned)mlsc_proof.total_rungs);
+                    LogPrintf("  rung_pks count=%zu\n", rung_pks.size());
+                    for (size_t i = 0; i < rung_pks.size(); ++i) {
+                        LogPrintf("    rung_pk[%zu]: %s\n", i, HexStr(rung_pks[i]).c_str());
+                    }
+                    LogPrintf("  witness rungs=%zu\n", witness_ladder.rungs.size());
+                    for (size_t r = 0; r < witness_ladder.rungs.size(); ++r) {
+                        const auto& wr = witness_ladder.rungs[r];
+                        LogPrintf("  wit_rung[%zu] blocks=%zu\n", r, wr.blocks.size());
+                        for (size_t b = 0; b < wr.blocks.size(); ++b) {
+                            const auto& wb = wr.blocks[b];
+                            LogPrintf("    wit_block[%zu] type=0x%04x fields=%zu\n",
+                                      b, (unsigned)wb.type, wb.fields.size());
+                            for (size_t fi = 0; fi < wb.fields.size(); ++fi) {
+                                LogPrintf("      wfld[%zu] type=0x%02x hex=%s\n", fi,
+                                          (unsigned)wb.fields[fi].type, HexStr(wb.fields[fi].data).c_str());
+                            }
+                        }
+                    }
+                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH, "L914");
                 }
             } else {
                 size_t total_leaves = mlsc_proof.total_rungs;
                 if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
                     LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
-                    return fail(LadderScriptError::UNKNOWN_ERROR);
+                    return fail(LadderScriptError::UNKNOWN_ERROR, "L920");
                 }
                 std::vector<uint256> leaves(total_leaves);
                 leaves[mlsc_proof.rung_index] = my_leaf;
@@ -903,7 +982,7 @@ bool VerifyRungTx(
                     if (i == mlsc_proof.rung_index) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
-                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH, "L929");
                     }
                     leaves[i] = mlsc_proof.proof_hashes[ph_idx++];
                 }
@@ -911,7 +990,7 @@ bool VerifyRungTx(
                 if (computed_root != conditions_root) {
                     LogPrintf("MLSC root mismatch: computed %s != expected %s\n",
                               computed_root.GetHex(), conditions_root.GetHex());
-                    return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
+                    return fail(LadderScriptError::MLSC_ROOT_MISMATCH, "L937");
                 }
             }
         }
@@ -921,7 +1000,7 @@ bool VerifyRungTx(
         if (witness_ladder.coil.output_index != spent_vout) {
             LogPrintf("coil.output_index %u != spent vout %u\n",
                       witness_ladder.coil.output_index, spent_vout);
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L947");
         }
 
         // Populate verified_leaves_data for recursive covenant blocks.
@@ -1037,18 +1116,18 @@ bool VerifyRungTx(
         // Merge conditions with witness.
         std::string merge_error;
         if (!MergeConditionsAndWitness(conditions, witness_ladder, eval_ladder, merge_error)) {
-            return fail(LadderScriptError::WITNESS_MALFORMED);
+            return fail(LadderScriptError::WITNESS_MALFORMED, "L1063");
         }
 
         if (!EvalLadder(eval_ladder, *ctx.sig_checker, legacy_checker,
                         SigVersion::LADDER, execdata, eval_ctx)) {
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L1068");
         }
     } else {
         // Bootstrap spend: v4 tx spending a v1/v2 UTXO.
         if (!EvalLadder(witness_ladder, *ctx.sig_checker, legacy_checker,
                         SigVersion::LADDER, execdata, eval_ctx)) {
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail(LadderScriptError::UNKNOWN_ERROR, "L1074");
         }
     }
 

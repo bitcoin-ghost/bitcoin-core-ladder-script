@@ -1,124 +1,506 @@
-# Ladder Script Review Guide
+# Ladder Script Reviewer Guide
 
-This guide walks code reviewers through the Ladder Script implementation. The system
-comprises 64 block types across 10 families, implemented in
-22 source files under `src/rung/`.
+Audience: Bitcoin Core developers, BIP reviewers, security researchers.
 
-## File-by-File Walkthrough
+Purpose: map the code a reviewer must verify, distinguish **load-bearing** consensus
+surface from **optional** convenience code, and cross-reference the per-section prose in
+`ANNOTATED_DIFF.md` with the library files.
 
-### types.h (single source of truth)
-The largest header. Defines all block types (`RungBlockType` enum), all data types
-(`RungDataType` enum), structural types (`RungCoil`, `RungField`, `RungBlock`, `Rung`,
-`Relay`, `LadderWitness`, `WitnessReference`), and metadata functions:
-- `IsKnownBlockType()` — allowlist of 64 types (codes 0x0201/0x0202 reserved, not known)
-- `IsInvertibleBlockType()` — explicit allowlist; key-consuming blocks excluded
-- `IsKeyConsumingBlockType()` — blocks whose pubkeys fold into Merkle leaves
-- `PubkeyCountForBlock()` — fixed or variable pubkey count per block type
-- `IsDataEmbeddingType()` — high-bandwidth types blocked in layout-less blocks
-- Micro-header table (128 slots, 63 assigned, 2 reserved as 0xFFFF)
-- Implicit field layouts (per block type, per context)
-- `BlockDescriptor` table and `LookupBlockDescriptor()`
-- `VerifyImplicitLayoutPairing()` — runtime init check for layout consistency
+## The Two Artefacts
 
-**What to look for:** Ensure every new block type is added to `IsKnownBlockType`, the
-micro-header table, the implicit layout switch, the `BlockDescriptor` table, and
-`VerifyImplicitLayoutPairing`'s whitelist if conditions-only.
+Ladder Script ships as two distinct things:
 
-### evaluator.h / evaluator.cpp
-Core evaluation engine. Key review points:
-- `EvalBlock()` dispatch: every block type must have a case; unknown types return `UNKNOWN_BLOCK_TYPE`
-- `EvalRung()`: AND logic; all blocks must be SATISFIED; checks relay_refs against cached relay results
-- `EvalLadder()`: OR logic; evaluates relays first via `EvalRelays()`, then tries rungs; `satisfied_rung_out` reports which rung passed
-- `VerifyRungTx()`: top-level entry point. Per-tx (first input only): `ValidateRungOutputs()`, creation proof (3+ outputs), PREIMAGE count. Per-input: key-path (1 elem) or script-path (2-3 elem), Merkle proof, merge, evaluate.
-- `ValidateRungOutputs()`: consensus rule — every output must be MLSC (`0xDF`), max 1 DATA_RETURN, dust threshold (546 sats). Runs first, not last.
-- `api::LadderSigChecker` (in `rung/api.h`): adapter interface for Ladder-native sig verification. Core-side impl is `CoreLadderSigChecker` in `rung_shims.h`. Library computes the Ladder sighash via `api::SignatureHashLadder`; the checker no longer carries conditions.
-- `ApplyInversion()`: ERROR unchanged; UNKNOWN inverted becomes ERROR
+| Artefact | LOC | Scope | Reviewer doc |
+|----------|-----|-------|--------------|
+| **Core Integration Patch** | ~740 | 24 existing Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
+| **Ladder Library** | ~18,390 | Self-contained module under `src/rung/` + `src/rung_shims.h` boundary header | This document |
 
-**What to look for:** Fail-closed behaviour for unknown types. Correct relay evaluation
-order (index 0 first, forward-only).
+No existing Bitcoin Core function signatures change. Two functions gain defaulted
+parameters for block-height plumbing. No existing opcode is modified. Transaction version
+4 is additive.
 
-### sighash.h / sighash.cpp
-Sighash computation. Tagged hash `"LadderSighash"`. Commits to epoch, hash_type, tx data,
-conditions hash (unless ANYPREVOUTANYSCRIPT).
-- Valid hash types: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}`
-- ANYPREVOUT (0x40): skips prevout hash, keeps amounts/sequences/conditions
-- ANYPREVOUTANYSCRIPT (0xC0): skips prevout and conditions
+## Suggested Reading Order
 
-**What to look for:** MLSC outputs use `conditions_root` directly as the conditions hash
-(no re-serialisation). Key-path uses `SignatureHashLadderKeyPath` (separate tagged hash
-`"LadderKeyPathSighash"` — does not commit to conditions). All outputs use MLSC (`0xDF`).
+1. `TLDR.md` — one-page summary.
+2. `RUNG_TX_SPEC.md` — the new transaction format.
+3. `TX_MLSC_SPEC.md` — the MLSC output format and Merkle tree.
+4. `ANNOTATED_DIFF.md` — per-section walkthrough of the Core Integration Patch.
+5. This document — library walkthrough with load-bearing vs optional callouts.
 
-### serialize.h / serialize.cpp
-Wire format. Key constants: MAX_RUNGS=16, MAX_BLOCKS_PER_RUNG=8, MAX_FIELDS_PER_BLOCK=16,
-MAX_LADDER_WITNESS_SIZE=100000, MAX_PREIMAGE_FIELDS_PER_WITNESS=2 (per-input),
-MAX_PREIMAGE_FIELDS_PER_TX=2 (per-transaction, binding), MAX_RELAYS=8,
-MAX_RELAY_DEPTH=4.
-- `DeserializeLadderWitness()`: fail-closed; rejects unknown types, deprecated blocks, non-invertible inversion, data-embedding types in layout-less blocks, trailing bytes
-- Diff witness mode: `n_rungs == 0` signals witness reference; diffs restricted to PUBKEY/SIGNATURE/PREIMAGE/SCRIPT_BODY/SCHEME
-- `DeserializeBlock()`: shared by witness and MLSC proof deserialization
-- Implicit field encoding: micro-header + layout match = omit field count/types
+## Legend
 
-**What to look for:** Strict field enforcement in explicit mode (count and types must match
-layout when layout exists). DATA type restricted to DATA_RETURN. ACCUMULATOR whitelisted
-from IsDataEmbeddingType check.
+Every file entry below uses this structure:
 
-### conditions.h / conditions.cpp
-MLSC conditions system. MLSC prefix `0xDF`. Inline conditions 0xC1 removed (stubs return false). Creation proof validated at block acceptance. Leaf computation uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`. Each rung's coil has `output_index` declaring which output it governs.
-- `IsConditionDataType()`: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA allowed; PUBKEY_COMMIT removed
-- Merkle tree: sorted interior hashing, `MLSC_EMPTY_LEAF` padding
-- Leaf order: rungs, then relays, then coil
-- `VerifyMLSCProof()`: reconstructs leaf array, builds tree, compares root
-- `MLSCVerifiedLeaves`: cached for covenant evaluators (avoids recomputing from all pubkeys)
-- `ResolveTemplateReference()`: copies conditions from referenced input, applies diffs, no chaining
+- **Path** — absolute path within repo.
+- **Purpose** — what this file *is*.
+- **Behaviour** — what this file *does* at runtime.
+- **Load-bearing invariants** — properties that *cannot* change without changing
+  consensus semantics. A reviewer must verify these.
+- **Optional / removable** — sections that can be trimmed from a minimum-viable BIP
+  submission without breaking the core surface. Each item names what would be lost.
 
-**What to look for:** Proof verification must reject mismatched total_rungs/total_relays.
-Template references cannot chain (source must not be a template ref).
+---
 
-### descriptor.h / descriptor.cpp
-Human-readable descriptor language. Grammar: `ladder(or(...))` with blocks as lowercase
-functions. Supports `!block` for inversion. Scheme names: schnorr, ecdsa, falcon512,
-falcon1024, dilithium3, sphincs_sha.
+# Part 1 — Boundary
 
-### policy.h / policy.cpp
-Mempool policy. `IsStandardRungTx()` delegates to the consensus deserializer for structural
-validation, then checks all outputs are MLSC. Classification functions: `IsBaseBlockType()`,
-`IsCovenantBlockType()`, `IsStatefulBlockType()`.
+## `src/rung_shims.h` (353 LOC)
 
-### pq_verify.h / pq_verify.cpp
-Post-quantum signature verification for FALCON-512, FALCON-1024, Dilithium3, SPHINCS+.
+- **Purpose**: the one-way Core↔library boundary. All includes of Core headers
+  (`<primitives/transaction.h>`, `<script/interpreter.h>`, `<consensus/validation.h>`)
+  from the library must go through this file. The library is otherwise Core-free.
+- **Behaviour**: adapter types (`CoreLadderSigChecker`, `CoreLadderTxView`,
+  `CoreLadderEvalContext`) that map Core's transaction/script/signature objects onto the
+  library's span-based public API (`rung/api.h`). Declares inline conversion helpers.
+- **Load-bearing invariants**:
+  - The boundary is *one-way*: Core code includes `rung_shims.h`; library code does not.
+    If the library ever included a Core header directly, it becomes unshippable as a
+    self-contained module.
+  - Adapter types must copy by value or wrap spans; they must not hold references to
+    stack-local Core objects beyond the immediate call.
+- **Optional / removable**: none. This file is the entire reason the library compiles
+  against a stable public API rather than Core's entire header tree.
 
-### aggregate.h / aggregate.cpp
-Half-aggregated Schnorr signature computation. Aggregates per-input R-values with a
-shared s-value at the transaction level. Used by `AGGREGATE` attestation mode.
+## `src/rung/api.h` (534 LOC)
 
-### rpc.cpp
-15 RPC commands: decoderung, createrung, validateladder, createtxmlsc, signladder,
-createrungtx (legacy), signrungtx (legacy), computectvhash, computemutation,
-generatepqkeypair, pqpubkeycommit, extractadaptorsecret, verifyadaptorpresig,
-parseladder, formatladder.
+- **Purpose**: the library's **public** interface. Declares span-based data views
+  (`LadderTxView`, `LadderSigChecker`), the evaluator context (`LadderEvalContext`), the
+  top-level entry point (`VerifyRungTx`), and the `LadderScriptError` enum.
+- **Behaviour**: compile-time contract between Core and the library. Adding any
+  non-span types here couples the library back to Core.
+- **Load-bearing invariants**:
+  - `LadderScriptError` enum values are wire-stable; never renumber.
+  - `VerifyRungTx` must remain the single entry point for script validation.
+- **Optional / removable**: the `QABI*` surface (≈40 lines) is optional — see QABIO
+  section below.
 
-**What to look for:** Auto-conversion in `createrung`: PUBKEY in conditions becomes Merkle
-leaf entry; PREIMAGE/SCRIPT_BODY becomes HASH256/HASH160; blanket HASH256 rejection with
-whitelist (CTV, TAGGED_HASH, ACCUMULATOR, COSIGN, OUTPUT_CHECK).
+---
 
-## User-Chosen Arbitrary Data Limits (112 bytes per transaction)
+# Part 2 — Central Types
 
-Total user-chosen arbitrary data: 64 bytes (PREIMAGE) + 40 bytes (DATA_RETURN) + 8 bytes
-(nLockTime + nSequence) = 112 bytes, flat regardless of output count.
+## `src/rung/types.h` (1496 LOC) / `types.cpp` (46 LOC)
 
-1. **Fail-closed deserialisation.** Unknown block types, unknown data types, and deprecated
-   blocks are rejected. Trailing bytes cause failure.
-2. **Selective inversion.** Explicit allowlist. Key-consuming blocks never invertible.
-3. **IsDataEmbeddingType.** PUBKEY_COMMIT, HASH256, HASH160, and DATA blocked in blocks
-   without implicit layouts.
-4. **PREIMAGE/SCRIPT_BODY cap.** Maximum 2 per witness and 2 per transaction (combined).
-5. **DATA type restriction.** Only allowed in DATA_RETURN blocks (max 40 bytes).
-6. **merkle_pub_key.** Pubkeys in Merkle leaves, not condition fields.
-7. **Blanket HASH256 rejection in RPC.** Whitelisted block types only.
+- **Purpose**: single source of truth for block types, data types, structural types, and
+  metadata tables. Every other file depends on these.
+- **Behaviour**:
+  - `enum class RungBlockType : uint16_t` — 62 block types across 10 families.
+  - `enum class RungDataType : uint8_t` — field data types (PUBKEY, SIGNATURE, NUMERIC,
+    HASH256, HASH160, PREIMAGE, SCRIPT_BODY, DATA, SCHEME, SPEND_INDEX, PUBKEY_COMMIT).
+  - Structural types: `RungCoil`, `RungField`, `RungBlock`, `Rung`, `Relay`,
+    `LadderWitness`.
+  - Metadata tables and predicates: `IsKnownBlockType`, `IsInvertibleBlockType`,
+    `IsKeyConsumingBlockType`, `IsDataEmbeddingType`, `PubkeyCountForBlock`,
+    `MicroHeaderSlot`, `LookupBlockDescriptor`, `VerifyImplicitLayoutPairing`.
+- **Load-bearing invariants**:
+  - Every `RungBlockType` enum value is on the wire. **Never renumber**. Reserved slots
+    (`0x0201`, `0x0202`) stay reserved — they were previously occupied and must never be
+    reused to prevent cross-version collisions.
+  - `IsKnownBlockType` is the authoritative allowlist. If a block type is not here,
+    consensus rejects it.
+  - `IsInvertibleBlockType` must remain an **allowlist** (deny by default). Key-consuming
+    blocks (SIG, MULTISIG, etc.) are *never* invertible — flipping a sig check upside
+    down would break soundness.
+  - `MicroHeaderSlot` table must match `ImplicitLayoutFor(type, context)`. The runtime
+    check `VerifyImplicitLayoutPairing()` enforces this on library init — don't disable
+    it.
+  - `IsDataEmbeddingType` gates anti-spam: DATA, HASH256, HASH160, PUBKEY_COMMIT are
+    blocked in blocks without implicit layouts.
+- **Optional / removable** (block families you could trim for a minimum-viable BIP):
+  - **Legacy family** (`0x0900-0x0907`): P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR,
+    P2TR_SCRIPT wrappers. Removing them drops the ability to bridge legacy scripts into
+    MLSC inputs; core functionality intact.
+  - **PLC family** (`0x0600-0x06FF`): hysteresis, timers, latches, counters, sequencer,
+    one-shot, rate-limit, cosign. These are programmable covenants built on NUMERIC
+    field comparisons. A minimum-viable BIP could ship with just SIG/CSV/CLTV/CTV + the
+    base recurse blocks. PLC adds roughly half the expressiveness of the system.
+  - **Anchor family** (`0x0500-0x05FF`): ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE,
+    ANCHOR_SEAL, ANCHOR_ORACLE. Optional — used for L2 bridges and oracle patterns.
+  - **Governance family** (`0x0800-0x08FF`): EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT,
+    OUTPUT_COUNT, RELATIVE_VALUE, ACCUMULATOR, OUTPUT_CHECK. Removing these drops tx-
+    shape introspection.
+  - **QABIO** (`QABI_PRIME`, `QABI_SPEND`): see QABIO section. Bounded by
+    `#ifdef LADDER_ENABLE_QABIO`.
+  - **Advanced recurses**: `RECURSE_COUNT`, `RECURSE_SPLIT`, `RECURSE_DECAY` are
+    variations on `RECURSE_MODIFIED`. The minimum-viable covenant surface is
+    `RECURSE_SAME` + `RECURSE_MODIFIED` + `RECURSE_UNTIL`.
+  - **Compound blocks** (`0x0700-0x07FF`, except where structurally needed): HTLC, PTLC,
+    TIMELOCKED_SIG, etc. can be implemented as compositions of base blocks. The compound
+    encoding is a size optimisation.
 
-## TLA+ Formal Specifications
+---
 
-21 specs in `spec/` with 197 checked properties (2.5B states verified, zero errors):
+# Part 3 — Consensus Surface (load-bearing)
+
+## `src/rung/evaluator.h` (349 LOC) / `evaluator.cpp` (1244 LOC)
+
+- **Purpose**: top-level validation. This is the entry point Bitcoin Core calls to
+  validate a v4 input.
+- **Behaviour**:
+  - `VerifyRungTx(tx, input_idx, spent_output, ctx, error_out)` — the single consensus
+    entry point. Handles both key-path (1-element witness) and script-path (2 or 3
+    element witness) spends.
+  - `EvalLadder(...)` — OR logic: tries rungs in order, first SATISFIED wins.
+  - `EvalRung(...)` — AND logic: every block must be SATISFIED.
+  - `EvalBlock(...)` — dispatches to the registered evaluator for the block's type.
+  - `ApplyInversion(...)` — only valid for types in `IsInvertibleBlockType`; UNKNOWN
+    inverted becomes ERROR (fail-closed).
+  - Per-tx checks on first input: `ValidateRungOutputs` (all outputs must be MLSC,
+    max 1 DATA_RETURN, dust threshold), creation proof (3+ outputs), PREIMAGE count
+    (anti-spam cap).
+  - Merkle proof verification via `VerifyMerklePath` or `BuildMerkleTree` +
+    `CheckLadderTweakRaw` (the latter for key-path spends using libsecp256k1's
+    `xonly_pubkey_tweak_add_check`).
+- **Load-bearing invariants**:
+  - Every rejected spend returns `false` with `error_out` set. Never `return true` on an
+    error path.
+  - Unknown block types fail-closed (`ApplyInversion` turns UNKNOWN into ERROR for
+    inverted blocks; non-inverted UNKNOWN is treated as UNSATISFIED so a rung's OR
+    siblings can still satisfy — this mirrors Taproot's forward-compat behaviour for
+    unknown leaf versions).
+  - Tweak verification uses libsecp256k1 primitives, never a hand-rolled curve math
+    path. `CheckLadderTweakRaw` mirrors `XOnlyPubKey::ComputeLadderTweakHash` in
+    `src/pubkey.cpp` **byte-for-byte**; any divergence splits the network.
+  - Per-tx checks run **before** per-input evaluation.
+- **Optional / removable**: diagnostic `LogPrintf` calls on error paths help debugging
+  but are not consensus-critical. They can be removed or gated behind a category.
+
+## `src/rung/conditions.h` (312 LOC) / `conditions.cpp` (≈1100 LOC)
+
+- **Purpose**: MLSC (Merkle Ladder Script Conditions) — the output format and Merkle
+  tree. Leaves commit to rung structure + value_commitment. `ComputeValueCommitment`
+  folds pubkeys into each leaf (merkle_pub_key binding).
+- **Behaviour**:
+  - `IsMLSCScript` / `GetMLSCRoot` / `HasMLSCData` — scriptPubKey classification
+    (0xDF prefix).
+  - `ComputeTxMLSCLeaf` — `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`.
+  - `ComputeTxMLSCRoot` — builds the Merkle tree from leaves.
+  - `BuildMerkleTree` / `VerifyMerklePath` — sorted interior hashing with tag
+    `TaggedHash("LadderInternal/v1")`, empty-leaf padding via `MLSC_EMPTY_LEAF`.
+  - `ComputeTweakedConditionsRoot` — key-path tweak: `output_pk = internal_pk + H("LadderTweak/v1", internal_pk || merkle_root) * G`.
+  - `SerializeMLSCProof` / `DeserializeMLSCProof` — wire-format of the proof witness.
+- **Load-bearing invariants**:
+  - Tagged hash domain strings are versioned (`/v1`). Changing them splits consensus.
+  - Merkle tree uses **sorted-pair** interior hashing (the smaller sibling is hashed
+    first). This is distinct from BIP-340 taproot's parity-based hashing — ensures
+    commutative proofs.
+  - Leaf padding uses `MLSC_EMPTY_LEAF` (a specific all-zero tagged hash), not raw
+    zeros. Don't substitute.
+  - PUBKEY fields are stripped from `block.fields` during conditions parsing and folded
+    into the value_commitment via `rung_pks` in positional order. Changing the order
+    changes the leaf → changes the root.
+- **Optional / removable**:
+  - `SHARED` proof mode (cached-tree cross-input reference) is an optimisation for
+    multi-input MLSC txs. `MERKLE_PATH` and `FULL_LEAVES` are the minimum set.
+  - Mutation-target serialisation (trailing field of `MLSCProof`) is only needed if
+    covenants with cross-rung mutation (RECURSE_MODIFIED pointing at non-self rungs) are
+    in scope.
+
+## `src/rung/serialize.h` (129 LOC) / `serialize.cpp` (998 LOC)
+
+- **Purpose**: wire format for `LadderWitness` (the per-input witness stream). Handles
+  serialization and fail-closed deserialization of blocks, rungs, relays, and the
+  MLSC proof.
+- **Behaviour**:
+  - `DeserializeLadderWitness` — parses a full witness stream, rejects unknown types /
+    deprecated blocks / invalid inversion / data-embedding violations / trailing bytes.
+  - `DeserializeBlock` — shared by witness and MLSC-proof paths. Accepts either the
+    *micro-header* encoding (1 byte, indexed into `MicroHeaderSlot` table, omits field
+    types/counts) or the *explicit* encoding.
+  - `SerializeBlock` / `SerializeLadderWitness` — forward direction.
+  - Diff witness: `n_rungs == 0` signals a template-diff reference to another input;
+    diffs restricted to witness-only field types.
+- **Load-bearing invariants**:
+  - Size caps (`MAX_RUNGS`, `MAX_BLOCKS_PER_RUNG`, `MAX_FIELDS_PER_BLOCK`,
+    `MAX_LADDER_WITNESS_SIZE`, `MAX_PREIMAGE_FIELDS_PER_*`, `MAX_RELAYS`,
+    `MAX_RELAY_DEPTH`) are consensus rules. Changing them changes the anti-spam
+    surface.
+  - Fail-closed: anything not in an allowlist rejects. Never "try to be helpful".
+  - PREIMAGE fields are capped to 2 per witness and 2 per transaction (binding). This
+    closes the data-embedding vector.
+  - Explicit encoding must match implicit layout when a layout exists (runtime check in
+    `VerifyImplicitLayoutPairing`).
+- **Optional / removable**: the micro-header encoding is a *size optimisation* for the
+  common case. Removing it costs ~2 bytes per block; consensus semantics unchanged if
+  kept consistent. A minimum-viable BIP could specify explicit-only encoding.
+
+## `src/rung/sighash.h` (66 LOC) / `sighash.cpp` (194 LOC)
+
+- **Purpose**: Ladder-specific signature hash. Tagged hashes
+  `TaggedHash("LadderSighash/v1")` (script-path) and `TaggedHash("LadderKeyPathSighash/v1")`
+  (key-path, does NOT commit to conditions).
+- **Behaviour**: commits to epoch, hash_type, tx metadata (version, locktime), amounts
+  and sequences via extension data, and the spent output's conditions_root (unless
+  ANYPREVOUTANYSCRIPT).
+- **Load-bearing invariants**:
+  - Tagged hash domains are versioned.
+  - Hash type set: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}` — anything outside is
+    rejected.
+  - For MLSC outputs: `conditions_root` is hashed *as-is* (no re-serialisation). This is
+    a consequence of the one-shared-root-per-tx wire format.
+  - Key-path sighash deliberately *omits* conditions — the tweak already commits to
+    them via the x-only tweak, so including them again is redundant and creates a
+    cross-protocol signing-oracle risk.
+- **Optional / removable**: ANYPREVOUT variants (`0x40`, `0xC0`) are not load-bearing for
+  basic spends — they enable channel-close patterns (eltoo-like). A minimum-viable BIP
+  could ship with `0x00-0x03` and `0x81-0x83` only.
+
+## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (107 LOC) / `block_helpers.cpp`
+
+- **Purpose**: registry + helpers. Every block evaluator self-registers via
+  `RegisterBlock(type, fn)`; `LookupBlockEvaluator(type)` returns it. Helpers:
+  `FindField`, `FindAllFields`, `ReadNumeric`, `WriteNumericField`, `ParseMutationSpecs`,
+  `VerifyMutatedLeaves`, `BuildCPRung`.
+- **Load-bearing invariants**:
+  - Every `IsKnownBlockType` entry must have a registered evaluator by the time the
+    library is used. `VerifyImplicitLayoutPairing` doubles as a registration audit.
+  - Numeric fields are normalised: `WriteNumericField` writes 4-byte little-endian;
+    `ReadNumeric` reads up to 8 bytes signed. The value_commitment hasher also pads
+    sub-4-byte NUMERIC fields to 4 bytes. Don't allow divergence.
+- **Optional / removable**: none. These are the glue that makes the block registry
+  work.
+
+## `src/rung/blocks/sig.cpp` (323 LOC)
+
+- **Purpose**: signature-family evaluators (SIG, MULTISIG, ADAPTOR_SIG,
+  MUSIG_THRESHOLD, KEY_REF_SIG).
+- **Behaviour**: each evaluator:
+  1. Pulls PUBKEY + SIGNATURE from the merged witness.
+  2. Calls `ctx.sig_checker` (the `LadderSigChecker` adapter) to verify.
+  3. Returns `SATISFIED` / `UNSATISFIED` / `ERROR`.
+- **Load-bearing invariants**:
+  - Signature size validation (64 or 65 bytes for Schnorr depending on hash type) runs
+    before the curve math, per BIP-340.
+  - KEY_REF_SIG resolves against cached relay results — must check relay index bounds.
+- **Optional / removable**:
+  - ADAPTOR_SIG only supports Schnorr (no PQ path) by design — the PQ scheme rejection
+    there is load-bearing.
+  - MUSIG_THRESHOLD is a client-side-aggregated Schnorr; the library just verifies one
+    signature against the aggregated key. Removing this block type drops MuSig2/FROST
+    path.
+
+## `src/rung/blocks/timelock.cpp` (152 LOC)
+
+- **Purpose**: CSV, CSV_TIME, CLTV, CLTV_TIME.
+- **Behaviour**: each consults `ctx.spending_sequence` (relative) or `ctx.tx->nLockTime`
+  / `ctx.median_time_past` (absolute) and compares against the NUMERIC field.
+- **Load-bearing invariants**: timelock arithmetic must mirror BIP-65 / BIP-112 exactly.
+- **Optional / removable**: the `_TIME` variants (median-time-past-based) could be
+  omitted for a height-only BIP; CSV/CLTV height-based are the minimum set.
+
+## `src/rung/blocks/hash.cpp` (114 LOC)
+
+- **Purpose**: TAGGED_HASH, HASH_GUARDED (raw SHA256 preimage check).
+- **Load-bearing invariants**: HASH_GUARDED is non-invertible (see `IsInvertibleBlockType`).
+- **Optional / removable**: HASH_GUARDED can be removed; TAGGED_HASH can be built from
+  PREIMAGE+HASH256 composition if needed.
+
+## `src/rung/blocks/covenant.cpp` (229 LOC)
+
+- **Purpose**: CTV (BIP-119-compatible), VAULT_LOCK, AMOUNT_LOCK.
+- **Behaviour**:
+  - CTV computes the template hash over the tx (excluding witness + scriptSig) and
+    compares against the field value.
+  - VAULT_LOCK enforces either (recovery key, no delay) or (hot key + CSV delay).
+  - AMOUNT_LOCK bounds `ctx.output_amount` between min and max NUMERIC fields.
+- **Load-bearing invariants**: CTV hash must use `WriteLE32`/`WriteLE64` exactly per
+  BIP-119. Don't hand-roll endianness.
+
+## `src/rung/blocks/recursion.cpp` (333 LOC)
+
+- **Purpose**: RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT,
+  RECURSE_SPLIT, RECURSE_DECAY.
+- **Behaviour**:
+  - SAME / UNTIL — identity recurse: output root must equal input root.
+  - MODIFIED / COUNT / DECAY — leaf-centric: expected root is the input tree with one
+    leaf mutated per `MutationSpec`.
+  - SPLIT — leaf-centric with 2-way output split.
+- **Load-bearing invariants**:
+  - `max_depth` field is the covenant termination guard. Reject if 0.
+  - `VerifyMutatedLeaves` must use `BuildCPRung` + `ComputeTxMLSCLeaf` to recompute the
+    mutated leaf; no shortcuts.
+- **Optional / removable**: RECURSE_COUNT, RECURSE_SPLIT, RECURSE_DECAY are syntactic
+  sugar over MODIFIED with a convention (decrement-by-1, 2-way split, negate-delta).
+  Minimum-viable: SAME + MODIFIED + UNTIL.
+
+## `src/rung/blocks/compound.cpp` (297 LOC)
+
+- **Purpose**: TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG.
+- **Behaviour**: each is a composition — e.g. HTLC = PREIMAGE reveal + CSV delay + SIG
+  on receiver key, plus a cross-branch for the refund path.
+- **Optional / removable**: all compound blocks can be expressed as compositions of
+  base blocks at larger witness cost. Compound encoding is a size optimisation with its
+  own implicit layout.
+
+## `src/rung/blocks/plc.cpp` (416 LOC)
+
+- **Purpose**: Programmable Logic Controller family — HYSTERESIS_FEE, HYSTERESIS_VALUE,
+  TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET,
+  COUNTER_UP, COMPARE, SEQUENCER, ONE_SHOT, RATE_LIMIT, COSIGN.
+- **Behaviour**: stateful or state-like comparators over NUMERIC fields; `COSIGN`
+  requires another input in the same tx whose spent SPK hashes to the given
+  `conditions_hash`.
+- **Optional / removable**: the whole family is optional for a minimum-viable BIP.
+  Their existence is what lets users express "rate-limit wallet", "dead-man's switch",
+  "counter-down DCA", etc. — the system is significantly less useful without them, but
+  they are *not* consensus-critical for non-PLC tx patterns.
+
+## `src/rung/blocks/anchor.cpp` (256 LOC)
+
+- **Purpose**: ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE, ANCHOR_SEAL,
+  ANCHOR_ORACLE, DATA_RETURN.
+- **Behaviour**: bridge primitives for L2 / oracle patterns. DATA_RETURN is the MLSC
+  equivalent of OP_RETURN.
+- **Load-bearing invariants**: DATA_RETURN is the *only* block where a DATA field is
+  valid (enforced in `IsDataEmbeddingType`). Max 40 bytes.
+- **Optional / removable**: everything except DATA_RETURN is optional.
+
+## `src/rung/blocks/governance.cpp` (316 LOC)
+
+- **Purpose**: EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, RELATIVE_VALUE,
+  ACCUMULATOR, OUTPUT_CHECK.
+- **Behaviour**: tx-shape introspection. Checks tx weight, input count, output count,
+  relative value across outputs, Merkle membership proofs, per-output structural
+  checks.
+- **Optional / removable**: entire family is optional.
+
+## `src/rung/blocks/legacy.cpp` (306 LOC)
+
+- **Purpose**: P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR, P2TR_SCRIPT wrappers.
+- **Behaviour**: each reproduces the respective Core script-verification semantics
+  against the Ladder witness.
+- **Load-bearing invariants**: these wrappers share the Ladder `LadderSigChecker`
+  (not Core's `BaseSignatureChecker`) to avoid the TAPROOT-only assertion trap in
+  `CheckSchnorrSignature`.
+- **Optional / removable**: entire family is optional. Removing it drops the ability
+  to embed a legacy script inside an MLSC rung.
+
+## `src/rung/blocks/qabi.cpp` (636 LOC) — `#ifdef LADDER_ENABLE_QABIO`
+
+- **Purpose**: QABIO (Quantum-resistant Authenticated Batch Input Output) blocks —
+  `QABI_PRIME`, `QABI_SPEND`. Enables PQ-safe batch payout patterns.
+- **Optional / removable**: the whole file + the corresponding `src/rung/qabi.{h,cpp}`
+  (~649 LOC) + the descriptor parser's qabi path + the `QABI*` error codes are gated
+  behind `LADDER_ENABLE_QABIO`. Remove the define for a minimum-viable BIP that doesn't
+  include QABIO.
+
+---
+
+# Part 4 — Supporting Surface
+
+## `src/rung/pq_verify.h` (52 LOC) / `pq_verify.cpp` (146 LOC)
+
+- **Purpose**: post-quantum signature verification wrappers for FALCON-512,
+  FALCON-1024, Dilithium3, SPHINCS+.
+- **Optional / removable**: entire file. Remove to drop PQ paths; SIG/MULTISIG/etc.
+  would reject PQ schemes at `ParsePQScheme` time.
+
+## `src/rung/adaptor.h` (58 LOC) / `adaptor.cpp`
+
+- **Purpose**: adaptor signature primitives used by ADAPTOR_SIG and PTLC.
+- **Optional / removable**: remove if ADAPTOR_SIG and PTLC are dropped.
+
+## `src/rung/policy.h` (100 LOC) / `policy.cpp` (339 LOC)
+
+- **Purpose**: mempool policy. `IsStandardRungTx` delegates structural validation to
+  the consensus deserializer then checks all outputs are MLSC. Block-type
+  classification helpers: `IsBaseBlockType`, `IsCovenantBlockType`, `IsStatefulBlockType`.
+- **Load-bearing invariants**: mempool policy is stricter than consensus. Must never
+  accept txs that consensus would reject.
+- **Optional / removable**: relay-policy tightening (beyond the "all-MLSC" check) is
+  implementation choice.
+
+## `src/rung/descriptor.h` (162 LOC) / `descriptor.cpp`
+
+- **Purpose**: human-readable descriptor parser. Grammar:
+  `ladder(or(rung1, rung2, ...))` with lowercase function-style blocks and optional `!`
+  for inversion.
+- **Optional / removable**: entire file. Developer convenience, never runs in
+  consensus. A minimum-viable BIP could ship JSON-only.
+
+## `src/rung/rpc.cpp` (4295 LOC)
+
+- **Purpose**: JSON-RPC commands — `createrungtx`, `signrungtx`, `createtxmlsc`,
+  `decoderungtx`, `validateladder`, `computectvhash`, `extractadaptorsecret`,
+  `verifyadaptorpresig`, `formatladder`, `parseladder`, `generatepqkeypair`, plus
+  QABIO-gated commands.
+- **Optional / removable**: entire file. Developer tooling, never runs in consensus.
+  Remove to drop RPC support.
+
+## `src/rung/write_helpers.h` (103 LOC)
+
+- **Purpose**: inline serialization helpers (`WriteLE32`, `WriteLE64`, etc.) — no Core
+  dependency.
+- **Load-bearing invariants**: endianness must match BIP-119 / BIP-340 where applicable.
+
+---
+
+# Part 5 — What a Minimum-Viable BIP Could Look Like
+
+A reviewer evaluating "what's the smallest Ladder Script I could soft-fork?" should
+consider:
+
+**Required (cannot be removed)**
+- `types.h` core enums + structural types
+- `api.h`, `rung_shims.h`
+- `evaluator.{h,cpp}` in full
+- `conditions.{h,cpp}` in full
+- `serialize.{h,cpp}` in full
+- `sighash.{h,cpp}` (can trim ANYPREVOUT variants)
+- `block_dispatch.h`, `block_helpers.{h,cpp}`
+- `blocks/sig.cpp`, `blocks/timelock.cpp`, `blocks/covenant.cpp` (CTV + AMOUNT_LOCK),
+  `blocks/recursion.cpp` (SAME + MODIFIED + UNTIL only), `blocks/anchor.cpp`
+  (DATA_RETURN only)
+- Core Integration Patch in full (the 740-LOC delta is already minimum)
+
+**Droppable for a conservative first soft-fork**
+- `blocks/plc.cpp` (entire PLC family)
+- `blocks/compound.cpp` (all compound encodings — express as compositions)
+- `blocks/governance.cpp` (tx-shape introspection)
+- `blocks/legacy.cpp` (P2* wrappers)
+- `blocks/qabi.cpp` + `qabi.{h,cpp}` + QABIO block evaluators
+- `pq_verify.{h,cpp}` (no PQ paths → no FALCON/Dilithium/SPHINCS)
+- `adaptor.{h,cpp}` + ADAPTOR_SIG + PTLC
+- Advanced recurses (COUNT, SPLIT, DECAY)
+- Hash family HASH_GUARDED
+- Anchor family minus DATA_RETURN
+- `descriptor.{h,cpp}` (developer convenience)
+- `rpc.cpp` (developer convenience)
+
+Dropping all droppable components yields approximately **~5,000-6,000 LOC** of library
+code versus the full ~18,390 — the same 740-LOC Core Integration Patch in both cases.
+
+---
+
+# Part 6 — Anti-Spam Properties
+
+A reviewer verifying user-chosen data limits should confirm:
+
+Total user-chosen arbitrary data per transaction: **112 bytes**
+- 64 bytes (2 × PREIMAGE × 32) — capped per-witness and per-tx
+- 40 bytes (DATA_RETURN) — one per tx
+- 8 bytes (nLockTime + nSequence) — standard Bitcoin
+
+Mechanisms that enforce this:
+
+1. **Fail-closed deserialisation** (`serialize.cpp`) — unknown types, deprecated blocks,
+   non-invertible inversion, trailing bytes all reject.
+2. **Selective inversion** (`types.h`) — explicit allowlist, key-consuming blocks
+   never invertible.
+3. **`IsDataEmbeddingType`** (`types.h`) — blocks without implicit layouts cannot carry
+   HASH256, HASH160, PUBKEY_COMMIT, or DATA.
+4. **PREIMAGE/SCRIPT_BODY cap** (`serialize.cpp`) — max 2 per witness, 2 per tx
+   (binding).
+5. **DATA type restriction** — only DATA_RETURN (40-byte cap, one per tx).
+6. **merkle_pub_key** — pubkeys fold into Merkle leaves, not condition fields. Prevents
+   pubkey-as-storage exfiltration.
+7. **Blanket HASH256 rejection in RPC** (`rpc.cpp`) — HASH256 fields in conditions are
+   whitelisted to CTV, TAGGED_HASH, ACCUMULATOR, COSIGN, OUTPUT_CHECK only. Users
+   provide PREIMAGE and the library computes the hash.
+
+---
+
+# Part 7 — Formal Verification
+
+21 TLA+ specs under `spec/` with 197 checked properties (2.5B states, zero errors):
 
 | Spec | Focus |
 |------|-------|
@@ -132,3 +514,38 @@ Total user-chosen arbitrary data: 64 bytes (PREIMAGE) + 40 bytes (DATA_RETURN) +
 | LadderSighash.tla | Sighash computation properties |
 | LadderCovenant.tla | Covenant/recursion termination and safety |
 | LadderCrossInput.tla | Cross-input (COSIGN) dependencies |
+
+---
+
+# Part 8 — Test Coverage
+
+Reviewers can re-run:
+
+- **Boost unit tests**: `build/bin/test_bitcoin --run_test=rung_tests` (517 cases).
+- **Functional tests**: `test/functional/feature_rung_tx.py`, `feature_rung_p2p.py`,
+  `feature_rung_fuzz.py`, `feature_rung_legacy.py`, `feature_qabi.py`.
+- **Preset end-to-end**: `tools/test-presets.py --api <proxy>` — 56 presets exercised
+  fund + spend on live signet (56/56 passing as of last run).
+
+---
+
+# Part 9 — Where to Start Reviewing
+
+For a reviewer with limited time, the fastest path to a meaningful audit:
+
+1. Read `TLDR.md` (5 minutes).
+2. Read `RUNG_TX_SPEC.md` and `TX_MLSC_SPEC.md` (30 minutes).
+3. Read `ANNOTATED_DIFF.md` sections 1-7 (primitives, interpreter, validation). These
+   contain the entire consensus seam.
+4. Read `src/rung/evaluator.cpp` `VerifyRungTx` + `ValidateRungOutputs` (60 minutes).
+5. Read `src/rung/conditions.cpp` `VerifyMerklePath` + `ComputeTxMLSCLeaf` +
+   `ComputeTweakedConditionsRoot` + `ComputeValueCommitment` (30 minutes).
+6. Read `src/rung/serialize.cpp` `DeserializeLadderWitness` + `DeserializeBlock`
+   (30 minutes).
+7. Spot-check one block evaluator per family (e.g. `blocks/sig.cpp::EvalSigBlock`,
+   `blocks/timelock.cpp::EvalCSVBlock`, `blocks/covenant.cpp::EvalCTVBlock`).
+
+That's roughly 3 hours of focused review to cover the entire consensus surface. The
+remaining ~14,000 LOC of library is developer tooling (RPC, descriptor, block
+evaluators for optional families) that can be audited separately or skipped for a
+minimum-viable BIP.

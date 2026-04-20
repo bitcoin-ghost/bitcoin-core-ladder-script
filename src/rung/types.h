@@ -3,6 +3,54 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+// ============================================================================
+// REVIEWER BLOCK — Central types for Ladder Script
+// ============================================================================
+//
+// PURPOSE
+//   Single source of truth for the entire library. Block types, data types,
+//   structural types (RungBlock/Rung/Relay/LadderWitness), and all metadata
+//   tables (implicit layouts, invertibility, pubkey counts, block descriptors).
+//
+// LOAD-BEARING INVARIANTS
+//   1. RungBlockType enum values are ON THE WIRE. Never renumber, never reuse
+//      reserved slots (0x0201, 0x0202). New block types MUST append.
+//   2. IsKnownBlockType is the authoritative allowlist. If not in this list,
+//      consensus rejects. Every new block type must be added here AND to the
+//      micro-header table AND to ImplicitLayoutFor AND to BlockDescriptor
+//      AND (if it uses sigs) to IsKeyConsumingBlockType AND (if invertible)
+//      to IsInvertibleBlockType.
+//   3. IsInvertibleBlockType is an ALLOWLIST (deny by default). Key-consuming
+//      blocks (SIG, MULTISIG, etc.) are NEVER invertible — flipping a sig
+//      check to "NOT verified" breaks soundness.
+//   4. IsDataEmbeddingType gates anti-spam. DATA, HASH256, HASH160,
+//      PUBKEY_COMMIT are all high-bandwidth types; they're blocked in blocks
+//      without implicit layouts so they can't be used as stealth storage.
+//   5. PubkeyCountForBlock ties the Merkle leaf shape to block types. If
+//      you change it, the value_commitment changes.
+//   6. VerifyImplicitLayoutPairing() runs at library init and ensures the
+//      micro-header table and ImplicitLayoutFor agree. Do not disable.
+//
+// FAMILIES (and what's optional for a minimum-viable BIP)
+//   0x00  Signature        — REQUIRED (SIG, MULTISIG)
+//   0x01  Timelock         — REQUIRED (CSV, CLTV); _TIME variants optional
+//   0x02  Hash             — TAGGED_HASH required; HASH_GUARDED optional
+//   0x03  Covenant         — CTV required; VAULT_LOCK, AMOUNT_LOCK optional
+//   0x04  Recursion        — SAME/MODIFIED/UNTIL required; COUNT/SPLIT/DECAY
+//                            are syntactic sugar over MODIFIED
+//   0x05  Anchor           — DATA_RETURN required; all others optional
+//   0x06  PLC              — entirely optional (rate-limit, timers, latches,
+//                            counters, cosign — significant expressiveness
+//                            but not consensus-critical)
+//   0x07  Compound         — optional (compositions of base blocks with
+//                            bespoke implicit layouts for size)
+//   0x08  Governance       — optional (tx-shape introspection)
+//   0x09  Legacy P2*       — optional (bridges legacy scripts into MLSC)
+//
+// REFERENCES
+//   Reviewer guide: doc/ladder-script/REVIEW_GUIDE.md (Part 2, types section).
+// ============================================================================
+
 #ifndef BITCOIN_RUNG_TYPES_H
 #define BITCOIN_RUNG_TYPES_H
 

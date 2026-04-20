@@ -6,6 +6,15 @@
 // Ladder Script block family: timelock.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Timelock family (0x0101..0x0104)
+//   Members: CSV, CSV_TIME, CLTV, CLTV_TIME.
+//   CSV / CLTV are BIP-68 / BIP-65 height-based; _TIME variants are
+//   median-time-past based (BIP-113).
+//   Load-bearing: timelock arithmetic must mirror BIP-65/112 exactly;
+//   sub-64-bit values must not overflow (regression c366dcc846 fixed a
+//   VAULT_LOCK uint32 truncation; see memory notes).
+//   Optional: _TIME variants can be dropped for a height-only MVP.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

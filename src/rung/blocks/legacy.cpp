@@ -6,6 +6,26 @@
 // Ladder Script block family: legacy.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Legacy P2* wrappers (0x0901..0x0907)
+//   Members: P2PK_LEGACY, P2PKH_LEGACY, P2SH_LEGACY, P2WPKH_LEGACY,
+//   P2WSH_LEGACY, P2TR_LEGACY, P2TR_SCRIPT_LEGACY.
+//   Pattern: wrap the semantic of Core's legacy script types inside an
+//   MLSC rung so legacy-script users can migrate without re-signing
+//   infrastructure.
+//   Load-bearing invariants:
+//     - Schnorr signature verification here flows through the Ladder
+//       api::LadderSigChecker, NOT Core's BaseSignatureChecker. Going
+//       through Core's checker triggers three TAPROOT-only assertions in
+//       CheckSchnorrSignature (sigversion, annex_init, m_bip341_taproot_ready)
+//       and crashes the process. Regression fix: commit 83f3a99a25. If you
+//       re-introduce a Core-checker-based path here, add the Taproot-state
+//       prerequisites first.
+//     - VerifySigWithScheme (in adaptor.cpp) replaces the earlier
+//       VerifySigFromFields; the new helper uses LadderSigChecker directly.
+//   Optional for MVP: entire family is optional. Removing drops the ability
+//   to bridge legacy-script UTXOs into MLSC rungs. Base spend patterns are
+//   unaffected.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

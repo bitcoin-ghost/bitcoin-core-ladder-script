@@ -6,6 +6,18 @@
 // Ladder Script block family: governance.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Governance family (0x0801..0x0807)
+//   Members: EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT,
+//   RELATIVE_VALUE, ACCUMULATOR, OUTPUT_CHECK.
+//   Pattern: tx-shape introspection. Checks tx weight, input/output count,
+//   relative value across outputs, Merkle membership proofs (ACCUMULATOR),
+//   per-output structural constraints (OUTPUT_CHECK).
+//   Load-bearing: none individually consensus-critical unless used.
+//   Optional for MVP: entire family is optional. Removing it drops
+//   tx-introspection expressiveness but does not affect base spend patterns.
+//   Historical note: RELATIVE_VALUE had an int64 overflow fix (a4782caa8e);
+//   regression-tested in rung_tests.cpp.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

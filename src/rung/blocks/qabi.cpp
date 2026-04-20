@@ -6,6 +6,21 @@
 // Ladder Script block family: qabi.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — QABIO family (gated #ifdef LADDER_ENABLE_QABIO)
+//   Members: QABI_PRIME, QABI_SPEND.
+//   Purpose: PQ-safe batch payout pattern. A coordinator commits an auth
+//   chain (tip hash + depth) in a prime tx; participants later spend by
+//   revealing their auth chain to a given depth. Used by the ghost-pool
+//   project for batch mining payouts.
+//   Load-bearing for QABIO deployments: these two blocks plus the matching
+//   serialisation in src/rung/qabi.{h,cpp} and the RPC helpers
+//   (qabi_authchain, qabi_buildblock).
+//   Optional for MVP: the whole QABIO surface is gated behind the
+//   LADDER_ENABLE_QABIO compile-time define. Drop the define → drop the
+//   entire feature (blocks, serialisation, RPCs, and the related QABI*
+//   error codes in api.h). Recommended to ship QABIO as a follow-up
+//   deployment rather than in the first BIP.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>

@@ -6,6 +6,17 @@
 // Ladder Script block family: covenant.
 // Evaluators + registry function. The top-level dispatcher calls each
 // registered evaluator via `rung::LookupBlockEvaluator`.
+//
+// REVIEWER NOTE — Covenant family (0x0301..0x0303)
+//   Members: CTV, VAULT_LOCK, AMOUNT_LOCK.
+//   CTV is BIP-119 compatible — template hash over the tx (witness + scriptSig
+//   excluded). CTV hash MUST use WriteLE32/WriteLE64 as per BIP-119; hand-
+//   rolled endianness here is a consensus footgun.
+//   VAULT_LOCK enforces either (recovery key, no delay) or (hot key + CSV).
+//   AMOUNT_LOCK bounds ctx.output_amount within [min, max] NUMERIC fields.
+//   Load-bearing: all three are consensus-critical when used.
+//   Optional: VAULT_LOCK + AMOUNT_LOCK can be dropped for a minimum-viable
+//   BIP (express via CSV + SIG composition), but CTV is required.
 
 #include <rung/block_dispatch.h>
 #include <rung/block_helpers.h>
