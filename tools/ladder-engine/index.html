@@ -3364,6 +3364,21 @@ BlockRegistry.TIMELOCKED_SIG.buildSigner = (block, keyLookup, preimages, opts) =
   return { type: 'TIMELOCKED_SIG', privkey: key.privkey, scheme: block.values.scheme || opts.scheme || 'SCHNORR' };
 };
 
+// VAULT_LOCK folds BOTH pubkeys (recovery + hot) into the merkle leaf.
+// The witness must include both in the same positional order committed at
+// fund time or the spend-time leaf reconstruction fails.
+BlockRegistry.VAULT_LOCK.buildSigner = (block, keyLookup) => {
+  const hotKey = keyLookup(block.values.hot_key);
+  const recoveryKey = keyLookup(block.values.recovery_key);
+  const signer = hotKey || recoveryKey;
+  if (!signer) return null;
+  return {
+    type: 'VAULT_LOCK',
+    privkey: signer.privkey,
+    pubkeys: [block.values.recovery_key, block.values.hot_key],
+  };
+};
+
 BlockRegistry.HTLC.buildSigner = (block, keyLookup, preimages) => {
   const key = keyLookup(block.values.pubkey);
   const preimage = block.values.preimage || preimages?.[block.values.hash];
@@ -7138,7 +7153,7 @@ const EXAMPLES = [
       { label: 'BUY', blocks: [
         { type: 'COUNTER_DOWN', values: { pubkey: FAKE.pk1, count: '12' } },
         { type: 'AMOUNT_LOCK', values: { min: '50000', max: '100000' } },
-        { type: 'RECURSE_MODIFIED', values: { max_depth: '10', block_idx: '0', param_idx: '1', delta: '-1' } },
+        { type: 'RECURSE_MODIFIED', values: { max_depth: '10', block_idx: '0', param_idx: '0', delta: '-1' } },
       ], output: { name: 'DCA_BUY', type: 'standard' } },
       { label: 'SWEEP', blocks: [
         { type: 'COUNTER_DOWN', values: { pubkey: FAKE.pk1, count: '0' } },
@@ -7172,7 +7187,7 @@ const EXAMPLES = [
   },
   {
     title: 'RATE-LIMITED WALLET',
-    desc: 'Daily spending cap of 50,000 sats with 200,000 sat accumulator. Refills over 144 blocks. Key holder signs each spend.\n\nDAY_SPEND: Single key signs, rate limiter enforces max 50k sats/block with 200k accumulator refilling over 144 blocks.\nOVERRIDE: Two keys co-sign to bypass the rate limit entirely.',
+    desc: 'Per-transaction spending cap of 50,000 sats. Key holder signs each spend. The carry-forward output is NOT bound to the same rung set by this preset alone — a full lifetime rate-limit needs a dedicated covenant primitive (design note).\n\nDAY_SPEND: Single key signs, rate limiter caps the payment output at 50k sats/tx.\nOVERRIDE: Two keys co-sign to bypass the rate limit entirely.',
     tags: [['RATE_LIM', 'plc'], ['SIG', 'sig'], ['AMT_LOCK', 'cov']],
     rungs: [
       { label: 'DAY_SPEND', blocks: [
@@ -7377,7 +7392,7 @@ const EXAMPLES = [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
         { type: 'COUNTER_UP', values: { pubkey: FAKE.pk2, current: '0', target: '24' } },
         { type: 'AMOUNT_LOCK', values: { min: '25000', max: '25000' } },
-        { type: 'RECURSE_MODIFIED', values: { max_depth: '10', block_idx: '1', param_idx: '1', delta: '1' } },
+        { type: 'RECURSE_MODIFIED', values: { max_depth: '10', block_idx: '1', param_idx: '0', delta: '1' } },
       ], output: { name: 'PAYMENT', type: 'standard' } },
       { label: 'CANCEL', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
@@ -9167,8 +9182,26 @@ function planSpend(record, options) {
       }
     }
 
-    // ── No buildSigner --types that need no witness (CSV, CLTV, covenants, governance, etc.) ──
-    signerBlocks.push({ type: b.type });
+    // ── No buildSigner: emit a bare signer entry, but forward any PUBKEY
+    //    field values so the library populates them in the witness. Without
+    //    this the fund-time Merkle leaf (which folded the pubkey in) won't
+    //    match the spend-time reconstruction (witness has no PUBKEY), and
+    //    the spend fails with "MLSC Merkle path verification failed".
+    const entry = { type: b.type };
+    const def = getBlockDef(b.type);
+    const pubkeys = [];
+    (def.fields || []).forEach(f => {
+      if (f.dataType !== 'PUBKEY') return;
+      const val = b.values?.[f.name];
+      if (!val) return;
+      if (f.multi) {
+        val.split(',').map(k => k.trim()).filter(Boolean).forEach(k => pubkeys.push(k));
+      } else {
+        pubkeys.push(val);
+      }
+    });
+    if (pubkeys.length > 0) entry.pubkeys = pubkeys;
+    signerBlocks.push(entry);
   }
 
   // Fallback: if no blocks detected, use simple SIG format
@@ -10376,6 +10409,23 @@ function SpendPanel() {
   const [selectedRungIdx, setSelectedRungIdx] = useState(0);
   const [selectedVout, setSelectedVout] = useState(null); // null = use rec.vout default
 
+  // Rungs that contain a COSIGN block need a paired input in the same spend
+  // tx. The engine can't synthesise that pair from an isolated UTXO, so on
+  // load we default to the first rung that is satisfiable in isolation and
+  // mark the COSIGN ones in the selector as "[needs paired UTXO]".
+  const rungNeedsPairedUtxo = (rung) =>
+    (rung.blocks || []).some(b => b.type === 'COSIGN');
+  React.useEffect(() => {
+    if (!selectedRecord) return;
+    const vout = selectedVout !== null ? selectedVout : (selectedRecord.vout || 0);
+    const voutRungs = (selectedRecord.rungs || []).filter(r => r.vout === vout);
+    if (voutRungs.length === 0) return;
+    const currentNeedsPair = voutRungs[selectedRungIdx] && rungNeedsPairedUtxo(voutRungs[selectedRungIdx]);
+    if (!currentNeedsPair) return;
+    const firstOk = voutRungs.findIndex(r => !rungNeedsPairedUtxo(r));
+    if (firstOk >= 0 && firstOk !== selectedRungIdx) setSelectedRungIdx(firstOk);
+  }, [selectedRecord, selectedVout]);
+
   const copyWithFeedback = (text, key) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -10646,8 +10696,19 @@ function SpendPanel() {
         if (exhausted) {
           createOutputs = [freshSigOutput];
         } else {
+          // Identity recurse (RECURSE_SAME/RECURSE_UNTIL) must carry the
+          // FULL original tree so the output root equals the spent-UTXO
+          // root. Leaf-centric recurses (MODIFIED/DECAY/COUNT/SPLIT) only
+          // need the target rung.
+          const identityRecurse = recurseBlocks.some(rb => rb.type === 'RECURSE_SAME' || rb.type === 'RECURSE_UNTIL');
+          const sourceRungs = identityRecurse ? allRungs : voutRungs;
           const buildCarryConditions = () => {
-            const conds = rungsToConditions(voutRungs);
+            const conds = rungsToConditions(sourceRungs);
+            // Each carry rung must carry its original output_index so the
+            // library reproduces the committed tree bit-exact.
+            conds.forEach((c, i) => {
+              if (typeof sourceRungs[i]?.vout === 'number') c.output_index = sourceRungs[i].vout;
+            });
             for (const cond of conds) {
               for (const blk of cond.blocks) {
                 if (blk.type === 'RECURSE_SPLIT') {
@@ -10704,6 +10765,22 @@ function SpendPanel() {
             ];
             const maxSplits = parseInt(splitBlock.values?.max_splits) || 0;
             addLog('RECURSE_SPLIT: 2-way (' + half + ' + ' + (sendSats - half) + ' sats), splits ' + maxSplits + ' → ' + (maxSplits - 1), 'info');
+          } else if (identityRecurse) {
+            // createtxmlsc requires output_index < n_outputs, so we need
+            // to create enough outputs to cover every output_index in the
+            // original tree. First output holds the bulk; padding outputs
+            // get dust each.
+            const carry = buildCarryConditions();
+            const maxOi = carry.reduce((m, c) => Math.max(m, c.output_index || 0), 0);
+            const nOutputs = maxOi + 1;
+            const padMin = 3000;
+            if (sendSats < padMin * nOutputs) {
+              throw new Error('Identity recurse: ' + sendSats + ' sats too small for ' + nOutputs + ' outputs of ' + padMin);
+            }
+            const padAmounts = new Array(nOutputs).fill(padMin);
+            padAmounts[0] = sendSats - padMin * (nOutputs - 1);
+            createOutputs = padAmounts.map(amt => ({ amount: amt / 1e8, conditions: carry, _isCarryForward: true }));
+            addLog('Identity carry: ' + nOutputs + ' output(s) (main ' + padAmounts[0] + ', dust×' + (nOutputs - 1) + ')', 'info');
           } else {
             createOutputs = [{ amount: spendAmount, conditions: buildCarryConditions(), _isCarryForward: true }];
             const types = recurseBlocks.map(b => b.type).join(' + ');
@@ -10712,18 +10789,72 @@ function SpendPanel() {
         }
 
       } else {
-        createOutputs = [freshSigOutput];
+        // RATE_LIMIT: consensus caps output_amount at max_per_block. A
+        // single-output spend for the full UTXO fails whenever the UTXO
+        // exceeds max_per_block. Split into a payment ≤ max_per_block plus
+        // a carry-forward output that re-encumbers with the same
+        // rung set (matching test-presets.py's RATE_LIMIT flow).
+        const rateLimitBlock = rungBlocks.find(b => b.type === 'RATE_LIMIT');
+        if (rateLimitBlock) {
+          const maxPer = parseInt(rateLimitBlock.values?.max_per_block) || 0;
+          const dustCarry = 546;
+          const paymentSats = Math.min(maxPer, Math.max(0, sendSats - dustCarry));
+          const carrySats = sendSats - paymentSats;
+          if (paymentSats <= 0 || carrySats < dustCarry) {
+            throw new Error('RATE_LIMIT: UTXO too small to split into payment + carry-forward (need ≥ ' + (dustCarry + 1) + ' sats after fees)');
+          }
+          const carryConditions = [{
+            blocks: rungBlocks.filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
+          }];
+          createOutputs = [
+            { amount: paymentSats / 1e8, conditions: [freshSigOutput.conditions[0]] },
+            { amount: carrySats / 1e8, conditions: carryConditions, _isCarryForward: true },
+          ];
+          addLog('RATE_LIMIT: payment ' + paymentSats + ', carry-forward ' + carrySats, 'info');
+        } else {
+          createOutputs = [freshSigOutput];
+        }
       }
 
-      // Build create payload
-      const createPayload = { inputs: spendInputs, outputs: createOutputs };
+      // Build create payload. /api/ladder/create (createrungtx) is single-
+      // output; multi-output spends (RECURSE_SPLIT, RATE_LIMIT carry-forward,
+      // etc.) must route through /api/ladder/createtxmlsc so the library
+      // builds a shared conditions_root across the new outputs.
+      let createPayload;
+      let createEndpoint;
+      if (createOutputs.length === 1) {
+        createPayload = { inputs: spendInputs, outputs: createOutputs };
+        createEndpoint = '/api/ladder/create';
+      } else {
+        const amounts = createOutputs.map(o => o.amount);
+        const rungsFlat = [];
+        // Identity-recurse shares one carry `conditions` array across all
+        // padding outputs; dedupe so each committed rung appears exactly
+        // once with its original output_index. For other multi-output
+        // shapes (RATE_LIMIT payment + carry, RECURSE_SPLIT 2-way), each
+        // output has its own conditions and the iteration index is the
+        // correct output_index.
+        const seen = new Set();
+        createOutputs.forEach((out, oi) => {
+          (out.conditions || []).forEach(cond => {
+            const hasOi = typeof cond.output_index === 'number';
+            const effOi = hasOi ? cond.output_index : oi;
+            const key = effOi + ':' + JSON.stringify(cond.blocks);
+            if (hasOi && seen.has(key)) return;
+            seen.add(key);
+            rungsFlat.push({ output_index: effOi, blocks: cond.blocks });
+          });
+        });
+        createPayload = { inputs: spendInputs, outputs: amounts, rungs: rungsFlat };
+        createEndpoint = '/api/ladder/createtxmlsc';
+      }
       if (rec.relays && rec.relays.length > 0) {
         createPayload.relays = rec.relays.map(r => ({
           blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
         }));
       }
       if (txLocktime > 0) createPayload.locktime = txLocktime;
-      const createResult = await apiCall('/api/ladder/create', createPayload, true);
+      const createResult = await apiCall(createEndpoint, createPayload, true);
       if (!createResult || !createResult.hex) throw new Error('Failed to create spending tx.');
       addLog('Unsigned tx created (' + (createResult.hex.length / 2) + ' bytes)', 'ok');
 
@@ -11026,18 +11157,25 @@ function SpendPanel() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {voutRungs.map((rung, ri) => {
                     const isActive = ri === selectedRungIdx;
+                    const needsPair = rungNeedsPairedUtxo(rung);
                     return (
                       <div key={ri} onClick={() => setSelectedRungIdx(ri)} style={{
                         padding: '8px 12px', cursor: 'pointer', border: '1px solid',
                         borderColor: isActive ? 'var(--cyan)' : 'var(--border)',
                         background: isActive ? 'rgba(0,212,255,0.08)' : 'var(--bg-primary)',
                         transition: 'all 0.15s', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        opacity: needsPair && !isActive ? 0.55 : 1,
                       }}>
                         <div>
                           <span style={{ fontSize: 10, fontWeight: 700, color: isActive ? 'var(--cyan)' : 'var(--text-dim)', marginRight: 8 }}>
                             {isActive ? '\u25B6' : '\u25CB'} CONDITION {ri}
                           </span>
                           {rung.label && <span style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 600 }}>{rung.label}</span>}
+                          {needsPair && (
+                            <span title="Contains COSIGN — needs a paired input in the same tx; can't be spent standalone" style={{ marginLeft: 8, fontSize: 9, color: 'var(--amber)', border: '1px solid var(--amber)', padding: '1px 5px' }}>
+                              needs paired UTXO
+                            </span>
+                          )}
                         </div>
                         <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
                           {(rung.blocks || []).map(b => b.type).join(' + ')}
