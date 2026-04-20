@@ -2522,6 +2522,15 @@ const BLOCK_FAMILIES = [
         { name: 'oracle_pk', dataType: 'PUBKEY', label: 'Oracle Key', placeholder: '02abc...' },
         { name: 'outcome_count', dataType: 'NUMERIC', label: 'Outcomes', placeholder: '2' }
       ]},
+      { type: 'ANCHOR_FEE', label: 'A_FEE', desc: 'L2 anti-pinning anchor: 2-of-2 sig + fee-rate band + weight cap', fields: [
+        { name: 'local_key', dataType: 'PUBKEY', label: 'Local Key', placeholder: '02abc...' },
+        { name: 'remote_key', dataType: 'PUBKEY', label: 'Remote Key', placeholder: '03def...' },
+        { name: 'min_fee_rate', dataType: 'NUMERIC', label: 'Min Fee (sat/vB)', placeholder: '1' },
+        { name: 'max_fee_rate', dataType: 'NUMERIC', label: 'Max Fee (sat/vB)', placeholder: '100' },
+        { name: 'max_weight', dataType: 'NUMERIC', label: 'Max Weight (WU)', placeholder: '400000' },
+        { name: 'commitment_number', dataType: 'NUMERIC', label: 'Commitment #', placeholder: '1' },
+        { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
+      ]},
       { type: 'DATA_RETURN', label: 'DATA_RET', desc: 'On-chain data (max 40 bytes) appended to MLSC output, replaces OP_RETURN', fields: [
         { name: 'data', dataType: 'DATA', label: 'Data', placeholder: 'hex data (max 40 bytes)' }
       ]},
@@ -6096,7 +6105,7 @@ function getTypeHex(type) {
     COUNTER_DOWN:'0631',COUNTER_PRESET:'0632',COUNTER_UP:'0633',
     COMPARE:'0641',SEQUENCER:'0651',ONE_SHOT:'0661',
     RATE_LIMIT:'0671',COSIGN:'0681',
-    TIMELOCKED_SIG:'0701',HTLC:'0702',HASH_SIG:'0703',PTLC:'0704',CLTV_SIG:'0705',TIMELOCKED_MULTISIG:'0706',
+    TIMELOCKED_SIG:'0701',HTLC:'0702',HASH_SIG:'0703',PTLC:'0704',CLTV_SIG:'0705',TIMELOCKED_MULTISIG:'0706',ANCHOR_FEE:'0707',
     EPOCH_GATE:'0801',WEIGHT_LIMIT:'0802',INPUT_COUNT:'0803',OUTPUT_COUNT:'0804',RELATIVE_VALUE:'0805',ACCUMULATOR:'0806',OUTPUT_CHECK:'0807',
     P2PK_LEGACY:'0901',P2PKH_LEGACY:'0902',P2SH_LEGACY:'0903',P2WPKH_LEGACY:'0904',P2WSH_LEGACY:'0905',P2TR_LEGACY:'0906',P2TR_SCRIPT_LEGACY:'0907',
   };

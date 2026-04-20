@@ -5,7 +5,48 @@ engine/playground could exercise the latest consensus code, then run
 solo static + smoke tests on the engine and playground while the user
 sleeps. What I hit and what I left behind.
 
-## 1. CONSENSUS REGRESSION — priority for the morning
+## 1. ROOT CAUSE IDENTIFIED (morning of 2026-04-20)
+
+The "regression" is not a regression — it's the deliberate tagged-hash
+versioning from commit **`e82178da6a`** (2026-04-18,
+"tagged-hash: version the five Ladder* domain separators to /v1").
+That commit renamed the five Ladder tagged-hash domain separators:
+
+    LadderLeaf            → LadderLeaf/v1            (Merkle tree leaves)
+    LadderInternal        → LadderInternal/v1        (Merkle tree internal nodes)
+    LadderSighash         → LadderSighash/v1
+    LadderKeyPathSighash  → LadderKeyPathSighash/v1
+    LadderTweak           → LadderTweak/v1
+
+Every hash in the MLSC Merkle path depends on those tags. The signet
+chain was mined on **2026-04-17**, one day before the rename. The new
+binary uses `/v1` tags, computes a different Merkle root from the same
+witness, and reports "MLSC Merkle path verification failed" on the
+first TX_MLSC spend (block 113, tx `b153ecfe...`).
+
+The versioning itself is intentional and correct: without a version
+suffix, a future Bitcoin BIP taking "Ladder*" as a tag would silently
+collide with ours. The commit message justifies this.
+
+**Fix:** regenerate the signet chain under the new tags. The existing
+1161 blocks are orphaned by design. No code change is needed.
+
+**Signet regen procedure (for later, when ready):**
+
+1. `ssh ladder-script "sudo systemctl stop bitcoind"`
+2. `ssh ladder-script "sudo rm -rf /home/ghost/.bitcoin/signet/{blocks,chainstate,banlist.json,fee_estimates.dat,mempool.dat,peers.dat}"`
+   (keep `bitcoin.conf`, `signet.{conf,json}` if any, `wallets/`)
+3. `ssh ladder-script "sudo rm /etc/systemd/system/bitcoind.service.d/reindex.conf && sudo systemctl daemon-reload"`
+4. Deploy the HEAD binary (see §3 backup steps — same procedure as
+   overnight, just this time it'll succeed because the chain is
+   empty).
+5. `sudo systemctl start bitcoind`
+6. Mine fresh signet blocks (need the custom signet challenge signer —
+   check `bitcoin.conf` for `signetchallenge=` and recover the signer
+   key from wherever it was stored; if lost, generate a new one and
+   update conf).
+
+## 1b. Original session notes (for history)
 
 **Symptom.** The freshly-built `bitcoind` from HEAD (`989004e433`)
 rejects block **113** of the existing signet chain during
