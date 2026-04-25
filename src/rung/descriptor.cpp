@@ -333,6 +333,23 @@ bool ParseQABISpend(ParseContext& ctx, RungBlock& block)
     return Expect(ctx, ')');
 }
 
+bool ParsePqBatch(ParseContext& ctx, RungBlock& block)
+{
+    // pq_batch(pubkey_hash_hex) — commits SHA256(falcon_pubkey).
+    // The pubkey + signature are revealed in the witness of one
+    // anchor input per tx; other inputs gated by the same hash
+    // validate via the cross-input cache.
+    if (!Expect(ctx, '(')) return false;
+    auto bytes = ParseHex(ReadHex(ctx));
+    if (bytes.size() != 32) {
+        ctx.error = "pq_batch requires 32-byte pubkey hash";
+        return false;
+    }
+    block.type = RungBlockType::PQ_BATCH;
+    block.fields.push_back({RungDataType::HASH256, bytes});
+    return Expect(ctx, ')');
+}
+
 bool ParseAmountLock(ParseContext& ctx, RungBlock& block)
 {
     if (!Expect(ctx, '(')) return false;
@@ -1042,6 +1059,7 @@ bool ParseBlock(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uin
     // QABI family
     else if (name == "qabi_prime") ok = ParseQABIPrime(ctx, block);
     else if (name == "qabi_spend") ok = ParseQABISpend(ctx, block);
+    else if (name == "pq_batch") ok = ParsePqBatch(ctx, block);
     // Covenant family
     else if (name == "ctv") ok = ParseCtv(ctx, block);
     else if (name == "vault_lock") ok = ParseVaultLock(ctx, block, rung_pks);
@@ -1395,6 +1413,13 @@ std::string FormatDescriptor(const RungConditions& conditions,
         }
         case RungBlockType::CTV: {
             result += "ctv(";
+            if (!block.fields.empty()) result += HexStr(block.fields[0].data);
+            result += ")";
+            return result;
+        }
+        case RungBlockType::PQ_BATCH: {
+            // Field: HASH256 SHA256(falcon_pubkey).
+            result += "pq_batch(";
             if (!block.fields.empty()) result += HexStr(block.fields[0].data);
             result += ")";
             return result;

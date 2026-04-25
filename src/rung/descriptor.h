@@ -98,6 +98,14 @@ namespace rung {
  *
  *  See doc/ladder-script/project_qabi.md for the full QABIO spec.
  *
+ *  PQ batch family:
+ *    pq_batch(pubkey_hash_hex)
+ *        Lightweight PQ batch gate. Commits SHA256(falcon_pubkey).
+ *        One anchor input per tx reveals [PUBKEY, SIGNATURE]; other
+ *        inputs gated by the same hash carry an empty witness and
+ *        validate via a tx-local cache. No coordinator, no priming.
+ *        See doc/ladder-script/PQ_BATCH_SPEC.md.
+ *
  *  Scheme names: schnorr, ecdsa, falcon512, falcon1024, dilithium3, sphincs_sha
  *
  *  @param[in]  desc     Descriptor string

@@ -14640,6 +14640,39 @@ BOOST_AUTO_TEST_CASE(descriptor_qabi_full_utxo_shape)
     BOOST_CHECK(conditions.rungs[2].blocks[0].type == RungBlockType::QABI_SPEND);
 }
 
+BOOST_AUTO_TEST_CASE(descriptor_pq_batch_parse_format_roundtrip)
+{
+    std::string pubkey_hash_hex(64, 'd');
+    std::string desc = "ladder(or(pq_batch(" + pubkey_hash_hex + ")))";
+
+    std::map<std::string, std::vector<uint8_t>> keys;
+    RungConditions conditions;
+    std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+    std::string err;
+
+    BOOST_REQUIRE_MESSAGE(ParseDescriptor(desc, keys, conditions, pubkeys, err),
+                          "parse failed: " << err);
+    BOOST_REQUIRE_EQUAL(conditions.rungs.size(), 1u);
+    BOOST_REQUIRE_EQUAL(conditions.rungs[0].blocks.size(), 1u);
+    const auto& block = conditions.rungs[0].blocks[0];
+    BOOST_CHECK(block.type == RungBlockType::PQ_BATCH);
+    BOOST_REQUIRE_EQUAL(block.fields.size(), 1u);
+    BOOST_CHECK(block.fields[0].type == RungDataType::HASH256);
+    BOOST_CHECK_EQUAL(block.fields[0].data.size(), 32u);
+
+    std::string formatted = FormatDescriptor(conditions, pubkeys);
+    BOOST_CHECK_NE(formatted.find("pq_batch("), std::string::npos);
+    BOOST_CHECK_NE(formatted.find(pubkey_hash_hex), std::string::npos);
+
+    // Wrong-size hash must reject.
+    std::string bad = "ladder(or(pq_batch(" + std::string(60, 'd') + ")))";
+    RungConditions bad_conditions;
+    std::vector<std::vector<std::vector<uint8_t>>> bad_pubkeys;
+    std::string bad_err;
+    BOOST_CHECK(!ParseDescriptor(bad, keys, bad_conditions, bad_pubkeys, bad_err));
+    BOOST_CHECK_NE(bad_err.find("32-byte"), std::string::npos);
+}
+
 // ============================================================================
 // Multi-party scale tests — push N-participant batches to validate
 // correctness and measure the cost curve.
