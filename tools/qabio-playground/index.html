@@ -1190,7 +1190,7 @@ function StagePanel({ apiCall }) {
       storeJson('sign_prime_res_' + p.id, p.label + ' signrungtx (prime) resp', signRes);
 
       const bcastPrime = await apiCall('/api/ladder/broadcast', { hex: signRes.hex });
-      if (!bcastPrime) { log(p.label + ': broadcast prime failed', 'err'); return; }
+      if (!bcastPrime) { log(p.label + ': broadcast prime failed', 'err'); failModal(p.label + ': broadcast (prime) failed'); return; }
       await apiCall('/api/ladder/mine', { blocks: 1 });
 
       dispatch({ type: 'PART_UPDATE', id: p.id, patch: {
@@ -1457,7 +1457,13 @@ function StagePanel({ apiCall }) {
     addModalStep('Batch-funding ' + parts.length + ' participants…', 'active');
     log('Step 3/9: Batch-funding ' + parts.length + ' participants…');
     const addresses = parts.map(p => p.address);
-    const fundRes = await apiCall('/api/ladder/playground/fund-batch', { addresses, amount_btc: 0.001 });
+    // Fund each participant with enough to cover their max contribution + fee headroom.
+    // Contributions scale with N (50k + i*5k sats), so at N=20 P19 needs ~145k sats — a
+    // hard-coded 0.001 BTC funding leaves P10..P19 short and their unprimed createtxmlsc
+    // returns no-fee or insufficient-funds errors.
+    const maxContribSats = Math.max(...parts.map(p => p.contribution));
+    const fundAmtBtc = (maxContribSats + 5000) / 1e8;
+    const fundRes = await apiCall('/api/ladder/playground/fund-batch', { addresses, amount_btc: fundAmtBtc });
     if (!fundRes) { log('Batch funding failed', 'err'); failModal('Batch funding failed'); return; }
     storeJson('fund_batch', 'playground/fund-batch response', fundRes);
     parts.forEach((p, i) => {
@@ -1553,12 +1559,12 @@ function StagePanel({ apiCall }) {
       const unprimedRes = await apiCall('/api/ladder/createtxmlsc', {
         inputs: [{ txid: p.fundingTxid, vout: p.fundingVout }], outputs: [p.contribution / 1e8], rungs: unprimedConds,
       });
-      if (!unprimedRes) { log(p.label + ': create unprimed failed', 'err'); return; }
+      if (!unprimedRes) { log(p.label + ': create unprimed failed', 'err'); failModal(p.label + ': createtxmlsc (unprimed) failed'); return; }
       storeJson('unprimed_' + p.id, p.label + ' unprimed resp', unprimedRes);
       const signedUn = await apiCall('/api/ladder/sign', { hex: unprimedRes.hex });
-      if (!signedUn || !signedUn.hex) { log(p.label + ': sign unprimed failed', 'err'); return; }
+      if (!signedUn || !signedUn.hex) { log(p.label + ': sign unprimed failed', 'err'); failModal(p.label + ': wallet sign (unprimed) failed'); return; }
       const bcastUn = await apiCall('/api/ladder/broadcast', { hex: signedUn.hex });
-      if (!bcastUn) { log(p.label + ': broadcast unprimed failed', 'err'); return; }
+      if (!bcastUn) { log(p.label + ': broadcast unprimed failed', 'err'); failModal(p.label + ': broadcast (unprimed) failed — likely mempool descendant limit at N>11 (default 25 sibs of fund-batch parent before the mine)'); return; }
       p.unprimedTxid = bcastUn.txid;
       p.unprimedSpk = unprimedRes.scriptPubKey;
       log(p.label + ': unprimed broadcast ' + shortHex(bcastUn.txid, 14), 'ok');
@@ -1577,7 +1583,7 @@ function StagePanel({ apiCall }) {
       const primeRes = await apiCall('/api/ladder/createtxmlsc', {
         inputs: [{ txid: p.unprimedTxid, vout: 0 }], outputs: [primeAmt], rungs: primedConds,
       });
-      if (!primeRes) { log(p.label + ': prime template failed', 'err'); return; }
+      if (!primeRes) { log(p.label + ': prime template failed', 'err'); failModal(p.label + ': createtxmlsc (prime) failed'); return; }
       storeJson('prime_' + p.id, p.label + ' prime resp', primeRes);
       const signersSpec = [{ input: 0, rung: 1, blocks: [{
         type: 'QABI_PRIME', new_committed_root: qabiRootWire, prime_depth: state.primeDepth,
@@ -1587,7 +1593,7 @@ function StagePanel({ apiCall }) {
       }) }];
       const spentOutputs = [{ amount: (p.contribution / 1e8).toFixed(8), scriptPubKey: p.unprimedSpk }];
       const signPrime = await apiCall('/api/ladder/sign', { hex: primeRes.hex, signers: signersSpec, spent_outputs: spentOutputs });
-      if (!signPrime || !signPrime.hex) { log(p.label + ': signrungtx prime failed', 'err'); return; }
+      if (!signPrime || !signPrime.hex) { log(p.label + ': signrungtx prime failed', 'err'); failModal(p.label + ': signrungtx (QABI_PRIME) failed'); return; }
       const bcastPrime = await apiCall('/api/ladder/broadcast', { hex: signPrime.hex });
       if (!bcastPrime) { log(p.label + ': broadcast prime failed', 'err'); return; }
       p.primedTxid = bcastPrime.txid;
@@ -1672,7 +1678,7 @@ function StagePanel({ apiCall }) {
       const signRes = await apiCall('/api/ladder/sign', {
         hex: witnessHex, signers: signersSpec, spent_outputs: allSpentOutputs,
       });
-      if (!signRes || !signRes.hex) { log(p.label + ': QABI_SPEND witness failed', 'err'); return; }
+      if (!signRes || !signRes.hex) { log(p.label + ': QABI_SPEND witness failed', 'err'); failModal(p.label + ': signrungtx (QABI_SPEND) failed at input ' + i); return; }
       storeJson('batch_witness_' + p.id, p.label + ' QABI_SPEND witness resp', signRes);
       witnessHex = signRes.hex;
       log(p.label + ': QABI_SPEND witness added', 'ok');
