@@ -205,17 +205,22 @@ const { apiCallBase, makeApiCall } = window.LadderAPI;
 // Constants
 // ────────────────────────────────────────────────────────────
 const MIN_N = 2;
-const MAX_N = 20;     // engine cap; consensus allows ~1800 but UI gets unwieldy
+// MAX_RUNGS = 16 in serialize.h caps a single createtxmlsc tx at 16 rungs
+// in its conditions tree. We fund N PQ_BATCH UTXOs in one tx (one rung per
+// output_index), so N is bound by that consensus limit. Stress runs in
+// feature_rung_pq_batch_stress.py go higher by funding via N separate txs.
+const MAX_N = 16;
 const DEFAULT_N = 5;
 
 // Per-input baseline (vB) for SIG(FALCON-512) — measured from the live
 // stress test (test/functional/feature_rung_pq_batch_stress.py at N=100).
 const SIG_FALCON_BASELINE_VB_PER_INPUT = 436;
 
-// Wallet UTXO funding amount per PQ_BATCH UTXO, in BTC. MiniWallet hands
-// out whole-coin (~50 BTC) UTXOs on regtest. We send a small chunk via
-// sendtoaddress so multiple PQ_BATCH UTXOs share the same source.
-const FUND_PER_UTXO_SATS = 100000;  // 0.001 BTC each
+// Per-PQ_BATCH-UTXO funding amount. Kept small so a single signet faucet
+// call (default 0.001 BTC = 100,000 sats) covers N up to 10 with headroom
+// for tx fee. The 300s per-IP faucet cooldown means a single click on
+// "Top up wallet" must produce enough headroom for the whole batch.
+const FUND_PER_UTXO_SATS = 5000;  // 0.00005 BTC each
 
 // ────────────────────────────────────────────────────────────
 // Helpers
@@ -230,13 +235,16 @@ async function sha256Hex(hex) {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// createtxmlsc rungs shape: per-output rungs with output_index. For our
-// single-output fund tx the index is always 0; signrungtx wants its own
-// shape (no output_index, just `blocks`).
-const buildPqBatchRungsForCreate = (commitHex, outputIndex = 0) => [{
-  output_index: outputIndex,
+// createtxmlsc rungs shape: one rung per (output_index, condition). For N
+// PQ_BATCH outputs sharing one commit, emit N rungs all with the same
+// PQ_BATCH(commit) gate. signrungtx takes a different shape: its
+// `conditions` array is the revealed-rung tree for the spent input
+// (single-rung here, no output_index — because the spent UTXO's
+// conditions tree was a single rung at fund time).
+const buildPqBatchRungsForCreate = (commitHex, n = 1) => Array.from({ length: n }, (_, i) => ({
+  output_index: i,
   blocks: [{ type: 'PQ_BATCH', fields: [{ type: 'HASH256', hex: commitHex }] }],
-}];
+}));
 
 const buildPqBatchRungsForSign = (commitHex) => [{
   blocks: [{ type: 'PQ_BATCH', fields: [{ type: 'HASH256', hex: commitHex }] }],
@@ -334,53 +342,81 @@ function App() {
     dispatch({ type: 'SET_BUSY', busy: false });
   }, [apiCall, log, state.scheme]);
 
+  // ── Action: top up wallet via signet faucet ──────────────
+  const handleTopUp = useCallback(async () => {
+    dispatch({ type: 'SET_BUSY', busy: true });
+    log('Requesting signet faucet to wallet...');
+    const addr = await apiCall('/api/ladder/wallet/address');
+    if (!addr || !addr.address) { log('failed to get wallet address', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    const fauc = await apiCall('/api/ladder/faucet', { address: addr.address });
+    if (!fauc || !fauc.txid) { log('faucet refused (cooldown or empty?)', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    log('faucet sent ' + fauc.amount + ' BTC → ' + shortHex(addr.address, 18), 'ok');
+    log('mining 1 block to confirm...');
+    const mine = await apiCall('/api/ladder/mine', { blocks: 1 });
+    if (mine) log('confirmed', 'ok');
+    dispatch({ type: 'SET_BUSY', busy: false });
+  }, [apiCall, log]);
+
   // ── Action: fund N PQ_BATCH UTXOs sharing the commit ─────
+  // ONE createtxmlsc tx with N outputs, all gated by the same PQ_BATCH
+  // commit. This consumes a single wallet UTXO and produces N PQ_BATCH
+  // UTXOs in one shot — no per-UTXO fund loop, no wallet exhaustion.
+  // Constrained by MAX_RUNGS=16 (one rung per output_index).
   const handleFund = useCallback(async () => {
     if (!state.pqKey) { log('generate a FALCON keypair first', 'err'); return; }
     dispatch({ type: 'SET_BUSY', busy: true });
     dispatch({ type: 'SET_PHASE', phase: 'funding' });
-    log('Funding ' + state.n + ' PQ_BATCH UTXOs sharing one commit...');
+    log('Funding ' + state.n + ' PQ_BATCH UTXOs in one tx (single createtxmlsc)...');
 
-    const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex);
+    const walletUtxos = await apiCall('/api/ladder/wallet/utxos');
+    if (!walletUtxos || walletUtxos.length === 0) {
+      log('no wallet UTXOs available — click "Top up wallet" first', 'err');
+      dispatch({ type: 'SET_BUSY', busy: false });
+      return;
+    }
+    // Pick a wallet UTXO large enough to cover N outputs + fee.
+    const totalNeeded = FUND_PER_UTXO_SATS * state.n + 5000;
+    const candidates = walletUtxos.filter(u => Math.round(u.amount * 1e8) >= totalNeeded);
+    if (candidates.length === 0) {
+      const biggest = Math.max(...walletUtxos.map(u => Math.round(u.amount * 1e8)));
+      log('no wallet UTXO ≥ ' + totalNeeded + ' sats (biggest=' + biggest + '); top up wallet', 'err');
+      dispatch({ type: 'SET_BUSY', busy: false });
+      return;
+    }
+    const u = candidates.sort((a, b) => a.amount - b.amount)[0];  // smallest sufficient
+    const inSats = Math.round(u.amount * 1e8);
+    const perOutSats = FUND_PER_UTXO_SATS;
+    const totalOutSats = perOutSats * state.n;
+    const feeSats = inSats - totalOutSats;  // remainder is fee — generous when input is much larger
+    log('input ' + inSats + ' sats → ' + state.n + ' × ' + perOutSats + ' sats (fee ' + feeSats + ')', 'info');
+
+    const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex, state.n);
+    const outputAmounts = Array(state.n).fill(perOutSats / 1e8);
+    const createReq = {
+      inputs: [{ txid: u.txid, vout: u.vout }],
+      outputs: outputAmounts,
+      rungs: rungsForCreate,
+    };
+    const created = await apiCall('/api/ladder/createtxmlsc', createReq);
+    if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    const signed = await apiCall('/api/ladder/sign', { hex: created.hex });
+    if (!signed || !signed.hex) { log('wallet sign failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
+    if (!bcast || !bcast.txid) { log('broadcast failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    await apiCall('/api/ladder/mine', { blocks: 1 }, true);
+
+    // All N outputs share the same scriptPubKey (0xDF + conditions_root).
+    const sharedSpk = created.scriptPubKey;
     const utxos = [];
     for (let i = 0; i < state.n; i++) {
-      // Get a fresh wallet UTXO for each fund tx.
-      const walletUtxos = await apiCall('/api/ladder/wallet/utxos', undefined, true);
-      if (!walletUtxos || walletUtxos.length === 0) {
-        log('no wallet UTXOs available — fund the wallet via faucet first', 'err');
-        dispatch({ type: 'SET_BUSY', busy: false });
-        return;
-      }
-      const u = walletUtxos.sort((a, b) => b.amount - a.amount)[0];
-      const valueSats = Math.round(u.amount * 1e8);
-      const sendSats = Math.min(FUND_PER_UTXO_SATS, valueSats - 1000);
-      const sendBtc = sendSats / 1e8;
-
-      // /api/ladder/createtxmlsc returns full result {hex, conditions_root,
-      // scriptPubKey, n_rungs}, unlike /api/ladder/create which only returns
-      // {hex}. We need scriptPubKey at spend time for the spent_outputs spec.
-      const createReq = {
-        inputs: [{ txid: u.txid, vout: u.vout }],
-        outputs: [sendBtc],
-        rungs: rungsForCreate,
-      };
-      const created = await apiCall('/api/ladder/createtxmlsc', createReq);
-      if (!created || !created.hex) { log('createtxmlsc failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
-      const signed = await apiCall('/api/ladder/sign', { hex: created.hex });
-      if (!signed || !signed.hex) { log('wallet sign failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
-      const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
-      if (!bcast || !bcast.txid) { log('broadcast failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
-      // Mine so the next loop's wallet/utxos call sees confirmed change.
-      await apiCall('/api/ladder/mine', { blocks: 1 }, true);
-
       utxos.push({
         txid: bcast.txid,
-        vout: 0,
-        amount_sats: sendSats,
-        spk: created.scriptPubKey,
+        vout: i,
+        amount_sats: perOutSats,
+        spk: sharedSpk,
       });
-      log((i + 1) + '/' + state.n + ' funded ' + shortHex(bcast.txid, 12), 'ok');
     }
+    log('funded: tx ' + shortHex(bcast.txid, 14) + ', ' + state.n + ' vouts, ' + (signed.hex.length / 2) + ' B', 'ok');
 
     dispatch({ type: 'SET_UTXOS', utxos });
     dispatch({ type: 'SET_PHASE', phase: 'funded' });
@@ -478,7 +514,8 @@ function App() {
       <Header state={state} onReset={handleReset} />
       <div className="pg-main">
         <LeftPanel state={state} dispatch={dispatch}
-                   onGenKey={handleGenKey} onFund={handleFund} onSpend={handleSpend} />
+                   onGenKey={handleGenKey} onTopUp={handleTopUp}
+                   onFund={handleFund} onSpend={handleSpend} />
         <StagePanel state={state} error={error} loading={loading} />
         <RightPanel state={state} />
       </div>
@@ -505,7 +542,7 @@ function Header({ state, onReset }) {
   );
 }
 
-function LeftPanel({ state, dispatch, onGenKey, onFund, onSpend }) {
+function LeftPanel({ state, dispatch, onGenKey, onTopUp, onFund, onSpend }) {
   return (
     <div className="pg-left">
       <div className="pg-section">
@@ -547,11 +584,17 @@ function LeftPanel({ state, dispatch, onGenKey, onFund, onSpend }) {
       <div className="pg-section">
         <div className="pg-section-title"><span className="pg-section-num">3</span> FUND POOL</div>
         <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
-          {state.n} UTXOs of {(FUND_PER_UTXO_SATS / 1e8).toFixed(4)} BTC each, all gated by the same PQ_BATCH commit.
+          One createtxmlsc with {state.n} vouts, all gated by the same PQ_BATCH commit
+          ({(FUND_PER_UTXO_SATS / 1e8).toFixed(4)} BTC each). Needs a wallet UTXO ≥ {((FUND_PER_UTXO_SATS * state.n + 5000) / 1e8).toFixed(4)} BTC.
         </div>
-        <button className="pg-btn primary" disabled={state.busy || !state.pqKey || state.utxos.length > 0} onClick={onFund}>
-          Fund {state.n} UTXOs
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="pg-btn" disabled={state.busy} onClick={onTopUp}>
+            Top up wallet
+          </button>
+          <button className="pg-btn primary" disabled={state.busy || !state.pqKey || state.utxos.length > 0} onClick={onFund}>
+            Fund {state.n} UTXOs
+          </button>
+        </div>
       </div>
 
       <div className="pg-section">
