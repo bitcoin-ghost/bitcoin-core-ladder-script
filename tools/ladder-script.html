@@ -182,6 +182,7 @@ a:hover { text-decoration: underline; }
     <div class="section-head">What you can build</div>
     <p>Ladder Script has 65 block types across 11 families. Here are some things they enable that Bitcoin Script cannot do today:</p>
     <div style="margin-top:16px">
+      <p><strong style="color:var(--accent)">~6&times; smaller UTXO set.</strong> Every TX_MLSC output is 8 bytes (value only) in chainstate &mdash; down from ~48 bytes for P2WPKH/P2TR. The 32-byte conditions_root is stored once per transaction at a synthetic entry, not once per output. A 100-output exchange consolidation costs around 950 bytes of chainstate against ~3.8 KB for the same payout shape today. Every full node stores the chainstate in RAM, so this scales straight into RAM savings + faster validation.</p>
       <p><strong style="color:var(--accent)">Vaults with clawback.</strong> Lock funds with a hot key + timelock on rung 0, cold key sweep (no delay) on rung 1. The VAULT_LOCK block handles this in a single block.</p>
       <p><strong style="color:var(--accent)">Rate-limited wallets.</strong> RATE_LIMIT restricts how many satoshis per block can be spent. Even if your key is compromised, the attacker can only drain at the rate you set.</p>
       <p><strong style="color:var(--accent)">Recursive covenants.</strong> RECURSE_SAME forces the output to carry the same conditions as the input. RECURSE_COUNT counts down each hop. RECURSE_SPLIT lets a UTXO split into multiple re-encumbered outputs. All with bounded depth.</p>
