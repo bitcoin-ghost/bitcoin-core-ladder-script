@@ -1399,9 +1399,11 @@ class QabiTest(BitcoinTestFramework):
         assert signed["complete"], \
             f"signrungtx must produce a complete QABI_PRIME witness: {signed}"
         signed_hex = signed["hex"]
+        signed_decoded = self.node.decoderawtransaction(signed_hex)
         self.log.info(
             f"  Step 3: QABI_PRIME witness built "
-            f"({len(signed_hex) // 2} bytes signed tx)")
+            f"({len(signed_hex) // 2} B raw, vsize={signed_decoded['vsize']} vB, "
+            f"weight={signed_decoded['weight']} wu)")
 
         # Broadcast + mine.
         priming_txid = self.node.sendrawtransaction(signed_hex)
@@ -1844,6 +1846,10 @@ class QabiTest(BitcoinTestFramework):
             signed_priming = self.node.signrungtx(
                 priming_tx["hex"], priming_signers, spent_for_priming)
             assert signed_priming["complete"]
+            priming_decoded = self.node.decoderawtransaction(signed_priming["hex"])
+            self.log.info(
+                f"    participant {i} priming tx: vsize={priming_decoded['vsize']} vB, "
+                f"weight={priming_decoded['weight']} wu")
             priming_txid = self.node.sendrawtransaction(signed_priming["hex"])
             self.generate(self.node, 1)
 
@@ -2037,9 +2043,11 @@ class QabiTest(BitcoinTestFramework):
         falcon_signed = self.node.qabi_signqabo(witnessed_hex, coord_privkey)
         assert_equal(falcon_signed["sig_size"], 666)
         falcon_signed_hex = falcon_signed["hex"]
+        falcon_signed_decoded = self.node.decoderawtransaction(falcon_signed_hex)
         self.log.info(
             f"  Step 7: FALCON-512 aggregate sig stamped "
-            f"({len(falcon_signed_hex) // 2} bytes total)")
+            f"({len(falcon_signed_hex) // 2} B raw, vsize={falcon_signed_decoded['vsize']} vB, "
+            f"weight={falcon_signed_decoded['weight']} wu)")
 
         self.log.info(
             "  All three QABIO consensus regressions passed: "
