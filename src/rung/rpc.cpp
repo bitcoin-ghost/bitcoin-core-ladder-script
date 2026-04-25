@@ -465,12 +465,12 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
         }
     }
 
-    // Fund-time strict layout enforcement (future work #8, 2026-04-24).
-    // Mirrors the spend-time DeserializeBlock check at serialize.cpp:324-331.
-    // Without this a client can commit a conditions_root where the target rung
-    // has a non-canonical field order (e.g. [NUMERIC, SCHEME] instead of
-    // [SCHEME, NUMERIC] for CLTV_SIG) — the fund succeeds silently but every
-    // spend attempt fails "field type mismatch" at mempool-script-verify.
+    // Fund-time strict layout enforcement. Mirrors the spend-time
+    // DeserializeBlock check at serialize.cpp:324-331. Without this, a
+    // client can commit a conditions_root where the target rung has a
+    // non-canonical field order (e.g. [NUMERIC, SCHEME] instead of
+    // [SCHEME, NUMERIC] for CLTV_SIG) — the fund succeeds silently but
+    // every spend attempt fails "field type mismatch" at script-verify.
     // Catch mis-ordered conditions at fund time instead.
     if (conditions_only) {
         const auto& expected = GetImplicitLayout(block.type,

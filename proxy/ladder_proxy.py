@@ -536,6 +536,36 @@ async def broadcast(request: Request):
     return {"txid": txid}
 
 
+@app.post("/api/ladder/serialiseconditions")
+async def serialise_conditions(request: Request):
+    """Serialise a LadderWitness in CONDITIONS context.
+
+    Returns bytes suitable as the preimage for P2SH_LEGACY / P2WSH_LEGACY /
+    P2TR_SCRIPT_LEGACY inner-script wrappers. EvalInnerConditions parses
+    with SerializationContext::CONDITIONS — this endpoint matches.
+
+    Request: {"rungs": [{"blocks": [...]}]}
+    Response: {"hex": "...", "size": N}
+    """
+    body = await request.body()
+    if len(body) > MAX_JSON_SIZE:
+        raise HTTPException(400, "Request too large.")
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON.")
+
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Request must be a JSON object.")
+
+    rungs = data.get("rungs", [])
+    if not isinstance(rungs, list) or not rungs:
+        raise HTTPException(400, "Missing or empty 'rungs' array.")
+
+    result = await rpc_call("serialiseconditions", [rungs])
+    return result
+
+
 @app.post("/api/ladder/decode")
 async def decode(request: Request):
     """Decode a ladder witness or conditions hex string."""
@@ -794,6 +824,51 @@ async def wallet_keypair():
         raise HTTPException(500, f"Key derivation mismatch: got {derived_pub}, expected {pubkey}")
     wif = _privkey_to_wif(child_privkey)
     return {"address": address, "pubkey": pubkey, "privkey": wif}
+
+
+
+@app.post("/api/ladder/wallet/sendtoaddress")
+async def wallet_sendtoaddress(request: Request):
+    """Send a payment from the wallet to the given address. Used by the
+    COSIGN companion-preset flow to fund a partner UTXO whose P2WPKH SPK
+    hashes into COSIGN's conditions_hash.
+
+    Request: {"address": "tb1q...", "amount_sats": 1000}
+    Response: {"txid": "...", "vout": N, "scriptPubKey": "hex"}
+    """
+    body = await request.body()
+    if len(body) > MAX_JSON_SIZE:
+        raise HTTPException(400, "Request too large.")
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON.")
+
+    address = data.get("address", "")
+    amount_sats = int(data.get("amount_sats", 0))
+    if not address or amount_sats <= 0:
+        raise HTTPException(400, "Missing address or amount_sats.")
+
+    # Convert sats to BTC string (bitcoin-cli expects BTC amounts)
+    amount_btc = f"{amount_sats / 1e8:.8f}"
+    txid = await rpc_call("sendtoaddress", [address, amount_btc])
+
+    # Locate the output index by matching the address in the tx's vouts
+    tx = await rpc_call("getrawtransaction", [txid, True])
+    vouts = tx.get("vout", [])
+    vout_idx = None
+    spk_hex = None
+    for i, v in enumerate(vouts):
+        spk = v.get("scriptPubKey", {})
+        addrs = spk.get("addresses") or ([spk.get("address")] if spk.get("address") else [])
+        if address in addrs:
+            vout_idx = i
+            spk_hex = spk.get("hex", "")
+            break
+    if vout_idx is None:
+        raise HTTPException(500, f"Could not find output to {address} in tx {txid}")
+
+    return {"txid": txid, "vout": vout_idx, "scriptPubKey": spk_hex}
 
 
 @app.get("/api/ladder/wallet/utxos")
@@ -1197,26 +1272,25 @@ async def qabi_authchain_ep(request: Request):
 async def qabi_buildblock_ep(request: Request):
     body = await request.body()
     data = _qabi_parse_json(body)
-    coord_pk    = _qabi_require_str(data, "coordinator_pubkey", max_len=1800)
-    expiry      = _qabi_require_int(data, "prime_expiry_height", min_val=0)
-    batch_id    = _qabi_require_str(data, "batch_id", max_len=64)
-    entries     = data.get("entries")
-    # RPC signature: qabi_buildblock(coord, expiry, batch_id, entries,
-    #   outputs_conditions_root, output_values)
-    # Accept either split fields or legacy "outputs" array of root strings.
-    ocr = data.get("outputs_conditions_root")
-    ov  = data.get("output_values")
-    outputs = data.get("outputs")
+    coord_pk = _qabi_require_str(data, "coordinator_pubkey", max_len=1800)
+    expiry   = _qabi_require_int(data, "prime_expiry_height", min_val=0)
+    batch_id = _qabi_require_str(data, "batch_id", max_len=64)
+    entries  = data.get("entries")
     if not isinstance(entries, list) or len(entries) == 0:
         raise HTTPException(400, "Missing or invalid 'entries' array.")
-    if ocr and ov:
-        params = [coord_pk, expiry, batch_id, entries, ocr, ov]
-    elif isinstance(outputs, list) and len(outputs) > 0:
-        params = [coord_pk, expiry, batch_id, entries, outputs[0],
-                  [e["contribution"] for e in entries]]
-    else:
-        raise HTTPException(400, "Missing outputs_conditions_root + output_values (or legacy 'outputs').")
-    return await rpc_call("qabi_buildblock", params)
+
+    # RPC signature: qabi_buildblock(coord, expiry, batch_id, entries,
+    #   outputs_conditions_root, output_values).
+    # The legacy `outputs: [{amount, script_pubkey}, ...]` shape was
+    # dropped 2026-04-25 — it broke the qabio playground "Run full flow"
+    # path because outputs[0] is a JSON object but qabi_buildblock expects
+    # a 32-byte hex string for outputs_conditions_root. Callers must use
+    # the explicit fields below.
+    ocr = _qabi_require_str(data, "outputs_conditions_root", max_len=64)
+    ov = data.get("output_values")
+    if not isinstance(ov, list) or not ov:
+        raise HTTPException(400, "Missing or invalid 'output_values' array.")
+    return await rpc_call("qabi_buildblock", [coord_pk, expiry, batch_id, entries, ocr, ov])
 
 
 @app.post("/api/ladder/qabi/blockinfo")

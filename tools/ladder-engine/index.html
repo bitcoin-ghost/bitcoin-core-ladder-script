@@ -8140,7 +8140,7 @@ const EXAMPLES = [
 
   {
     title: 'PQ BATCH POOL',
-    desc: 'Pool of UTXOs sharing one FALCON-512 key. PQ_BATCH commits SHA256(falcon_pubkey) at fund time. The "anchor" input in the spend tx reveals the pubkey + a FALCON signature once; every other input gated by the same hash short-circuits via a tx-local cache the anchor populates. Net cost ~18 vB/input vs ~400 vB/input for separate FALCON sigs.\n\nPOOL_KEY: PQ_BATCH gates the UTXO with the pubkey commit. The fund flow auto-generates a fresh FALCON-512 keypair, computes SHA256(pubkey), and writes both the commit (into pubkey_hash, on-chain) and the keypair (into block.values, persisted with the record so the spend can sign).\n\nThis preset funds + spends ONE PQ_BATCH UTXO end-to-end. The multi-input "anchor + cache" cost amortisation lives in the consensus + functional test (test/functional/feature_rung_pq_batch.py); the engine spend handler is single-input.',
+    desc: 'Pool of UTXOs sharing one FALCON-512 key. PQ_BATCH commits SHA256(falcon_pubkey) at fund time. The "anchor" input in the spend tx reveals the pubkey + a FALCON signature once; every other input gated by the same hash short-circuits via a tx-local cache the anchor populates. Net cost ~18 vB/input vs ~400 vB/input for separate FALCON sigs.\n\nPOOL_KEY: PQ_BATCH gates the UTXO with the pubkey commit. The fund flow auto-generates a fresh FALCON-512 keypair, computes SHA256(pubkey), and writes both the commit (into pubkey_hash, on-chain) and the keypair (into block.values, persisted with the record so the spend can sign).\n\nThis preset funds + spends ONE PQ_BATCH UTXO end-to-end. The multi-input "anchor + cache" cost amortisation is demonstrated live at the PQ Batch Playground (Tools \u2192 PQ Batch Playground) and exercised in test/functional/feature_rung_pq_batch.py.',
     tags: [['PQ_BATCH', 'sig'], ['FALCON', 'sig']],
     rungs: [
       { label: 'POOL_KEY', blocks: [
@@ -9955,12 +9955,12 @@ function SignetPanel() {
     // 6-legacy removed --HASH160(pubkey) for P2PKH/P2WPKH now computed by node via PUBKEY→HASH160 auto-conversion.
 
     // 6-inner. Serialize inner conditions for P2SH/P2WSH/P2TR_SCRIPT legacy blocks.
-    // Uses /api/ladder/serialiseconditions (future work #12, 2026-04-24) which
-    // calls the dedicated library RPC that returns SerializeLadderWitness(ladder,
-    // CONDITIONS) bytes — the exact format EvalInnerConditions expects at spend
-    // time. The previous approach (wrap-in-dummy-tx + strip scriptPubKey prefix)
-    // produced a 32-byte MLSC root, not a serialised LadderWitness, so the
-    // revealed body couldn't be deserialised at spend.
+    // Uses /api/ladder/serialiseconditions, which returns
+    // SerializeLadderWitness(ladder, CONDITIONS) bytes — the exact format
+    // EvalInnerConditions expects at spend time. The previous approach
+    // (wrap-in-dummy-tx + strip scriptPubKey prefix) produced a 32-byte
+    // MLSC root, not a serialised LadderWitness, so the revealed body
+    // couldn't be deserialised at spend.
     for (let ri = 0; ri < updatedRungs.length; ri++) {
       for (let bi = 0; bi < updatedRungs[ri].blocks.length; bi++) {
         const block = updatedRungs[ri].blocks[bi];
@@ -10761,7 +10761,7 @@ function SpendPanel() {
   // ONE_SHOT was previously in this list but is now supported end-to-end:
   // planFund generates a preimage at fund time, stores SHA256(preimage) as
   // the commitment, and persists the preimage in the record for reveal at
-  // spend time (future work #6, 2026-04-24).
+  // spend time.
   const rungNeedsExternalSetup = (rung) =>
     (rung.blocks || []).some(b => b.type === 'COSIGN');
   const rungNeedsPairedUtxo = rungNeedsExternalSetup; // keep older name, widened meaning

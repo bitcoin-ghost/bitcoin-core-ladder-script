@@ -1533,15 +1533,9 @@ function StagePanel({ apiCall }) {
     const entries = blockParts.map((p, i) => ({
       participant_id: p.ownerId, contribution: (p.contribution / 1e8).toFixed(8), destination_index: i,
     }));
-    const qOutputs = blockParts.map((p, i) => ({
-      amount: batchAmounts[i].toFixed(8), script_pubkey: outputSpks[i],
-    }));
-    // Use the explicit outputs_conditions_root + output_values shape.
-    // The legacy `outputs: [{amount, script_pubkey}, ...]` array form is
-    // mishandled by the proxy: it passes outputs[0] (an object) where
-    // qabi_buildblock expects a 32-byte hex string for outputs_conditions_root.
-    // Compute the root from the first SPK (all share it for TX_MLSC).
-    // SPKs are 33 bytes: 0xDF prefix + 32-byte conditions_root, in wire order.
+    // Compute the conditions_root from the first SPK (all share it under
+    // TX_MLSC's one-root-per-tx). SPKs are 33 bytes: 0xDF MLSC prefix +
+    // 32-byte conditions_root, both in wire order.
     const sharedSpkHex = outputSpks[0];
     const outputsConditionsRoot = sharedSpkHex.startsWith('df')
       ? sharedSpkHex.slice(2)              // strip 0xDF prefix → 32-byte hex
