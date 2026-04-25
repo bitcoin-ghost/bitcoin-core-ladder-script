@@ -1,9 +1,9 @@
 # Block Library
 
-Ladder Script defines 64 block types across 10 families (62 listed here, plus
-`QABI_PRIME` and `QABI_SPEND` in the QABIO family documented in
-[QABIO.md](QABIO.md)). Each block type has a uint16_t type code encoded
-little-endian on the wire.
+Ladder Script defines 65 block types across 11 families (62 listed here, plus
+`QABI_PRIME`, `QABI_SPEND`, and `PQ_BATCH` in the QABIO family documented in
+[QABIO.md](QABIO.md) and [PQ_BATCH_SPEC.md](PQ_BATCH_SPEC.md)). Each block
+type has a uint16_t type code encoded little-endian on the wire.
 
 ## Legend
 
@@ -126,6 +126,14 @@ little-endian on the wire.
 | 0x0905 | P2WSH_LEGACY | yes | no | 0 | HASH256(32) | Wrapped P2WSH (inner conditions + witness) |
 | 0x0906 | P2TR_LEGACY | no | yes | 1 | SCHEME(1) | Wrapped P2TR key-path |
 | 0x0907 | P2TR_SCRIPT_LEGACY | no | yes | 1 | HASH256(32) | Wrapped P2TR script-path |
+
+## QABIO Family (0x0A00 - 0x0AFF)
+
+| Code | Name | Inv | Key | PK# | Conditions | Description |
+|--------|------|-----|-----|-----|------------|-------------|
+| 0x0A01 | QABI_PRIME | no | no | 0 | (none) | Priming state transition --reveals next auth chain preimage, mutates committed_root/depth/expiry. See [QABIO.md](QABIO.md). |
+| 0x0A02 | QABI_SPEND | no | no | 0 | HASH256(32)+HASH256(32)+NUMERIC+NUMERIC+PUBKEY_COMMIT(32) | Coordinator-governed batch spend with single FALCON-512 aggregated sig. See [QABIO.md](QABIO.md). |
+| 0x0A03 | PQ_BATCH | no | no | 0 | HASH256(32) | PQ key-sharing pool --commits SHA256(falcon_pubkey); anchor input reveals pubkey + PQ sig, siblings short-circuit via tx-local cache. See [PQ_BATCH_SPEC.md](PQ_BATCH_SPEC.md). |
 
 ## Notes
 
