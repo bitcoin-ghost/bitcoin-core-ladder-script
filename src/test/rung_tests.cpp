@@ -3819,7 +3819,6 @@ BOOST_AUTO_TEST_CASE(boundary_max_rungs_exceeded_policy)
     std::string reason;
     // TX_MLSC: witness structure enforced at consensus, policy only checks outputs.
     BOOST_CHECK(IsStandardRungTx(tx, reason));
-    // BOOST_CHECK(reason.find("too many rungs") != std::string::npos);
 }
 
 // --- MAX_BLOCKS_PER_RUNG boundary (8) ---
@@ -3883,7 +3882,6 @@ BOOST_AUTO_TEST_CASE(boundary_max_blocks_exceeded_policy)
     std::string reason;
     // TX_MLSC: witness structure enforced at consensus, policy only checks outputs.
     BOOST_CHECK(IsStandardRungTx(tx, reason));
-    // BOOST_CHECK(reason.find("too many blocks") != std::string::npos);
 }
 
 // --- MAX_FIELDS_PER_BLOCK boundary (16) ---
@@ -5731,7 +5729,6 @@ BOOST_AUTO_TEST_CASE(policy_preimage_block_limit)
     std::string reason;
     // TX_MLSC: witness structure enforced at consensus, policy only checks outputs.
     BOOST_CHECK(rung::IsStandardRungTx(tx, reason));
-    // BOOST_CHECK(!reason.empty());
 }
 
 BOOST_AUTO_TEST_CASE(policy_preimage_block_limit_at_max)
@@ -5765,7 +5762,6 @@ BOOST_AUTO_TEST_CASE(policy_preimage_block_limit_at_max)
     std::string reason;
     // TX_MLSC: witness structure enforced at consensus, policy only checks outputs.
     BOOST_CHECK(rung::IsStandardRungTx(tx, reason));
-    // BOOST_CHECK(!reason.empty());
 }
 
 BOOST_AUTO_TEST_CASE(policy_preimage_block_limit_mixed_types)
@@ -5799,7 +5795,6 @@ BOOST_AUTO_TEST_CASE(policy_preimage_block_limit_mixed_types)
     std::string reason;
     // TX_MLSC: witness structure enforced at consensus, policy only checks outputs.
     BOOST_CHECK(rung::IsStandardRungTx(tx, reason));
-    // BOOST_CHECK(!reason.empty());
 }
 
 BOOST_AUTO_TEST_CASE(spam_embed_fake_pubkey_in_conditions_rejected)

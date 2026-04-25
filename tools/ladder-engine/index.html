@@ -11916,7 +11916,6 @@ const INITIAL_STATE = {
   scanSpeed: 600,
   scanResults: {},
   scanIdx: -1,
-  scanStopRung: null,
   simState: {
     blockHeight: 850000, csvBlocks: 0, csvSeconds: 0,
     inputAmount: 50000, outputAmount: 40000, feeRate: 10, medianTime: 0,
@@ -11961,7 +11960,6 @@ function appReducer(state, action) {
     case 'UPDATE_SCAN_RESULTS': return { ...state, scanResults: action.fn(state.scanResults) };
     case 'SET_SCAN_IDX': return { ...state, scanIdx: action.value };
     case 'UPDATE_SCAN_IDX': return { ...state, scanIdx: action.fn(state.scanIdx) };
-    case 'SET_SCAN_STOP_RUNG': return { ...state, scanStopRung: action.value };
     case 'SET_SIM_STATE': return { ...state, simState: action.value };
     case 'UPDATE_SIM_STATE': return { ...state, simState: action.fn(state.simState) };
     case 'SET_FORCED_BLOCKS': return { ...state, forcedBlocks: action.value };
@@ -11980,7 +11978,7 @@ function appReducer(state, action) {
     case 'DESELECT_ALL': return { ...state, selectedBlockId: null, selectedCoilId: null, selectedInputId: null };
 
     // Compound: reset scan
-    case 'RESET_SCAN': return { ...state, scanPhase: 'idle', scanIdx: -1, scanResults: {}, scanStopRung: null };
+    case 'RESET_SCAN': return { ...state, scanPhase: 'idle', scanIdx: -1, scanResults: {} };
 
     // Compound: clear all
     case 'CLEAR_ALL': return {
@@ -12091,7 +12089,7 @@ function appReducer(state, action) {
       simActiveRungId: null,
       simActiveStep: -1,
       simStepResults: {},
-      scanPhase: 'idle', scanIdx: -1, scanResults: {}, scanStopRung: null,
+      scanPhase: 'idle', scanIdx: -1, scanResults: {},
     };
 
     // Compound: start rung sim
@@ -12280,7 +12278,7 @@ function App() {
   const { mode, showExamples, showTooltips, ladderFullscreen, rungs, txInputs, txOutputs, locktime,
     selectedBlockId, selectedCoilId, selectedInputId, expandedBlockId, expandedInputId, expandedOutputId,
     contextMenu, inputContextMenu, outputContextMenu, renamingBlockId, renamingInputId, rightTab,
-    validationResult, showValidationPanel, scanPhase, scanSpeed, scanResults, scanIdx, scanStopRung,
+    validationResult, showValidationPanel, scanPhase, scanSpeed, scanResults, scanIdx,
     simState, forcedBlocks, spentRungs, simActiveRungId, simActiveStep, simStepResults
   } = state;
 
@@ -12453,10 +12451,6 @@ function App() {
         }
         return { ...p, [`r${step.rung}_coil`]: allSat ? 'pass' : 'fail' };
       }});
-      // Stop after this rung if scanning a single rung
-      if (s.scanStopRung !== null && step.rung === s.scanStopRung) {
-        dispatch({ type: 'SET_SCAN_PHASE', value: 'done' });
-      }
     }
     dispatch({ type: 'SET_SCAN_IDX', value: next });
   }, [scanSequence, energizedOutputs, energizedRungNums]);

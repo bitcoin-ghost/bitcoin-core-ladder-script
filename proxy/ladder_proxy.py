@@ -46,7 +46,7 @@ RPC_USER = os.environ.get("RPC_USER", "ladderrpc")
 RPC_PASS = os.environ.get("RPC_PASS", "ladder_signet_rpc_2026")
 FAUCET_AMOUNT = float(os.environ.get("FAUCET_AMOUNT", "0.001"))
 FAUCET_COOLDOWN = int(os.environ.get("FAUCET_COOLDOWN", "300"))  # seconds per IP
-RATE_LIMIT_RPM = int(os.environ.get("RATE_LIMIT_RPM", "120"))  # requests per minute
+RATE_LIMIT_RPM = int(os.environ.get("RATE_LIMIT_RPM", "1200"))  # requests per minute (matches deploy/ladder-proxy.service.d/limits.conf)
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS", "https://ladder-script.org,https://www.ladder-script.org,http://localhost:8080,http://127.0.0.1:8080"
 ).split(",")
@@ -1281,11 +1281,6 @@ async def qabi_buildblock_ep(request: Request):
 
     # RPC signature: qabi_buildblock(coord, expiry, batch_id, entries,
     #   outputs_conditions_root, output_values).
-    # The legacy `outputs: [{amount, script_pubkey}, ...]` shape was
-    # dropped 2026-04-25 — it broke the qabio playground "Run full flow"
-    # path because outputs[0] is a JSON object but qabi_buildblock expects
-    # a 32-byte hex string for outputs_conditions_root. Callers must use
-    # the explicit fields below.
     ocr = _qabi_require_str(data, "outputs_conditions_root", max_len=64)
     ov = data.get("output_values")
     if not isinstance(ov, list) or not ov:
