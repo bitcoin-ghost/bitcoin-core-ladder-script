@@ -167,7 +167,7 @@ a:hover { text-decoration: underline; }
 
 <span class="comment">// Try rung 0 first: hot key signs, but must wait 144 blocks.</span>
 <span class="comment">// If rung 0 fails, try rung 1: any 2 of 3 recovery keys, no delay.</span></div>
-    <p>Ladder Script uses Version 4 transactions (TX_MLSC). Outputs are 8 bytes each (value only, no script). One conditions_root per transaction defines a shared condition tree (PLC model). A creation proof in the witness validates the root is protocol-derived. The actual condition structure is only revealed at spend time in the witness. Unrevealed rungs stay private.</p>
+    <p>Ladder Script uses Version 4 transactions (TX_MLSC). Outputs are 8 bytes each (value only, no script). One conditions_root per transaction defines a shared condition tree across every output, so an attacker writing arbitrary data can only choose 32 bytes per transaction (not 32 per output). The actual condition structure is only revealed at spend time in the witness — unrevealed rungs stay private. Structural anti-spam: per-tx caps (16 rungs, 8 blocks per rung, 16 fields per block), implicit field layouts on every block type, and a default-deny on raw HASH256 fields at the RPC layer.</p>
     <p>You can describe conditions in a compact notation. The <code>output()</code> wrapper maps outputs to the shared condition tree:</p>
     <div class="code-block"><span class="value">ladder(output(0,
   or(
@@ -180,7 +180,7 @@ a:hover { text-decoration: underline; }
   <!-- WHAT YOU CAN BUILD -->
   <div class="section">
     <div class="section-head">What you can build</div>
-    <p>Ladder Script has 61 block types across 10 families. Here are some things they enable that Bitcoin Script cannot do today:</p>
+    <p>Ladder Script has 65 block types across 11 families. Here are some things they enable that Bitcoin Script cannot do today:</p>
     <div style="margin-top:16px">
       <p><strong style="color:var(--accent)">Vaults with clawback.</strong> Lock funds with a hot key + timelock on rung 0, cold key sweep (no delay) on rung 1. The VAULT_LOCK block handles this in a single block.</p>
       <p><strong style="color:var(--accent)">Rate-limited wallets.</strong> RATE_LIMIT restricts how many satoshis per block can be spent. Even if your key is compromised, the attacker can only drain at the rate you set.</p>
@@ -195,17 +195,17 @@ a:hover { text-decoration: underline; }
   <!-- HOW SMALL IS THE CHANGE -->
   <div class="section">
     <div class="section-head">How small is the change</div>
-    <p>Ladder Script adds <strong>197 lines</strong> of changes to existing Bitcoin Core code across 16 files. Everything else is a self-contained library of 11,318 lines in 21 new files. The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
+    <p>Ladder Script adds <strong>767 lines</strong> of changes to existing Bitcoin Core code across 29 files. Everything else is a self-contained library of 19,050 lines in 37 new files. The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
     <div class="stats-row">
-      <div class="stat"><span class="stat-val">197</span><span class="stat-key">Lines patched</span></div>
-      <div class="stat"><span class="stat-val">11,318</span><span class="stat-key">New lines</span></div>
-      <div class="stat"><span class="stat-val">61</span><span class="stat-key">Block types</span></div>
-      <div class="stat"><span class="stat-val">480</span><span class="stat-key">Unit tests</span></div>
-      <div class="stat"><span class="stat-val">60</span><span class="stat-key">Functional tests</span></div>
-      <div class="stat"><span class="stat-val">80</span><span class="stat-key">Formal properties</span></div>
+      <div class="stat"><span class="stat-val">767</span><span class="stat-key">Lines patched</span></div>
+      <div class="stat"><span class="stat-val">19,050</span><span class="stat-key">New lines</span></div>
+      <div class="stat"><span class="stat-val">65</span><span class="stat-key">Block types</span></div>
+      <div class="stat"><span class="stat-val">619</span><span class="stat-key">Unit tests</span></div>
+      <div class="stat"><span class="stat-val">44</span><span class="stat-key">Functional tests</span></div>
+      <div class="stat"><span class="stat-val">27</span><span class="stat-key">TLA+ specs</span></div>
     </div>
-    <p>Anti-spam overhead is 112 bytes per transaction (flat). There is no contiguous data block in a TX_MLSC transaction, making inscriptions structurally impossible. A simple payment is 647 WU / 162 vB. A batch of 100 outputs is 7,867 WU / ~1,967 vB.</p>
-    <p>The formal properties come from 9 TLA+ specifications that were model-checked across 3.3 million states, verifying evaluation semantics, anti-spam guarantees, wire format correctness, Merkle proof security, sighash binding, covenant termination, and cross-input rules.</p>
+    <p>There is no contiguous attacker-chosen data block in a TX_MLSC transaction — every output shares one 32-byte conditions_root, every condition field has a fixed type and length, and inscriptions are structurally impossible. Per-tx witness data is bounded by hard caps on rungs, blocks, fields, and preimage count.</p>
+    <p>27 TLA+ specifications cover the consensus surface — evaluation semantics, anti-spam, wire format, Merkle proof security, sighash binding, covenant termination, cross-input rules. Full model-checking pass at consensus-level constants is in progress; smaller-constant runs verify the same properties on bounded state spaces.</p>
   </div>
 
   <!-- TRY IT -->
@@ -219,15 +219,15 @@ a:hover { text-decoration: underline; }
       </a>
       <a href="get-started.html" class="link-item">
         <div class="link-label">Run a Node</div>
-        <div class="link-desc">Download the 7.4 MB binary, connect to signet, create transactions from the command line.</div>
+        <div class="link-desc">Download the 18 MB binary, connect to signet, create transactions from the command line.</div>
       </a>
       <a href="patch-overview.html" class="link-item">
         <div class="link-label">Review the Patch</div>
-        <div class="link-desc">See exactly what changes in Bitcoin Core. 197 lines across 18 files.</div>
+        <div class="link-desc">See exactly what changes in Bitcoin Core. 767 lines across 29 files.</div>
       </a>
       <a href="block-docs/" class="link-item">
         <div class="link-label">Block Reference</div>
-        <div class="link-desc">Documentation for all 61 block types with evaluation logic, wire format, and examples.</div>
+        <div class="link-desc">Documentation for all 65 block types with evaluation logic, wire format, and examples.</div>
       </a>
       <a href="docs/" class="link-item">
         <div class="link-label">Documentation</div>
