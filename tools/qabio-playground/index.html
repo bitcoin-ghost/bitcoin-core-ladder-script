@@ -1564,7 +1564,7 @@ function StagePanel({ apiCall }) {
       const signedUn = await apiCall('/api/ladder/sign', { hex: unprimedRes.hex });
       if (!signedUn || !signedUn.hex) { log(p.label + ': sign unprimed failed', 'err'); failModal(p.label + ': wallet sign (unprimed) failed'); return; }
       const bcastUn = await apiCall('/api/ladder/broadcast', { hex: signedUn.hex });
-      if (!bcastUn) { log(p.label + ': broadcast unprimed failed', 'err'); failModal(p.label + ': broadcast (unprimed) failed — likely mempool descendant limit at N>11 (default 25 sibs of fund-batch parent before the mine)'); return; }
+      if (!bcastUn) { log(p.label + ': broadcast unprimed failed', 'err'); failModal(p.label + ': broadcast (unprimed) failed — check proxy/bitcoind log'); return; }
       p.unprimedTxid = bcastUn.txid;
       p.unprimedSpk = unprimedRes.scriptPubKey;
       log(p.label + ': unprimed broadcast ' + shortHex(bcastUn.txid, 14), 'ok');
