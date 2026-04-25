@@ -175,6 +175,15 @@ body {
 .log-row.ok .log-msg { color: var(--green); }
 .log-row.info .log-msg { color: var(--text-primary); }
 
+.json-panel { background: var(--bg-secondary); border: 1px solid var(--border); margin-top: 6px; font-size: 10px; }
+.json-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+.json-panel-head:hover { background: var(--bg-hover); }
+.json-panel-title { font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-primary); }
+.json-panel-body { padding: 8px; overflow-x: auto; max-height: 300px; overflow-y: auto; }
+.json-panel-body pre { font-size: 10px; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-all; }
+.btn-mini { padding: 1px 6px; font-size: 9px; font-family: var(--font-mono); background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-secondary); cursor: pointer; }
+.btn-mini:hover { color: var(--text-primary); border-color: var(--cyan); }
+
 .banner {
   padding: 10px 14px; margin-bottom: 12px; border: 1px solid; font-size: 11px; line-height: 1.5;
 }
@@ -279,6 +288,9 @@ const initialState = {
   },
   // Live measurements
   metrics: null,
+  // Captured request/response JSONs from each stage, surfaced in the
+  // inspector so the user can copy/download what hit the proxy.
+  lastJsons: [],   // [{ id, title, json }]
   log: [],
 };
 
@@ -298,6 +310,10 @@ function reducer(state, action) {
       log: [...state.log, { msg: action.msg, cls: action.cls || 'info', time: new Date().toLocaleTimeString() }].slice(-200),
     };
     case 'CLEAR_LOG': return { ...state, log: [] };
+    case 'STORE_JSON': {
+      const filtered = state.lastJsons.filter(e => e.id !== action.id);
+      return { ...state, lastJsons: [...filtered, { id: action.id, title: action.title, json: action.json }] };
+    }
     case 'RESET': return { ...initialState, online: state.online, blocks: state.blocks, n: state.n };
     default: return state;
   }
@@ -313,6 +329,7 @@ function App() {
   const apiCall = useMemo(() => makeApiCall({ setLoading, setError }), []);
 
   const log = useCallback((msg, cls) => dispatch({ type: 'LOG', msg, cls }), []);
+  const storeJson = useCallback((id, title, json) => dispatch({ type: 'STORE_JSON', id, title, json }), []);
 
   // Poll status every 5s.
   useEffect(() => {
@@ -339,6 +356,8 @@ function App() {
     if (!kp) { log('keypair generation failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
     const commit = await sha256Hex(kp.pubkey);
     dispatch({ type: 'SET_PQ_KEY', key: { ...kp, commitHex: commit } });
+    storeJson('pq_keypair', 'PQ keypair (/api/ladder/pq/keypair)',
+      { scheme: kp.scheme, pubkey: kp.pubkey, privkey: kp.privkey, sha256_commit: commit });
     log('FALCON pubkey ' + (kp.pubkey.length / 2) + ' B, commit=' + shortHex(commit, 16), 'ok');
     dispatch({ type: 'SET_PHASE', phase: 'idle' });
     dispatch({ type: 'SET_BUSY', busy: false });
@@ -383,17 +402,23 @@ function App() {
     log('Building fund tx — 1 input → ' + state.n + ' PQ_BATCH UTXOs...');
     const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex, state.n);
     const outputAmounts = Array(state.n).fill(perOutSats / 1e8);
-    const created = await apiCall('/api/ladder/createtxmlsc', {
+    const fundCreateReq = {
       inputs: [{ txid: sent.txid, vout: sent.vout }],
       outputs: outputAmounts,
       rungs: rungsForCreate,
-    });
+    };
+    storeJson('fund_create_req', 'fund createtxmlsc request', fundCreateReq);
+    const created = await apiCall('/api/ladder/createtxmlsc', fundCreateReq);
     if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    storeJson('fund_create_resp', 'fund createtxmlsc response', created);
     const signed = await apiCall('/api/ladder/sign', { hex: created.hex });
     if (!signed || !signed.hex) { log('wallet sign of fund tx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
     const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
     if (!bcast || !bcast.txid) { log('broadcast of fund tx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
     await apiCall('/api/ladder/mine', { blocks: 1 }, true);
+    storeJson('fund_signed_tx', 'fund tx (signed hex + txid)',
+      { txid: bcast.txid, hex: signed.hex, vouts: state.n,
+        per_output_sats: perOutSats, source_utxo: { txid: sent.txid, vout: sent.vout, sats: sourceSats } });
 
     // All N outputs share the same scriptPubKey (0xDF + conditions_root).
     const sharedSpk = created.scriptPubKey;
@@ -432,8 +457,10 @@ function App() {
       outputs: [sinkBtc],
       rungs: rungsForCreate,
     };
+    storeJson('spend_create_req', 'spend createtxmlsc request', createReq);
     const created = await apiCall('/api/ladder/createtxmlsc', createReq);
     if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    storeJson('spend_create_resp', 'spend createtxmlsc response', created);
     dispatch({ type: 'PATCH_SPEND', patch: { unsignedHex: created.hex } });
 
     // Anchor at index 0 (full witness), siblings at 1..N-1 (empty witness).
@@ -462,20 +489,23 @@ function App() {
     }));
 
     log('Signing — 1 anchor (FALCON sign) + ' + (state.utxos.length - 1) + ' cache reads...');
-    const signed = await apiCall('/api/ladder/sign', {
-      hex: created.hex, signers, spent_outputs: spentOutputs,
-    });
+    const signReq = { hex: created.hex, signers, spent_outputs: spentOutputs };
+    storeJson('spend_sign_req', 'spend signrungtx request', signReq);
+    const signed = await apiCall('/api/ladder/sign', signReq);
     if (!signed || !signed.hex) { log('signrungtx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
 
     const decoded = await apiCall('/api/ladder/decode-tx', { hex: signed.hex });
     const vsize = decoded?.vsize || 0;
     const weight = decoded?.weight || 0;
+    storeJson('spend_signed_tx', 'spend tx (signed hex + decoded)',
+      { hex: signed.hex, vsize, weight, decoded });
     log('Signed: ' + vsize + ' vB (weight ' + weight + ' wu)', 'ok');
 
     const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
     const accepted = !!(bcast && bcast.txid);
     if (accepted) {
       log('Broadcast: ' + bcast.txid, 'ok');
+      storeJson('spend_broadcast', 'spend broadcast result', bcast);
       await apiCall('/api/ladder/mine', { blocks: 1 }, true);
     } else {
       log('Broadcast rejected', 'err');
@@ -510,7 +540,7 @@ function App() {
       <div className="pg-main">
         <LeftPanel state={state} dispatch={dispatch}
                    onGenKey={handleGenKey} onFund={handleFund} onSpend={handleSpend} />
-        <StagePanel state={state} error={error} loading={loading} />
+        <StagePanel state={state} error={error} loading={loading} onReset={handleReset} />
         <RightPanel state={state} />
       </div>
       <Footer state={state} />
@@ -624,7 +654,7 @@ function LeftPanel({ state, dispatch, onGenKey, onFund, onSpend }) {
   );
 }
 
-function StagePanel({ state, error, loading }) {
+function StagePanel({ state, error, loading, onReset }) {
   const phaseDesc = {
     idle:    'Ready. Configure N, generate the PQ key, then fund + spend.',
     keygen:  'Generating FALCON keypair via /api/ladder/pq/keypair...',
@@ -662,7 +692,10 @@ function StagePanel({ state, error, loading }) {
 
       {state.spendTx.signedHex && (
         <div className="phase-panel">
-          <div className="pg-section-title">SPEND TX</div>
+          <div className="pg-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>SPEND TX</span>
+            <button className="pg-btn green" onClick={onReset}>Start over</button>
+          </div>
           <div className="field-row">
             <span className="field-label">txid</span>
             <input className="field-input" readOnly value={state.spendTx.txid || '(not broadcast)'} />
@@ -682,7 +715,60 @@ function StagePanel({ state, error, loading }) {
         </div>
       )}
 
+      <JsonInspector entries={state.lastJsons} />
       <LogPanel log={state.log} />
+    </div>
+  );
+}
+
+function JsonInspector({ entries }) {
+  const [openId, setOpenId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  if (!entries || entries.length === 0) return null;
+  const copy = (id, json) => {
+    try {
+      navigator.clipboard.writeText(JSON.stringify(json, null, 2));
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(prev => prev === id ? null : prev), 1500);
+    } catch {}
+  };
+  const downloadAll = () => {
+    const payload = {
+      exported_at: new Date().toISOString(),
+      entries: Object.fromEntries(entries.map(e => [e.id, { title: e.title, json: e.json }])),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pq-batch-' + new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-') + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="pg-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>JSON INSPECTOR ({entries.length})</span>
+        <button className="btn-mini" onClick={downloadAll}>Download all</button>
+      </div>
+      {entries.map(item => (
+        <div key={item.id} className="json-panel">
+          <div className="json-panel-head" onClick={() => setOpenId(openId === item.id ? null : item.id)}>
+            <span className="json-panel-title">{item.title}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button className="btn-mini" onClick={(e) => { e.stopPropagation(); copy(item.id, item.json); }}>
+                {copiedId === item.id ? '✓ copied' : 'copy'}
+              </button>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{openId === item.id ? '▼' : '▶'}</span>
+            </span>
+          </div>
+          {openId === item.id && (
+            <div className="json-panel-body">
+              <pre>{JSON.stringify(item.json, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
