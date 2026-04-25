@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PQ Batch Playground — Ladder Script</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../shared/ladder-api.js?v=2"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f8f8;
+  --bg-tertiary: #f0f0f0;
+  --bg-panel: #ffffff;
+  --bg-hover: #f0f0f0;
+  --bg-active: #e8e8e8;
+  --border: #e0e0e0;
+  --border-light: #d0d0d0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-dim: #999999;
+  --amber: #d4950c;
+  --amber-dim: #b8860b;
+  --amber-glow: #d4950c20;
+  --amber-bright: #e6a817;
+  --green: #27ae60;
+  --green-glow: #27ae6020;
+  --red: #c0392b;
+  --red-glow: #c0392b20;
+  --blue: #2980b9;
+  --cyan: #00bcd4;
+  --cyan-glow: #00bcd420;
+  --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+  --font-display: 'Share Tech Mono', monospace;
+}
+html, body, #root { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-thumb { background: var(--border); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+.pg-app { display: grid; grid-template-rows: 40px 1fr 22px; height: 100vh; overflow: hidden; }
+
+.pg-header {
+  display: flex; align-items: center; background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border); padding: 0 14px; gap: 14px; user-select: none;
+}
+.pg-title { font-family: var(--font-display); font-size: 13px; color: var(--cyan); letter-spacing: 2px; }
+.pg-subtitle { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+.pg-divider { width: 1px; height: 18px; background: var(--border); }
+.pg-header-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.pg-btn {
+  padding: 4px 10px; font-size: 10px; font-family: var(--font-mono); font-weight: 500;
+  letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-secondary);
+  background: var(--bg-tertiary); border: 1px solid var(--border); cursor: pointer;
+  transition: all 0.12s;
+}
+.pg-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.pg-btn.primary { color: var(--amber); border-color: var(--amber-dim); }
+.pg-btn.primary:hover { background: var(--amber-glow); }
+.pg-btn.cyan { color: var(--cyan); border-color: var(--cyan); }
+.pg-btn.cyan:hover { background: var(--cyan-glow); }
+.pg-btn.green { color: var(--green); border-color: var(--green); }
+.pg-btn.green:hover { background: var(--green-glow); }
+.pg-btn.red { color: var(--red); border-color: var(--red); }
+.pg-btn.red:hover { background: var(--red-glow); }
+.pg-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.pg-main { display: grid; grid-template-columns: 320px 1fr 360px; overflow: hidden; }
+.pg-left {
+  background: var(--bg-panel); border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 12px;
+}
+.pg-stage { overflow-y: auto; padding: 14px 20px; background: var(--bg-primary); }
+.pg-right {
+  background: var(--bg-secondary); border-left: 1px solid var(--border);
+  overflow-y: auto; padding: 10px 14px;
+}
+.pg-footer {
+  display: flex; align-items: center; background: var(--bg-secondary);
+  border-top: 1px solid var(--border); padding: 0 14px; font-size: 10px;
+  color: var(--text-dim); gap: 12px;
+}
+
+.pg-section { margin-bottom: 14px; }
+.pg-section-title {
+  font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--cyan); margin-bottom: 8px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
+}
+.pg-section-num {
+  display: inline-block; width: 18px; height: 18px; line-height: 18px; text-align: center;
+  background: var(--cyan); color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700;
+}
+.pg-label { font-size: 9px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
+
+.utxo-card {
+  background: var(--bg-secondary); border: 1px solid var(--border); padding: 6px 8px;
+  margin-bottom: 4px; font-size: 11px; transition: all 0.12s;
+}
+.utxo-card.anchor { border-color: var(--cyan); background: var(--cyan-glow); }
+.utxo-card.spent { opacity: 0.5; border-color: var(--green); }
+.utxo-head {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;
+}
+.utxo-label { font-weight: 600; color: var(--text-primary); }
+.utxo-status {
+  font-size: 9px; padding: 1px 5px; letter-spacing: 0.5px; text-transform: uppercase;
+  border: 1px solid;
+}
+.status-pending { color: var(--text-dim); border-color: var(--text-dim); }
+.status-funded { color: var(--blue); border-color: var(--blue); }
+.status-anchor { color: var(--cyan); border-color: var(--cyan); }
+.status-cache { color: var(--amber); border-color: var(--amber); }
+.status-spent { color: var(--green); border-color: var(--green); }
+.utxo-row {
+  display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 10px;
+}
+.utxo-row .val { color: var(--text-primary); font-family: var(--font-mono); }
+
+.phase-panel {
+  background: var(--bg-secondary); border: 1px solid var(--border); padding: 14px 18px; margin-bottom: 14px;
+}
+.phase-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 10px; }
+.phase-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.field-row {
+  display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin-bottom: 6px;
+  font-size: 11px; align-items: center;
+}
+.field-label { color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.field-input {
+  padding: 4px 7px; background: var(--bg-primary); border: 1px solid var(--border);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; outline: none; width: 100%;
+}
+.field-input:focus { border-color: var(--cyan); }
+.field-input:disabled { background: var(--bg-tertiary); color: var(--text-dim); }
+
+.metric-big { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.metric-big-item { background: var(--bg-primary); border: 1px solid var(--border); padding: 8px 10px; }
+.metric-big-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+.metric-big-val { font-size: 14px; color: var(--cyan); font-weight: 600; font-family: var(--font-display); }
+.metric-big-sub { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+.metric-table { width: 100%; font-size: 10px; border-collapse: collapse; margin-bottom: 8px; }
+.metric-table th {
+  text-align: left; padding: 4px 6px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border);
+  font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-dim); font-weight: 600;
+}
+.metric-table td {
+  padding: 3px 6px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); font-family: var(--font-mono);
+}
+.metric-table td.num { text-align: right; }
+.metric-table tr:hover td { background: var(--bg-hover); }
+
+.log-panel { background: var(--bg-primary); border: 1px solid var(--border); margin-top: 10px; }
+.log-row {
+  font-size: 10px; padding: 3px 8px; border-bottom: 1px solid var(--border-light);
+  display: flex; gap: 8px; align-items: baseline;
+}
+.log-time { color: var(--text-dim); font-size: 9px; min-width: 56px; }
+.log-msg { flex: 1; word-break: break-word; }
+.log-row.err .log-msg { color: var(--red); }
+.log-row.ok .log-msg { color: var(--green); }
+.log-row.info .log-msg { color: var(--text-primary); }
+
+.banner {
+  padding: 10px 14px; margin-bottom: 12px; border: 1px solid; font-size: 11px; line-height: 1.5;
+}
+.banner.amber { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-glow); }
+.banner.cyan { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-glow); }
+
+.range-row {
+  display: grid; grid-template-columns: 70px 1fr 50px; gap: 8px; align-items: center;
+  margin-bottom: 8px; font-size: 11px;
+}
+.status-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-dim); margin-right: 6px;
+}
+.status-dot.online { background: var(--green); }
+.status-dot.offline { background: var(--red); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useReducer, useMemo, useCallback } = React;
+
+const { apiCallBase, makeApiCall } = window.LadderAPI;
+
+// ────────────────────────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────────────────────────
+const MIN_N = 2;
+const MAX_N = 20;     // engine cap; consensus allows ~1800 but UI gets unwieldy
+const DEFAULT_N = 5;
+
+// Per-input baseline (vB) for SIG(FALCON-512) — measured from the live
+// stress test (test/functional/feature_rung_pq_batch_stress.py at N=100).
+const SIG_FALCON_BASELINE_VB_PER_INPUT = 436;
+
+// Wallet UTXO funding amount per PQ_BATCH UTXO, in BTC. MiniWallet hands
+// out whole-coin (~50 BTC) UTXOs on regtest. We send a small chunk via
+// sendtoaddress so multiple PQ_BATCH UTXOs share the same source.
+const FUND_PER_UTXO_SATS = 100000;  // 0.001 BTC each
+
+// ────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────
+const shortHex = (hex, n) => !hex ? '—' : (hex.length > (n || 12) ? hex.slice(0, n || 12) + '…' : hex);
+const fmtSats = (n) => (n === null || n === undefined) ? '—' : n.toLocaleString() + ' sats';
+const fmtVb = (n) => (n === null || n === undefined) ? '—' : n.toLocaleString() + ' vB';
+
+async function sha256Hex(hex) {
+  const bytes = new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// createtxmlsc rungs shape: per-output rungs with output_index. For our
+// single-output fund tx the index is always 0; signrungtx wants its own
+// shape (no output_index, just `blocks`).
+const buildPqBatchRungsForCreate = (commitHex, outputIndex = 0) => [{
+  output_index: outputIndex,
+  blocks: [{ type: 'PQ_BATCH', fields: [{ type: 'HASH256', hex: commitHex }] }],
+}];
+
+const buildPqBatchRungsForSign = (commitHex) => [{
+  blocks: [{ type: 'PQ_BATCH', fields: [{ type: 'HASH256', hex: commitHex }] }],
+}];
+
+// ────────────────────────────────────────────────────────────
+// State + reducer
+// ────────────────────────────────────────────────────────────
+const initialState = {
+  online: false,
+  blocks: 0,
+  n: DEFAULT_N,
+  scheme: 'FALCON512',
+  // Lifecycle: 'idle' | 'keygen' | 'funding' | 'funded' | 'spending' | 'spent'
+  phase: 'idle',
+  busy: false,
+  // FALCON keypair + commit
+  pqKey: null,         // { pubkey, privkey, scheme, commitHex }
+  // Funded UTXOs: [{ txid, vout, amount_sats, spk, fundTxVsize }]
+  utxos: [],
+  // Spend tx artifacts
+  spendTx: {
+    unsignedHex: null,
+    signedHex: null,
+    txid: null,
+    vsize: null,
+    weight: null,
+    accepted: null,
+    rejectReason: null,
+  },
+  // Live measurements
+  metrics: null,
+  log: [],
+};
+
+function reducer(state, action) {
+  switch (action.type) {
+    case 'ONLINE': return { ...state, online: action.online, blocks: action.blocks };
+    case 'SET_N': return { ...state, n: action.n };
+    case 'SET_SCHEME': return { ...state, scheme: action.scheme };
+    case 'SET_PHASE': return { ...state, phase: action.phase };
+    case 'SET_BUSY': return { ...state, busy: action.busy };
+    case 'SET_PQ_KEY': return { ...state, pqKey: action.key };
+    case 'SET_UTXOS': return { ...state, utxos: action.utxos };
+    case 'PATCH_SPEND': return { ...state, spendTx: { ...state.spendTx, ...action.patch } };
+    case 'SET_METRICS': return { ...state, metrics: action.metrics };
+    case 'LOG': return {
+      ...state,
+      log: [...state.log, { msg: action.msg, cls: action.cls || 'info', time: new Date().toLocaleTimeString() }].slice(-200),
+    };
+    case 'CLEAR_LOG': return { ...state, log: [] };
+    case 'RESET': return { ...initialState, online: state.online, blocks: state.blocks, n: state.n };
+    default: return state;
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// App
+// ────────────────────────────────────────────────────────────
+function App() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(null);
+  const apiCall = useMemo(() => makeApiCall({ setLoading, setError }), []);
+
+  const log = useCallback((msg, cls) => dispatch({ type: 'LOG', msg, cls }), []);
+
+  // Poll status every 5s.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await apiCallBase('/api/ladder/status');
+        if (!cancelled) dispatch({ type: 'ONLINE', online: s?.status === 'ok', blocks: s?.blocks || 0 });
+      } catch {
+        if (!cancelled) dispatch({ type: 'ONLINE', online: false, blocks: 0 });
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // ── Action: generate FALCON keypair ──────────────────────
+  const handleGenKey = useCallback(async () => {
+    dispatch({ type: 'SET_BUSY', busy: true });
+    dispatch({ type: 'SET_PHASE', phase: 'keygen' });
+    log('Generating ' + state.scheme + ' keypair...');
+    const kp = await apiCall('/api/ladder/pq/keypair', { scheme: state.scheme });
+    if (!kp) { log('keypair generation failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    const commit = await sha256Hex(kp.pubkey);
+    dispatch({ type: 'SET_PQ_KEY', key: { ...kp, commitHex: commit } });
+    log('FALCON pubkey ' + (kp.pubkey.length / 2) + ' B, commit=' + shortHex(commit, 16), 'ok');
+    dispatch({ type: 'SET_PHASE', phase: 'idle' });
+    dispatch({ type: 'SET_BUSY', busy: false });
+  }, [apiCall, log, state.scheme]);
+
+  // ── Action: fund N PQ_BATCH UTXOs sharing the commit ─────
+  const handleFund = useCallback(async () => {
+    if (!state.pqKey) { log('generate a FALCON keypair first', 'err'); return; }
+    dispatch({ type: 'SET_BUSY', busy: true });
+    dispatch({ type: 'SET_PHASE', phase: 'funding' });
+    log('Funding ' + state.n + ' PQ_BATCH UTXOs sharing one commit...');
+
+    const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex);
+    const utxos = [];
+    for (let i = 0; i < state.n; i++) {
+      // Get a fresh wallet UTXO for each fund tx.
+      const walletUtxos = await apiCall('/api/ladder/wallet/utxos', undefined, true);
+      if (!walletUtxos || walletUtxos.length === 0) {
+        log('no wallet UTXOs available — fund the wallet via faucet first', 'err');
+        dispatch({ type: 'SET_BUSY', busy: false });
+        return;
+      }
+      const u = walletUtxos.sort((a, b) => b.amount - a.amount)[0];
+      const valueSats = Math.round(u.amount * 1e8);
+      const sendSats = Math.min(FUND_PER_UTXO_SATS, valueSats - 1000);
+      const sendBtc = sendSats / 1e8;
+
+      // /api/ladder/createtxmlsc returns full result {hex, conditions_root,
+      // scriptPubKey, n_rungs}, unlike /api/ladder/create which only returns
+      // {hex}. We need scriptPubKey at spend time for the spent_outputs spec.
+      const createReq = {
+        inputs: [{ txid: u.txid, vout: u.vout }],
+        outputs: [sendBtc],
+        rungs: rungsForCreate,
+      };
+      const created = await apiCall('/api/ladder/createtxmlsc', createReq);
+      if (!created || !created.hex) { log('createtxmlsc failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+      const signed = await apiCall('/api/ladder/sign', { hex: created.hex });
+      if (!signed || !signed.hex) { log('wallet sign failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+      const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
+      if (!bcast || !bcast.txid) { log('broadcast failed at i=' + i, 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+      // Mine so the next loop's wallet/utxos call sees confirmed change.
+      await apiCall('/api/ladder/mine', { blocks: 1 }, true);
+
+      utxos.push({
+        txid: bcast.txid,
+        vout: 0,
+        amount_sats: sendSats,
+        spk: created.scriptPubKey,
+      });
+      log((i + 1) + '/' + state.n + ' funded ' + shortHex(bcast.txid, 12), 'ok');
+    }
+
+    dispatch({ type: 'SET_UTXOS', utxos });
+    dispatch({ type: 'SET_PHASE', phase: 'funded' });
+    dispatch({ type: 'SET_BUSY', busy: false });
+  }, [apiCall, log, state.pqKey, state.n]);
+
+  // ── Action: build + sign + broadcast batch spend ─────────
+  const handleSpend = useCallback(async () => {
+    if (state.utxos.length === 0) { log('fund UTXOs first', 'err'); return; }
+    if (!state.pqKey) { log('missing PQ key', 'err'); return; }
+    dispatch({ type: 'SET_BUSY', busy: true });
+    dispatch({ type: 'SET_PHASE', phase: 'spending' });
+    log('Building batch spend tx (' + state.utxos.length + ' inputs, anchor=0)...');
+
+    const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex);
+    const rungsForSign = buildPqBatchRungsForSign(state.pqKey.commitHex);
+    const totalIn = state.utxos.reduce((s, u) => s + u.amount_sats, 0);
+    // Generous fee — 5000 sats covers any plausible tx size at N≤20.
+    const sinkSats = totalIn - 5000;
+    const sinkBtc = sinkSats / 1e8;
+
+    const createReq = {
+      inputs: state.utxos.map(u => ({ txid: u.txid, vout: u.vout })),
+      outputs: [sinkBtc],
+      rungs: rungsForCreate,
+    };
+    const created = await apiCall('/api/ladder/createtxmlsc', createReq);
+    if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    dispatch({ type: 'PATCH_SPEND', patch: { unsignedHex: created.hex } });
+
+    // Anchor at index 0 (full witness), siblings at 1..N-1 (empty witness).
+    const signers = [{
+      input: 0,
+      blocks: [{
+        type: 'PQ_BATCH',
+        scheme: state.pqKey.scheme,
+        pq_pubkey: state.pqKey.pubkey,
+        pq_privkey: state.pqKey.privkey,
+      }],
+      conditions: rungsForSign,
+    }];
+    for (let i = 1; i < state.utxos.length; i++) {
+      signers.push({ input: i, blocks: [{ type: 'PQ_BATCH' }], conditions: rungsForSign });
+    }
+    const spentOutputs = state.utxos.map(u => ({
+      amount: (u.amount_sats / 1e8).toFixed(8),
+      scriptPubKey: u.spk,
+    }));
+
+    log('Signing — 1 anchor (FALCON sign) + ' + (state.utxos.length - 1) + ' cache reads...');
+    const signed = await apiCall('/api/ladder/sign', {
+      hex: created.hex, signers, spent_outputs: spentOutputs,
+    });
+    if (!signed || !signed.hex) { log('signrungtx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+
+    const decoded = await apiCall('/api/ladder/decode-tx', { hex: signed.hex });
+    const vsize = decoded?.vsize || 0;
+    const weight = decoded?.weight || 0;
+    log('Signed: ' + vsize + ' vB (weight ' + weight + ' wu)', 'ok');
+
+    const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
+    const accepted = !!(bcast && bcast.txid);
+    if (accepted) {
+      log('Broadcast: ' + bcast.txid, 'ok');
+      await apiCall('/api/ladder/mine', { blocks: 1 }, true);
+    } else {
+      log('Broadcast rejected', 'err');
+    }
+
+    const baselineVb = state.utxos.length * SIG_FALCON_BASELINE_VB_PER_INPUT;
+    const perInput = vsize / state.utxos.length;
+    const savings = baselineVb / vsize;
+    dispatch({ type: 'PATCH_SPEND', patch: {
+      signedHex: signed.hex,
+      txid: bcast?.txid || null,
+      vsize, weight, accepted,
+      rejectReason: bcast?.detail || null,
+    }});
+    dispatch({ type: 'SET_METRICS', metrics: {
+      vsize, weight, perInput, baselineVb, savings,
+      anchorPayload: 41 + Math.ceil((897 + 666 + 4) / 4),  // base + witness/4
+      cachePayload: 41 + 14,                                  // base + MLSC proof witness
+    }});
+    dispatch({ type: 'SET_PHASE', phase: 'spent' });
+    dispatch({ type: 'SET_BUSY', busy: false });
+  }, [apiCall, log, state.utxos, state.pqKey]);
+
+  const handleReset = useCallback(() => {
+    dispatch({ type: 'RESET' });
+    log('reset');
+  }, [log]);
+
+  return (
+    <div className="pg-app">
+      <Header state={state} onReset={handleReset} />
+      <div className="pg-main">
+        <LeftPanel state={state} dispatch={dispatch}
+                   onGenKey={handleGenKey} onFund={handleFund} onSpend={handleSpend} />
+        <StagePanel state={state} error={error} loading={loading} />
+        <RightPanel state={state} />
+      </div>
+      <Footer state={state} />
+    </div>
+  );
+}
+
+function Header({ state, onReset }) {
+  return (
+    <div className="pg-header">
+      <div className="pg-title">PQ BATCH PLAYGROUND</div>
+      <div className="pg-subtitle">N-input cache amortisation · FALCON-512 · TX_MLSC v4</div>
+      <div className="pg-divider" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10 }}>
+        <span className={'status-dot ' + (state.online ? 'online' : 'offline')} />
+        {state.online ? ('chain @ ' + state.blocks) : 'offline'}
+      </div>
+      <div className="pg-header-actions">
+        <a href="../ladder-engine.html" style={{ fontSize: 10, color: 'var(--text-dim)', textDecoration: 'none' }}>← Engine</a>
+        <button className="pg-btn" onClick={onReset}>RESET</button>
+      </div>
+    </div>
+  );
+}
+
+function LeftPanel({ state, dispatch, onGenKey, onFund, onSpend }) {
+  return (
+    <div className="pg-left">
+      <div className="pg-section">
+        <div className="pg-section-title"><span className="pg-section-num">1</span> CONFIGURE</div>
+        <div className="range-row">
+          <span className="field-label">Inputs N</span>
+          <input type="range" min={MIN_N} max={MAX_N} value={state.n}
+                 disabled={state.busy || state.utxos.length > 0}
+                 onChange={(e) => dispatch({ type: 'SET_N', n: parseInt(e.target.value) })} />
+          <span style={{ fontFamily: 'var(--font-display)', color: 'var(--cyan)' }}>{state.n}</span>
+        </div>
+        <div className="field-row">
+          <span className="field-label">Scheme</span>
+          <select className="field-input" value={state.scheme}
+                  disabled={state.busy || state.pqKey != null}
+                  onChange={(e) => dispatch({ type: 'SET_SCHEME', scheme: e.target.value })}>
+            <option value="FALCON512">FALCON-512 (897 B pk, 666 B sig)</option>
+            <option value="FALCON1024">FALCON-1024 (1793 B pk, 1280 B sig)</option>
+            <option value="DILITHIUM3">Dilithium3 (1952 B pk, 3293 B sig)</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="pg-section">
+        <div className="pg-section-title"><span className="pg-section-num">2</span> KEY + COMMIT</div>
+        <div className="field-row">
+          <span className="field-label">PQ pubkey</span>
+          <input className="field-input" readOnly value={shortHex(state.pqKey?.pubkey, 26)} />
+        </div>
+        <div className="field-row">
+          <span className="field-label">SHA256 commit</span>
+          <input className="field-input" readOnly value={shortHex(state.pqKey?.commitHex, 26)} />
+        </div>
+        <button className="pg-btn cyan" disabled={state.busy || state.pqKey != null} onClick={onGenKey}>
+          Generate {state.scheme}
+        </button>
+      </div>
+
+      <div className="pg-section">
+        <div className="pg-section-title"><span className="pg-section-num">3</span> FUND POOL</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
+          {state.n} UTXOs of {(FUND_PER_UTXO_SATS / 1e8).toFixed(4)} BTC each, all gated by the same PQ_BATCH commit.
+        </div>
+        <button className="pg-btn primary" disabled={state.busy || !state.pqKey || state.utxos.length > 0} onClick={onFund}>
+          Fund {state.n} UTXOs
+        </button>
+      </div>
+
+      <div className="pg-section">
+        <div className="pg-section-title"><span className="pg-section-num">4</span> BATCH SPEND</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
+          Drain all {state.n} UTXOs into one sink. Input 0 = anchor (PUBKEY + FALCON sig).
+          Inputs 1..{state.n - 1} = empty PQ_BATCH witness (cache reads).
+        </div>
+        <button className="pg-btn green" disabled={state.busy || state.utxos.length === 0 || state.spendTx.signedHex} onClick={onSpend}>
+          Build + Sign + Broadcast
+        </button>
+      </div>
+
+      <div className="pg-section">
+        <div className="pg-section-title">UTXO POOL ({state.utxos.length}/{state.n})</div>
+        {state.utxos.length === 0
+          ? <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>(none yet)</div>
+          : state.utxos.map((u, i) => (
+              <div key={i} className={'utxo-card ' + (state.spendTx.accepted ? 'spent' : (i === 0 ? 'anchor' : ''))}>
+                <div className="utxo-head">
+                  <span className="utxo-label">#{i} {i === 0 ? '(anchor)' : '(cache)'}</span>
+                  <span className={'utxo-status ' + (state.spendTx.accepted ? 'status-spent' : (i === 0 ? 'status-anchor' : 'status-cache'))}>
+                    {state.spendTx.accepted ? 'spent' : (i === 0 ? 'anchor' : 'cache')}
+                  </span>
+                </div>
+                <div className="utxo-row">
+                  <span>txid</span><span className="val">{shortHex(u.txid, 14)}</span>
+                </div>
+                <div className="utxo-row">
+                  <span>amount</span><span className="val">{fmtSats(u.amount_sats)}</span>
+                </div>
+              </div>
+            ))}
+      </div>
+    </div>
+  );
+}
+
+function StagePanel({ state, error, loading }) {
+  const phaseDesc = {
+    idle:    'Ready. Configure N, generate the PQ key, then fund + spend.',
+    keygen:  'Generating FALCON keypair via /api/ladder/pq/keypair...',
+    funding: 'Funding ' + state.n + ' PQ_BATCH UTXOs sharing one commit. Each is its own createrungtx + wallet sign + broadcast + mine cycle.',
+    funded:  'Pool of ' + state.utxos.length + ' UTXOs is on-chain. Each is gated by SHA256(pq_pubkey). Run the batch spend to demonstrate the anchor + cache pattern.',
+    spending:'Building the spend tx (' + state.utxos.length + ' inputs → 1 sink). Anchor at input 0 reveals pubkey + FALCON sig; siblings have empty PQ_BATCH witness.',
+    spent:   'Done. The single FALCON verify on the anchor populated a tx-local cache; consensus satisfied every other input by cache lookup. Compare the measurement vs N×SIG(FALCON).',
+  };
+
+  return (
+    <div className="pg-stage">
+      {error && (
+        <div className="banner amber">
+          <strong>ERROR:</strong> {String(error)}
+        </div>
+      )}
+      {!state.online && (
+        <div className="banner amber">
+          Proxy is offline. Start the Ladder proxy and a regtest/signet bitcoind, then refresh.
+        </div>
+      )}
+      <div className="banner cyan">
+        <strong>What this is:</strong> a focused demo of PQ_BATCH (wire ID 0x0A03). Funds N UTXOs sharing one FALCON-512 pubkey commit, then drains them in a single tx where ONE input ("anchor") reveals the pubkey + sig and the rest validate from a tx-local cache. Per-input cost asymptotes to ~55 vB vs ~436 vB for independent FALCON sigs (~8× saving at large N).
+      </div>
+
+      <div className="phase-panel">
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+          Phase: {state.phase}
+        </div>
+        <div className="phase-desc">{phaseDesc[state.phase] || ''}</div>
+        {loading && (
+          <div style={{ fontSize: 10, color: 'var(--cyan)' }}>… {loading}</div>
+        )}
+      </div>
+
+      {state.spendTx.signedHex && (
+        <div className="phase-panel">
+          <div className="pg-section-title">SPEND TX</div>
+          <div className="field-row">
+            <span className="field-label">txid</span>
+            <input className="field-input" readOnly value={state.spendTx.txid || '(not broadcast)'} />
+          </div>
+          <div className="field-row">
+            <span className="field-label">vsize</span>
+            <input className="field-input" readOnly value={state.spendTx.vsize + ' vB'} />
+          </div>
+          <div className="field-row">
+            <span className="field-label">weight</span>
+            <input className="field-input" readOnly value={state.spendTx.weight + ' wu'} />
+          </div>
+          <div className="field-row">
+            <span className="field-label">accepted</span>
+            <input className="field-input" readOnly value={state.spendTx.accepted ? 'yes' : 'no'} />
+          </div>
+        </div>
+      )}
+
+      <LogPanel log={state.log} />
+    </div>
+  );
+}
+
+function RightPanel({ state }) {
+  const m = state.metrics;
+  return (
+    <div className="pg-right">
+      <div className="pg-section-title">LIVE METRICS</div>
+      <div className="metric-big">
+        <div className="metric-big-item">
+          <div className="metric-big-label">tx vsize</div>
+          <div className="metric-big-val">{m ? m.vsize.toLocaleString() : '—'}</div>
+          <div className="metric-big-sub">vB (segwit)</div>
+        </div>
+        <div className="metric-big-item">
+          <div className="metric-big-label">per input</div>
+          <div className="metric-big-val">{m ? m.perInput.toFixed(1) : '—'}</div>
+          <div className="metric-big-sub">vB / input</div>
+        </div>
+      </div>
+      <div className="metric-big">
+        <div className="metric-big-item">
+          <div className="metric-big-label">SIG(FALCON) baseline</div>
+          <div className="metric-big-val" style={{ color: 'var(--text-primary)' }}>{m ? m.baselineVb.toLocaleString() : '—'}</div>
+          <div className="metric-big-sub">N × {SIG_FALCON_BASELINE_VB_PER_INPUT} vB (no batching)</div>
+        </div>
+        <div className="metric-big-item">
+          <div className="metric-big-label">savings</div>
+          <div className="metric-big-val" style={{ color: 'var(--green)' }}>{m ? m.savings.toFixed(2) + '×' : '—'}</div>
+          <div className="metric-big-sub">vs independent FALCON sigs</div>
+        </div>
+      </div>
+
+      <div className="pg-section">
+        <div className="pg-label">Cost breakdown (model)</div>
+        <table className="metric-table">
+          <thead>
+            <tr><th>Slot</th><th className="num">vB</th><th className="num">N=∞ asymptote</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Anchor input</td>
+              <td className="num">{m ? m.anchorPayload : '~433'}</td>
+              <td className="num">≈ 433</td>
+            </tr>
+            <tr>
+              <td>Cache input × {Math.max(0, state.n - 1)}</td>
+              <td className="num">{m ? m.cachePayload : '~55'}</td>
+              <td className="num">≈ 55 each</td>
+            </tr>
+            <tr>
+              <td><strong>Per input (mean)</strong></td>
+              <td className="num"><strong>{m ? m.perInput.toFixed(1) : '—'}</strong></td>
+              <td className="num"><strong>≈ 55</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {state.pqKey && (
+        <div className="pg-section">
+          <div className="pg-label">FALCON key</div>
+          <table className="metric-table">
+            <tbody>
+              <tr><td>scheme</td><td>{state.pqKey.scheme}</td></tr>
+              <tr><td>pubkey size</td><td>{state.pqKey.pubkey.length / 2} B</td></tr>
+              <tr><td>commit (hex)</td><td>{shortHex(state.pqKey.commitHex, 18)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="pg-section" style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+        Baseline {SIG_FALCON_BASELINE_VB_PER_INPUT} vB/input is the asymptotic per-input cost
+        of N independent SIG(FALCON-512) inputs, measured live at N=100 in
+        <code>test/functional/feature_rung_pq_batch_stress.py</code>. Batch
+        sizes ≤ 20 here; consensus allows ≤ ~1,810 PQ_BATCH inputs in one
+        standard tx (100K vB cap).
+      </div>
+    </div>
+  );
+}
+
+function LogPanel({ log }) {
+  if (!log || log.length === 0) return null;
+  return (
+    <div className="log-panel">
+      <div style={{ padding: '6px 10px', fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '1px solid var(--border)' }}>
+        Activity log
+      </div>
+      <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+        {log.slice().reverse().map((row, i) => (
+          <div key={i} className={'log-row ' + row.cls}>
+            <span className="log-time">{row.time}</span>
+            <span className="log-msg">{row.msg}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Footer({ state }) {
+  return (
+    <div className="pg-footer">
+      <span>PQ_BATCH wire 0x0A03 · evaluator: src/rung/blocks/qabi.cpp::EvalPQBatchBlock</span>
+      <span style={{ marginLeft: 'auto' }}>n={state.n} · phase={state.phase} · utxos={state.utxos.length}</span>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
