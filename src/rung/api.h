@@ -342,11 +342,13 @@ struct LadderEvalContext {
     // internal code casts back to the matching library types.
     //   shared_tree_cache   -> rung::SharedTreeCache*
     //   qabo_sig_cache      -> rung::QABOSigCache*
+    //   pq_batch_cache      -> rung::PQBatchCache*
     //   legacy_sig_checker  -> Core BaseSignatureChecker* (consumed only by
     //                         the legacy P2* wrapper family; nullable when
     //                         those blocks are compiled out or unused)
     void* shared_tree_cache{nullptr};
     void* qabo_sig_cache{nullptr};
+    void* pq_batch_cache{nullptr};
     void* legacy_sig_checker{nullptr};
 };
 

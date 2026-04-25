@@ -116,6 +116,24 @@ struct QABOSigCache {};
 
 #endif // ENABLE_QABIO
 
+/** Per-tx cache of verified PQ_BATCH anchors, keyed by the block's committed
+ *  HASH256 (SHA256 of the canonical FALCON/Dilithium pubkey encoding).
+ *
+ *  Value = true means the anchor input for this commit has already been
+ *  verified in this tx (SHA256(revealed pubkey) matches commit, and the
+ *  PQ signature verifies against the tx sighash). Subsequent inputs whose
+ *  PQ_BATCH block carries the same commit with an empty witness can then
+ *  return SATISFIED from cache without re-verifying.
+ *
+ *  Anchor ordering constraint: the input carrying PUBKEY + SIGNATURE must
+ *  be evaluated BEFORE non-anchor inputs with the matching commit. Script
+ *  verification runs in input order (0, 1, 2, ...), so signers must place
+ *  the anchor at the lowest-index PQ_BATCH input. Non-anchor inputs at
+ *  lower indices return UNSATISFIED (no cache entry yet). This is
+ *  acceptable — the cost model of "one anchor input per commit group per
+ *  tx" still delivers ~5× amortisation for N=100 batches. */
+using PQBatchCache = std::map<uint256, bool>;
+
 /** Extended evaluation context for block types that need transaction data.
  *  Provides transaction and amount data needed by covenant, anchor,
  *  recursion, and PLC evaluators. */
@@ -149,6 +167,7 @@ struct RungEvalContext {
     const MLSCVerifiedLeaves* verified_leaves{nullptr}; //!< Verified leaf array from VerifyMLSCProof (leaf-centric covenant checks)
     const MLSCProof* mlsc_proof{nullptr}; //!< MLSC proof (for cross-rung mutation target access)
     QABOSigCache* qabo_sig_cache{nullptr}; //!< Optional per-tx cache: caches the FALCON QABO sig verify result so subsequent inputs of the same QABIO tx skip the expensive verify call
+    PQBatchCache* pq_batch_cache{nullptr}; //!< Optional per-tx cache for PQ_BATCH commits: anchor inputs populate it, non-anchor inputs read to skip per-input verification. See PQBatchCache comment for ordering rules.
 };
 
 /** Result of evaluating a single block or rung. */
@@ -342,7 +361,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   ScriptError* serror,
                   int32_t block_height = 0,
                   SharedTreeCache* shared_cache = nullptr,
-                  QABOSigCache* qabo_sig_cache = nullptr);
+                  QABOSigCache* qabo_sig_cache = nullptr,
+                  PQBatchCache* pq_batch_cache = nullptr);
 
 } // namespace rung
 

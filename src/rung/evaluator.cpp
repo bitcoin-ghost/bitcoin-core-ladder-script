@@ -714,6 +714,7 @@ bool VerifyRungTx(
 
     auto* shared_cache   = static_cast<SharedTreeCache*>(ctx.shared_tree_cache);
     auto* qabo_sig_cache = static_cast<QABOSigCache*>(ctx.qabo_sig_cache);
+    auto* pq_batch_cache = static_cast<PQBatchCache*>(ctx.pq_batch_cache);
 
     // ================================================================
     // KEY-PATH SPEND: witness = [signature]
@@ -946,28 +947,7 @@ bool VerifyRungTx(
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
                                       mlsc_proof.total_rungs, conditions_root, path_error)) {
                     LogPrintf("MLSC Merkle path verification failed: %s\n", path_error.c_str());
-                    LogPrintf("  my_leaf=%s expected_root=%s rung_idx=%u total=%u\n",
-                              my_leaf.GetHex().c_str(), conditions_root.GetHex().c_str(),
-                              (unsigned)mlsc_proof.rung_index, (unsigned)mlsc_proof.total_rungs);
-                    LogPrintf("  rung_pks count=%zu\n", rung_pks.size());
-                    for (size_t i = 0; i < rung_pks.size(); ++i) {
-                        LogPrintf("    rung_pk[%zu]: %s\n", i, HexStr(rung_pks[i]).c_str());
-                    }
-                    LogPrintf("  witness rungs=%zu\n", witness_ladder.rungs.size());
-                    for (size_t r = 0; r < witness_ladder.rungs.size(); ++r) {
-                        const auto& wr = witness_ladder.rungs[r];
-                        LogPrintf("  wit_rung[%zu] blocks=%zu\n", r, wr.blocks.size());
-                        for (size_t b = 0; b < wr.blocks.size(); ++b) {
-                            const auto& wb = wr.blocks[b];
-                            LogPrintf("    wit_block[%zu] type=0x%04x fields=%zu\n",
-                                      b, (unsigned)wb.type, wb.fields.size());
-                            for (size_t fi = 0; fi < wb.fields.size(); ++fi) {
-                                LogPrintf("      wfld[%zu] type=0x%02x hex=%s\n", fi,
-                                          (unsigned)wb.fields[fi].type, HexStr(wb.fields[fi].data).c_str());
-                            }
-                        }
-                    }
-                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH, "L914");
+                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
                 }
             } else {
                 size_t total_leaves = mlsc_proof.total_rungs;
@@ -1098,6 +1078,9 @@ bool VerifyRungTx(
     // Plumb the QABO sig cache through so QABI_SPEND can short-circuit
     // duplicate FALCON verifications across primed inputs of the same tx.
     eval_ctx.qabo_sig_cache = qabo_sig_cache;
+    // Plumb the PQ_BATCH cache so non-anchor inputs with matching HASH256
+    // commits can validate from cache after the anchor has verified once.
+    eval_ctx.pq_batch_cache = pq_batch_cache;
 
     // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
     // wrapper family. Fetch it from the opaque ctx field; fall back to a
@@ -1150,7 +1133,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   ScriptError* serror,
                   int32_t block_height,
                   SharedTreeCache* shared_cache,
-                  QABOSigCache* qabo_sig_cache)
+                  QABOSigCache* qabo_sig_cache,
+                  PQBatchCache* pq_batch_cache)
 {
     LadderTxViewBuilder tx_view_builder(tx);
     LadderPrecomputedBuilder precomputed_builder(txdata);
@@ -1169,6 +1153,7 @@ bool VerifyRungTx(const CTransaction& tx,
     adapter_ctx.sig_checker = &sig_checker;
     adapter_ctx.shared_tree_cache = shared_cache;
     adapter_ctx.qabo_sig_cache = qabo_sig_cache;
+    adapter_ctx.pq_batch_cache = pq_batch_cache;
     adapter_ctx.legacy_sig_checker = const_cast<BaseSignatureChecker*>(&checker);
 
     api::LadderScriptError err = api::LadderScriptError::OK;

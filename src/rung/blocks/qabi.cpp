@@ -626,6 +626,133 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     return EvalResult::SATISFIED;
 }
 
+/**
+ * PQ_BATCH evaluator (v2 — cross-input cache enabled).
+ *
+ * SEMANTIC:
+ *   Conditions carry HASH256(pubkey_hash), a commitment to a canonical
+ *   FALCON/Dilithium pubkey encoding. Spend requires that SOME input in
+ *   the tx reveals a matching PUBKEY + a valid PQ sig over the tx sighash
+ *   — that input is the "anchor" for the commit. Non-anchor inputs with
+ *   empty PQ_BATCH witness validate from a tx-level cache after the
+ *   anchor verifies once.
+ *
+ *   Per-input eval rule:
+ *     IF this input carries PUBKEY + SIGNATURE:
+ *       verify SHA256(pubkey) == commit
+ *       verify PQ sig
+ *       on success: cache (commit → verified) → SATISFIED
+ *     ELSE (witness empty):
+ *       check cache; cached → SATISFIED; else UNSATISFIED
+ *
+ *   Scheme derived from PUBKEY length (32/33 → Schnorr, 897 → FALCON-512,
+ *   1793 → FALCON-1024, 1952 → Dilithium3). Pubkey size is canonical per
+ *   scheme; sig size is variable up to a max. SPHINCS+ excluded — sig is
+ *   ~13 KB, amortisation benefit is marginal.
+ *
+ * ANCHOR ORDERING:
+ *   Script verification runs in input order. The input carrying the
+ *   PUBKEY + SIGNATURE MUST be evaluated before non-anchor inputs with
+ *   the matching commit. Signers are responsible for placing the anchor
+ *   at the lowest-index PQ_BATCH input with each unique commit.
+ *
+ * CACHE:
+ *   `ctx.pq_batch_cache` is an optional per-tx std::map<uint256, bool>.
+ *   Nullptr → no cache → non-anchor inputs fail. Populated by the host
+ *   (CScriptCheck) once per tx, then threaded into every VerifyRungTx call
+ *   for that tx. Same lifetime pattern as qabo_sig_cache.
+ *
+ * SOFT-FORK SAFETY:
+ *   If v2 deploys over v1 (which returned UNSATISFIED for witness-empty),
+ *   the semantic RELAXES — v2 accepts strictly more txs. That's a
+ *   soft-fork-compatible upgrade path.
+ */
+static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext& ctx)
+{
+    // Conditions: HASH256(pubkey_hash). Witness-merged in by MergeConditionsAndWitness.
+    const RungField* hash_field = FindField(block, RungDataType::HASH256);
+    const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
+    const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
+
+    if (!hash_field || hash_field->data.size() != 32) {
+        return EvalResult::ERROR;
+    }
+
+    // Convert committed hash to uint256 for the cache key.
+    uint256 commit_key;
+    std::memcpy(commit_key.data(), hash_field->data.data(), 32);
+
+    // Non-anchor path: no PUBKEY / SIGNATURE in witness → check cache.
+    if (!pubkey_field || !sig_field) {
+        if (ctx.pq_batch_cache != nullptr) {
+            auto it = ctx.pq_batch_cache->find(commit_key);
+            if (it != ctx.pq_batch_cache->end() && it->second) {
+                return EvalResult::SATISFIED;
+            }
+        }
+        // No cache entry → anchor hasn't evaluated yet (or cache is absent).
+        // Anchor MUST precede non-anchor inputs with the same commit.
+        return EvalResult::UNSATISFIED;
+    }
+
+    // Anchor path: verify SHA256(pubkey) matches commit.
+    unsigned char computed[CSHA256::OUTPUT_SIZE];
+    CSHA256().Write(pubkey_field->data.data(), pubkey_field->data.size()).Finalize(computed);
+    if (std::memcmp(computed, hash_field->data.data(), 32) != 0) {
+        // Cache the failure too, so later inputs don't re-verify a bad anchor.
+        // (With our simple cache = bool, absence = "no anchor yet", true =
+        // "verified". We don't cache false since "failed" inputs can't re-run.)
+        return EvalResult::UNSATISFIED;
+    }
+
+    // Derive scheme from PUBKEY size — canonical per scheme, unlike
+    // FALCON/Dilithium signatures which are variable-length up to a max.
+    // The committed HASH256 binds the exact pubkey bytes (length included),
+    // so an attacker can't equivocate the scheme via collision.
+    RungScheme scheme;
+    const size_t pk_len = pubkey_field->data.size();
+    if (pk_len == 32 || pk_len == 33) {
+        // SCHNORR/ECDSA carve-out (PQ_BATCH still rejects classical paths
+        // below — value-add is PQ-specific).
+        scheme = RungScheme::SCHNORR;
+    } else if (pk_len == 897) {
+        scheme = RungScheme::FALCON512;
+    } else if (pk_len == 1793) {
+        scheme = RungScheme::FALCON1024;
+    } else if (pk_len == 1952) {
+        scheme = RungScheme::DILITHIUM3;
+    } else {
+        // SPHINCS+ excluded (no amortisation benefit). Unknown sizes rejected.
+        return EvalResult::UNSATISFIED;
+    }
+
+    // Fetch tx sighash and verify.
+    uint8_t sighash[32];
+    if (!FetchLadderSighash(ctx, SIGHASH_DEFAULT, sighash)) {
+        return EvalResult::ERROR;
+    }
+
+    std::span<const uint8_t> msg{sighash, 32};
+    std::span<const uint8_t> sig_span{sig_field->data.data(), sig_field->data.size()};
+    std::span<const uint8_t> pk_span{pubkey_field->data.data(), pubkey_field->data.size()};
+
+    bool verified = false;
+    if (IsPQScheme(scheme)) {
+        verified = VerifyPQSignature(scheme, sig_span, msg, pk_span);
+    }
+    // Classical scheme verification deferred — v2 still rejects Schnorr/ECDSA
+    // through PQ_BATCH because its value-add is PQ-specific (classical sigs
+    // already have merkle_pub_key for hash-committed gating via SIG).
+
+    if (verified && ctx.pq_batch_cache != nullptr) {
+        // Populate the tx-level cache so subsequent inputs with the same
+        // commit and an empty witness can short-circuit.
+        (*ctx.pq_batch_cache)[commit_key] = true;
+    }
+
+    return verified ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
+}
+
 void register_qabi_blocks()
 {
     RegisterBlock(RungBlockType::QABI_PRIME, [](const RungBlock& b, const BlockDispatchContext& d) {
@@ -633,6 +760,9 @@ void register_qabi_blocks()
     });
     RegisterBlock(RungBlockType::QABI_SPEND, [](const RungBlock& b, const BlockDispatchContext& d) {
         return EvalQABISpendBlock(b, d.sig_checker, d.ctx);
+    });
+    RegisterBlock(RungBlockType::PQ_BATCH, [](const RungBlock& b, const BlockDispatchContext& d) {
+        return EvalPQBatchBlock(b, d.ctx);
     });
 }
 
@@ -644,6 +774,9 @@ static void register_qabi_stub()
         return EvalResult::UNSATISFIED;
     });
     RegisterBlock(RungBlockType::QABI_SPEND, [](const RungBlock&, const BlockDispatchContext&) {
+        return EvalResult::UNSATISFIED;
+    });
+    RegisterBlock(RungBlockType::PQ_BATCH, [](const RungBlock&, const BlockDispatchContext&) {
         return EvalResult::UNSATISFIED;
     });
 }

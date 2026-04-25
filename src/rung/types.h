@@ -149,7 +149,8 @@ enum class RungBlockType : uint16_t {
     // QABI family — Quantum Atomic Batch Input / Output
     QABI_PRIME         = 0x0A01, //!< Priming state transition: verifies auth chain preimage + covenant-mutates (committed_root, committed_depth, committed_expiry)
     QABI_SPEND         = 0x0A02, //!< Batch spend: verifies primed state, expiry, spend preimage, root match, identity, full output-set match, FALCON QABO sig
-    // 0x0A03, 0x0A04 reserved for future QABI-family members
+    PQ_BATCH           = 0x0A03, //!< Lightweight PQ batch: SHA256(falcon_pubkey) committed; any input in the tx revealing a matching pubkey + valid PQ sig authorises all inputs with the same commit. No priming, no coordinator.
+    // 0x0A04 reserved for future QABI-family members
 
     // PLC family
     HYSTERESIS_FEE   = 0x0601, //!< Fee hysteresis band
@@ -268,6 +269,7 @@ inline bool IsKnownBlockType(uint16_t b)
     // QABI family
     case RungBlockType::QABI_PRIME:
     case RungBlockType::QABI_SPEND:
+    case RungBlockType::PQ_BATCH:
         return true;
     case RungBlockType::RESERVED_0201:
     case RungBlockType::RESERVED_0202:
@@ -411,6 +413,7 @@ inline std::string BlockTypeName(RungBlockType type)
     case RungBlockType::P2TR_SCRIPT_LEGACY: return "P2TR_SCRIPT_LEGACY";
     case RungBlockType::QABI_PRIME:         return "QABI_PRIME";
     case RungBlockType::QABI_SPEND:         return "QABI_SPEND";
+    case RungBlockType::PQ_BATCH:           return "PQ_BATCH";
     }
     return "UNKNOWN";
 }
@@ -812,7 +815,8 @@ inline constexpr uint16_t MICRO_HEADER_TABLE[MICRO_HEADER_SLOTS] = {
     0x0204, // 0x3D: HASH_GUARDED
     // Slot 62: Governance family (late-added)
     0x0807, // 0x3E: OUTPUT_CHECK
-    0xFFFF, // 0x3F
+    // Slot 63: QABI family (late-added)
+    0x0A03, // 0x3F: PQ_BATCH
     0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, // 0x40-0x47
     0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, // 0x48-0x4F
     0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, // 0x50-0x57
@@ -1242,6 +1246,22 @@ inline constexpr ImplicitFieldLayout QABI_SPEND_WITNESS = {1, {
     {RungDataType::PREIMAGE, 32},
 }};
 
+/** PQ_BATCH conditions (committed at UTXO creation):
+ *    [0] HASH256(pubkey_hash) — 32 B, SHA256(canonical_falcon_pubkey_bytes)
+ *  A UTXO gated by PQ_BATCH commits only to the hash of a PQ signing key.
+ *  No priming, no per-participant state. */
+inline constexpr ImplicitFieldLayout PQ_BATCH_CONDITIONS = {1, {
+    {RungDataType::HASH256, 32},
+}};
+
+/** PQ_BATCH witness — VARIABLE (anchor vs non-anchor). Left unconstrained
+ *  (nullptr in BlockTypeInfo) because exactly one input in the tx carries
+ *  [PUBKEY(pubkey_bytes), SIGNATURE(sig_bytes)] as the "anchor" revealing
+ *  the signing key and authorising signature. Other inputs gated by the
+ *  same HASH256 carry no PQ_BATCH witness fields (0 fields) and validate
+ *  via the cross-input cache populated by the anchor. Evaluator enforces
+ *  the 0-or-2 field rule; layout framework would reject a flexible count. */
+
 #endif // ENABLE_QABIO
 
 /** Lookup implicit field layout for a block type and serialization context.
@@ -1322,6 +1342,7 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
 #ifdef ENABLE_QABIO
         // QABI family
         case RungBlockType::QABI_SPEND:       return QABI_SPEND_CONDITIONS;
+        case RungBlockType::PQ_BATCH:         return PQ_BATCH_CONDITIONS;
         // QABI_PRIME has no committed fields (pure witness-driven) — NO_IMPLICIT
 #endif
         default: return NO_IMPLICIT;
@@ -1471,9 +1492,11 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
 #ifdef ENABLE_QABIO
         {RungBlockType::QABI_PRIME, "QABI_PRIME", true, false, false, 0, nullptr, &QABI_PRIME_WITNESS, false},
         {RungBlockType::QABI_SPEND, "QABI_SPEND", true, false, false, 0, &QABI_SPEND_CONDITIONS, &QABI_SPEND_WITNESS, false},
+        {RungBlockType::PQ_BATCH, "PQ_BATCH", true, false, false, 0, &PQ_BATCH_CONDITIONS, nullptr, false},
 #else
         {RungBlockType::QABI_PRIME, "QABI_PRIME", true, false, false, 0, nullptr, nullptr, false},
         {RungBlockType::QABI_SPEND, "QABI_SPEND", true, false, false, 0, nullptr, nullptr, false},
+        {RungBlockType::PQ_BATCH, "PQ_BATCH", true, false, false, 0, nullptr, nullptr, false},
 #endif
     };
     static const size_t N_DESCRIPTORS = sizeof(BLOCK_DESCRIPTORS) / sizeof(BLOCK_DESCRIPTORS[0]);

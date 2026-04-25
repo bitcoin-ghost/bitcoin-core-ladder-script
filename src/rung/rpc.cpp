@@ -257,6 +257,7 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
     // QABI family
     if (name == "QABI_PRIME")         { out = RungBlockType::QABI_PRIME; return true; }
     if (name == "QABI_SPEND")         { out = RungBlockType::QABI_SPEND; return true; }
+    if (name == "PQ_BATCH")           { out = RungBlockType::PQ_BATCH; return true; }
     // Backward compat aliases
     if (name == "HASHLOCK") {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -347,7 +348,10 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                     // QABI_SPEND carries auth_tip and committed_root as external
                     // commitments — the user provides them directly, not as
                     // preimages.
-                    block.type != RungBlockType::QABI_SPEND) {
+                    block.type != RungBlockType::QABI_SPEND &&
+                    // PQ_BATCH carries SHA256(pubkey) as an external commitment
+                    // (the pubkey is revealed at spend, not hashed as a preimage).
+                    block.type != RungBlockType::PQ_BATCH) {
                     throw JSONRPCError(RPC_INVALID_PARAMETER,
                         "Use PREIMAGE instead of HASH256 for " + type_str +
                         "; the node computes the hash commitment automatically");
@@ -456,6 +460,36 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                     block.fields.insert(block.fields.begin() + insert_pos,
                         RungField{RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
                     break;
+                }
+            }
+        }
+    }
+
+    // Fund-time strict layout enforcement (future work #8, 2026-04-24).
+    // Mirrors the spend-time DeserializeBlock check at serialize.cpp:324-331.
+    // Without this a client can commit a conditions_root where the target rung
+    // has a non-canonical field order (e.g. [NUMERIC, SCHEME] instead of
+    // [SCHEME, NUMERIC] for CLTV_SIG) — the fund succeeds silently but every
+    // spend attempt fails "field type mismatch" at mempool-script-verify.
+    // Catch mis-ordered conditions at fund time instead.
+    if (conditions_only) {
+        const auto& expected = GetImplicitLayout(block.type,
+            static_cast<uint8_t>(rung::SerializationContext::CONDITIONS));
+        if (expected.count > 0) {
+            if (block.fields.size() != expected.count) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "Block " + type_str + " field count mismatch: got " +
+                    std::to_string(block.fields.size()) + ", expected " +
+                    std::to_string(expected.count) +
+                    " per implicit layout for " + type_str + "_CONDITIONS");
+            }
+            for (uint8_t i = 0; i < expected.count; ++i) {
+                if (block.fields[i].type != expected.fields[i].type) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        "Block " + type_str + " field " + std::to_string(i) +
+                        " type mismatch: got " + DataTypeName(block.fields[i].type) +
+                        ", expected " + DataTypeName(expected.fields[i].type) +
+                        " per implicit layout");
                 }
             }
         }
@@ -666,6 +700,85 @@ static RPCHelpMan createrung()
     }
 
     auto serialized = rung::SerializeLadderWitness(ladder);
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("hex", HexStr(serialized));
+    result.pushKV("size", static_cast<int>(serialized.size()));
+    return result;
+},
+    };
+}
+
+/** serialiseconditions: serialise a LadderWitness in CONDITIONS context.
+ *
+ *  Returns the bytes that would be committed at fund time for use as a
+ *  P2SH_LEGACY / P2WSH_LEGACY / P2TR_SCRIPT_LEGACY inner script body.
+ *  EvalInnerConditions deserialises with SerializationContext::CONDITIONS,
+ *  so the engine needs a way to produce that exact byte sequence when
+ *  building legacy-script-hash wrappers. createrung uses WITNESS context
+ *  (which emits PUBKEY/SIGNATURE fields), which doesn't match — hence this
+ *  dedicated RPC. Future work item #12, 2026-04-24.
+ */
+static RPCHelpMan serialiseconditions()
+{
+    return RPCHelpMan{
+        "serialiseconditions",
+        "Serialise a LadderWitness in CONDITIONS context.\n"
+        "Returns the bytes suitable as a P2SH/P2WSH/P2TR_SCRIPT inner-script preimage.\n"
+        "Fields are parsed with conditions_only=true (PUBKEYs fold into merkle_pub_key,\n"
+        "PREIMAGE/SCRIPT_BODY auto-hash to HASH256/HASH160, SCHEME is auto-inserted).\n",
+        {
+            {"rungs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Array of rung specifications",
+                {
+                    {"rung", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A single rung",
+                        {
+                            {"blocks", RPCArg::Type::ARR, RPCArg::Optional::NO, "Array of block specifications",
+                                {
+                                    {"block", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A function block",
+                                        {
+                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Block type"},
+                                            {"inverted", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Invert evaluation result"},
+                                            {"fields", RPCArg::Type::ARR, RPCArg::Optional::NO, "Typed fields for this block",
+                                                {
+                                                    {"field", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A typed field",
+                                                        {
+                                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Data type"},
+                                                            {"hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Field data in hex"},
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "hex", "The serialised conditions bytes as hex (suitable for script_body/preimage in P2SH/P2WSH/P2TR_SCRIPT witness)"},
+            {RPCResult::Type::NUM, "size", "Size in bytes"},
+        }},
+        RPCExamples{
+            HelpExampleCli("serialiseconditions", "'[{\"blocks\":[{\"type\":\"SIG\",\"fields\":[{\"type\":\"PUBKEY\",\"hex\":\"03...\"}]}]}]'")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    const UniValue& rungs_arr = request.params[0].get_array();
+    LadderWitness ladder;
+
+    for (size_t r = 0; r < rungs_arr.size(); ++r) {
+        const UniValue& rung_obj = rungs_arr[r];
+        Rung rung;
+        const UniValue& blocks_arr = rung_obj["blocks"].get_array();
+        for (size_t b = 0; b < blocks_arr.size(); ++b) {
+            rung.blocks.push_back(ParseBlockSpec(blocks_arr[b], /*conditions_only=*/true));
+        }
+        ladder.rungs.push_back(std::move(rung));
+    }
+
+    auto serialized = rung::SerializeLadderWitness(ladder, rung::SerializationContext::CONDITIONS);
     UniValue result(UniValue::VOBJ);
     result.pushKV("hex", HexStr(serialized));
     result.pushKV("size", static_cast<int>(serialized.size()));
@@ -1925,6 +2038,31 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             throw JSONRPCError(RPC_INVALID_PARAMETER, "QABI_SPEND: preimage must be 32 bytes");
         }
         block.fields.push_back({RungDataType::PREIMAGE, preimage_bytes});
+        break;
+    }
+    case RungBlockType::PQ_BATCH: {
+        // PQ_BATCH witness (anchor input only): [PUBKEY, SIGNATURE].
+        // Non-anchor inputs pass an empty witness spec (no pubkey/signature
+        // fields) and rely on the tx-level PQBatchCache populated by the
+        // anchor input's earlier verification.
+        //
+        // Two signing paths:
+        //  1. In-band: pass {scheme, pq_pubkey, pq_privkey} — SignSingleKey
+        //     computes the per-input ladder sighash and PQ-signs it.
+        //  2. Pre-signed: pass {pubkey, signature} hex directly — used when
+        //     the caller signed externally (e.g. cold-storage HSM).
+        if (block_spec.exists("pq_privkey")) {
+            SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "PQ_BATCH");
+            break;
+        }
+        if (block_spec.exists("pubkey")) {
+            PushWitnessPubkey(block, ParseHex(block_spec["pubkey"].get_str()));
+        }
+        if (block_spec.exists("signature")) {
+            block.fields.push_back({
+                RungDataType::SIGNATURE,
+                ParseHex(block_spec["signature"].get_str())});
+        }
         break;
     }
 #endif // ENABLE_QABIO
@@ -3759,15 +3897,15 @@ static RPCHelpMan createtxmlsc()
             });
         }
 
-        // Coil
-        cp_rung.coil.output_index = output_index;
+        // Coil: full parse so scheme/attestation/address bind into the leaf
+        // at fund time. Previously only coil.type was read here, which meant
+        // a FALCON512/DILITHIUM3 rung committed to the default SCHNORR
+        // coil — and a spend-time reconstruction with the real scheme would
+        // produce a different leaf and fail Merkle verification.
         if (rung_obj.exists("coil")) {
-            const UniValue& coil_obj = rung_obj["coil"];
-            if (coil_obj.exists("type")) {
-                std::string ct = coil_obj["type"].get_str();
-                if (ct == "UNLOCK_TO") cp_rung.coil.coil_type = rung::RungCoilType::UNLOCK_TO;
-            }
+            cp_rung.coil = ParseCoil(rung_obj["coil"]);
         }
+        cp_rung.coil.output_index = output_index;
 
         // Compute value_commitment = SHA256(field_values || pubkeys)
         cp_rung.value_commitment = rung::ComputeValueCommitment(rung, rung_pks);
@@ -4265,6 +4403,7 @@ void RegisterRungRPCCommands(CRPCTable& t)
     static const CRPCCommand commands[]{
         {"rung", &decoderung},
         {"rung", &createrung},
+        {"rung", &serialiseconditions},
         {"rung", &validateladder},
         {"rung", &createrungtx},
         {"rung", &createtxmlsc},

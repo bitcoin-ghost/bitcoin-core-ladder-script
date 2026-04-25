@@ -2189,7 +2189,18 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         // to UNSATISFIED before touching the cache.
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
 #endif
-        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr);
+        // PQ_BATCH: per-tx anchor verification cache. Snapshot, pass local
+        // copy so parallel input checks don't conflict, merge back after.
+        rung::PQBatchCache local_pq_batch_cache;
+        rung::PQBatchCache* pq_batch_cache_ptr = nullptr;
+        if (m_pq_batch_cache) {
+            {
+                LOCK(m_pq_batch_cache->mutex);
+                local_pq_batch_cache = m_pq_batch_cache->cache;
+            }
+            pq_batch_cache_ptr = &local_pq_batch_cache;
+        }
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr);
         // Write back any new cache entries
         if (m_shared_tree_cache && cache_ptr) {
             LOCK(m_shared_tree_cache->mutex);
@@ -2205,6 +2216,12 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             }
         }
 #endif
+        if (m_pq_batch_cache && pq_batch_cache_ptr) {
+            LOCK(m_pq_batch_cache->mutex);
+            for (const auto& [k, v] : local_pq_batch_cache) {
+                m_pq_batch_cache->cache.emplace(k, v);
+            }
+        }
         if (ok) {
             return std::nullopt;
         } else {
@@ -2340,8 +2357,12 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
     // Ladder Script: create shared tree cache for same-source proof sharing.
     // Thread-safe — shared across parallel CScriptCheck evaluations.
     std::shared_ptr<ThreadSafeSharedTreeCache> shared_tree_cache;
+    // PQ_BATCH: per-tx cache so non-anchor PQ_BATCH inputs can validate
+    // from the anchor's verification result. See rung::PQBatchCache comment.
+    std::shared_ptr<ThreadSafePQBatchCache> pq_batch_cache;
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
         shared_tree_cache = std::make_shared<ThreadSafeSharedTreeCache>();
+        pq_batch_cache = std::make_shared<ThreadSafePQBatchCache>();
 
         // Tx-level rung consensus checks. These run for EVERY v4 tx,
         // regardless of whether its inputs are MLSC or standard (P2WPKH/P2TR).
@@ -2370,7 +2391,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // spent being checked as a part of CScriptCheck.
 
         // Verify signature
-        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height, shared_tree_cache);
+        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height, shared_tree_cache, /*qabo_sig_cache=*/nullptr, pq_batch_cache);
         if (pvChecks) {
             pvChecks->emplace_back(std::move(check));
         } else if (auto result = check(); result.has_value()) {
