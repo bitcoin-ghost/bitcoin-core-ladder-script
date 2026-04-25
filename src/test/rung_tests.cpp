@@ -2954,7 +2954,7 @@ BOOST_AUTO_TEST_CASE(consensus_output_rejects_non_mlsc)
     mtx.vout.push_back(CTxOut(100000, CScript() << OP_RETURN));
 
     std::string error;
-    BOOST_CHECK(!rung::ValidateRungOutputs(CTransaction(mtx), 0, error));
+    BOOST_CHECK(!rung::ValidateRungOutputs(CTransaction(mtx), error));
 }
 
 BOOST_AUTO_TEST_CASE(consensus_output_accepts_mlsc)
@@ -2973,7 +2973,7 @@ BOOST_AUTO_TEST_CASE(consensus_output_accepts_mlsc)
     mtx.vout.push_back(CTxOut(100000, CreateMLSCScript(root)));
 
     std::string error;
-    BOOST_CHECK(rung::ValidateRungOutputs(CTransaction(mtx), 0, error));
+    BOOST_CHECK(rung::ValidateRungOutputs(CTransaction(mtx), error));
 }
 
 BOOST_AUTO_TEST_CASE(consensus_output_rejects_multiple_data_return)
@@ -2987,7 +2987,7 @@ BOOST_AUTO_TEST_CASE(consensus_output_rejects_multiple_data_return)
     mtx.vout.push_back(CTxOut(0, CreateMLSCScript(root, data)));
 
     std::string error;
-    BOOST_CHECK(!rung::ValidateRungOutputs(CTransaction(mtx), 0, error));
+    BOOST_CHECK(!rung::ValidateRungOutputs(CTransaction(mtx), error));
 }
 
 // ============================================================================

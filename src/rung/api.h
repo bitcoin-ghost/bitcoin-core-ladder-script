@@ -450,10 +450,6 @@ const LadderBlockDescriptor* ladder_enumerate_blocks(
 
 void ladder_init();
 
-// Inverse of ladder_init, primarily for test fixtures that want a clean
-// registry per run. In production, library lifetime == process lifetime.
-void ladder_shutdown();
-
 // ============================================================================
 // Section 9: consensus-critical entry points
 // ============================================================================
@@ -481,17 +477,13 @@ bool VerifyRungTx(
 // v4 txs whose inputs are all standard P2WPKH/P2TR (wallet-funded bootstrap).
 bool CheckRungTxLevel(
     const LadderTxView& tx,
-    uint32_t flags,
     std::string& error_out);
 
 // Per-output format check: every vout must be MLSC, at most one
 // DATA_RETURN, and every non-DATA_RETURN output meets the dust
-// threshold. Called from CheckRungTxLevel (once per v4 tx) and
-// indirectly from the recursive covenant evaluators
-// (RECURSE_SAME / RECURSE_MODIFIED / RECURSE_DECAY).
+// threshold. Called once per v4 tx from CheckRungTxLevel.
 bool ValidateRungOutputs(
     const LadderTxView& tx,
-    uint32_t flags,
     std::string& error_out);
 
 // Is this scriptPubKey an MLSC output of any form (compact, full, or with

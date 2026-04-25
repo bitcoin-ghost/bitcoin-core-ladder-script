@@ -1332,8 +1332,6 @@ static void SignSingleKey(const UniValue& block_spec,
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Schnorr signing failed", block_name));
     }
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
-    LogPrintf("SignSingleKey(%s): sig=%s\n", block_name,
-              HexStr(std::span<const uint8_t>(sig_buf, 64)).substr(0, 32).c_str());
 }
 
 /** PQ-aware multi-key signing for MULTISIG and TIMELOCKED_MULTISIG.

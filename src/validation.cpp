@@ -2342,9 +2342,11 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     } else {
                         // Synthetic root missing — cannot inflate. Leave as compact
                         // 1-byte [0xDF] which will fail MLSC proof verification in
-                        // VerifyRungTx (conditions_root will be null). Log for debugging.
-                        LogPrintf("WARNING: MLSC root entry missing for input %u (source %s)\n",
-                                  (unsigned)i, source_txid.ToString());
+                        // VerifyRungTx (conditions_root will be null). Use the
+                        // proper Warning level (rate-limited) rather than a raw
+                        // INFO LogPrintf with a "WARNING:" string prefix.
+                        LogWarning("MLSC root entry missing for input %u (source %s)",
+                                   (unsigned)i, source_txid.ToString());
                     }
                 }
             }
@@ -2370,7 +2372,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // rules (output format, per-tx preimage count) because VerifyRungTx
         // is only invoked when the spent input is MLSC.
         std::string rung_error;
-        if (!rung::CheckRungTxLevel(tx, flags, rung_error)) {
+        if (!rung::CheckRungTxLevel(tx, rung_error)) {
             LogPrintf("TX_MLSC tx-level rejection: %s\n", rung_error);
             if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
                 return state.Invalid(TxValidationResult::TX_NOT_STANDARD,

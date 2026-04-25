@@ -1522,7 +1522,6 @@ inline bool VerifyImplicitLayoutPairing()
         RungBlockType::EPOCH_GATE, RungBlockType::ANCHOR_SEAL,
         RungBlockType::AMOUNT_LOCK, RungBlockType::CTV,
         RungBlockType::DATA_RETURN,
-        // Newly added conditions layouts (witness layouts not yet defined)
         RungBlockType::MULTISIG, RungBlockType::KEY_REF_SIG,
         RungBlockType::VAULT_LOCK,
         RungBlockType::RECURSE_SAME, RungBlockType::RECURSE_UNTIL,

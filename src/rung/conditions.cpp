@@ -878,12 +878,8 @@ bool VerifyMLSCProof(const MLSCProof& proof,
                      const std::vector<std::vector<uint8_t>>& rung_pubkeys,
                      const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys,
                      std::string& error,
-                     MLSCVerifiedLeaves* verified_out,
-                     const std::vector<std::vector<std::vector<uint8_t>>>& /*mutation_target_pubkeys_unused*/)
+                     MLSCVerifiedLeaves* verified_out)
 {
-    // The mutation_target_pubkeys parameter is retained for ABI
-    // compatibility but is no longer consulted — pubkey data now
-    // travels inline inside each MLSCMutationTarget.
     // SHARED mode must be handled by the caller (evaluator) — not this function
     if (proof.proof_mode == MLSCProofMode::SHARED) {
         error = "SHARED proof mode must be resolved by the caller";

@@ -261,7 +261,6 @@ std::vector<uint8_t> SerializeMLSCProof(const MLSCProof& proof);
  *  @param[in]  relay_pubkeys   Per-relay pubkey lists for revealed relays
  *  @param[out] error           Error message on failure
  *  @param[out] verified_out    If non-null, receives the verified leaf array for covenant checks
- *  @param[in]  mutation_target_pubkeys  Per-mutation-target pubkey lists (for cross-rung leaf computation)
  *  @return true if the Merkle proof verifies correctly. */
 bool VerifyMLSCProof(const MLSCProof& proof,
                      const RungCoil& coil,
@@ -269,8 +268,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
                      const std::vector<std::vector<uint8_t>>& rung_pubkeys,
                      const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys,
                      std::string& error,
-                     MLSCVerifiedLeaves* verified_out = nullptr,
-                     const std::vector<std::vector<std::vector<uint8_t>>>& mutation_target_pubkeys = {});
+                     MLSCVerifiedLeaves* verified_out = nullptr);
 
 // ============================================================================
 // TX_MLSC (Transaction-Level Merkelised Ladder Script Conditions)

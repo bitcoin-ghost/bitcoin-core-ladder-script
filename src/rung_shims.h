@@ -181,16 +181,16 @@ inline bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 
 // --- Consensus-level shims (CTransaction -> LadderTxView) -----------------
 
-inline bool CheckRungTxLevel(const CTransaction& tx, unsigned int flags, std::string& error)
+inline bool CheckRungTxLevel(const CTransaction& tx, std::string& error)
 {
     LadderTxViewBuilder b(tx);
-    return rung::api::CheckRungTxLevel(b.view, flags, error);
+    return rung::api::CheckRungTxLevel(b.view, error);
 }
 
-inline bool ValidateRungOutputs(const CTransaction& tx, unsigned int flags, std::string& error)
+inline bool ValidateRungOutputs(const CTransaction& tx, std::string& error)
 {
     LadderTxViewBuilder b(tx);
-    return rung::api::ValidateRungOutputs(b.view, flags, error);
+    return rung::api::ValidateRungOutputs(b.view, error);
 }
 
 inline bool ExtractQABIPrimeDepth(const CTransaction& tx, uint32_t input_index, int64_t& depth_out)
