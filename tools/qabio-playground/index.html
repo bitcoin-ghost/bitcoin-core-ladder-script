@@ -1834,7 +1834,7 @@ function StagePanel({ apiCall }) {
 
       <ScenarioPicker />
 
-      <div className="phase-panel">
+      <div className="phase-panel" id="run-flow-section">
         <div className="pg-section-title"><span className="pg-section-num">▶</span>One-Click Run</div>
         <div className="phase-desc">
           Runs every step below sequentially. Use this to see the full flow end-to-end in one click.
@@ -2142,17 +2142,25 @@ function ScenarioPicker() {
   const loadScenario = (s) => {
     dispatch({ type: 'RESET' });
     dispatch({ type: 'SET_N', n: s.n });
+    // setTimeout(0) waits for SET_N to materialise the participant array
+    // before PART_FAIL_TOGGLE references their ids.
     setTimeout(() => {
       s.fail.forEach(id => dispatch({ type: 'PART_FAIL_TOGGLE', id }));
-      dispatch({ type: 'LOG', kind: 'info', msg: 'Scenario loaded: ' + s.name });
+      dispatch({ type: 'LOG', kind: 'info', msg: 'Scenario loaded: ' + s.name + ' — click ▶ Run full flow' });
+      // Scroll the Run section into view so the next click target is right
+      // there — without this, loading a scenario silently re-renders the
+      // tall participant list below and the page often ends up at the
+      // bottom rather than at the action button.
+      const el = document.getElementById('run-flow-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 0);
   };
   return (
     <div className="phase-panel">
       <div className="pg-section-title"><span className="pg-section-num">?</span>Prebuilt Scenarios</div>
       <div className="phase-desc">
-        Click a scenario to preset the participant count and failure flags. Scenarios don't run themselves —
-        click through the 6 steps below once loaded.
+        Click a scenario to preset the participant count and failure flags. The page scrolls to
+        the ▶ Run full flow button — one click from there to start the ceremony.
       </div>
       <div className="scen-list">
         {SCENARIOS.map(s => (
