@@ -1487,16 +1487,34 @@ function StagePanel({ apiCall }) {
     // calling qabi_buildblock.
     log('Step 4/9: Building QABI block…');
 
+    // The qabi_block + batch tx must contain ONLY participants who will
+    // actually spend in the batch. Participants flagged `failOnDemand`
+    // are excluded from the batch and instead get an escape sweep at
+    // the end of the flow. Including them in qabi_block here would
+    // commit to an N-output template; the batch tx (built with N-fail
+    // outputs) would then fail consensus check 8 — outputs_conditions_root
+    // would mismatch the actual vout layout.
+    const willingParts = parts.filter(p => !p.failOnDemand);
+    if (willingParts.length === 0) {
+      // Pure coordinator-bails / all-fail scenario — skip the batch entirely.
+      // The escape sweep at the bottom handles every participant.
+      log('All participants flagged as failing — skipping batch, will escape-sweep', 'info');
+      // Set qabi block stubs so downstream code paths work, but mark batch unrunnable.
+      dispatch({ type: 'COORD_UPDATE', patch: { qabiBlockHex: '', qabiRoot: '' } });
+      // Continue to step 5 (priming) so escape inputs exist.
+    }
+    const blockParts = willingParts.length > 0 ? willingParts : parts;
+
     // Determine final batch output amounts (same formula used in step 6).
-    const batchAmounts = parts.map(p => (p.contribution - 1000) / 1e8);
-    const batchRungs = parts.map((p, i) => ({
+    const batchAmounts = blockParts.map(p => (p.contribution - 1000) / 1e8);
+    const batchRungs = blockParts.map((p, i) => ({
       output_index: i, blocks: [{ type: 'SIG', fields: [{ type: 'SCHEME', hex: '01' }] }], pubkeys: [p.pubkey],
     }));
 
     // Template tx (no qabi_block) — just to get the output scriptPubKeys.
     // Use dummy inputs since we don't have primed UTXOs yet; createtxmlsc
     // only needs inputs to build the tx structure, not to validate them.
-    const templateInputs = parts.map((p, i) => ({ txid: '00'.repeat(32), vout: i }));
+    const templateInputs = blockParts.map((p, i) => ({ txid: '00'.repeat(32), vout: i }));
     const templateRes = await apiCall('/api/ladder/createtxmlsc', {
       inputs: templateInputs, outputs: batchAmounts, rungs: batchRungs,
     });
@@ -1508,14 +1526,14 @@ function StagePanel({ apiCall }) {
     if (!decoded) { log('Decode template failed', 'err'); failModal('Decode template failed'); return; }
     storeJson('batch_template_decoded', 'Batch template decoded', decoded);
     const outputSpks = (decoded.vout || []).map(v => v.scriptPubKey?.hex || '');
-    if (outputSpks.length !== parts.length) {
-      log('Output count mismatch: expected ' + parts.length + ', got ' + outputSpks.length, 'err'); failModal('Output count mismatch'); return;
+    if (outputSpks.length !== blockParts.length) {
+      log('Output count mismatch: expected ' + blockParts.length + ', got ' + outputSpks.length, 'err'); failModal('Output count mismatch'); return;
     }
 
-    const entries = parts.map((p, i) => ({
+    const entries = blockParts.map((p, i) => ({
       participant_id: p.ownerId, contribution: (p.contribution / 1e8).toFixed(8), destination_index: i,
     }));
-    const qOutputs = parts.map((p, i) => ({
+    const qOutputs = blockParts.map((p, i) => ({
       amount: batchAmounts[i].toFixed(8), script_pubkey: outputSpks[i],
     }));
     // Use the explicit outputs_conditions_root + output_values shape.
