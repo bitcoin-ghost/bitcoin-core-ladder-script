@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ladder Script</title>
+<title>Tools — Ladder Script</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script>
-// Set theme before first paint to avoid flash.
 (function () {
   var t = localStorage.getItem('theme');
   if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -43,7 +42,6 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: v
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* -- HEADER -- */
 .site-header { background: var(--bg); border-bottom: 1px solid var(--border); padding: 0; }
 .site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
 .header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
@@ -64,29 +62,38 @@ html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
 .header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding-top: 10px; padding-bottom: 10px; }
 .header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
 .header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 
+.hero { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 64px 32px 48px; text-align: center; }
+.hero-title { font-size: 60px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); margin-bottom: 20px; line-height: 1.05; }
+.hero-lede { font-size: 18px; color: var(--text-body); max-width: 640px; margin: 0 auto 56px; line-height: 1.6; }
 
-/* -- HERO -- */
-.hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 32px; text-align: center; }
-.hero-title { font-size: 72px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); margin-bottom: 24px; line-height: 1.05; }
-.hero-title .accent { color: var(--accent); }
-.hero-lede { font-size: 20px; color: var(--text-body); max-width: 720px; margin: 0 auto 16px; line-height: 1.6; }
-.hero-stat { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: var(--text-dim); max-width: 720px; margin: 0 auto 32px; }
-.hero-call { font-size: 16px; color: var(--text-dim); max-width: 680px; margin: 0 auto; line-height: 1.7; }
-.hero-call a { font-weight: 500; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 960px; width: 100%; margin: 0 auto; }
+.tool-card {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 40px 24px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-body); text-decoration: none;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.tool-card:hover { border-color: var(--accent); transform: translateY(-2px); text-decoration: none; }
+.tool-icon { width: 56px; height: 56px; margin-bottom: 20px; color: var(--accent); }
+.tool-name { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px; letter-spacing: -0.01em; }
+.tool-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; max-width: 240px; }
 
-/* -- FOOTER -- */
 .site-footer { background: var(--bg-alt); border-top: 1px solid var(--border); padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-light); }
 .site-footer a { color: var(--text-light); }
 .site-footer a:hover { color: var(--accent); }
 
+@media (max-width: 800px) {
+  .tool-grid { grid-template-columns: 1fr; max-width: 480px; }
+}
 @media (max-width: 600px) {
   .header-top { flex-direction: column; align-items: flex-start; gap: 8px; height: auto; padding: 12px 0; }
   .header-nav { flex-wrap: wrap; gap: 18px; }
   .site-header-inner { padding: 0 16px; }
-  .hero-title { font-size: 48px; }
-  .hero-lede { font-size: 17px; }
-  .hero { padding: 48px 20px; }
+  .hero-title { font-size: 44px; }
+  .hero-lede { font-size: 16px; margin-bottom: 36px; }
+  .hero { padding: 40px 20px 32px; }
 }
 </style>
 </head>
@@ -114,17 +121,52 @@ html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
       <a href="docs/">Docs</a>
       <a href="patch-overview.html">Patch</a>
       <a href="get-started.html">Get Started</a>
-      <a href="tools.html">Tools</a>
+      <a href="tools.html" class="active">Tools</a>
       <a href="explorer.html">Explorer</a>
     </nav>
   </div>
 </header>
 
 <main class="hero">
-  <h1 class="hero-title">Ladder Script</h1>
-  <p class="hero-lede">A proposal for a new transaction type: v4 RUNG_TX.</p>
-  <p class="hero-stat">767 LOC in Bitcoin Core · 19,050 LOC in a dedicated library.</p>
-  <p class="hero-call">Open for <a href="docs/">review</a>. <a href="explorer.html">Live on signet</a>.</p>
+  <h1 class="hero-title">Tools</h1>
+  <p class="hero-lede">Three browser tools for exercising the library against a live signet node.</p>
+  <div class="tool-grid">
+    <a href="ladder-engine.html" class="tool-card">
+      <svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1"/>
+        <rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/>
+        <rect x="14" y="14" width="7" height="7" rx="1"/>
+        <line x1="10" y1="6.5" x2="14" y2="6.5"/>
+        <line x1="10" y1="17.5" x2="14" y2="17.5"/>
+        <line x1="6.5" y1="10" x2="6.5" y2="14"/>
+        <line x1="17.5" y1="10" x2="17.5" y2="14"/>
+      </svg>
+      <div class="tool-name">Engine</div>
+      <div class="tool-desc">Visual block-builder for composing Ladder Script ladders. Fund and spend on signet from the browser.</div>
+    </a>
+    <a href="pq-batch-playground.html" class="tool-card">
+      <svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="4" y="10" width="16" height="11" rx="2"/>
+        <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+        <circle cx="12" cy="15.5" r="1.5"/>
+        <line x1="12" y1="17" x2="12" y2="19"/>
+      </svg>
+      <div class="tool-name">PQ Batch</div>
+      <div class="tool-desc">N FALCON-gated UTXOs spent in one tx with a single anchor signature. Live cost amortisation vs per-input PQ sigs.</div>
+    </a>
+    <a href="qabio-playground.html" class="tool-card">
+      <svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="6" cy="8" r="3"/>
+        <circle cx="18" cy="8" r="3"/>
+        <circle cx="12" cy="17" r="3"/>
+        <line x1="8" y1="10" x2="11" y2="14.5"/>
+        <line x1="16" y1="10" x2="13" y2="14.5"/>
+      </svg>
+      <div class="tool-name">QABIO</div>
+      <div class="tool-desc">N-party batch ceremony walkthrough. Coordinator + participants + FALCON-512 aggregate signature, end-to-end on signet.</div>
+    </a>
+  </div>
 </main>
 
 <footer class="site-footer">

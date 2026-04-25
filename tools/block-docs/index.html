@@ -46,28 +46,6 @@ a:hover { text-decoration: underline; }
 .header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 
 
-.header-nav { position: relative; }
-.nav-dropdown { display: contents; }
-.nav-dropdown-trigger {
-  cursor: pointer; color: var(--text-dim); font-size: 12px; font-weight: 500;
-  text-decoration: none; padding-bottom: 6px; user-select: none;
-}
-.nav-dropdown-trigger::after { content: ' \25BE'; font-size: 9px; }
-.nav-dropdown-trigger:hover { color: var(--accent); }
-.nav-dropdown-trigger.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
-.nav-dropdown-menu {
-  display: none; position: absolute; top: 100%; background: #fff;
-  border: 1px solid var(--border); min-width: 160px; z-index: 10;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
-.nav-dropdown-menu a {
-  display: block; padding: 8px 12px; color: var(--text-dim); font-size: 12px;
-  text-decoration: none; border-bottom: 1px solid var(--border-light);
-}
-.nav-dropdown-menu a:last-child { border-bottom: none; }
-.nav-dropdown-menu a:hover { background: var(--bg-alt); color: var(--accent); }
-.nav-dropdown-trigger:hover + .nav-dropdown-menu,
-.nav-dropdown-menu:hover { display: block; }
 /* -- MAIN -- */
 .main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
 .page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
@@ -121,12 +99,7 @@ a:hover { text-decoration: underline; }
       <a href="../docs/">Docs</a>
       <a href="../patch-overview.html">Patch</a>
       <a href="../get-started.html">Get Started</a>
-      <a class="nav-dropdown-trigger" tabindex="0">Tools</a>
-      <div class="nav-dropdown-menu">
-          <a href="../ladder-engine.html">Engine</a>
-          <a href="../qabio-playground.html">QABIO Playground</a>
-          <a href="../pq-batch-playground.html">PQ Batch Playground</a>
-      </div>
+      <a href="../tools.html">Tools</a>
       <a href="../explorer.html">Explorer</a>
     </nav>
   </div>
