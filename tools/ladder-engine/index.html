@@ -2604,8 +2604,10 @@ const BLOCK_FAMILIES = [
     blocks: [
       { type: 'TIMELOCKED_SIG', label: 'TL_SIG', desc: 'SIG + CSV combined --signature with relative timelock', fields: [
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Public Key', placeholder: '02abcdef...' },
+        // Wire layout (CONDITIONS, PUBKEY stripped): [SCHEME, NUMERIC(blocks)].
+        // Matches library TIMELOCKED_SIG_CONDITIONS layout.
+        { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true },
         { name: 'blocks', dataType: 'NUMERIC', label: 'Timelock (blocks)', placeholder: '144' },
-        { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
       { type: 'HTLC', label: 'HTLC', desc: 'Hash + Timelock + Sig --Lightning HTLC / atomic swap', fields: [
         { name: 'preimage', dataType: 'PREIMAGE', label: 'Payment Preimage', placeholder: 'Hex secret --node computes payment hash' },
@@ -2628,8 +2630,13 @@ const BLOCK_FAMILIES = [
       ]},
       { type: 'CLTV_SIG', label: 'CLTV_SIG', desc: 'SIG + CLTV combined --signature with absolute timelock', fields: [
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Public Key', placeholder: '02abcdef...' },
+        // Wire layout (CONDITIONS context, PUBKEY stripped into Merkle leaf):
+        //   [SCHEME, NUMERIC(height)]
+        // Order in this def.fields list dictates wire emission order, so
+        // SCHEME must precede the NUMERIC to match the library's implicit
+        // CLTV_SIG_CONDITIONS layout.
+        { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true },
         { name: 'height', dataType: 'NUMERIC', label: 'Lock Height', placeholder: '850000' },
-        { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
       { type: 'TIMELOCKED_MULTISIG', label: 'TL_MULTI', desc: 'MULTISIG + CSV combined --M-of-N with relative timelock', fields: [
         { name: 'threshold', dataType: 'NUMERIC', label: 'Threshold (M)', placeholder: '2' },
@@ -2728,6 +2735,11 @@ const BLOCK_FAMILIES = [
         { name: 'owner_id', dataType: 'PUBKEY_COMMIT', label: 'Owner ID', placeholder: '32-byte SHA256(owner Rung 0 FALCON pubkey) (conditions)' },
         { name: 'spend_preimage', dataType: 'PREIMAGE', label: 'Spend Preimage', placeholder: '32-byte preimage at depth committed_depth+1', witnessOnly: true }
       ]},
+      { type: 'PQ_BATCH', label: 'PQ_BATCH', desc: 'PQ batch authorisation --commits SHA256(falcon_pubkey); the anchor input in a tx reveals the pubkey + a PQ signature, and every other input gated by the same hash short-circuits via a tx-level cache. ~18 vB/input amortised across N inputs. The fund flow auto-generates a FALCON-512 keypair when pubkey_hash is empty (writes the SHA256 commit into pubkey_hash and stashes the keypair into pq_pubkey/pq_privkey for the spend signer). To use a pre-existing key, fill pubkey_hash + pq_pubkey + pq_privkey manually.', fields: [
+        { name: 'pubkey_hash', dataType: 'HASH256', label: 'Pubkey Hash', placeholder: 'Auto-filled at fund time --SHA256(pq_pubkey), 32 B (conditions)' },
+        { name: 'pq_pubkey', dataType: 'PUBKEY', label: 'PQ Pubkey (anchor only)', placeholder: 'Auto-filled at fund time --hex FALCON/Dilithium pubkey, used to anchor the spend witness', witnessOnly: true, optional: true },
+        { name: 'pq_privkey', dataType: 'PUBKEY', label: 'PQ Privkey (anchor only)', placeholder: 'Auto-filled at fund time --hex private key, signs the per-input ladder sighash at spend', witnessOnly: true, optional: true }
+      ]},
     ]
   },
 ];
@@ -2815,6 +2827,7 @@ const BLOCK_RULES = {
   P2TR_SCRIPT_LEGACY: 'Legacy P2TR script-path wrapped. HASH256 is Merkle root of script tree, internal key folded into Merkle leaf. Revealed leaf (SCRIPT_BODY) must be valid Ladder Script conditions (up to 32 bytes). Closes the primary inscription/data-embedding vector.',
   QABI_PRIME: 'QABIO priming state transition. Reveals the next auth chain preimage, bumps committed_depth, and mutates the QABI_SPEND rung\'s committed_root + committed_expiry via a covenant check (tx.vout[0] must be an MLSC UTXO whose conditions_root equals the re-computed primed tree). Participant-authorised: only the auth_seed holder can produce a valid preimage. No coordinator signature required at priming time.',
   QABI_SPEND: 'QABIO batch spend. Consensus-enforced N-party atomic batch: each primed input reveals its preimage at committed_depth+1, verifies against committed auth_tip, then a single FALCON-512 coordinator signature (SIGHASH_QABO, 666 B) authorises the whole tx. Output set must bit-exact match the QABIBlock outputs list (tx-level hashOutputs). Tx-level aggregated_sig is shared across all inputs \u2014 one FALCON verify per tx, not per input.',
+  PQ_BATCH: 'PQ batch authorisation. Conditions commit SHA256(pq_pubkey). Exactly one input per (tx, commit) is the "anchor": its witness reveals the pubkey + a PQ signature over the per-input ladder sighash. Every other input gated by the same hash carries no PQ witness and short-circuits via a tx-local cache the anchor populates after its first verify. Scheme derived from pubkey size (897 \u2192 FALCON-512, 1793 \u2192 FALCON-1024, 1952 \u2192 Dilithium3). No priming, no coordinator, no output-set binding \u2014 the simple "key-sharing pool" complement to QABIO.',
 };
 
 // Realistic test data for every block type --deterministic fake keys/hashes
@@ -3383,7 +3396,13 @@ BlockRegistry.HTLC.buildSigner = (block, keyLookup, preimages) => {
   const key = keyLookup(block.values.pubkey);
   const preimage = block.values.preimage || preimages?.[block.values.hash];
   if (!key || !preimage) return null;
-  return { type: 'HTLC', privkey: key.privkey, preimage };
+  // HTLC folds two pubkeys (claimer + refunder) into the Merkle leaf via
+  // PubkeyCountForBlock=2. SignSingleKey pushes the claimer PUBKEY from the
+  // privkey; `pubkeys` carries the refunder so the witness matches fund-time
+  // commitment.
+  const entry = { type: 'HTLC', privkey: key.privkey, preimage };
+  if (block.values.pubkey2) entry.pubkeys = [block.values.pubkey2];
+  return entry;
 };
 
 BlockRegistry.HASH_SIG.buildSigner = (block, keyLookup, preimages, opts) => {
@@ -3473,10 +3492,14 @@ function _findInnerKey(block, keyLookup) {
   return null;
 }
 
+// Library's P2SH/P2WSH/P2TR_SCRIPT witness builders (rpc.cpp:1731-1773) read
+// `preimage` as the serialised-inner-conditions hex. Always emit under that
+// key so the witness's SCRIPT_BODY field is populated. `script_body` is only
+// used by the conditions/fund-time path (auto-HASH256).
 BlockRegistry.P2SH_LEGACY.buildSigner = (block, keyLookup, preimages, opts) => {
   const entry = { type: 'P2SH_LEGACY' };
-  if (block.values.script_body) entry.script_body = block.values.script_body;
-  else if (block.values.preimage) entry.preimage = block.values.preimage;
+  const body = block.values.preimage || block.values.script_body;
+  if (body) entry.preimage = body;
   const key = _findInnerKey(block, keyLookup);
   if (key) entry.privkey = key.privkey;
   return entry;
@@ -3484,8 +3507,8 @@ BlockRegistry.P2SH_LEGACY.buildSigner = (block, keyLookup, preimages, opts) => {
 
 BlockRegistry.P2WSH_LEGACY.buildSigner = (block, keyLookup, preimages, opts) => {
   const entry = { type: 'P2WSH_LEGACY' };
-  if (block.values.script_body) entry.script_body = block.values.script_body;
-  else if (block.values.preimage) entry.preimage = block.values.preimage;
+  const body = block.values.preimage || block.values.script_body;
+  if (body) entry.preimage = body;
   const key = _findInnerKey(block, keyLookup);
   if (key) entry.privkey = key.privkey;
   return entry;
@@ -3493,10 +3516,79 @@ BlockRegistry.P2WSH_LEGACY.buildSigner = (block, keyLookup, preimages, opts) => 
 
 BlockRegistry.P2TR_SCRIPT_LEGACY.buildSigner = (block, keyLookup, preimages, opts) => {
   const entry = { type: 'P2TR_SCRIPT_LEGACY' };
-  if (block.values.script_body) entry.script_body = block.values.script_body;
-  else if (block.values.preimage) entry.preimage = block.values.preimage;
+  const body = block.values.preimage || block.values.script_body;
+  if (body) entry.preimage = body;
   const key = _findInnerKey(block, keyLookup);
   if (key) entry.privkey = key.privkey;
+  return entry;
+};
+
+// ANCHOR_POOL / ANCHOR_RESERVE / ANCHOR_SEAL: consensus EvalAnchor*Block
+// (src/rung/blocks/anchor.cpp) requires VerifyHashPreimageBinding — the
+// witness must reveal a PREIMAGE whose SHA256 equals the committed HASH256.
+// At fund time the PREIMAGE is the raw 32-byte hex from the preset
+// (pool_id / guardian_hash / seal_hash) which the library auto-hashes to
+// HASH256 in conditions_only parsing. At spend time we must echo that same
+// PREIMAGE back so the evaluator's hash binding check passes.
+BlockRegistry.ANCHOR_POOL.buildSigner = (block) => {
+  const entry = { type: 'ANCHOR_POOL' };
+  if (block.values?.pool_id) entry.preimage = block.values.pool_id;
+  return entry;
+};
+
+// ONE_SHOT: the `commitment` field is a hash; consensus requires the witness
+// to reveal SHA256(preimage) == commitment (VerifyHashPreimageBinding in
+// EvalOneShotBlock). At fund time planFund generates a fresh preimage,
+// stores SHA256(preimage) as the commitment, and persists the preimage in
+// the record so the spend can reveal it.
+BlockRegistry.ONE_SHOT.fundNeeds = () => ({ keys: [], hashes: [{ field: 'commitment' }] });
+BlockRegistry.ONE_SHOT.buildSigner = (block) => {
+  const entry = { type: 'ONE_SHOT' };
+  // ONE_SHOT's commitment field has dataType PREIMAGE in the block def —
+  // applyFundKeypairs wrote the raw preimage into values.commitment, not the
+  // hash (library auto-hashes PREIMAGE → HASH256 in CONDITIONS context).
+  // At spend time we reveal the same preimage in the witness so the
+  // library's VerifyHashPreimageBinding sees SHA256(preimage) == committed.
+  // values.preimage also holds the same bytes (set by applyFundKeypairs),
+  // so either works.
+  const preimage = block.values?.preimage || block.values?.commitment;
+  if (preimage) entry.preimage = preimage;
+  return entry;
+};
+
+BlockRegistry.ANCHOR_RESERVE.buildSigner = (block) => {
+  const entry = { type: 'ANCHOR_RESERVE' };
+  if (block.values?.guardian_hash) entry.preimage = block.values.guardian_hash;
+  return entry;
+};
+
+BlockRegistry.ANCHOR_SEAL.buildSigner = (block) => {
+  // ANCHOR_SEAL needs TWO preimages (asset_id + state_hash) per EvalAnchorSealBlock's
+  // HasRequiredHashes(block, 2) check. Library rpc.cpp:1948 witness builder reads
+  // `preimages` (array) OR `preimage` (single) — must send as array for multi-hash.
+  const entry = { type: 'ANCHOR_SEAL' };
+  const a = block.values?.asset_id;
+  const b = block.values?.state_hash;
+  if (a && b) entry.preimages = [a, b];
+  else if (a) entry.preimage = a;
+  return entry;
+};
+
+// PQ_BATCH: anchor inputs reveal {pq_pubkey, pq_privkey, scheme}; the library's
+// signrungtx PQ_BATCH case (src/rung/rpc.cpp) computes the per-input ladder
+// sighash and PQ-signs it. Non-anchor inputs emit only {type: 'PQ_BATCH'} —
+// no witness fields, validated against the tx-local cache populated by the
+// anchor's verify. Auto-generation of the PQ keypair at fund time isn't yet
+// wired; users supply pq_pubkey/pq_privkey hex manually.
+BlockRegistry.PQ_BATCH.buildSigner = (block) => {
+  const entry = { type: 'PQ_BATCH' };
+  const pubHex = block.values?.pq_pubkey;
+  const privHex = block.values?.pq_privkey;
+  if (pubHex && privHex) {
+    entry.scheme = block.values?.scheme || 'FALCON512';
+    entry.pq_pubkey = pubHex;
+    entry.pq_privkey = privHex;
+  }
   return entry;
 };
 
@@ -4036,6 +4128,16 @@ function rungsToConditions(storedRungs) {
     if (rung.relayRefs && rung.relayRefs.length > 0) {
       cond.relay_refs = rung.relayRefs;
     }
+    // Carry the stored coil so recompute at fund-time matches fund-time
+    // commitment (PQ schemes, UNLOCK_TO).
+    const coilType = rung.coilType || 'UNLOCK';
+    const coilScheme = rung.coilScheme || 'SCHNORR';
+    if (coilType !== 'UNLOCK' || coilScheme !== 'SCHNORR' || rung.coilAddress) {
+      cond.coil = { type: coilType, attestation: 'INLINE', scheme: coilScheme };
+      if (coilType === 'UNLOCK_TO' && rung.coilAddress) {
+        cond.coil.address = rung.coilAddress;
+      }
+    }
     return cond;
   });
 }
@@ -4273,12 +4375,20 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
       .map(b => {
         const def = getBlockDef(b.type);
         const fields = [];
+        // P2PKH_LEGACY / P2WPKH_LEGACY: the library auto-converts inline
+        // PUBKEY → HASH160 in conditions_only parsing (conditions commit the
+        // hash, not the pubkey). Keep PUBKEY inline for these block types
+        // so the leaf gets its HASH160 field. Other block types strip
+        // PUBKEYs into the rung-level `pubkeys` array (merkle_pub_key fold).
+        const keepPubkeyInline = (b.type === 'P2PKH_LEGACY' || b.type === 'P2WPKH_LEGACY');
         def.fields.forEach(f => {
           if (f.noWire || f.witnessOnly || f.computed) return;
-          if (f.dataType === 'PUBKEY') return; // pubkeys are separate in TX_MLSC
+          if (f.dataType === 'PUBKEY' && !keepPubkeyInline) return; // pubkeys are separate in TX_MLSC
           const val = b.values[f.name];
           if (!val) return;
-          if (f.dataType === 'NUMERIC') {
+          if (f.dataType === 'PUBKEY') {
+            fields.push({ type: 'PUBKEY', hex: val });
+          } else if (f.dataType === 'NUMERIC') {
             fields.push({ type: 'NUMERIC', hex: toNumericHex(val) });
           } else if (f.dataType === 'SCHEME') {
             const schemeMap = { SCHNORR: '01', ECDSA: '02', FALCON512: '10', FALCON1024: '11', DILITHIUM3: '12', SPHINCS_SHA: '13' };
@@ -4302,10 +4412,14 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
         return out;
       });
 
-    // Collect pubkeys for merkle_pub_key binding
+    // Collect pubkeys for merkle_pub_key binding. P2PKH_LEGACY and
+    // P2WPKH_LEGACY commit their pubkey INLINE as HASH160 in block.fields
+    // (library auto-converts), not via the rung-level pubkeys array, so
+    // skip them here.
     const pubkeys = [];
     rung.blocks.forEach(b => {
       if (b.type === 'OUTPUT_REF') return;
+      if (b.type === 'P2PKH_LEGACY' || b.type === 'P2WPKH_LEGACY') return;
       const def = getBlockDef(b.type);
       def.fields.forEach(f => {
         if (f.dataType !== 'PUBKEY') return;
@@ -4321,10 +4435,98 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
 
     const rungObj = { output_index: outputIdx, blocks };
     if (pubkeys.length > 0) rungObj.pubkeys = pubkeys;
+    // Attach per-rung coil so PQ schemes (FALCON512/DILITHIUM3/SPHINCS_SHA)
+    // bind into the fund-time Merkle leaf. If omitted, createtxmlsc commits
+    // every rung with the default SCHNORR coil, and a spend-time witness
+    // carrying the real scheme fails Merkle reconstruction.
+    const scheme = rung.output.scheme || 'SCHNORR';
+    const coilType = rung.output.wireType || 'UNLOCK';
+    const attestation = rung.output.attestation || 'INLINE';
+    if (scheme !== 'SCHNORR' || coilType !== 'UNLOCK' || attestation !== 'INLINE') {
+      rungObj.coil = { type: coilType, attestation, scheme };
+      if (coilType === 'UNLOCK_TO' && rung.output.address) {
+        rungObj.coil.address = rung.output.address;
+      }
+    }
+    rungObj.__rungRef = rung;
     sharedRungs.push(rungObj);
   });
 
+  // Build relays array: relay rungs become top-level relays keyed by name.
+  // Main rungs reference them via outputRefs (relay names) → relay_refs (indices).
+  const relayRungs = rungs.filter(r => r.output.type === 'relay');
+  const relayNameToIndex = new Map();
+  relayRungs.forEach((r, i) => {
+    const nm = (r.output.name || '').trim().toUpperCase();
+    if (nm) relayNameToIndex.set(nm, i);
+  });
+  const relays = relayRungs.map(r => {
+    const blocks = r.blocks
+      .filter(b => b.type !== 'OUTPUT_REF')
+      .map(b => {
+        const def = getBlockDef(b.type);
+        const fields = [];
+        const keepPubkeyInline = (b.type === 'P2PKH_LEGACY' || b.type === 'P2WPKH_LEGACY');
+        def.fields.forEach(f => {
+          if (f.noWire || f.witnessOnly || f.computed) return;
+          if (f.dataType === 'PUBKEY' && !keepPubkeyInline) return;
+          const val = b.values[f.name];
+          if (!val) return;
+          if (f.dataType === 'PUBKEY') { fields.push({ type: 'PUBKEY', hex: val }); }
+          else if (f.dataType === 'NUMERIC') { fields.push({ type: 'NUMERIC', hex: toNumericHex(val) }); }
+          else if (f.dataType === 'SCHEME') {
+            const schemeMap = { SCHNORR: '01', ECDSA: '02', FALCON512: '10', FALCON1024: '11', DILITHIUM3: '12', SPHINCS_SHA: '13' };
+            fields.push({ type: 'SCHEME', hex: schemeMap[val] || '01' });
+          }
+          else if (f.dataType === 'HASH256') { fields.push({ type: 'HASH256', hex: val }); }
+          else if (f.dataType === 'HASH160') { fields.push({ type: 'HASH160', hex: val }); }
+          else if (f.dataType === 'PREIMAGE') { fields.push({ type: 'PREIMAGE', hex: val }); }
+          else if (f.dataType === 'SCRIPT_BODY') { fields.push({ type: 'SCRIPT_BODY', hex: val }); }
+          else if (f.dataType === 'DATA') { fields.push({ type: 'DATA', hex: val }); }
+          else if (f.dataType === 'PUBKEY_COMMIT') { fields.push({ type: 'PUBKEY_COMMIT', hex: val }); }
+        });
+        const out = { type: b.type, fields };
+        if (b.inverted) out.inverted = true;
+        return out;
+      });
+    const pubkeys = [];
+    r.blocks.forEach(b => {
+      if (b.type === 'OUTPUT_REF') return;
+      if (b.type === 'P2PKH_LEGACY' || b.type === 'P2WPKH_LEGACY') return;
+      const def = getBlockDef(b.type);
+      def.fields.forEach(f => {
+        if (f.dataType !== 'PUBKEY') return;
+        const val = b.values[f.name];
+        if (!val) return;
+        if (f.multi) val.split(',').map(k => k.trim()).filter(Boolean).forEach(k => pubkeys.push(k));
+        else pubkeys.push(val);
+      });
+    });
+    const relayObj = { blocks };
+    if (pubkeys.length > 0) relayObj.pubkeys = pubkeys;
+    if (r.outputRefs && r.outputRefs.length > 0) {
+      const refs = r.outputRefs
+        .map(n => relayNameToIndex.get((n || '').trim().toUpperCase()))
+        .filter(idx => idx !== undefined);
+      if (refs.length > 0) relayObj.relay_refs = refs;
+    }
+    return relayObj;
+  });
+
+  // Wire outputRefs on main rungs to relay_refs indices
+  sharedRungs.forEach(rungObj => {
+    const r = rungObj.__rungRef;
+    delete rungObj.__rungRef;
+    if (r && r.outputRefs && r.outputRefs.length > 0) {
+      const refs = r.outputRefs
+        .map(n => relayNameToIndex.get((n || '').trim().toUpperCase()))
+        .filter(idx => idx !== undefined);
+      if (refs.length > 0) rungObj.relay_refs = refs;
+    }
+  });
+
   const result = { inputs, outputs: amounts, rungs: sharedRungs };
+  if (relays.length > 0) result.relays = relays;
   const lt = parseInt(locktime);
   if (lt > 0) result.locktime = lt;
 
@@ -6128,6 +6330,7 @@ function getTypeHex(type) {
     TIMELOCKED_SIG:'0701',HTLC:'0702',HASH_SIG:'0703',PTLC:'0704',CLTV_SIG:'0705',TIMELOCKED_MULTISIG:'0706',ANCHOR_FEE:'0707',
     EPOCH_GATE:'0801',WEIGHT_LIMIT:'0802',INPUT_COUNT:'0803',OUTPUT_COUNT:'0804',RELATIVE_VALUE:'0805',ACCUMULATOR:'0806',OUTPUT_CHECK:'0807',
     P2PK_LEGACY:'0901',P2PKH_LEGACY:'0902',P2SH_LEGACY:'0903',P2WPKH_LEGACY:'0904',P2WSH_LEGACY:'0905',P2TR_LEGACY:'0906',P2TR_SCRIPT_LEGACY:'0907',
+    QABI_PRIME:'0A01',QABI_SPEND:'0A02',PQ_BATCH:'0A03',
   };
   return map[type] || '????';
 }
@@ -7061,6 +7264,12 @@ const FAKE_PQ = {
   falcon1024: 'f1024aa1bb2cc3dd4ee5ff6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7',
 };
 
+// Module-level holder for preset-level metadata that crosses the App → SignetPanel
+// component boundary. handleLoadExample (in App) writes here; handleFundFromWallet
+// (in SignetPanel) reads. Refs work within one component but not across components,
+// so a plain module variable is the simplest cross-boundary stash.
+const PRESET_META = { cosignCompanion: null };
+
 const FAKE = {
   pk1: '02a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
   pk2: '03f9e8d7c6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a3928170605f4e3d2c1b0',
@@ -7253,6 +7462,23 @@ const EXAMPLES = [
     inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
   {
+    title: 'COSIGN PAIR (end-to-end demo)',
+    desc: 'COSIGN primitive demonstrated end-to-end: the engine auto-funds a partner P2WPKH UTXO, computes SHA256(partner SPK), and wires it as COSIGN\'s conditions_hash in the same flow.\n\nCLAIM: SIG + COSIGN. Spend consumes BOTH the MLSC UTXO AND the partner UTXO in one atomic tx (signrungtx for MLSC input, wallet signs the partner input).\n\nThe companion record is saved to localStorage so the spend flow finds the partner via SPK-hash match.',
+    tags: [['SIG', 'sig'], ['COSIGN', 'plc'], ['COMPANION', 'rec']],
+    cosignCompanion: { amount_sats: 2000 },
+    rungs: [
+      { label: 'CLAIM', blocks: [
+        { type: 'SIG', values: { pubkey: FAKE.pk1 } },
+        { type: 'COSIGN', values: { conditions_hash: FAKE.hash1 } },
+      ], output: { name: 'PAIRED', type: 'standard' } },
+    ],
+    txInputs: [{ txid: FAKE.txid1, vout: 0 }],
+    txOutputs: [
+      { address: FAKE.addr1, amount: 5000 },
+    ],
+    inputMap: [[0]], outputMap: [0],
+  },
+  {
     title: 'PAYMENT CHANNEL',
     desc: 'Lightning-style payment channel. Cooperative close with both sigs, or unilateral close after 1-day CSV timeout.\n\nCOOP: Both Alice and Bob sign to close the channel cooperatively.\nFORCE_A: Alice signs + waits 1 day + CTV commits to final balances.\nFORCE_B: Bob signs + waits 1 day + CTV commits to final balances.',
     tags: [['SIG', 'sig'], ['CSV_TIME', 'time'], ['CTV', 'cov']],
@@ -7368,13 +7594,13 @@ const EXAMPLES = [
   },
   {
     title: 'BLOCK-HEIGHT TIMELOCK + COMPARE',
-    desc: 'Funds locked until block 900,000. After unlock, output amount must be > 10,000 sats. CLTV + COMPARE combo.\n\nSPEND: CLTV enforces block 900,000 minimum, key signs, COMPARE ensures output > 10,000 sats.',
+    desc: 'Funds locked until a minimum block height. After unlock, output amount must be > 10,000 sats. CLTV + COMPARE combo.\n\nSPEND: CLTV enforces block-height minimum, key signs, COMPARE ensures output > 10,000 sats.\n\nDemo note: the preset uses height=50 (always past on any chain) so the example is spendable immediately. Real usage would pick a mainnet-scale height appropriate to the locktime (e.g. 900000 for a long-term escrow).',
     tags: [['CLTV', 'time'], ['COMPARE', 'plc'], ['SIG', 'sig']],
     rungs: [
       { label: 'SPEND', blocks: [
-        { type: 'CLTV', values: { height: '900000' } },
+        { type: 'CLTV', values: { height: '50' } },
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-        { type: 'COMPARE', values: { operator: '3', value_b: '10000' } },
+        { type: 'COMPARE', values: { operator: '3', value_b: '10000', value_c: '0' } },
       ], output: { name: 'AFTER_LOCK', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 3 }],
@@ -7482,7 +7708,7 @@ const EXAMPLES = [
       { txid: FAKE.txid3, vout: 0 },
     ],
     txOutputs: [
-      { address: FAKE.addr1, amount: 75000 },
+      { address: FAKE.addr1, amount: 110000 },
     ],
     inputMap: [[0, 1, 2]], outputMap: [0],
   },
@@ -7525,19 +7751,19 @@ const EXAMPLES = [
   },
   {
     title: 'CLTV_SIG VESTING SCHEDULE',
-    desc: 'Time-locked payouts at specific block heights. Employee vesting with quarterly unlocks using CLTV_SIG compound blocks.\n\nQ1: First quarter vesting --CLTV_SIG unlocks at block 860000 with AMOUNT_LOCK capping payout at 250k sats.\nQ2: Second quarter --same pattern at block 873000, another 250k sats.\nFULL: Final vesting --CLTV_SIG at block 900000 releases the remaining balance with no amount cap.',
+    desc: 'Time-locked payouts at specific block heights. Employee vesting with quarterly unlocks using CLTV_SIG compound blocks.\n\nQ1: First quarter vesting --CLTV_SIG unlocks at a committed height with AMOUNT_LOCK capping payout at 250k sats.\nQ2: Second quarter --same pattern at a later height, another 250k sats.\nFULL: Final vesting --CLTV_SIG at the latest height releases the remaining balance with no amount cap.\n\nDemo note: heights 50/60/70 below are picked so all three rungs are spendable immediately on signet. Real usage would pick mainnet-era heights (e.g. 860000/873000/900000 for quarterly 2024 vesting).',
     tags: [['CLTV_SIG', 'sig'], ['AMT_LOCK', 'cov']],
     rungs: [
       { label: 'Q1', blocks: [
-        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '860000' } },
+        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '50' } },
         { type: 'AMOUNT_LOCK', values: { min: '250000', max: '250000' } },
       ], output: { name: 'Q1_VEST', type: 'standard' } },
       { label: 'Q2', blocks: [
-        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '873000' } },
+        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '60' } },
         { type: 'AMOUNT_LOCK', values: { min: '250000', max: '250000' } },
       ], output: { name: 'Q2_VEST', type: 'standard' } },
       { label: 'FULL', blocks: [
-        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '900000' } },
+        { type: 'CLTV_SIG', values: { pubkey: FAKE.pk1, height: '70' } },
       ], output: { name: 'FULL_VEST', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid3, vout: 0 }],
@@ -7578,7 +7804,9 @@ const EXAMPLES = [
     tags: [['HTLC', 'compound'], ['SIG', 'sig']],
     rungs: [
       { label: 'CLAIM', blocks: [
-        { type: 'HTLC', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1, blocks: '144' } },
+        // HTLC commits 2 pubkeys into the Merkle leaf (claimer + refunder).
+        // Both must appear so the leaf matches at spend time.
+        { type: 'HTLC', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1, pubkey2: FAKE.pk2, blocks: '144' } },
       ], output: { name: 'HTLC', type: 'standard' } },
       { label: 'REFUND', blocks: [
         { type: 'TIMELOCKED_SIG', values: { pubkey: FAKE.pk2, blocks: '288' } },
@@ -7658,11 +7886,11 @@ const EXAMPLES = [
 
   {
     title: 'CLTV_TIME CALENDAR LOCK',
-    desc: 'Date-locked payment using absolute Unix timestamp. Funds cannot move until January 1, 2027. HASH_SIG adds a hash-gated signature requirement.\n\nUNLOCK: CLTV_TIME enforces Jan 1 2027 timestamp, HASH_SIG requires preimage reveal + signature.\nCANCEL: Two SIG blocks, both parties must cooperate to cancel before the date.',
+    desc: 'Date-locked payment using absolute Unix timestamp. Funds cannot move before the committed date. HASH_SIG adds a hash-gated signature requirement.\n\nUNLOCK: CLTV_TIME enforces absolute-timestamp minimum, HASH_SIG requires preimage reveal + signature.\nCANCEL: Two SIG blocks, both parties must cooperate to cancel before the date.\n\nDemo note: timestamp=1 is always in the past, so UNLOCK is spendable immediately on signet. Real usage would pick a mainnet-era Unix timestamp (e.g. 1798761600 for 2027-01-01).',
     tags: [['CLTV_TIME', 'time'], ['HASH_SIG', 'hash'], ['SIG', 'sig']],
     rungs: [
       { label: 'UNLOCK', blocks: [
-        { type: 'CLTV_TIME', values: { timestamp: '1798761600' } },
+        { type: 'CLTV_TIME', values: { timestamp: '1' } },
         { type: 'HASH_SIG', values: { preimage: FAKE.preimage1, pubkey: FAKE.pk1 } },
       ], output: { name: 'LOCKED', type: 'standard' } },
       { label: 'CANCEL', blocks: [
@@ -7863,8 +8091,8 @@ const EXAMPLES = [
   },
 
   {
-    title: 'LEGACY P2SH MULTISIG VAULT',
-    desc: 'P2SH legacy wrapping inner Ladder Script conditions --the PREIMAGE carries serialised conditions that are deserialised and evaluated. Combines with a P2WPKH hot-spend path and CLTV cold sweep.\n\nHOT: P2WPKH_LEGACY --SegWit-wrapped hash-based spend, delegates to P2PKH evaluation internally.\nVAULT: P2SH_LEGACY --HASH160 of inner conditions committed on-chain; PREIMAGE reveals the Ladder Script conditions at spend time.\nCOLD: CLTV at block 900000 + native SIG --absolute timelock cold sweep.',
+    title: 'LEGACY P2SH VAULT',
+    desc: 'P2SH legacy wrapping inner Ladder Script conditions --the PREIMAGE carries serialised conditions that are deserialised and evaluated. Combines with a P2WPKH hot-spend path and CLTV cold sweep.\n\nHOT: P2WPKH_LEGACY --SegWit-wrapped hash-based spend, delegates to P2PKH evaluation internally.\nVAULT: P2SH_LEGACY --HASH160 of inner conditions (single SIG) committed on-chain; PREIMAGE reveals the Ladder Script conditions at spend time.\nCOLD: CLTV at block 50 + native SIG --absolute timelock cold sweep (demo height; mainnet would use a real future height).',
     tags: [['P2SH', 'legacy'], ['P2WPKH', 'legacy'], ['CLTV', 'time']],
     rungs: [
       { label: 'HOT', blocks: [
@@ -7875,7 +8103,7 @@ const EXAMPLES = [
           innerBlocks: [{ id: uid(), type: 'SIG', values: { pubkey: FAKE.pk2, scheme: 'SCHNORR' } }] },
       ], output: { name: 'VAULT', type: 'standard' } },
       { label: 'COLD', blocks: [
-        { type: 'CLTV', values: { height: '900000' } },
+        { type: 'CLTV', values: { height: '50' } },
         { type: 'SIG', values: { pubkey: FAKE.pk3, scheme: 'SCHNORR' } },
       ], output: { name: 'VAULT', type: 'standard' } },
     ],
@@ -7910,6 +8138,21 @@ const EXAMPLES = [
     inputMap: [[0], [0], [0]], outputMap: [0, 0, 0],
   },
 
+  {
+    title: 'PQ BATCH POOL',
+    desc: 'Pool of UTXOs sharing one FALCON-512 key. PQ_BATCH commits SHA256(falcon_pubkey) at fund time. The "anchor" input in the spend tx reveals the pubkey + a FALCON signature once; every other input gated by the same hash short-circuits via a tx-local cache the anchor populates. Net cost ~18 vB/input vs ~400 vB/input for separate FALCON sigs.\n\nPOOL_KEY: PQ_BATCH gates the UTXO with the pubkey commit. The fund flow auto-generates a fresh FALCON-512 keypair, computes SHA256(pubkey), and writes both the commit (into pubkey_hash, on-chain) and the keypair (into block.values, persisted with the record so the spend can sign).\n\nThis preset funds + spends ONE PQ_BATCH UTXO end-to-end. The multi-input "anchor + cache" cost amortisation lives in the consensus + functional test (test/functional/feature_rung_pq_batch.py); the engine spend handler is single-input.',
+    tags: [['PQ_BATCH', 'sig'], ['FALCON', 'sig']],
+    rungs: [
+      { label: 'POOL_KEY', blocks: [
+        { type: 'PQ_BATCH', values: { pubkey_hash: '', scheme: 'FALCON512' } },
+      ], output: { name: 'POOL', type: 'standard' } },
+    ],
+    txInputs: [{ txid: FAKE.txid1, vout: 0 }],
+    txOutputs: [
+      { address: FAKE.addr1, amount: 100000 },
+    ],
+    inputMap: [[0]], outputMap: [0],
+  },
   {
     title: 'SINGLE SIG (SPHINCS+)',
     desc: 'Post-quantum single signature using NIST FIPS 205 SPHINCS+-SHA2 (SLH-DSA). Hash-based stateless signatures (~49,216 bytes). Most conservative PQ assumption --security relies only on hash function strength, not lattice hardness.',
@@ -7948,7 +8191,8 @@ const EXAMPLES = [
     rungs: [
       { label: 'DECAY', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-        { type: 'RECURSE_DECAY', values: { max_depth: '10', block_idx: '0', param_idx: '0', decay_per_step: '1' } },
+        { type: 'COUNTER_DOWN', values: { pubkey: FAKE.pk1, count: '10' } },
+        { type: 'RECURSE_DECAY', values: { max_depth: '10', block_idx: '1', param_idx: '0', decay_per_step: '1' } },
       ], output: { name: 'DECAYED', type: 'standard' } },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
@@ -7959,23 +8203,59 @@ const EXAMPLES = [
   },
   {
     title: 'KEY_REF_SIG RELAY KEY',
-    desc: 'Signature using a key commitment from a relay block. The signing key is referenced from another block in the same rung via relay index, enabling cross-block key sharing.\n\nVERIFY: SIG block commits the key in Merkle leaf. KEY_REF_SIG references it by relay index.',
-    tags: [['KEY_REF', 'sig'], ['SIG', 'sig']],
+    desc: 'Signature using a key commitment from a separate relay block. The signing key is committed once in a relay (shared condition set) and referenced by any rung via relay_index. Saves ~30 bytes per rung vs inlining the key.\n\nKEY_RELAY: Standalone relay rung holding the pubkey in a SIG block. Not tied to any output.\nVERIFY: Main rung that references the relay via KEY_REF_SIG(relay_index=0, block_index=0).',
+    tags: [['KEY_REF', 'sig'], ['SIG', 'sig'], ['RELAY', 'rec']],
     rungs: [
-      { label: 'VERIFY', blocks: [
+      { label: 'KEY_RELAY', blocks: [
         { type: 'SIG', values: { pubkey: FAKE.pk1 } },
+      ], output: { name: 'SHARED_KEY', type: 'relay' } },
+      { label: 'VERIFY', blocks: [
         { type: 'KEY_REF_SIG', values: { relay_index: '0', block_index: '0' } },
-      ], output: { name: 'VERIFIED', type: 'standard' } },
+      ], output: { name: 'VERIFIED', type: 'standard' }, outputRefs: ['SHARED_KEY'] },
     ],
     txInputs: [{ txid: FAKE.txid1, vout: 0 }],
     txOutputs: [
       { address: FAKE.addr1, amount: 25000 },
     ],
-    inputMap: [[0]], outputMap: [0],
+    inputMap: [[], [0]], outputMap: [null, 0],
   },
   {
-    title: 'LEGACY P2WSH MULTISIG',
-    desc: 'P2WSH legacy wrapping inner Ladder Script conditions. The HASH256 of serialised conditions is committed on-chain; PREIMAGE reveals them at spend time. SegWit witness discount applies.\n\nSPEND: P2WSH_LEGACY with inner SIG block.\nFALLBACK: Native CSV + SIG recovery.',
+    title: 'RELAY SHARING FAN-OUT',
+    desc: 'Four spend paths share a single relay-committed key. The KEY_RELAY holds the pubkey once; DAILY/WEEKLY/MONTHLY/EMERGENCY rungs each reference it via KEY_REF_SIG, avoiding pubkey duplication across leaves.\n\nReal-world shape: spending policy with several time/amount-gated paths all authorised by the same key. At spend time you reveal ONE rung + the relay; the relay cost amortises as rung count grows.',
+    tags: [['KEY_REF', 'sig'], ['RELAY', 'rec'], ['CSV', 'time'], ['AMOUNT_LOCK', 'anchor']],
+    rungs: [
+      { label: 'KEY_RELAY', blocks: [
+        { type: 'SIG', values: { pubkey: FAKE.pk1 } },
+      ], output: { name: 'SHARED_KEY', type: 'relay' } },
+      { label: 'DAILY', blocks: [
+        { type: 'KEY_REF_SIG', values: { relay_index: '0', block_index: '0' } },
+        { type: 'AMOUNT_LOCK', values: { min: '0', max: '10000' } },
+      ], output: { name: 'UNLOCK_DAILY', type: 'standard' }, outputRefs: ['SHARED_KEY'] },
+      { label: 'WEEKLY', blocks: [
+        { type: 'CSV', values: { blocks: '10' } },
+        { type: 'KEY_REF_SIG', values: { relay_index: '0', block_index: '0' } },
+      ], output: { name: 'UNLOCK_WEEKLY', type: 'standard' }, outputRefs: ['SHARED_KEY'] },
+      { label: 'MONTHLY', blocks: [
+        { type: 'CSV', values: { blocks: '20' } },
+        { type: 'KEY_REF_SIG', values: { relay_index: '0', block_index: '0' } },
+      ], output: { name: 'UNLOCK_MONTHLY', type: 'standard' }, outputRefs: ['SHARED_KEY'] },
+      { label: 'EMERGENCY', blocks: [
+        { type: 'CSV', values: { blocks: '50' } },
+        { type: 'KEY_REF_SIG', values: { relay_index: '0', block_index: '0' } },
+      ], output: { name: 'UNLOCK_EMERGENCY', type: 'standard' }, outputRefs: ['SHARED_KEY'] },
+    ],
+    txInputs: [{ txid: FAKE.txid1, vout: 0 }],
+    txOutputs: [
+      // 8,000 sats fits under DAILY's 10k AMOUNT_LOCK cap so the DAILY path
+      // can drain the UTXO in one spend. For the timelocked rungs, any
+      // amount works since they have no value cap.
+      { address: FAKE.addr1, amount: 8000 },
+    ],
+    inputMap: [[], [0], [0], [0], [0]], outputMap: [null, 0, 0, 0, 0],
+  },
+  {
+    title: 'LEGACY P2WSH',
+    desc: 'P2WSH legacy wrapping inner Ladder Script conditions. The HASH256 of serialised conditions is committed on-chain; PREIMAGE reveals them at spend time. SegWit witness discount applies.\n\nSPEND: P2WSH_LEGACY with inner single SIG block.\nFALLBACK: Native CSV + SIG recovery.',
     tags: [['P2WSH', 'legacy'], ['CSV', 'time'], ['SIG', 'sig']],
     rungs: [
       { label: 'SPEND', blocks: [
@@ -8073,116 +8353,6 @@ const EXAMPLES = [
     ],
     inputMap: [[0]], outputMap: [0],
   },
-  {
-    title: 'QABIO UTXO --FRESH (unprimed)',
-    desc: 'A brand-new QABIO-enabled UTXO with the standard 3-rung deployment shape. Not yet primed for any specific batch. Three spend paths: the SIG escape rung (participant sweeps unilaterally with their own key), the QABI_PRIME rung (participant opts the UTXO into a specific upcoming coordinator batch), and the QABI_SPEND rung (coordinator-driven batch spend, only valid after priming).\n\nESCAPE: Participant spends with their own key, no coordinator involvement.\nPRIME:   Participant reveals auth-chain preimage to commit into a batch.\nSPEND:   Coordinator finalises the batch (only after a QABI_PRIME has set committed_root).',
-    tags: [['SIG', 'sig'], ['QABI_PRIME', 'qabi'], ['QABI_SPEND', 'qabi']],
-    rungs: [
-      { label: 'ESCAPE', blocks: [
-        { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-      ], output: { name: 'PARTICIPANT_SWEEP', type: 'standard' } },
-      { label: 'PRIME', blocks: [
-        { type: 'QABI_PRIME', values: {
-            new_committed_root: FAKE.hash1,
-            prime_depth: '10',
-            new_committed_expiry: '500',
-            prime_preimage: FAKE.hash2,
-        } },
-      ], output: { name: 'PRIMED_UTXO', type: 'standard' } },
-      { label: 'SPEND', blocks: [
-        { type: 'QABI_SPEND', values: {
-            auth_tip: FAKE.hash3,
-            committed_root: '0000000000000000000000000000000000000000000000000000000000000000',
-            committed_depth: '0',
-            committed_expiry: '0',
-            owner_id: FAKE.hash4,
-            spend_preimage: FAKE.preimage1,
-        } },
-      ], output: { name: 'BATCH_PAYOUT', type: 'standard' } },
-    ],
-    txInputs: [{ txid: FAKE.txid1, vout: 0 }],
-    txOutputs: [
-      { address: FAKE.addr1, amount: 49990 },
-      { address: FAKE.addr2, amount: 49980 },
-      { address: FAKE.addr3, amount: 49970 },
-    ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
-  },
-  {
-    title: 'QABIO UTXO --PRIMED',
-    desc: 'The same QABIO UTXO after a QABI_PRIME has fired. committed_root now points at a specific coordinator batch, committed_depth is 10, committed_expiry is 500. The QABI_SPEND rung is now valid for that batch --the coordinator can finalise it by signing once with FALCON-512 over the whole batch tx. The SIG escape rung is STILL valid: if the coordinator bails, the participant can sweep via the SIG rung using their own key. The QABI_PRIME rung can still fire again to re-prime at a deeper auth depth if the current batch misses its window.\n\nESCAPE: Unchanged --still works if the coordinator disappears.\nRE_PRIME: Participant can prime again at a deeper auth depth, committing to a different batch.\nSPEND:   Coordinator finalises --single FALCON-512 sig authorises the whole N-party tx.',
-    tags: [['SIG', 'sig'], ['QABI_PRIME', 'qabi'], ['QABI_SPEND', 'qabi']],
-    rungs: [
-      { label: 'ESCAPE', blocks: [
-        { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-      ], output: { name: 'PARTICIPANT_SWEEP', type: 'standard' } },
-      { label: 'RE_PRIME', blocks: [
-        { type: 'QABI_PRIME', values: {
-            new_committed_root: FAKE.hash4,
-            prime_depth: '20',
-            new_committed_expiry: '1000',
-            prime_preimage: FAKE.hash2,
-        } },
-      ], output: { name: 'RE_PRIMED', type: 'standard' } },
-      { label: 'SPEND', blocks: [
-        { type: 'QABI_SPEND', values: {
-            auth_tip: FAKE.hash3,
-            committed_root: FAKE.hash1,
-            committed_depth: '10',
-            committed_expiry: '500',
-            owner_id: FAKE.hash4,
-            spend_preimage: FAKE.preimage1,
-        } },
-      ], output: { name: 'BATCH_PAYOUT', type: 'standard' } },
-    ],
-    txInputs: [{ txid: FAKE.txid2, vout: 0 }],
-    txOutputs: [
-      { address: FAKE.addr4, amount: 49970 },
-      { address: FAKE.addr5, amount: 49960 },
-      { address: FAKE.addr6, amount: 49950 },
-    ],
-    inputMap: [[0], [0], [0]], outputMap: [0, 1, 2],
-  },
-  {
-    title: 'QABIO COORDINATOR BAILS --ESCAPE',
-    desc: 'The safety-test shape: a minimal 1-rung MLSC UTXO a participant sweeps into via the SIG escape rung after the coordinator has disappeared mid-batch. This is the destination of the escape path from the PRIMED example above --the participant produces a Schnorr signature under their own key, the primed UTXO is consumed, and the funds land in a fresh MLSC(SIG-only) UTXO they control unilaterally.\n\nSIG_ONLY: Single-key Schnorr signature. Spendable any time. No coordinator, no preimage, no batch state --just a normal one-of-one key-controlled UTXO that happens to live in the MLSC envelope.',
-    tags: [['SIG', 'sig']],
-    rungs: [
-      { label: 'SIG_ONLY', blocks: [
-        { type: 'SIG', values: { pubkey: FAKE.pk1 } },
-      ], output: { name: 'RECOVERED', type: 'standard' } },
-    ],
-    txInputs: [{ txid: FAKE.txid3, vout: 0 }],
-    txOutputs: [
-      { address: FAKE.addr1, amount: 49950 },
-    ],
-    inputMap: [[0]], outputMap: [0],
-  },
-  {
-    title: 'QABIO BATCH PAYOUT --COORDINATOR VIEW',
-    desc: 'The tx a coordinator constructs when finalising an N-party batch. Single QABI_SPEND rung authorises the whole tx; the FALCON-512 aggregated_sig (666 bytes, tx-level) is verified once per tx and shared across every primed input. In practice each primed input has its own QABI_SPEND witness revealing its own spend_preimage, but the ladder structure is the same --N copies of this rung, one per input, all consuming the same tx-level signature.\n\nSPEND: All 9 QABI_SPEND consensus checks run per-input, but the expensive FALCON verify is cached across inputs (~865 us/input at N=1000).',
-    tags: [['QABI_SPEND', 'qabi']],
-    rungs: [
-      { label: 'SPEND', blocks: [
-        { type: 'QABI_SPEND', values: {
-            auth_tip: FAKE.hash3,
-            committed_root: FAKE.hash1,
-            committed_depth: '10',
-            committed_expiry: '500',
-            owner_id: FAKE.hash4,
-            spend_preimage: FAKE.preimage1,
-        } },
-      ], output: { name: 'BATCH_OUT', type: 'standard' } },
-    ],
-    txInputs: [{ txid: FAKE.txid4, vout: 0 }],
-    txOutputs: [
-      { address: FAKE.addr1, amount: 12500 },
-      { address: FAKE.addr2, amount: 12500 },
-      { address: FAKE.addr3, amount: 12500 },
-      { address: FAKE.addr4, amount: 12400 },
-    ],
-    inputMap: [[0]], outputMap: [0, 1, 2, 3],
-  },
 ];
 
 function ExamplesModal({ onClose, onLoad }) {
@@ -8192,6 +8362,9 @@ function ExamplesModal({ onClose, onLoad }) {
         <div className="examples-modal-header">
           <h2>EXAMPLE PROGRAMS</h2>
           <button className="examples-modal-close" onClick={onClose}>CLOSE [ESC]</button>
+        </div>
+        <div style={{ padding: '10px 16px', margin: '0 0 12px 0', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          QABIO primitives (QABI_PRIME / QABI_SPEND) need multi-transaction orchestration that this engine can't demonstrate in a single preset. For end-to-end QABIO batch flows, see the <a href="/qabio-playground.html" target="_blank" style={{ color: 'var(--amber)', textDecoration: 'underline' }}>QABIO Playground</a>. The PQ_BATCH preset funds + spends one UTXO end-to-end here; for the multi-input cache amortisation demo (N inputs sharing one FALCON commit, anchor + cache reads), see the <a href="/pq-batch-playground.html" target="_blank" style={{ color: 'var(--cyan)', textDecoration: 'underline' }}>PQ Batch Playground</a>.
         </div>
         <div className="examples-grid">
           {EXAMPLES.map((ex, i) => (
@@ -8852,10 +9025,28 @@ function applyFundKeypairs(rungs, oldToNew, emptyKeyMap, hashReplacements, schem
         }
       });
 
-      // Replace hash values with real hashes and store preimage (node-computed hash model)
+      // Replace hash values with real hashes and store preimage (node-computed hash model).
+      //
+      // The tricky bit: different blocks emit their commit field on-wire with
+      // DIFFERENT dataTypes. Some use HASH256 directly (the library expects the
+      // final hash), others use PREIMAGE (the library SHA256s whatever the
+      // field holds). We key off the block def's field dataType:
+      //   - HASH256 dataType: write `hr.hash` to values[field]  (library commits as-is)
+      //   - PREIMAGE dataType: write `hr.preimage` to values[field] (library auto-hashes)
+      // ONE_SHOT is the PREIMAGE case — its `commitment` field is declared
+      // PREIMAGE in the block def, so we must write the raw preimage and let
+      // the library hash it. Writing the hash here would cause double-hashing.
       const hr = hashReplacements.get(`${ri}:${bi}`);
       if (hr) {
-        if (vals.hash !== undefined) vals.hash = hr.hash;
+        const hashFieldName = hr.field || 'hash';
+        const def = getBlockDef(block.type);
+        const fieldDef = def?.fields?.find(f => f.name === hashFieldName);
+        const storesPreimage = fieldDef?.dataType === 'PREIMAGE';
+        if (vals[hashFieldName] !== undefined) {
+          vals[hashFieldName] = storesPreimage ? hr.preimage : hr.hash;
+        } else if (vals.hash !== undefined) {
+          vals.hash = hr.hash;
+        }
         vals.preimage = hr.preimage;
       }
 
@@ -8898,7 +9089,15 @@ function applyFundKeypairs(rungs, oldToNew, emptyKeyMap, hashReplacements, schem
  * @param {string} scheme          - signing scheme
  * @returns {Array} snapshot entries: { label, vout, blocks, coilType, coilAddress }
  */
-function buildRungSnapshot(rungs, newOutputs, oldToNew, emptyKeyMap, hashReplacements, scheme) {
+function buildRungSnapshot(rungs, newOutputs, oldToNew, emptyKeyMap, hashReplacements, scheme, allRungs) {
+  // Build relay-name→index map so per-rung outputRefs can be resolved to
+  // relay_refs (consumed by KEY_REF_SIG's ctx.rung_relay_refs at spend time).
+  const relayRungs = (allRungs || rungs).filter(rr => rr.output?.type === 'relay');
+  const relayNameToIndex = new Map();
+  relayRungs.forEach((rr, idx) => {
+    const nm = (rr.output?.name || '').trim().toUpperCase();
+    if (nm) relayNameToIndex.set(nm, idx);
+  });
   return rungs.map((r, ri) => {
     const updatedBlocks = r.blocks.map((block, bi) => {
       const reg = BlockRegistry[block.type];
@@ -8926,6 +9125,12 @@ function buildRungSnapshot(rungs, newOutputs, oldToNew, emptyKeyMap, hashReplace
         bv.preimage = hr.preimage;
       }
       const entry = { type: block.type, values: bv };
+      // `inverted` is part of the structural template hashed into the
+      // Merkle leaf at fund time; dropping it here means spend-time leaf
+      // reconstruction will hash a different preimage. TIMER_CONTINUOUS
+      // (inverted) and any other NOT-gated block would fail Merkle
+      // verification without this.
+      if (block.inverted) entry.inverted = true;
       // Preserve innerBlocks for script-hash legacy blocks
       if (block.innerBlocks && block.innerBlocks.length > 0) {
         entry.innerBlocks = block.innerBlocks.map(ib => {
@@ -8951,7 +9156,12 @@ function buildRungSnapshot(rungs, newOutputs, oldToNew, emptyKeyMap, hashReplace
       coilAddress = matchedOut?.address || null;
     }
     const coilScheme = r.output?.scheme || scheme || 'SCHNORR';
-    return { label: r.label, vout: voutIdx >= 0 ? voutIdx : null, blocks: updatedBlocks, coilType, coilAddress, coilScheme };
+    const relayRefs = (r.outputRefs || [])
+      .map(n => relayNameToIndex.get((n || '').trim().toUpperCase()))
+      .filter(idx => idx !== undefined);
+    const entry = { label: r.label, vout: voutIdx >= 0 ? voutIdx : null, blocks: updatedBlocks, coilType, coilAddress, coilScheme };
+    if (relayRefs.length > 0) entry.relayRefs = relayRefs;
+    return entry;
   });
 }
 
@@ -9031,6 +9241,11 @@ function planSpend(record, options) {
       if (leaves.length > 0) {
         needsAccumulatorProof = true;
         accumulatorLeaves = leaves;
+        // Push a placeholder so the async proof step can replace it IN PLACE,
+        // preserving block order. Without this, the ACCUMULATOR gets appended
+        // at the end and conditions↔witness block-type alignment breaks at
+        // MergeConditionsAndWitness ("block type mismatch in rung N block M").
+        signerBlocks.push({ type: b.type });
       } else {
         warnings.push('ACCUMULATOR: no merkle_leaves stored --proof cannot be generated');
         signerBlocks.push({ type: b.type });
@@ -9538,6 +9753,11 @@ function SignetPanel() {
           ctvOutputsMap: signingData.ctvOutputsMap,
         });
         saveRecord(record);
+        // Persist the COSIGN companion partner UTXO record so the spend-time
+        // co-input lookup (line ~10820) can find it via SPK-hash match.
+        if (signingData.cosignCompanion) {
+          saveRecord(signingData.cosignCompanion);
+        }
       }
     }
   };
@@ -9610,15 +9830,108 @@ function SignetPanel() {
 
     // 4. Generate preimages for hash blocks (async API calls)
     const preimagesGenerated = [];
-    const hashReplacements = new Map(); // "ri:bi" -> { preimage, hash }
+    const hashReplacements = new Map(); // "ri:bi" -> { preimage, hash, field }
     for (const hf of hashFields) {
       const pi = await apiCall('/api/ladder/preimage', undefined, true);
       if (pi) {
         const newHash = hf.hashType === 'hash160' ? pi.hash160 : pi.sha256;
-        hashReplacements.set(`${hf.ri}:${hf.bi}`, { preimage: pi.preimage, hash: newHash });
-        preimagesGenerated.push({ preimage: pi.preimage, hash: newHash, type: hf.hashType, ri: hf.ri, bi: hf.bi });
+        // `field` carries the block's hash-value field name (e.g. 'commitment'
+        // for ONE_SHOT, 'hash' for HTLC/HASH_SIG). applyFundKeypairs uses it
+        // to update the right values entry.
+        hashReplacements.set(`${hf.ri}:${hf.bi}`, { preimage: pi.preimage, hash: newHash, field: hf.field });
+        preimagesGenerated.push({ preimage: pi.preimage, hash: newHash, type: hf.hashType, ri: hf.ri, bi: hf.bi, field: hf.field });
       }
     }
+
+    // 4b. COSIGN companion flow. When the loaded preset has `cosignCompanion`,
+    //     auto-fund a partner P2WPKH UTXO and wire SHA256(partner SPK) as the
+    //     conditions_hash of every COSIGN block. A stub record is saved to
+    //     localStorage so the spend-time co-input lookup (line ~10820) finds
+    //     the partner by SPK-hash match.
+    let cosignCompanionRecord = null;
+    const cosignCompanionCfg = PRESET_META.cosignCompanion;
+    if (cosignCompanionCfg) {
+      const partnerAmount = parseInt(cosignCompanionCfg.amount_sats) || 2000;
+      const partnerKp = await apiCall('/api/ladder/wallet/keypair');
+      if (!partnerKp) { setError('COSIGN companion: failed to get partner keypair.'); return; }
+      const partnerTx = await apiCall('/api/ladder/wallet/sendtoaddress',
+        { address: partnerKp.address, amount_sats: partnerAmount });
+      if (!partnerTx || !partnerTx.txid) { setError('COSIGN companion: failed to fund partner UTXO.'); return; }
+
+      // Compute SHA256(partner scriptPubKey) — this is the value COSIGN's
+      // evaluator checks against for each other input's spent SPK.
+      const spkBytes = hexToBytes(partnerTx.scriptPubKey);
+      const condHashBytes = await sha256Bytes(spkBytes);
+      const condHashHex = bytesToHex(condHashBytes);
+
+      // Wire the hash into every COSIGN block in rungs. Dispatch via setRungs
+      // (not direct mutation) so React state captures the update for later
+      // reads by buildRungSnapshot / exportCreateTxMLSC.
+      setRungs(prev => prev.map(r => ({
+        ...r,
+        blocks: (r.blocks || []).map(b => b.type === 'COSIGN'
+          ? { ...b, values: { ...b.values, conditions_hash: condHashHex } }
+          : b),
+      })));
+      // Also mutate the local closure's rungs so downstream steps in this
+      // same invocation (applyFundKeypairs, buildRungSnapshot) see the new
+      // hash before React re-renders.
+      for (const r of rungs) {
+        for (const b of (r.blocks || [])) {
+          if (b.type === 'COSIGN') {
+            b.values = { ...b.values, conditions_hash: condHashHex };
+          }
+        }
+      }
+      console.log('[fund] COSIGN conditions_hash wired to', condHashHex);
+
+      // Save a minimal companion record keyed by partner txid+vout. The
+      // co-input lookup fetches the tx via /api/ladder/tx/<txid> to verify
+      // the SPK, so the record only needs { txid, vout } plus enough marker
+      // fields that loadAllRecords returns it.
+      cosignCompanionRecord = {
+        txid: partnerTx.txid,
+        vout: partnerTx.vout,
+        type: 'cosign-companion',
+        scriptPubKey: partnerTx.scriptPubKey,
+        amount: partnerAmount,
+        walletKey: partnerKp,       // privkey for later wallet sign step
+        conditionKeys: [],
+        preimages: [],
+        rungs: [],                   // empty — signrungtx skips non-MLSC inputs
+      };
+      console.log('[fund] COSIGN companion partner ' + partnerTx.txid + ':' + partnerTx.vout
+        + ' SPK-hash=' + condHashHex.substring(0, 16) + '...');
+    }
+
+    // 4c. PQ_BATCH plumbing. The block commits SHA256(pq_pubkey) at fund time;
+    //     the keypair is generated here, the commit is written into pubkey_hash
+    //     (the on-chain conditions field), and pq_pubkey/pq_privkey are stashed
+    //     into block.values so the persisted record carries them through to the
+    //     spend-time signer. PQ_BATCH.fundNeeds returns no keys, so this runs
+    //     independently of the global isPQ keypair pool.
+    for (const r of rungs) {
+      for (const b of (r.blocks || [])) {
+        if (b.type !== 'PQ_BATCH') continue;
+        if (b.values?.pubkey_hash && b.values.pubkey_hash !== '') continue;
+        const scheme = b.values?.scheme || 'FALCON512';
+        const kp = await apiCall('/api/ladder/pq/keypair', { scheme });
+        if (!kp) { setError('PQ_BATCH: failed to generate ' + scheme + ' keypair (check liboqs).'); return; }
+        const pkBytes = hexToBytes(kp.pubkey);
+        const commitBytes = await sha256Bytes(pkBytes);
+        const commitHex = bytesToHex(commitBytes);
+        b.values = {
+          ...(b.values || {}),
+          pubkey_hash: commitHex,
+          pq_pubkey: kp.pubkey,
+          pq_privkey: kp.privkey,
+          scheme,
+        };
+        console.log('[fund] PQ_BATCH: generated ' + scheme + ' keypair, commit=' + commitHex.substring(0, 16) + '...');
+      }
+    }
+    // Mirror the local mutation into React state so the persisted record sees it.
+    setRungs(prev => prev.map((r, ri) => ({ ...r, blocks: rungs[ri]?.blocks ? [...rungs[ri].blocks] : r.blocks })));
 
     // 5. Map old fake pubkeys to new pubkeys
     const oldToNew = new Map();
@@ -9641,7 +9954,13 @@ function SignetPanel() {
 
     // 6-legacy removed --HASH160(pubkey) for P2PKH/P2WPKH now computed by node via PUBKEY→HASH160 auto-conversion.
 
-    // 6-inner. Serialize inner conditions for P2SH/P2WSH/P2TR_SCRIPT legacy blocks
+    // 6-inner. Serialize inner conditions for P2SH/P2WSH/P2TR_SCRIPT legacy blocks.
+    // Uses /api/ladder/serialiseconditions (future work #12, 2026-04-24) which
+    // calls the dedicated library RPC that returns SerializeLadderWitness(ladder,
+    // CONDITIONS) bytes — the exact format EvalInnerConditions expects at spend
+    // time. The previous approach (wrap-in-dummy-tx + strip scriptPubKey prefix)
+    // produced a 32-byte MLSC root, not a serialised LadderWitness, so the
+    // revealed body couldn't be deserialised at spend.
     for (let ri = 0; ri < updatedRungs.length; ri++) {
       for (let bi = 0; bi < updatedRungs[ri].blocks.length; bi++) {
         const block = updatedRungs[ri].blocks[bi];
@@ -9652,34 +9971,25 @@ function SignetPanel() {
         const updatedInner = block.innerBlocks;
 
         // Build wire-format conditions from inner blocks
-        const innerConditions = [{ blocks: updatedInner.map(exportBlockFields) }];
+        const innerRungs = [{ blocks: updatedInner.map(exportBlockFields) }];
 
-        // Use createtxmlsc via API to serialize the inner conditions
-        const dummyPayload = {
-          inputs: [{ txid: '0'.repeat(64), vout: 0 }],
-          outputs: [{ amount: 0.00001, conditions: innerConditions }]
-        };
-        const dummyResult = await apiCall('/api/ladder/create', dummyPayload, true);
-        if (!dummyResult || !dummyResult.hex) {
-          console.error('Failed to serialize inner conditions for', block.type);
+        const serResult = await apiCall('/api/ladder/serialiseconditions', { rungs: innerRungs }, true);
+        if (!serResult || !serResult.hex) {
+          console.error('Failed to serialise inner conditions for', block.type);
           continue;
         }
+        const preimageHex = serResult.hex;
 
-        // Decode to get scriptPubKey
-        const decoded = await apiCall('/api/ladder/decode-tx', { hex: dummyResult.hex }, true);
-        if (!decoded?.vout?.[0]?.scriptPubKey?.hex) {
-          console.error('Failed to decode inner conditions tx');
-          continue;
-        }
-        // Strip 1-byte RUNG_CONDITIONS_PREFIX to get raw serialised conditions
-        const scriptHex = decoded.vout[0].scriptPubKey.hex;
-        const preimageHex = scriptHex.substring(2); // skip prefix byte
-
-        // Store serialised inner conditions as preimage --node computes hash automatically
+        // Store serialised inner conditions as script_body so exportCreateTxMLSC
+        // emits a SCRIPT_BODY field on the block. The library auto-converts
+        // SCRIPT_BODY → HASH256 (or HASH160 for P2SH) in conditions_only parsing,
+        // populating the implicit layout expected by P2WSH_LEGACY_CONDITIONS
+        // (fund commits the hash). Also set preimage for backwards-compat with
+        // buildSigner's `script_body || preimage` fallback at witness-build time.
         updatedRungs[ri].blocks[bi] = {
           ...block,
           innerBlocks: updatedInner,
-          values: { ...block.values, preimage: preimageHex }
+          values: { ...block.values, script_body: preimageHex, preimage: preimageHex }
         };
         rungs[ri] = updatedRungs[ri];
       }
@@ -9705,6 +10015,40 @@ function SignetPanel() {
         }));
       }
     }
+
+    // 6a2. Auto-bump fund output amounts to satisfy AMOUNT_LOCK and RECURSE_SPLIT
+    // before CTV template hash computation. The CTV template commits to an exact
+    // output amount; if we compute the template from an under-minimum amount the
+    // spend becomes unsatisfiable (amount < lock.min → AMOUNT_LOCK fails, or
+    // amount/2 < split.min_sats → RECURSE_SPLIT fails). Ported from
+    // tools/test-presets.py:1497-1513.
+    const spendFeeEst = 1500; // rough upper bound — refined in spend flow
+    const dust = 546;
+    txOutputs.forEach((out, oi) => {
+      const assignedRungs = rungs.filter(r => r.output?.txOutputId === out.id);
+      let minRequired = spendFeeEst + dust;
+      for (const rung of assignedRungs) {
+        for (const block of (rung.blocks || [])) {
+          if (block.type === 'RECURSE_SPLIT') {
+            const minSats = parseInt(block.values?.min_sats) || 546;
+            minRequired = Math.max(minRequired, minSats * 2 + spendFeeEst);
+          } else if (block.type === 'AMOUNT_LOCK') {
+            const lockMin = parseInt(block.values?.min) || 0;
+            if (lockMin > 0) minRequired = Math.max(minRequired, lockMin + spendFeeEst);
+          }
+        }
+      }
+      const currentAmount = parseInt(out.amount) || 0;
+      if (currentAmount > 0 && currentAmount < minRequired) {
+        console.log('[fund] Bumping output ' + oi + ' from ' + currentAmount + ' to ' + minRequired + ' (AMOUNT_LOCK/RECURSE_SPLIT min)');
+        out.amount = minRequired;
+      }
+    });
+    // Push the bumped amounts back into React state so user sees the final values
+    setTxOutputs(prev => prev.map(o => {
+      const match = txOutputs.find(t => t.id === o.id);
+      return match ? { ...o, amount: match.amount } : o;
+    }));
 
     // 6b. Auto-compute CTV template hashes (async API calls)
     const ctvOutputsMap = new Map();
@@ -9836,7 +10180,7 @@ function SignetPanel() {
 
     // 13. Build rung snapshot via pure helper
     const snapshotRungs = rungs.filter(r => r.label !== 'Change' && r.output.type !== 'relay');
-    const rungSnapshot = buildRungSnapshot(snapshotRungs, newOutputs, oldToNew, emptyKeyMap, hashReplacements, fundScheme);
+    const rungSnapshot = buildRungSnapshot(snapshotRungs, newOutputs, oldToNew, emptyKeyMap, hashReplacements, fundScheme, rungs);
     // Append change rung if one was created (it's not in the closure's rungs yet)
     if (changeMode !== 'none') {
       const changeOut = newOutputs[newOutputs.length - 1];
@@ -9859,6 +10203,7 @@ function SignetPanel() {
       preimages: preimagesGenerated,
       rungSnapshot,
       ctvOutputsMap: Object.fromEntries(ctvOutputsMap),
+      cosignCompanion: cosignCompanionRecord,
     });
 
     // 14. Update engine state
@@ -10231,7 +10576,7 @@ function SignetPanel() {
                     {tx.detail_data && (
                       <div style={{ marginTop: 8, padding: '8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', fontSize: 10, fontFamily: 'var(--font-mono)', maxHeight: 200, overflow: 'auto' }}>
                         <div><span style={{ color: 'var(--text-dim)' }}>CONFIRMATIONS: </span><span style={{ color: tx.detail_data.confirmations > 0 ? 'var(--green-bright)' : 'var(--amber)' }}>{tx.detail_data.confirmations ?? 'pending'}</span></div>
-                        <div><span style={{ color: 'var(--text-dim)' }}>SIZE: </span>{tx.detail_data.size} bytes / {tx.detail_data.vsize} vbytes</div>
+                        <div title="VSIZE (virtual bytes) is the fee-weight metric — witness data is discounted 4x per BIP-141"><span style={{ color: 'var(--text-dim)' }}>VSIZE: </span><span style={{ color: 'var(--green-bright)', fontWeight: 600 }}>{tx.detail_data.vsize} vB</span> <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>(size: {tx.detail_data.size} B)</span></div>
                         <div><span style={{ color: 'var(--text-dim)' }}>INPUTS: </span>{tx.detail_data.vin?.length}</div>
                         <div><span style={{ color: 'var(--text-dim)' }}>OUTPUTS: </span>{tx.detail_data.vout?.length}</div>
                         {tx.detail_data.vout?.map((v, vi) => (
@@ -10309,8 +10654,8 @@ function SignetPanel() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <div><span style={{ color: 'var(--text-dim)' }}>CONF: </span><span style={{ color: lookupResult.confirmations > 0 ? 'var(--green-bright)' : 'var(--amber)' }}>{lookupResult.confirmations || 0}</span></div>
-                <div><span style={{ color: 'var(--text-dim)' }}>SIZE: </span>{lookupResult.size} bytes</div>
-                <div><span style={{ color: 'var(--text-dim)' }}>VSIZE: </span>{lookupResult.vsize} vbytes</div>
+                <div title="Virtual size — fees are charged per vbyte on mainnet (witness data is discounted 4x per BIP-141)"><span style={{ color: 'var(--text-dim)' }}>VSIZE (fee basis): </span><span style={{ color: 'var(--green-bright)', fontWeight: 600 }}>{lookupResult.vsize} vB</span></div>
+                <div title="Raw serialized size (not what fees are based on)"><span style={{ color: 'var(--text-dim)' }}>SIZE: </span>{lookupResult.size} B</div>
                 {lookupResult.version && <div><span style={{ color: 'var(--text-dim)' }}>VERSION: </span>{lookupResult.version}</div>}
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -10409,12 +10754,17 @@ function SpendPanel() {
   const [selectedRungIdx, setSelectedRungIdx] = useState(0);
   const [selectedVout, setSelectedVout] = useState(null); // null = use rec.vout default
 
-  // Rungs that contain a COSIGN block need a paired input in the same spend
-  // tx. The engine can't synthesise that pair from an isolated UTXO, so on
-  // load we default to the first rung that is satisfiable in isolation and
-  // mark the COSIGN ones in the selector as "[needs paired UTXO]".
-  const rungNeedsPairedUtxo = (rung) =>
+  // Rungs that need external setup the engine can't synthesise from an
+  // isolated UTXO:
+  //   COSIGN   — requires a paired input in the same tx whose spent SPK
+  //              hashes to conditions_hash
+  // ONE_SHOT was previously in this list but is now supported end-to-end:
+  // planFund generates a preimage at fund time, stores SHA256(preimage) as
+  // the commitment, and persists the preimage in the record for reveal at
+  // spend time (future work #6, 2026-04-24).
+  const rungNeedsExternalSetup = (rung) =>
     (rung.blocks || []).some(b => b.type === 'COSIGN');
+  const rungNeedsPairedUtxo = rungNeedsExternalSetup; // keep older name, widened meaning
   React.useEffect(() => {
     if (!selectedRecord) return;
     const vout = selectedVout !== null ? selectedVout : (selectedRecord.vout || 0);
@@ -10526,6 +10876,13 @@ function SpendPanel() {
       const { inputSequence, txLocktime, csvBlocks, csvTimeSeconds } = timelocks;
       const { recurseBlocks, mutationBlocks, validationBlocks, ctvBlock, splitBlock } = outputClassification;
 
+      // COSIGN is now supported end-to-end via the cosignCompanion preset
+      // hook (2026-04-24): fund auto-creates a partner P2WPKH UTXO, spend
+      // auto-finds it via SPK-hash match and co-signs both inputs. The
+      // co-input lookup at line ~10820 logs a warning if no matching partner
+      // record exists, so let the spend proceed and fail naturally if so
+      // instead of hard-blocking here. ONE_SHOT is also supported end-to-end.
+
       // ── Handle async ACCUMULATOR Merkle proof ──
       if (needsAccumulatorProof && accumulatorLeaves) {
         const proof = await computeMerkleProof(accumulatorLeaves, 0);
@@ -10615,17 +10972,31 @@ function SpendPanel() {
         if (!condHash) {
           addLog('COSIGN block has no conditions_hash --backend will reject', 'warn');
         } else {
-          const allRecords = loadAllRecords();
+          // Only scan companion records — walking every record in history
+          // triggers proxy rate-limits (503 cascade) once localStorage has
+          // 100+ entries. Companion records are explicitly tagged at fund
+          // time by the cosignCompanion hook.
+          const allRecords = loadAllRecords()
+            .filter(cr => cr.type === 'cosign-companion');
           for (const cr of allRecords) {
             if (cr.txid === txid && (cr.vout || 0) === vout) continue;
-            const coTxData = await apiCall('/api/ladder/tx/' + cr.txid, undefined, true);
-            if (!coTxData) continue;
-            const coOut = coTxData.vout[cr.vout || 0];
-            if (!coOut) continue;
-            const spkHex = coOut.scriptPubKey?.hex || '';
-            if (!spkHex) continue;
+            // Companion records already persist scriptPubKey — skip the
+            // /api/ladder/tx/ network call. Only fall back to fetching if
+            // the stored field is missing (legacy / corrupt record).
+            let spkHex = cr.scriptPubKey || '';
+            let coAmountBtc = (cr.amount || 0) / 1e8;
+            if (!spkHex) {
+              const coTxData = await apiCall('/api/ladder/tx/' + cr.txid, undefined, true);
+              if (!coTxData) continue;
+              const coOut = coTxData.vout[cr.vout || 0];
+              if (!coOut) continue;
+              spkHex = coOut.scriptPubKey?.hex || '';
+              coAmountBtc = coOut.value;
+              if (!spkHex) continue;
+            }
             const spkHash = bytesToHex(await sha256Bytes(hexToBytes(spkHex)));
             if (spkHash === condHash) {
+              const coOut = { value: coAmountBtc, scriptPubKey: { hex: spkHex } };
               const coRungs = cr.rungs || [];
               const coRung = coRungs[0];
               const coBlocks = coRung?.blocks || [];
@@ -10701,7 +11072,12 @@ function SpendPanel() {
           // root. Leaf-centric recurses (MODIFIED/DECAY/COUNT/SPLIT) only
           // need the target rung.
           const identityRecurse = recurseBlocks.some(rb => rb.type === 'RECURSE_SAME' || rb.type === 'RECURSE_UNTIL');
-          const sourceRungs = identityRecurse ? allRungs : voutRungs;
+          // Leaf-centric recurses (MODIFIED/DECAY/COUNT/SPLIT) reduce to the
+          // single mutated leaf in MERKLE_PATH mode — verified_leaves.leaves
+          // contains just my_leaf (size 1) so expected_root = new_mutated_leaf.
+          // Carry tree must match: just the target rung, not all sibling rungs
+          // at the same vout.
+          const sourceRungs = identityRecurse ? allRungs : [targetRung];
           const buildCarryConditions = () => {
             const conds = rungsToConditions(sourceRungs);
             // Each carry rung must carry its original output_index so the
@@ -10842,7 +11218,10 @@ function SpendPanel() {
             const key = effOi + ':' + JSON.stringify(cond.blocks);
             if (hasOi && seen.has(key)) return;
             seen.add(key);
-            rungsFlat.push({ output_index: effOi, blocks: cond.blocks });
+            const rungEntry = { output_index: effOi, blocks: cond.blocks };
+            if (cond.coil) rungEntry.coil = cond.coil;
+            if (cond.relay_refs && cond.relay_refs.length > 0) rungEntry.relay_refs = cond.relay_refs;
+            rungsFlat.push(rungEntry);
           });
         });
         createPayload = { inputs: spendInputs, outputs: amounts, rungs: rungsFlat };
@@ -10882,6 +11261,7 @@ function SpendPanel() {
             blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
           };
           if (typeof r.vout === 'number') condSpec.output_index = r.vout;
+          if (r.relayRefs && r.relayRefs.length > 0) condSpec.relay_refs = r.relayRefs;
           return condSpec;
         });
       }
@@ -10921,7 +11301,25 @@ function SpendPanel() {
         signers,
         spent_outputs,
       };
-      const signResult = await apiCall('/api/ladder/sign', signPayload, true);
+      // COSIGN: the partner input (P2WPKH) needs a wallet signature. Must
+      // be done BEFORE signrungtx — signrawtransactionwithwallet on a tx
+      // where input 0 (MLSC) already has a witness treats the 0xdf prefix
+      // as an unknown segwit program and silently strips the witness while
+      // trying to sign. Wallet-sign first (fills in input 1), then
+      // signrungtx fills in input 0 without touching input 1.
+      let unsignedHex = createResult.hex;
+      if (coInput && coInput.signerBlocks.length === 0) {
+        addLog('COSIGN: wallet-signing partner input ' + coInput.txid.substring(0, 16) + '...', 'info');
+        const walletSigned = await apiCall('/api/ladder/sign', { hex: unsignedHex }, true);
+        if (walletSigned && walletSigned.hex) {
+          unsignedHex = walletSigned.hex;
+          addLog('COSIGN: partner input signed by wallet', 'ok');
+        } else {
+          addLog('COSIGN: wallet-sign failed (broadcast will reject)', 'warn');
+        }
+      }
+      signPayload.hex = unsignedHex;
+      let signResult = await apiCall('/api/ladder/sign', signPayload, true);
       if (!signResult || !signResult.hex) throw new Error('Signing failed.');
       addLog(signerBlocks.length + ' signature block(s) applied (' + scheme + ')', 'ok');
 
@@ -11173,7 +11571,7 @@ function SpendPanel() {
                           {rung.label && <span style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 600 }}>{rung.label}</span>}
                           {needsPair && (
                             <span title="Contains COSIGN — needs a paired input in the same tx; can't be spent standalone" style={{ marginLeft: 8, fontSize: 9, color: 'var(--amber)', border: '1px solid var(--amber)', padding: '1px 5px' }}>
-                              needs paired UTXO
+                              needs external setup
                             </span>
                           )}
                         </div>
@@ -12540,6 +12938,9 @@ function App() {
   }, [rungs, txInputs, txOutputs, locktime, jsonOutput]);
 
   const handleLoadExample = useCallback((ex) => {
+    // Stash preset-level metadata consumed by the fund/spend flows in
+    // SignetPanel. Module-level PRESET_META since ref isn't cross-component.
+    PRESET_META.cosignCompanion = ex.cosignCompanion || null;
     // Build tx inputs
     const newTxInputs = ex.txInputs.map(inp => ({ id: uid(), txid: inp.txid, vout: inp.vout }));
     // Build tx outputs
@@ -12569,6 +12970,19 @@ function App() {
           Object.keys(bd.values).forEach(k => { block.values[k] = bd.values[k]; });
         }
         if (bd.inverted) block.inverted = true;
+        // Copy innerBlocks for P2SH/P2WSH/P2TR_SCRIPT legacy presets.
+        // createBlock initialises innerBlocks=[] for INNER_CONDITION_TYPES;
+        // without this copy, step 6-inner's guard at handleFundFromWallet
+        // (`!block.innerBlocks || length === 0`) fires and the fund-time
+        // inner serialisation step is silently skipped. Spend then fails
+        // with "P2WSH_LEGACY field count mismatch: got 0, expected 1".
+        if (Array.isArray(bd.innerBlocks)) {
+          block.innerBlocks = bd.innerBlocks.map(ib => ({
+            id: ib.id || uid(),
+            type: ib.type,
+            values: { ...(ib.values || {}) },
+          }));
+        }
         return block;
       });
       return rung;
