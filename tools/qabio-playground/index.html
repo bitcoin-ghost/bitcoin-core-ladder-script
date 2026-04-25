@@ -2037,22 +2037,30 @@ function MetricsPanel() {
 // ────────────────────────────────────────────────────────────
 function LogPanel() {
   const state = useContext(StateCtx);
-  const logEnd = useRef(null);
-  useEffect(() => { logEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [state.log.length]);
+  const bodyRef = useRef(null);
+  // Scroll the log body to its own bottom on new entries — but use
+  // scrollTop on the inner container, NOT scrollIntoView on a sentinel.
+  // scrollIntoView walks up to the nearest scrollable ancestor (here
+  // pg-stage, the whole centre column), which means a single new log
+  // entry was scrolling the entire page to its bottom — including the
+  // case where loading a scenario logs "Scenario loaded: …" and the
+  // page jumped past the Run button.
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [state.log.length]);
   if (state.log.length === 0) return null;
   return (
     <div className="json-panel">
       <div className="json-panel-head">
         <span className="json-panel-title">Activity Log ({state.log.length})</span>
       </div>
-      <div className="json-panel-body" style={{ maxHeight: 180 }}>
+      <div ref={bodyRef} className="json-panel-body" style={{ maxHeight: 180 }}>
         {state.log.map((l, i) => (
           <div key={i} className={'log-line ' + l.kind}>
             <span className="ts">{l.ts}</span>{' '}
             <span className="msg">{l.msg}</span>
           </div>
         ))}
-        <div ref={logEnd} />
       </div>
     </div>
   );
