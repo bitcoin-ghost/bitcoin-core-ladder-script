@@ -1382,19 +1382,44 @@ function StagePanel({ apiCall }) {
       return copy;
     });
   };
+  // Mark the active step as failed and (optionally) append an error reason.
+  // The modal renders a Close button when the latest step is 'error', so
+  // the user is never trapped staring at a perpetually-spinning step.
+  const failModal = (reason) => {
+    setModalSteps(prev => {
+      if (!prev || prev.length === 0) return prev;
+      const copy = [...prev];
+      copy[copy.length - 1] = { ...copy[copy.length - 1], status: 'error' };
+      if (reason) copy.push({ msg: reason, status: 'error' });
+      return copy;
+    });
+  };
 
   // ── One-click happy path: self-contained flow that threads local data
   //    between steps instead of reading stale React closure state. ──
+  //    All early-return failure paths call failModal(reason) so the
+  //    progress modal flips its spinning step to red ✗ + Close button
+  //    instead of hanging forever. The outer try/catch is the safety net
+  //    for unexpected throws (network errors, JSON parse failures, etc.).
   const handleRunHappyPath = async () => {
     setModalSteps([]);
     log('Running full happy-path flow…', 'info');
     dispatch({ type: 'CLEAR_ERROR' });
+    try {
+      await _runHappyPathInner();
+    } catch (e) {
+      const reason = e?.message || String(e);
+      log('Full flow threw: ' + reason, 'err');
+      failModal(reason);
+    }
+  };
 
+  const _runHappyPathInner = async () => {
     // ── 1. Coordinator keypair ──
     addModalStep('Generating coordinator FALCON-512 keypair…', 'active');
     log('Step 1/9: Generating coordinator FALCON-512 keypair…');
     const coordKp = await apiCall('/api/ladder/pq/keypair', { scheme: 'FALCON512' });
-    if (!coordKp) { log('Coordinator keygen failed', 'err'); return; }
+    if (!coordKp) { failModal('Coordinator keygen failed'); return; }
     const batchId = randHex(32);
     const height = state.currentBlockHeight || 200;
     const expiryHeight = height + DEFAULT_EXPIRY_BLOCKS_AHEAD;
@@ -1412,11 +1437,11 @@ function StagePanel({ apiCall }) {
         const r = await fetch(window.LadderAPI.SIGNET_API + '/api/ladder/wallet/keypair');
         kp = await r.json();
         if (!r.ok) throw new Error(kp.detail || 'keypair failed');
-      } catch (e) { log('Wallet keygen failed for P' + i, 'err'); return; }
+      } catch (e) { log('Wallet keygen failed for P' + i, 'err'); failModal('Wallet keygen failed for P' + i); return; }
 
       const authSeed = randHex(32);
       const chainRes = await apiCall('/api/ladder/qabi/authchain', { auth_seed: authSeed, chain_length: state.chainLength });
-      if (!chainRes) { log('Auth chain failed for P' + i, 'err'); return; }
+      if (!chainRes) { log('Auth chain failed for P' + i, 'err'); failModal('Auth chain failed for P' + i); return; }
       const ownerId = await sha256Hex(kp.pubkey);
       const contribution = 50000 + i * 5000;
 
@@ -1433,7 +1458,7 @@ function StagePanel({ apiCall }) {
     log('Step 3/9: Batch-funding ' + parts.length + ' participants…');
     const addresses = parts.map(p => p.address);
     const fundRes = await apiCall('/api/ladder/playground/fund-batch', { addresses, amount_btc: 0.001 });
-    if (!fundRes) { log('Batch funding failed', 'err'); return; }
+    if (!fundRes) { log('Batch funding failed', 'err'); failModal('Batch funding failed'); return; }
     storeJson('fund_batch', 'playground/fund-batch response', fundRes);
     parts.forEach((p, i) => {
       const out = fundRes.outputs[i];
@@ -1469,16 +1494,16 @@ function StagePanel({ apiCall }) {
     const templateRes = await apiCall('/api/ladder/createtxmlsc', {
       inputs: templateInputs, outputs: batchAmounts, rungs: batchRungs,
     });
-    if (!templateRes) { log('Template batch tx failed', 'err'); return; }
+    if (!templateRes) { log('Template batch tx failed', 'err'); failModal('Template batch tx failed'); return; }
     storeJson('batch_template', 'Batch template (for output SPKs)', templateRes);
 
     // Decode to get per-output scriptPubKeys.
     const decoded = await apiCall('/api/ladder/decode-tx', { hex: templateRes.hex });
-    if (!decoded) { log('Decode template failed', 'err'); return; }
+    if (!decoded) { log('Decode template failed', 'err'); failModal('Decode template failed'); return; }
     storeJson('batch_template_decoded', 'Batch template decoded', decoded);
     const outputSpks = (decoded.vout || []).map(v => v.scriptPubKey?.hex || '');
     if (outputSpks.length !== parts.length) {
-      log('Output count mismatch: expected ' + parts.length + ', got ' + outputSpks.length, 'err'); return;
+      log('Output count mismatch: expected ' + parts.length + ', got ' + outputSpks.length, 'err'); failModal('Output count mismatch'); return;
     }
 
     const entries = parts.map((p, i) => ({
@@ -1487,10 +1512,26 @@ function StagePanel({ apiCall }) {
     const qOutputs = parts.map((p, i) => ({
       amount: batchAmounts[i].toFixed(8), script_pubkey: outputSpks[i],
     }));
+    // Use the explicit outputs_conditions_root + output_values shape.
+    // The legacy `outputs: [{amount, script_pubkey}, ...]` array form is
+    // mishandled by the proxy: it passes outputs[0] (an object) where
+    // qabi_buildblock expects a 32-byte hex string for outputs_conditions_root.
+    // Compute the root from the first SPK (all share it for TX_MLSC).
+    // SPKs are 33 bytes: 0xDF prefix + 32-byte conditions_root, in wire order.
+    const sharedSpkHex = outputSpks[0];
+    const outputsConditionsRoot = sharedSpkHex.startsWith('df')
+      ? sharedSpkHex.slice(2)              // strip 0xDF prefix → 32-byte hex
+      : sharedSpkHex;
+    const outputValuesArr = batchAmounts.map(a => a.toFixed(8));
     const blockRes = await apiCall('/api/ladder/qabi/buildblock', {
-      coordinator_pubkey: coordKp.pubkey, prime_expiry_height: expiryHeight, batch_id: batchId, entries, outputs: qOutputs,
+      coordinator_pubkey: coordKp.pubkey,
+      prime_expiry_height: expiryHeight,
+      batch_id: batchId,
+      entries,
+      outputs_conditions_root: outputsConditionsRoot,
+      output_values: outputValuesArr,
     });
-    if (!blockRes) { log('buildblock failed', 'err'); return; }
+    if (!blockRes) { failModal('qabi_buildblock failed (check log)'); return; }
     storeJson('qabi_block', 'QABI block (raw)', blockRes);
     const qabiBlockHex = blockRes.qabi_block;
     const qabiRoot = blockRes.qabi_root;
@@ -1590,7 +1631,7 @@ function StagePanel({ apiCall }) {
     const batchRes = await apiCall('/api/ladder/createtxmlsc', {
       inputs: batchInputs, outputs: finalBatchAmounts, rungs: finalBatchRungs, locktime: 0, internal_pubkey: '', qabi_block: qabiBlockHex,
     });
-    if (!batchRes) { log('Batch build failed', 'err'); return; }
+    if (!batchRes) { log('Batch build failed', 'err'); failModal('Batch build failed'); return; }
     storeJson('batch_build', 'Batch createtxmlsc resp', batchRes);
     dispatch({ type: 'BATCH_UPDATE', patch: { unsignedHex: batchRes.hex, vin: batchInputs.length, vout: finalBatchAmounts.length, totalBytes: batchRes.hex.length / 2 } });
     log('Batch: ' + (batchRes.hex.length / 2) + ' bytes, vin=' + batchInputs.length, 'ok');
@@ -1641,12 +1682,12 @@ function StagePanel({ apiCall }) {
     addModalStep('Signing batch with FALCON-512 (SIGHASH_QABO)…', 'active');
     log('Step 8/9: Signing batch with FALCON-512…');
     const shRes = await apiCall('/api/ladder/qabi/sighash', { hex: witnessHex });
-    if (!shRes) { log('sighash failed', 'err'); return; }
+    if (!shRes) { log('sighash failed', 'err'); failModal('qabi_sighash failed'); return; }
     storeJson('sighash', 'SIGHASH_QABO', shRes);
     const t0 = performance.now();
     const sigRes = await apiCall('/api/ladder/qabi/signqabo', { hex: witnessHex, privkey: coordKp.privkey });
     const signMs = performance.now() - t0;
-    if (!sigRes) { log('signqabo failed', 'err'); return; }
+    if (!sigRes) { log('signqabo failed', 'err'); failModal('qabi_signqabo failed'); return; }
     storeJson('signqabo', 'qabi_signqabo resp', sigRes);
     dispatch({ type: 'BATCH_UPDATE', patch: { signedHex: sigRes.hex, sighash: shRes.sighash, totalBytes: sigRes.hex.length / 2 } });
     dispatch({ type: 'COORD_UPDATE', patch: { signMs } });
@@ -1658,7 +1699,7 @@ function StagePanel({ apiCall }) {
     const t1 = performance.now();
     const bcRes = await apiCall('/api/ladder/broadcast', { hex: sigRes.hex });
     const verifyMs = performance.now() - t1;
-    if (!bcRes) { log('Broadcast failed', 'err'); return; }
+    if (!bcRes) { log('Broadcast failed', 'err'); failModal('Broadcast failed'); return; }
     storeJson('batch_broadcast', 'broadcast resp', bcRes);
     await apiCall('/api/ladder/mine', { blocks: 1 });
     dispatch({ type: 'BATCH_UPDATE', patch: { txid: bcRes.txid, vbytes: null } });
@@ -1705,15 +1746,26 @@ function StagePanel({ apiCall }) {
   // ── Progress modal component ──
   const ProgressModal = () => {
     if (!modalSteps) return null;
-    const isRunning = modalSteps.length > 0 && modalSteps[modalSteps.length - 1].status === 'active';
-    const isDone = modalSteps.length > 0 && modalSteps[modalSteps.length - 1].msg === 'Full flow complete!';
+    const last = modalSteps.length > 0 ? modalSteps[modalSteps.length - 1] : null;
+    const isRunning = last?.status === 'active';
+    const isDone = last?.msg === 'Full flow complete!';
+    const isError = last?.status === 'error';
+    // Any non-running terminal state should be dismissable, so the user is
+    // never trapped staring at a perpetually-spinning step. Both done and
+    // error get a Close button + click-outside-to-dismiss.
+    const dismissable = !isRunning;
     return (
-      <div className="modal-overlay" onClick={isDone ? () => setModalSteps(null) : undefined}>
+      <div className="modal-overlay" onClick={dismissable ? () => setModalSteps(null) : undefined}>
         <div className="modal-box" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
             {isRunning && <span className="spinner" />}
             {isDone && <span style={{ fontSize: 16, color: 'var(--green)' }}>&#10003;</span>}
-            <span className="modal-title">{isDone ? 'QABIO Batch Complete' : 'Running QABIO Flow…'}</span>
+            {isError && <span style={{ fontSize: 16, color: 'var(--red)' }}>&#10005;</span>}
+            <span className="modal-title">
+              {isDone ? 'QABIO Batch Complete'
+                : isError ? 'QABIO Flow Failed'
+                : 'Running QABIO Flow…'}
+            </span>
           </div>
           <div className="modal-body">
             {modalSteps.map((s, i) => (
@@ -1727,9 +1779,11 @@ function StagePanel({ apiCall }) {
               </div>
             ))}
           </div>
-          {isDone && (
+          {dismissable && (
             <div className="modal-footer">
-              <button className="pg-btn green" onClick={() => setModalSteps(null)}>Close</button>
+              <button className={'pg-btn ' + (isError ? 'red' : 'green')} onClick={() => setModalSteps(null)}>
+                Close
+              </button>
             </div>
           )}
         </div>
