@@ -43,3 +43,4 @@ tools/generate-tx-docs.py
 spec/jdk-*/
 spec/*.tar.gz
 spec/tla2tools.jar
+proxy/analytics.db

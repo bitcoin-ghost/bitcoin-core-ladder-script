@@ -3,8 +3,8 @@ name: Release
 # Builds binary tarballs from a v*.*.* tag and publishes them as a
 # pre-release GitHub Release with PGP-signed SHA256SUMS.
 #
-# Targets: linux-x86_64 and macos-arm64. Windows x86_64 cross-build
-# (via depends/) is intentionally deferred — see issue tracker.
+# Targets: linux-x86_64, macos-arm64, windows-x86_64 (cross-built
+# from Linux via depends/ + mingw-w64).
 #
 # PGP signing requires two repository secrets:
 #   - GPG_PRIVATE_KEY: ASCII-armoured private key (`gpg --armor --export-secret-key <fpr>`)
@@ -197,9 +197,122 @@ jobs:
           path: dist/*.tar.gz
           retention-days: 7
 
+  windows-x86_64:
+    name: Build windows-x86_64 (cross)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: echo "version=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        # mingw-w64 cross toolchain plus everything depends/ needs to
+        # build host libraries from source.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkgconf python3 \
+            g++-mingw-w64-x86-64-posix \
+            mingw-w64-x86-64-dev \
+            curl wget bsdmainutils ca-certificates patch xz-utils \
+            zip
+          # depends/ defaults to the win32 thread model on some Ubuntu
+          # versions; force the posix variant which has std::thread.
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
+      - name: Cache depends build
+        uses: actions/cache@v4
+        with:
+          path: depends/x86_64-w64-mingw32
+          key: depends-mingw-${{ hashFiles('depends/packages/*.mk', 'depends/funcs.mk', 'depends/Makefile') }}
+
+      - name: Build host dependencies (depends/)
+        # NO_QT=1 we don't ship a GUI; NO_USDT=1 USDT tracing is Linux-only.
+        run: |
+          make -C depends HOST=x86_64-w64-mingw32 NO_QT=1 NO_USDT=1 -j$(nproc)
+
+      - name: Cross-compile liboqs to mingw
+        # depends/ doesn't ship liboqs; build it ourselves with the same
+        # mingw toolchain and install into the depends prefix so cmake
+        # finds it via the bitcoin toolchain file.
+        run: |
+          DEPENDS_PREFIX="$PWD/depends/x86_64-w64-mingw32"
+          git clone --depth 1 --branch 0.10.1 \
+            https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cat > /tmp/mingw-toolchain.cmake <<EOF
+          set(CMAKE_SYSTEM_NAME Windows)
+          set(CMAKE_SYSTEM_PROCESSOR x86_64)
+          set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc-posix)
+          set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++-posix)
+          set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
+          set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32 ${DEPENDS_PREFIX})
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          EOF
+          cmake -B /tmp/liboqs/build -S /tmp/liboqs -GNinja \
+            -DCMAKE_TOOLCHAIN_FILE=/tmp/mingw-toolchain.cmake \
+            -DCMAKE_INSTALL_PREFIX="$DEPENDS_PREFIX" \
+            -DOQS_BUILD_ONLY_LIB=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build /tmp/liboqs/build
+          cmake --install /tmp/liboqs/build
+
+      - name: Configure
+        run: |
+          cmake -B build -GNinja \
+            --toolchain depends/x86_64-w64-mingw32/toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_GUI=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_BENCH=OFF \
+            -DBUILD_FUZZ_BINARY=OFF \
+            -DBUILD_TX=ON \
+            -DBUILD_UTIL=ON \
+            -DBUILD_WALLET_TOOL=ON \
+            -DWITH_ZMQ=OFF
+
+      - name: Build binaries
+        run: |
+          cmake --build build -j$(nproc) \
+            --target bitcoind \
+            --target bitcoin-cli \
+            --target bitcoin-tx \
+            --target bitcoin-util \
+            --target bitcoin-wallet
+
+      - name: Package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="bitcoin-core-ladder-${VERSION}-x86_64-w64-mingw32"
+          mkdir -p "dist/${PKG}/bin"
+          cp build/bin/bitcoind.exe \
+             build/bin/bitcoin-cli.exe \
+             build/bin/bitcoin-tx.exe \
+             build/bin/bitcoin-util.exe \
+             build/bin/bitcoin-wallet.exe \
+             "dist/${PKG}/bin/"
+          # liboqs was built static (BUILD_SHARED_LIBS=OFF) and linked
+          # into bitcoind directly, so no DLL bundle needed.
+          x86_64-w64-mingw32-strip "dist/${PKG}/bin/"*.exe || true
+          (cd dist && zip -r "${PKG}.zip" "${PKG}/")
+          ls -lh "dist/${PKG}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*.zip
+          retention-days: 7
+
   publish:
     name: Publish release
-    needs: [linux-x86_64, macos-arm64]
+    needs: [linux-x86_64, macos-arm64, windows-x86_64]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -217,9 +330,9 @@ jobs:
       - name: Compute SHA256SUMS
         run: |
           mkdir release
-          find artifacts -type f -name '*.tar.gz' -exec mv {} release/ \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
           cd release
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: PGP-sign SHA256SUMS
