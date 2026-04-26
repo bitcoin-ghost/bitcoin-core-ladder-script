@@ -135,11 +135,6 @@ single FALCON aggregate covering every input. One verify per tx.
 At N=100, **~143 vB per cosigner** — roughly equivalent to a
 P2WPKH payment, fully PQ-safe and atomically settled.
 
-A v2 layout that drops redundant `entries`/`outputs` vectors saves
-a further ~9% at large N. Deferred as a post-launch optimisation;
-v1 is comfortably inside the standard envelope for tens to a few
-hundred participants.
-
 ## 6. Fee economics
 
 **Single-output payment (N=1):** MLSC and P2TR key-path within
@@ -166,7 +161,6 @@ reference implementation. Run any of:
 ./build/bin/test_bitcoin --run_test=qabi_tests/mlsc_spend_path_sweep         --log_level=message
 ./build/bin/test_bitcoin --run_test=qabi_tests/mlsc_utxo_storage_size        --log_level=message
 ./build/bin/test_bitcoin --run_test=qabi_tests/qabi_tx_size_sweep            --log_level=message
-./build/bin/test_bitcoin --run_test=qabi_tests/qabi_tx_size_sweep_v2_projection --log_level=message
 ```
 
 Source-of-truth doc in the repository:
