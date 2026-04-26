@@ -17,17 +17,33 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+html { scroll-behavior: smooth; }
 .site-header { background: #fff; border-bottom: 1px solid var(--border); }
 .site-header-inner { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
 .header-top { display: flex; align-items: center; justify-content: space-between; height: 56px; }
 .header-title { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none; }
 .header-title:hover { color: var(--accent); text-decoration: none; }
+.header-right { display: flex; align-items: center; gap: 20px; }
+.header-right a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
+.header-right a:hover { color: var(--accent); }
+.header-right .gh-icon { display: flex; align-items: center; color: var(--text-dim); }
+.header-right .gh-icon:hover { color: var(--accent); }
 .header-nav { display: flex; gap: 28px; border-top: 1px solid var(--border-light); padding: 10px 0; }
-.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; }
-.header-nav a:hover { color: var(--accent); }
+.header-nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; padding-bottom: 8px; }
+.header-nav a:hover { color: var(--accent); text-decoration: none; }
+.header-nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 
+.page-layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 96px); }
+.sidebar { background: #fff; border-right: 1px solid var(--border); padding: 24px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.sidebar::-webkit-scrollbar { display: none; }
+.sidebar-label { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-light); padding: 16px 20px 6px; }
+.sidebar-label:first-child { padding-top: 8px; }
+.sidebar-link { display: block; padding: 7px 20px; font-size: 14px; color: var(--text-dim); text-decoration: none; transition: all 0.15s; border-left: 2px solid transparent; }
+.sidebar-link:hover { color: var(--text); background: var(--bg-alt); text-decoration: none; }
+.sidebar-link.active { color: var(--accent); border-left-color: var(--accent); background: rgba(230, 126, 34, 0.04); }
+.sidebar-divider { height: 1px; background: var(--border-light); margin: 12px 0; }
 
-.main { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+.main { padding: 40px 48px 80px; max-width: 1100px; }
 .page-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .page-sub { color: var(--text-dim); font-size: 15px; margin-bottom: 48px; }
 
@@ -47,8 +63,10 @@ a:hover { text-decoration: underline; }
 .tag-hacky { background: #fff3e0; color: var(--accent-dark); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
 .tag-native { background: #e8f5e9; color: var(--green); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
   .comp-grid { grid-template-columns: 1fr; }
+  .page-layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
   .main { padding: 32px 16px 60px; }
 }
 
@@ -62,17 +80,65 @@ a:hover { text-decoration: underline; }
   <div class="site-header-inner">
     <div class="header-top">
       <a href="/" class="header-title">Ladder Script</a>
+      <div class="header-right">
+        <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" rel="noopener" class="gh-icon" aria-label="GitHub">
+          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
     </div>
     <nav class="header-nav">
       <a href="ladder-script.html">Intro</a>
       <a href="rung-tx-anatomy.html">Anatomy</a>
       <a href="block-docs/">Blocks</a>
       <a href="docs/">Docs</a>
-      <a href="descriptor-notation.html">Descriptors</a>
+      <a href="patch-overview.html">Patch</a>
+      <a href="get-started.html">Get Started</a>
       <a href="tools.html">Tools</a>
+      <a href="explorer.html">Explorer</a>
     </nav>
   </div>
 </header>
+
+<div class="page-layout">
+  <aside class="sidebar">
+    <div class="sidebar-label">Getting Started</div>
+    <a href="docs/#INTRODUCTION" class="sidebar-link">Introduction</a>
+    <a href="docs/#TLDR" class="sidebar-link">TLDR</a>
+    <a href="comparison.html" class="sidebar-link active">Compare</a>
+    <a href="docs/#FAQ" class="sidebar-link">FAQ</a>
+    <a href="docs/#GLOSSARY" class="sidebar-link">Glossary</a>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-label">Specification</div>
+    <a href="docs/#BIP-XXXX" class="sidebar-link">BIP draft</a>
+    <a href="docs/#BLOCK_LIBRARY" class="sidebar-link">Block Library</a>
+    <a href="docs/#MERKLE-UTXO-SPEC" class="sidebar-link">MLSC Specification</a>
+    <a href="docs/#SIZING" class="sidebar-link">Sizing</a>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-label">Guides</div>
+    <a href="docs/#EXAMPLES" class="sidebar-link">Examples</a>
+    <a href="docs/#INTEGRATION" class="sidebar-link">Integration Guide</a>
+    <a href="descriptor-notation.html" class="sidebar-link">Descriptor Notation</a>
+    <a href="docs/#ENGINE_GUIDE" class="sidebar-link">Engine Guide</a>
+    <a href="docs/#PQ_BATCH_PLAYGROUND_GUIDE" class="sidebar-link">PQ Batch Tool Guide</a>
+    <a href="docs/#QABIO_PLAYGROUND_GUIDE" class="sidebar-link">QABIO Tool Guide</a>
+    <a href="docs/#SOFT_FORK_GUIDE" class="sidebar-link">Soft Fork Guide</a>
+    <a href="docs/#REVIEW_GUIDE" class="sidebar-link">Review Guide</a>
+    <a href="docs/#RPC_REFERENCE" class="sidebar-link">RPC Reference</a>
+    <a href="docs/#ANNOTATED_DIFF" class="sidebar-link">Annotated Patch</a>
+    <a href="docs/#ANNOTATED_LIBRARY" class="sidebar-link">Annotated Library</a>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-label">QABIO</div>
+    <a href="docs/#QABIO" class="sidebar-link">QABIO Overview</a>
+    <a href="block-docs/qabi-prime.html" class="sidebar-link">QABI_PRIME Block</a>
+    <a href="block-docs/qabi-spend.html" class="sidebar-link">QABI_SPEND Block</a>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-label">More</div>
+    <a href="docs/#POSSIBILITIES" class="sidebar-link">Possibilities</a>
+  </aside>
 
 <div class="main">
 
@@ -767,6 +833,7 @@ DLC settlement, atomic swaps,
     <p style="margin-top:16px;font-size:14px;color:var(--text-dim);">Bitcoin Script works for simple signatures, timelocks, and hash locks. For everything else &mdash; vaults, rate limiting, covenants, PQ signatures, batching, transaction introspection, persistent state, paired UTXOs &mdash; it either can&apos;t do it, requires proposed opcodes that aren&apos;t activated, or needs fragile off-chain coordination. Ladder Script provides all of these as native, typed block types with bounded execution and deterministic evaluation.</p>
   </div>
 
+</div>
 </div>
 
 <footer class="site-footer">
