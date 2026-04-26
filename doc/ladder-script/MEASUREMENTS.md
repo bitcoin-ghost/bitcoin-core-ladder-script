@@ -8,7 +8,6 @@
 - `rung_tests/mlsc_spend_path_sweep`
 - `rung_tests/mlsc_utxo_storage_size`
 - `qabi_tests/qabi_tx_size_sweep`
-- `qabi_tests/qabi_tx_size_sweep_v2_projection`
 
 Regenerate any table in this doc by running the matching test with
 `--log_level=message`.
@@ -128,10 +127,6 @@ reuses the root entry.
 
 ## 5. QABIO batch spend
 
-Full numbers and v2-projection analysis live in the companion
-doc [`project_qabi_scaling.md`](project_qabi_scaling.md). A
-summary:
-
 - **Per-input asymptotic cost:** ~409 B on the wire, ~139 vB
   after witness discount, converges from N≈50 upward.
 - **Standard-relay ceiling (400 kWU):** hits at ~2,870 inputs at
@@ -139,13 +134,6 @@ summary:
   needs direct-to-miner submission.
 - **QABI block hard cap (262,144 B):** binds first at ~3,500
   participants — still well above any realistic batch shape.
-
-A hypothetical v2 that eliminates the `entries`/`outputs`
-vectors inside `qabi_block` saves **~12%** of wire bytes at all
-N ≥ 100 (see `qabi_tx_size_sweep_v2_projection`). Deferred as a
-post-launch optimisation; v1 is comfortably inside the standard
-envelope for realistic batch sizes (tens to a few hundred
-participants).
 
 ## 6. Fee economics at a glance
 
@@ -176,7 +164,6 @@ cosigners.
 
 # QABIO:
 ./build/bin/test_bitcoin --run_test=qabi_tests/qabi_tx_size_sweep --log_level=message
-./build/bin/test_bitcoin --run_test=qabi_tests/qabi_tx_size_sweep_v2_projection --log_level=message
 ```
 
 If you change any serialisation, run every sweep in this doc and

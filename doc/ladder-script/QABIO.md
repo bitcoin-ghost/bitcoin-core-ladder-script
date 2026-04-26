@@ -396,43 +396,17 @@ scheme — 666 bytes vs. 1280 for FALCON-1024, 3293 for DILITHIUM3, and
 overhead amortised across every primed input, smaller is strictly
 better for the amortised per-input cost.
 
-A future `QABI_BLOCK_VERSION = 0x02` could unlock scheme selection via
-a dispatch byte in the qabi_block header. The design leaves room for
-this — `QABI_BLOCK_VERSION_CURRENT` is already a field — but no such
-extension is wired today.
-
 ---
 
-## 10. Scaling beyond v1
+## 10. Scaling ceiling
 
-At ~3,500 participants the current block format hits the
-`QABI_BLOCK_MAX_HARD` ceiling and a future v2 block format is needed
-to go further. Two v2 designs have been considered:
+The current block format hits the `QABI_BLOCK_MAX_HARD` ceiling at
+roughly 3,500 participants — well above any practical batch shape.
+Standard-relay tx size also caps at ~2,870 inputs at the current
+per-input cost (~143 vB amortised at N=100). Above either limit a
+batch ships via direct-to-miner submission rather than mempool relay.
 
-- **Merkle-committed entries and outputs (v2a).** Replace the entries
-  and outputs vectors in `qabi_block` with two 32-byte Merkle roots.
-  Each spending input carries its own entry leaf + output leaf + two
-  inclusion proofs. *Measured result: strictly worse.* The O(log N)
-  proof overhead per input overwhelms the amortised qabi_block saving,
-  so transactions grow ~2× larger at N=1000. This design should not
-  be pursued.
-
-- **Eliminate entries and outputs entirely (v2b).** Both lists are
-  arguably redundant with existing SIGHASH_QABO commitments: the
-  per-UTXO preimage binding already enumerates legitimate
-  participants, and `hashOutputs` already pins the output set.
-  Removing both lists shrinks qabi_block to a fixed ~937-byte header
-  (independent of N) and saves roughly 74 bytes per participant
-  across the transaction. Requires removing consensus checks 7 and 8,
-  which is a non-trivial audit exercise.
-
-v1 is the launch design. v2 is deferred until a real deployment hits
-the standard-relay cap or asks for batches beyond 3,500 participants.
-
-For the full scaling analysis including measured numbers at every N
-and the forward-compatible soft-fork activation path, see the QABIO
-scaling decision note at `doc/ladder-script/project_qabi_scaling.md`
-in the bitcoin-core-ladder repository.
+No alternative qabi_block format is planned. v1 is the design.
 
 ---
 

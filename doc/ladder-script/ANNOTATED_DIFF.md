@@ -17,8 +17,8 @@ each modification.
 |----------------------------------|------:|------------:|
 | Modified Bitcoin Core files      |    29 |       +805  |
 | New library code (`src/rung/`)   |    39 |    +19,533  |
-| New tests (`src/test/rung_tests.cpp`) |    1 |    +17,081  |
-| **Total surface change**         |    69 |    +37,419  |
+| New tests (`src/test/rung_tests.cpp`) |    1 |    +16,945  |
+| **Total surface change**         |    69 |    +37,283  |
 
 The design principle is **minimal core intrusion**: the 805 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
@@ -668,7 +668,7 @@ new defaulted parameters. Single test signature update.
 
 ## Tests
 
-`src/test/rung_tests.cpp` — **17,081 lines, 620 unit tests** organised
+`src/test/rung_tests.cpp` — **16,945 lines, 619 unit tests** organised
 into multiple boost test suites:
 
 - `rung_tests` — block evaluator unit tests, descriptor parser, witness
