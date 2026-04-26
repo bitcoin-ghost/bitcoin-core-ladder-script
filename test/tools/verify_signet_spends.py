@@ -143,7 +143,7 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         "outputs": outputs,
         "locktime": 0,
     }
-    resp = api("create", create_payload)
+    resp = api("createrungtx", create_payload)
     fund_hex = resp["hex"]
 
     # Sign with wallet (P2WPKH input)
@@ -185,7 +185,7 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         }],
         "locktime": 0,
     }
-    spend_resp = api("create", spend_payload)
+    spend_resp = api("createrungtx", spend_payload)
 
     spend_sign = api("sign", {
         "hex": spend_resp["hex"],
@@ -278,6 +278,7 @@ def load_vectors():
 
 
 def save_vectors(data):
+    VECTORS_FILE.parent.mkdir(parents=True, exist_ok=True)
     VECTORS_FILE.write_text(json.dumps(data, indent=2) + "\n")
 
 

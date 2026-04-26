@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install proxy deps
-        run: pip install fastapi 'uvicorn[standard]' httpx pytest pytest-asyncio
+        run: pip install fastapi 'uvicorn[standard]' httpx pytest pytest-asyncio coincurve
       - name: Run proxy tests
         run: python -m pytest proxy/test_proxy.py -v
 
