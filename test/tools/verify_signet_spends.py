@@ -170,10 +170,26 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         "rungs": [{"output_index": 0, "blocks": [_sig_block_for(pk)]}],
         "locktime": 0,
     })
+    # MLSC outputs only commit a 32-byte root on-chain — to sign a spend
+    # we must replay the conditions tree so signrungtx can reconstruct
+    # the leaf and verify the Merkle proof.
+    spend_conditions = json.dumps([{
+        "blocks": [{
+            "type": "SIG",
+            "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": pk},
+            ],
+        }],
+    }])
     spend_sign = api("sign", {
         "hex": spend_create["hex"],
-        # signrungtx legacy SIG-only shape: [{privkey: <WIF>, input: <idx>}]
-        "signers": [{"privkey": keypair["privkey"], "input": 0}],
+        "signers": [{
+            "input": 0,
+            "rung": 0,
+            "conditions": spend_conditions,
+            "blocks": json.dumps([{"type": "SIG", "privkey": keypair["privkey"]}]),
+        }],
         "spent_outputs": [spent_output],
     })
     if not spend_sign.get("complete"):
