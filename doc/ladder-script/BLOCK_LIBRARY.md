@@ -1,9 +1,9 @@
 # Block Library
 
-Ladder Script defines 65 block types across 11 families (62 listed here, plus
-`QABI_PRIME`, `QABI_SPEND`, and `PQ_BATCH` in the QABIO family documented in
-[QABIO.md](QABIO.md) and [PQ_BATCH_SPEC.md](PQ_BATCH_SPEC.md)). Each block
-type has a uint16_t type code encoded little-endian on the wire.
+Ladder Script defines **65 block types across 11 families**, all listed below.
+The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md))
+sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
+little-endian on the wire.
 
 ## Legend
 
@@ -20,7 +20,7 @@ type has a uint16_t type code encoded little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0001 | SIG | no | yes | 1 | SCHEME(1) | Single Schnorr/ECDSA/PQ signature |
-| 0x0002 | MULTISIG | no | yes | var | NUMERIC(M) | M-of-N threshold signature |
+| 0x0002 | MULTISIG | no | yes | var | NUMERIC(M), SCHEME(1) | M-of-N threshold signature |
 | 0x0003 | ADAPTOR_SIG | no | yes | 2 | (none) | Adaptor signature verification |
 | 0x0004 | MUSIG_THRESHOLD | no | yes | 1 | NUMERIC(M), NUMERIC(N) | MuSig2/FROST aggregate threshold |
 | 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using key from a relay block |
@@ -96,11 +96,11 @@ type has a uint16_t type code encoded little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0701 | TIMELOCKED_SIG | no | yes | 1 | SCHEME(1), NUMERIC(csv) | SIG + CSV in one block |
-| 0x0702 | HTLC | no | yes | 2 | HASH256(32), NUMERIC(csv) | Hash + timelock + sig (Lightning HTLC) |
+| 0x0702 | HTLC | no | yes | 2 | HASH256(32), NUMERIC(csv), SCHEME(1) | Hash + timelock + sig (Lightning HTLC) |
 | 0x0703 | HASH_SIG | no | yes | 1 | HASH256(32), SCHEME(1) | Hash preimage + signature |
 | 0x0704 | PTLC | no | yes | 2 | NUMERIC(csv) | Adaptor sig + CSV (point-locked channel) |
 | 0x0705 | CLTV_SIG | no | yes | 1 | SCHEME(1), NUMERIC(cltv) | SIG + CLTV in one block |
-| 0x0706 | TIMELOCKED_MULTISIG | no | yes | var | NUMERIC(M), NUMERIC(csv) | MULTISIG + CSV in one block |
+| 0x0706 | TIMELOCKED_MULTISIG | no | yes | var | NUMERIC(M), NUMERIC(csv), SCHEME(1) | MULTISIG + CSV in one block |
 | 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning) |
 
 ## Governance Family (0x0800 - 0x08FF)
