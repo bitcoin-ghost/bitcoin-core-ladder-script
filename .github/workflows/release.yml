@@ -27,7 +27,11 @@ permissions:
 jobs:
   linux-x86_64:
     name: Build linux-x86_64
-    runs-on: ubuntu-24.04
+    # Build on the older LTS so the resulting binary's glibc / libstdc++
+    # ABI requirements match what users on Ubuntu 22.04 / Debian 12 /
+    # WSL2 actually have. ubuntu-24.04 ships glibc 2.39 and gcc-13
+    # libstdc++; binaries built there won't run on glibc 2.35 systems.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
         with:
