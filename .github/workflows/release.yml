@@ -1,11 +1,15 @@
 name: Release
 
 # Builds binary tarballs from a v*.*.* tag and publishes them as a
-# GitHub Release. Currently Linux x86_64 only — Windows and macOS
-# targets can be added once the Linux flow is stable.
+# pre-release GitHub Release with PGP-signed SHA256SUMS.
 #
-# Manual dispatch is also supported (`workflow_dispatch`) for testing
-# against an already-cut tag without re-pushing it.
+# Targets: linux-x86_64 and macos-arm64. Windows x86_64 cross-build
+# (via depends/) is intentionally deferred — see issue tracker.
+#
+# PGP signing requires two repository secrets:
+#   - GPG_PRIVATE_KEY: ASCII-armoured private key (`gpg --armor --export-secret-key <fpr>`)
+#   - GPG_PASSPHRASE:  passphrase for the key (omit if unprotected)
+# When neither secret is set the SHA256SUMS file is published unsigned.
 
 on:
   push:
@@ -34,7 +38,6 @@ jobs:
         run: |
           VERSION="${{ inputs.tag || github.ref_name }}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Building ${VERSION}"
 
       - name: Install build dependencies
         run: |
@@ -59,6 +62,9 @@ jobs:
           sudo ldconfig
 
       - name: Configure
+        # BUILD_TX / BUILD_UTIL / BUILD_WALLET_TOOL default to ${BUILD_TESTS},
+        # so disabling tests cascades and drops these tools — set them
+        # explicitly to keep them in the release tarball.
         run: |
           cmake -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -66,6 +72,9 @@ jobs:
             -DBUILD_TESTS=OFF \
             -DBUILD_BENCH=OFF \
             -DBUILD_FUZZ_BINARY=OFF \
+            -DBUILD_TX=ON \
+            -DBUILD_UTIL=ON \
+            -DBUILD_WALLET_TOOL=ON \
             -DWITH_ZMQ=OFF
 
       - name: Build binaries
@@ -81,7 +90,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PKG="bitcoin-core-ladder-${VERSION}-x86_64-linux-gnu"
-          mkdir -p "dist/${PKG}/bin"
+          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib"
           cp build/bin/bitcoind \
              build/bin/bitcoin-cli \
              build/bin/bitcoin-tx \
@@ -89,9 +98,7 @@ jobs:
              build/bin/bitcoin-wallet \
              "dist/${PKG}/bin/"
           # Bundle liboqs.so so the binary is self-contained.
-          mkdir -p "dist/${PKG}/lib"
-          cp /usr/local/lib/liboqs.so* "dist/${PKG}/lib/" 2>/dev/null || true
-          # Strip to keep the archive small.
+          cp -P /usr/local/lib/liboqs.so* "dist/${PKG}/lib/"
           strip "dist/${PKG}/bin/"* || true
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
@@ -102,9 +109,76 @@ jobs:
           path: dist/*.tar.gz
           retention-days: 7
 
+  macos-arm64:
+    name: Build macos-arm64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ inputs.tag || github.ref_name }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        env:
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+        run: |
+          brew install --quiet \
+            cmake ninja pkgconf coreutils \
+            boost libevent sqlite3 capnp liboqs
+
+      - name: Configure
+        run: |
+          cmake -B build -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_GUI=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_BENCH=OFF \
+            -DBUILD_FUZZ_BINARY=OFF \
+            -DBUILD_TX=ON \
+            -DBUILD_UTIL=ON \
+            -DBUILD_WALLET_TOOL=ON \
+            -DWITH_ZMQ=OFF
+
+      - name: Build binaries
+        run: |
+          cmake --build build -j$(sysctl -n hw.logicalcpu) \
+            --target bitcoind \
+            --target bitcoin-cli \
+            --target bitcoin-tx \
+            --target bitcoin-util \
+            --target bitcoin-wallet
+
+      - name: Package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="bitcoin-core-ladder-${VERSION}-arm64-apple-darwin"
+          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib"
+          cp build/bin/bitcoind \
+             build/bin/bitcoin-cli \
+             build/bin/bitcoin-tx \
+             build/bin/bitcoin-util \
+             build/bin/bitcoin-wallet \
+             "dist/${PKG}/bin/"
+          # Bundle liboqs from Homebrew so the binary is self-contained.
+          cp -RP $(brew --prefix liboqs)/lib/liboqs.*dylib "dist/${PKG}/lib/"
+          strip "dist/${PKG}/bin/"* || true
+          tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
+          ls -lh "dist/${PKG}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist/*.tar.gz
+          retention-days: 7
+
   publish:
     name: Publish release
-    needs: [linux-x86_64]
+    needs: [linux-x86_64, macos-arm64]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -127,13 +201,31 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
+      - name: PGP-sign SHA256SUMS
+        if: ${{ env.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          # Import the signing key into a fresh, isolated GnuPG home so we
+          # don't leak the private key into the runner's default keyring.
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # Detached, ASCII-armoured signature alongside SHA256SUMS.
+          echo "$GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback \
+            --passphrase-fd 0 --armor --detach-sign \
+            --output release/SHA256SUMS.asc release/SHA256SUMS
+          gpg --verify release/SHA256SUMS.asc release/SHA256SUMS
+          rm -rf "$GNUPGHOME"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           NOTES=$(cat <<EOF
-          Bitcoin Core + Ladder Script — pre-built binary for review and
+          Bitcoin Core + Ladder Script — pre-built binaries for review and
           playground use.
 
           - Connects to the Ladder Script signet at \`ladder-script.org\`.
@@ -147,8 +239,15 @@ jobs:
           ### Verifying
 
           \`\`\`
-          sha256sum -c SHA256SUMS
+          # 1. Verify the SHA256SUMS file was signed by the release key.
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+
+          # 2. Verify the binary archive matches the SHA256SUMS line.
+          sha256sum -c SHA256SUMS --ignore-missing
           \`\`\`
+
+          The release-signing key fingerprint is published on
+          [ladder-script.org/get-started.html](https://ladder-script.org/get-started.html#download).
           EOF
           )
           gh release create "$VERSION" release/* \

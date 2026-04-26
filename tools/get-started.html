@@ -152,7 +152,7 @@ a:hover { text-decoration: underline; }
 
     <div class="download">
       <div class="download-title">Bitcoin Core + Ladder Script</div>
-      <div class="download-meta">Pre-built <code>bitcoind</code> + <code>bitcoin-cli</code> for Linux x86_64 &mdash; based on Bitcoin Core v30.0</div>
+      <div class="download-meta">Pre-built <code>bitcoind</code> + tools &mdash; Linux x86_64 and macOS arm64 &mdash; based on Bitcoin Core v30.0</div>
       <div class="download-stats">
         <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">65</span></span>
         <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">619</span></span>
@@ -164,7 +164,27 @@ a:hover { text-decoration: underline; }
       <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:8px;">View on GitHub</a>
     </div>
 
-    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64 only at this stage; macOS and Windows targets will follow. Reproducible Guix builds are not yet wired in. The 805 lines of integration code are in 29 modified Core files; the 19,336-line library lives in 39 new files under <code>src/rung/</code>.</div>
+    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64 and macOS arm64 today; Windows x86_64 to follow. Reproducible Guix builds are not yet wired in. The 805 lines of integration code are in 29 modified Core files; the 19,336-line library lives in 39 new files under <code>src/rung/</code>.</div>
+  </div>
+
+  <!-- -- VERIFY -- -->
+  <div class="section" id="verify">
+    <div class="section-head">Verify the Download</div>
+
+    <p>Each release ships a <code>SHA256SUMS</code> file plus a detached PGP signature <code>SHA256SUMS.asc</code>. Verify the signature first, then check the binary against the SHA file.</p>
+
+    <div class="code-block"><span class="comment"># 1. Import the release-signing key (one-time setup).</span>
+<span class="cmd">gpg --keyserver keys.openpgp.org --recv-keys &lt;FINGERPRINT&gt;</span>
+
+<span class="comment"># 2. Verify SHA256SUMS was signed by the release key.</span>
+<span class="cmd">gpg --verify SHA256SUMS.asc SHA256SUMS</span>
+<span class="output">gpg: Good signature from "defenwycke &lt;defenwycke@icloud.com&gt;"</span>
+
+<span class="comment"># 3. Verify the binary archive matches.</span>
+<span class="cmd">sha256sum -c SHA256SUMS --ignore-missing</span>
+<span class="output">bitcoin-core-ladder-v30.0-ladder-0.1-x86_64-linux-gnu.tar.gz: OK</span></div>
+
+    <div class="note"><strong>Release-signing key fingerprint:</strong> <code>&lt;FINGERPRINT&gt;</code> &mdash; this page is the canonical publication. If <code>gpg --verify</code> reports any other key, do not trust the binary. Cross-check against the same fingerprint in the repo&apos;s <code>README.md</code>.</div>
   </div>
 
   <!-- -- BUILD FROM SOURCE -- -->
