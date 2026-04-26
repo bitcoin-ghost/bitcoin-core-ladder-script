@@ -1,7 +1,7 @@
 # TL;DR
 
-Ladder Script is a typed spending condition system for Bitcoin. 62 declarative blocks
-organised into 10 families. Soft-fork compatible — existing transactions continue to work.
+Ladder Script is a typed spending condition system for Bitcoin. 65 declarative blocks
+organised into 11 families. Soft-fork compatible — existing transactions continue to work.
 Legacy script types are supported via wrappers.
 
 Live on signet today. Post-quantum signatures verified on-chain.
@@ -16,7 +16,7 @@ Live on signet today. Post-quantum signatures verified on-chain.
 | Standard payment (1-in, 2-out) | 226 vB | 143 vB | 157 vB | **118 vB** |
 | Script-path spend | — | — | ~170 vB | **124 vB** |
 | 10-output batch | — | 391 vB | 511 vB | **194 vB** |
-| 100-output batch | — | 3,181 vB | 4,381 vB | **914 vB** |
+| 100-output batch | — | 3,179 vB | 4,369 vB | **911 vB** |
 
 Script-path spends are smaller than P2WPKH key-path spends.
 One signature covers all outputs — 100 outputs, one sig.
@@ -46,17 +46,19 @@ is structurally impossible. Conditions contain zero user-chosen bytes.
 |-----------|-------------|
 | **Engine** | Visual drag-and-drop transaction builder — compose blocks, simulate, deploy to signet |
 | **Descriptor notation** | Human-readable: `ladder(or(sig(@alice), and(csv(1000), sig(@bob))))` |
-| **15 RPCs** | Full programmatic access — create, sign, broadcast, parse, decode, validate |
+| **PQ Batch playground** | N FALCON-gated UTXOs spent in one tx with a single anchor signature |
+| **QABIO playground** | N-party batch ceremony walkthrough on signet |
 | **Block explorer** | Live signet explorer with mempool viewer |
-| **Block reference** | Documentation for all 64 block types |
+| **Block reference** | Documentation for all 65 block types |
 
-## What the 64 Blocks Cover
+## What the 65 Blocks Cover
 
 Signatures. Timelocks. Hash locks. Covenants. Recursive covenants. Vaults. Rate limiters.
 Counters. Latches. Timers. Sequencers. Multi-party signing. Adaptor signatures. Atomic
 swaps. Payment channels. Oracle attestations. Transaction weight limits. Input/output
 count constraints. Value ratio enforcement. Cross-input binding. Data anchoring.
-Post-quantum signatures. Legacy P2PKH/P2WPKH/P2TR wrapping.
+Post-quantum signatures (FALCON / Dilithium / SPHINCS+). Lightweight PQ batches (PQ_BATCH).
+Multi-party PQ batches (QABIO). Legacy P2PKH/P2WPKH/P2TR wrapping.
 
 All type-safe. All formally specified. All live on signet.
 

@@ -55,8 +55,6 @@ Interactive HTML pages in [`tools/`](../../tools/) (served at `ladder-script.org
 - [`tools/comparison.html`](../../tools/comparison.html) — Bitcoin Script vs Ladder Script
 - [`tools/patch-overview.html`](../../tools/patch-overview.html) — Patch impact analysis
 - [`tools/get-started.html`](../../tools/get-started.html) — Getting started guide
-- [`tools/ladder-data-flow.html`](../../tools/ladder-data-flow.html) — Data flow and anti-spam visualization
-- [`tools/mainnet-checklist.html`](../../tools/mainnet-checklist.html) — Mainnet readiness tracker
 - [`tools/explorer.html`](../../tools/explorer.html) — Live signet block explorer
 - [`tools/qabio-playground.html`](../../tools/qabio-playground.html) — QABIO sandbox
 
