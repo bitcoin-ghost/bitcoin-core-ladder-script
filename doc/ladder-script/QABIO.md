@@ -488,11 +488,11 @@ Test coverage includes:
   `contrib/qabi/signet_escape.py`, verified end-to-end on the
   ladder-script signet chain.
 
-The first real QABIO transactions on a live non-regtest chain are
-published on the ladder-script signet; references:
+QABIO transactions — both the priming/spend lifecycle and the SIG
+escape path — have been demonstrated end-to-end on the live
+ladder-script signet at `ladder-script.org`. Specific txids drift
+across chain resets; the live block explorer at
+`ladder-script.org/explorer.html` always reflects the current chain.
 
-- Priming transaction: `8f379e0c8c0a6acaa48d260be6b869efe8e159c1be85aed9b221d77496ac4ea5`
-- Escape transaction: `7bd0d5e4ced77cb2b5d1f12a0494273e1f61c9e988ede6f38b3e4ad126e4c66a`
-
-QABIO is ready for production use. The remaining work is a BIP
+QABIO is implementation-complete. The remaining work is a BIP
 submission and an external security audit.
