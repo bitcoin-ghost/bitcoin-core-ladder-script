@@ -131,7 +131,7 @@ Build instructions follow upstream Bitcoin Core — see [`doc/build-unix.md`](do
 - [`doc/ladder-script/ENGINE_GUIDE.md`](doc/ladder-script/ENGINE_GUIDE.md) — how to use the visual builder
 - [`doc/ladder-script/INTEGRATION.md`](doc/ladder-script/INTEGRATION.md) — wallet and application integration guide
 - [`doc/ladder-script/ANNOTATED_DIFF.md`](doc/ladder-script/ANNOTATED_DIFF.md) — per-section walkthrough of the 805-line Core patch
-- [`doc/ladder-script/ANNOTATED_LIBRARY.md`](doc/ladder-script/ANNOTATED_LIBRARY.md) — file-by-file walkthrough of the 19,337-line library
+- [`doc/ladder-script/ANNOTATED_LIBRARY.md`](doc/ladder-script/ANNOTATED_LIBRARY.md) — file-by-file walkthrough of the 19,345-line library
 - [`doc/ladder-script/REVIEW_GUIDE.md`](doc/ladder-script/REVIEW_GUIDE.md) — recommended reading order for reviewers
 - [`doc/ladder-script/SOFT_FORK_GUIDE.md`](doc/ladder-script/SOFT_FORK_GUIDE.md) — proposed activation path
 - [`doc/ladder-script/POSSIBILITIES.md`](doc/ladder-script/POSSIBILITIES.md) — design space exploration

@@ -16,7 +16,7 @@ each modification.
 | Category                         | Files | Lines added |
 |----------------------------------|------:|------------:|
 | Modified Bitcoin Core files      |    29 |       +805  |
-| New library code (`src/rung/`)   |    39 |    +19,337  |
+| New library code (`src/rung/`)   |    39 |    +19,345  |
 | New tests (`src/test/rung_tests.cpp`) |    1 |    +16,945  |
 | **Total surface change**         |    69 |    +37,086  |
 

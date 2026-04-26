@@ -875,7 +875,7 @@ A detailed list of changes in this version follows. To keep the list to a manage
 - bitcoin/bitcoin#22742 Use proper target in `do_fund_send` (S3RK)
 
 ### Miscellaneous
-- bitcoin/bitcoin#19337 sync: Detect double lock from the same thread (vasild)
+- bitcoin/bitcoin#19345 sync: Detect double lock from the same thread (vasild)
 - bitcoin/bitcoin#19809 log: Prefix log messages with function name and source code location if -logsourcelocations is set (practicalswift)
 - bitcoin/bitcoin#19866 eBPF Linux tracepoints (jb55)
 - bitcoin/bitcoin#20024 init: Fix incorrect warning "Reducing -maxconnections from N to N-1, because of system limitations" (practicalswift)

@@ -170,6 +170,14 @@ struct RungEvalContext {
     PQBatchCache* pq_batch_cache{nullptr}; //!< Optional per-tx cache for PQ_BATCH commits: anchor inputs populate it, non-anchor inputs read to skip per-input verification. See PQBatchCache comment for ordering rules.
 };
 
+// Windows headers (wingdi.h, transitively via windows.h) define ERROR as
+// a preprocessor macro, which collides with our EvalResult::ERROR enum
+// value when compiling on mingw / native Windows. Drop the macro locally
+// — nothing in this header uses the Windows ERROR constant.
+#ifdef ERROR
+#undef ERROR
+#endif
+
 /** Result of evaluating a single block or rung. */
 enum class EvalResult {
     SATISFIED,           //!< All conditions met

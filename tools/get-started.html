@@ -158,13 +158,13 @@ a:hover { text-decoration: underline; }
         <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">619</span></span>
         <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">52</span></span>
         <span><span class="s-key">PATCH_LINES=</span><span class="s-val">805</span></span>
-        <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">19,337</span></span>
+        <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">19,345</span></span>
       </div>
       <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/latest" class="download-btn">Latest Release</a>
       <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:8px;">View on GitHub</a>
     </div>
 
-    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64, macOS arm64, and Windows x86_64. Reproducible Guix builds are not yet wired in. The 805 lines of integration code are in 29 modified Core files; the 19,337-line library lives in 39 new files under <code>src/rung/</code>.</div>
+    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64, macOS arm64, and Windows x86_64. Reproducible Guix builds are not yet wired in. The 805 lines of integration code are in 29 modified Core files; the 19,345-line library lives in 39 new files under <code>src/rung/</code>.</div>
   </div>
 
   <!-- -- VERIFY -- -->
@@ -274,7 +274,7 @@ a:hover { text-decoration: underline; }
 <span class="cmd">cmake --build build -j$(nproc)</span>
 
 <span class="comment"># Optional: -DENABLE_QABIO=OFF for the base block set without the QABIO extension</span></div>
-    <div class="note">Forked from upstream Bitcoin Core v30.0. The 805-line patch lives across 29 files in <code>src/</code>; the 19,337-line library in 39 new files under <code>src/rung/</code>. A single boundary header (<code>src/rung_shims.h</code>) is the only place Core types meet library types. See <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> for the per-file walkthrough.</div>
+    <div class="note">Forked from upstream Bitcoin Core v30.0. The 805-line patch lives across 29 files in <code>src/</code>; the 19,345-line library in 39 new files under <code>src/rung/</code>. A single boundary header (<code>src/rung_shims.h</code>) is the only place Core types meet library types. See <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> for the per-file walkthrough.</div>
   </div>
 
   <!-- -- RPC COMMANDS -- -->

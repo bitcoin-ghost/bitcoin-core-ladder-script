@@ -69,6 +69,10 @@ jobs:
         # BUILD_TX / BUILD_UTIL / BUILD_WALLET_TOOL default to ${BUILD_TESTS},
         # so disabling tests cascades and drops these tools — set them
         # explicitly to keep them in the release tarball.
+        # ENABLE_IPC=OFF: ubuntu-22.04 ships capnproto 0.8.0 which has a
+        # known CVE; bitcoin's CMake refuses to use it. We don't ship the
+        # multiprocess (`bitcoin-node` / IPC) binaries in this release
+        # anyway, so disabling IPC is the cleanest path.
         run: |
           cmake -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -79,6 +83,7 @@ jobs:
             -DBUILD_TX=ON \
             -DBUILD_UTIL=ON \
             -DBUILD_WALLET_TOOL=ON \
+            -DENABLE_IPC=OFF \
             -DWITH_ZMQ=OFF
 
       - name: Build binaries
