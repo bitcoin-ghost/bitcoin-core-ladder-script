@@ -155,7 +155,14 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
 
     time.sleep(2)
     tx_info = api(f"tx/{fund_txid}")
-    spent_output = tx_info["vout"][0]
+    # `tx/<txid>` returns Bitcoin Core's getrawtransaction shape (value
+    # in BTC, scriptPubKey as an object). signrungtx expects
+    # {amount, scriptPubKey: hex}.
+    raw_vout = tx_info["vout"][0]
+    spent_output = {
+        "amount": raw_vout["value"],
+        "scriptPubKey": raw_vout["scriptPubKey"]["hex"],
+    }
 
     spend_create = api("createrungtx", {
         "inputs": [{"txid": fund_txid, "vout": 0}],
