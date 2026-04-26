@@ -7,10 +7,12 @@ modes, PQ schemes, and per-rung destinations.
 ## Overview
 
 Ladder Script uses version 4 transactions (`RUNG_TX`). Each output is 8 bytes on the wire
-(value only). A single 32-byte `conditions_root` is shared across all outputs, carrying the
-Merkelised Ladder Script Conditions. Flag byte `0x02` signals the RUNG_TX wire format. A
-creation proof in the witness is required for 3 or more spendable outputs. At spend time,
-the witness reveals one rung's conditions plus a Merkle proof. The node verifies the proof,
+(value only) — TX_MLSC encoding. A single 32-byte `conditions_root` is shared across all
+outputs of the transaction, carrying the Merkelised Ladder Script Conditions. Flag byte
+`0x02` signals the RUNG_TX wire format. The 32-byte root is recovered at spend time from
+a synthetic UTXO entry at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)` — see
+[`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md) for the full mechanism. At spend time the
+witness reveals one rung's conditions plus a Merkle proof; the node verifies the proof,
 merges conditions with the witness, and evaluates the ladder.
 
 ## Creating Outputs (MLSC)
@@ -79,7 +81,8 @@ is 1 to 40 bytes.
 The witness stack has 1, 2, or 3 elements depending on the spending path:
 
 - **Key-path** (1 element): `[signature(64)]` — sign against the tweaked conditions root
-  as an x-only pubkey. No conditions revealed. 110 vB (1-in, 1-out).
+  as an x-only pubkey. No conditions revealed. **109 vB** (1-in, 1-out — 1 vB smaller
+  than P2WPKH, 2 vB smaller than P2TR key-path).
 - **Script-path** (2 elements): `[LadderWitness, MLSCProof]` — reveal one rung's
   conditions with a Merkle proof.
 - **Tweaked script-path** (3 elements): `[LadderWitness, MLSCProof, internal_pubkey]` —
@@ -113,7 +116,8 @@ Diff field types are restricted to PUBKEY, SIGNATURE, PREIMAGE, SCRIPT_BODY, and
 Use the `signladder` RPC to sign a Ladder Script transaction. The RPC automatically
 looks up the funding transaction. The RPC:
 
-1. Computes `SignatureHashLadder()` using tagged hash `"LadderSighash"`.
+1. Computes `SignatureHashLadder()` using tagged hash `"LadderSighash/v1"` (script-path)
+   or `"LadderKeyPathSighash/v1"` (key-path).
 2. Signs with the specified scheme (Schnorr by default).
 3. Inserts the signature into the correct field position.
 
@@ -139,16 +143,19 @@ ANYPREVOUT enables LN-Symmetry/eltoo. ANYPREVOUTANYSCRIPT enables rebindable sig
 Set the coil's `scheme` field to a PQ scheme. Use `generatepqkeypair` to create a keypair
 and `pqpubkeycommit` to compute the commitment. Supported schemes:
 
-| Code | Scheme | Signature Size |
-|------|--------|---------------|
-| 0x01 | SCHNORR | 64-65 bytes |
-| 0x02 | ECDSA | 8-72 bytes |
-| 0x10 | FALCON512 | ~666 bytes |
-| 0x11 | FALCON1024 | ~1280 bytes |
-| 0x12 | DILITHIUM3 | ~3293 bytes |
-| 0x13 | SPHINCS_SHA | ~49216 bytes |
+| Code | Scheme | Pubkey Size | Signature Size |
+|------|--------|-------------|---------------|
+| 0x01 | SCHNORR | 32 bytes | 64-65 bytes |
+| 0x02 | ECDSA | 33 bytes | 8-72 bytes |
+| 0x10 | FALCON512 | 897 bytes | 666 bytes (exact) |
+| 0x11 | FALCON1024 | 1,793 bytes | ~1,330 bytes |
+| 0x12 | DILITHIUM3 | 1,952 bytes | 3,293 bytes |
+| 0x13 | SPHINCS_SHA | 64 bytes | 49,216 bytes |
 
-The `MAX_LADDER_WITNESS_SIZE` of 100,000 bytes accommodates PQ signatures.
+`MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates PQ signatures. For batched
+PQ spends, see the **PQ_BATCH** primitive (one anchor input reveals pubkey + sig once;
+other inputs gated by the same `SHA256(falcon_pubkey)` short-circuit at ~55 vB amortised) —
+[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
 
 ## Broadcasting
 
@@ -172,7 +179,7 @@ rung = block | and(block, ...)      single block or AND composition
 
 ### Block Syntax
 
-All 64 block types are supported in descriptors. Common examples:
+All 65 block types are supported in descriptors. Common examples:
 
 | Block | Syntax |
 |-------|--------|
@@ -192,8 +199,9 @@ All 64 block types are supported in descriptors. Common examples:
 | hash_guarded | `hash_guarded(hex32)` |
 | (inverted) | `!block` prefix |
 
-All other blocks follow the pattern `block_name(args...)`. The full list of 44
-parseable names matches the block type names in lowercase with underscores.
+All other blocks follow the pattern `block_name(args...)` — block names are the
+type names in lowercase with underscores (e.g. `RECURSE_MODIFIED` →
+`recurse_modified(...)`, `PQ_BATCH` → `pq_batch(hex32)`).
 
 Scheme names: `schnorr`, `ecdsa`, `falcon512`, `falcon1024`, `dilithium3`, `sphincs_sha`.
 
@@ -218,8 +226,12 @@ Coil conditions (the `conditions` field in RungCoil) are reserved and must be em
 
 | Mode | Code | Behaviour |
 |------|------|----------|
-| INLINE | 0x01 | Signatures are inline in the witness. Standard mode. |
-| AGGREGATE | 0x02 | Half-aggregated Schnorr: R per input in witness, aggregated s-value at tx level. |
+| INLINE | 0x01 | Signatures sit inline in the witness. The only defined mode. |
+
+Earlier draft modes (`AGGREGATE`, `DEFERRED`) were removed from the enum entirely; values
+other than `0x01` reject at deserialisation. For tx-level FALCON-512 aggregation see
+QABIO ([`QABIO.md`](QABIO.md)) — the coordinator's signature is carried in the tx-level
+`aggregated_sig` field, not via this attestation byte.
 
 ## Per-Rung Destinations (rung_destinations)
 
@@ -252,11 +264,13 @@ cached results before evaluating the rung's own blocks.
 
 The full validation pipeline for a v4 RUNG_TX:
 
-**Per-transaction (first input only):**
+**Per-transaction (`CheckRungTxLevel`, runs once per tx):**
 
-1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN, dust threshold.
-2. Creation proof validated (required for 3+ spendable outputs).
-3. PREIMAGE/SCRIPT_BODY count across all inputs checked against `MAX_PREIMAGE_FIELDS_PER_TX`.
+1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN,
+   non-DATA_RETURN outputs ≥ `MIN_RUNG_OUTPUT_VALUE` (546 sats).
+2. PREIMAGE/SCRIPT_BODY count across all inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2).
+3. Cross-input invariants when applicable: PQ_BATCH cache consistency, QABIO output-set
+   binding.
 
 **Per-input:**
 
@@ -270,19 +284,20 @@ The full validation pipeline for a v4 RUNG_TX:
 
 ## RPC Command Reference
 
+The library adds **20 RPCs** across six groups (descriptor authoring, raw construction,
+inspection/validation, templates/commitments, PQ helpers, QABIO). Headline commands:
+
 | Command | Purpose |
 |---------|---------|
-| `decoderung` | Decode a ladder witness from hex |
-| `createrung` | Build conditions and compute MLSC root |
-| `validateladder` | Validate a ladder witness structure |
+| `parseladder` / `formatladder` | Descriptor ↔ conditions hex |
+| `signladder` | One-call sign of a v4 RUNG_TX using descriptor notation |
 | `createrungtx` | Build an unsigned v4 RUNG_TX with shared conditions tree |
-| `signladder` | One-call sign a v4 transaction using descriptor notation |
-| `computectvhash` | Compute BIP-119 CTV template hash |
-| `generatepqkeypair` | Generate a PQ keypair |
-| `pqpubkeycommit` | Compute PQ pubkey commitment |
-| `extractadaptorsecret` | Extract adaptor secret from completed signature |
-| `verifyadaptorpresig` | Verify an adaptor pre-signature |
-| `parseladder` | Parse descriptor string to conditions |
-| `formatladder` | Format conditions as descriptor string |
-| `signrungtx` | Sign a v4 transaction input (raw path, used internally by `signladder`) |
-| `computemutation` | Compute mutated conditions root for recursive covenants |
+| `signrungtx` | Sign a v4 RUNG_TX (raw path, used internally by `signladder`) |
+| `createrung` / `decoderung` / `validateladder` / `serialiseconditions` | Witness/conditions construction and inspection |
+| `computectvhash` / `computemutation` | Templates and recursive-covenant target hashes |
+| `generatepqkeypair` / `pqpubkeycommit` | PQ key helpers |
+| `extractadaptorsecret` / `verifyadaptorpresig` | Adaptor signature primitives (PTLC) |
+| `qabi_buildblock` / `qabi_blockinfo` / `qabi_authchain` / `qabi_signqabo` / `qabi_sighash` | QABIO ceremony |
+
+Full per-RPC signature, args, returns, and examples in
+[`RPC_REFERENCE.md`](RPC_REFERENCE.md).
