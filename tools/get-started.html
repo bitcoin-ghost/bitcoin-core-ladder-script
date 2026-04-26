@@ -148,11 +148,11 @@ a:hover { text-decoration: underline; }
 
   <!-- -- DOWNLOAD -- -->
   <div class="section" id="download">
-    <div class="section-head">Build from Source</div>
+    <div class="section-head">Download</div>
 
     <div class="download">
       <div class="download-title">Bitcoin Core + Ladder Script</div>
-      <div class="download-meta">Build target: <code>bitcoind</code> (~18 MB) &mdash; based on Bitcoin Core v30.0</div>
+      <div class="download-meta">Pre-built <code>bitcoind</code> + <code>bitcoin-cli</code> for Linux x86_64 &mdash; based on Bitcoin Core v30.0</div>
       <div class="download-stats">
         <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">65</span></span>
         <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">619</span></span>
@@ -160,10 +160,23 @@ a:hover { text-decoration: underline; }
         <span><span class="s-key">PATCH_LINES=</span><span class="s-val">805</span></span>
         <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">19,336</span></span>
       </div>
-      <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn">View on GitHub</a>
+      <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/latest" class="download-btn">Latest Release</a>
+      <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:8px;">View on GitHub</a>
     </div>
 
-    <div class="note">No pre-built binaries yet &mdash; build from source against Bitcoin Core v30.0. The 805 lines of integration code are in 29 modified Core files; the 19,336-line library lives in 39 new files under <code>src/rung/</code>. Connects to the Ladder Script signet where you can create and spend RUNG_TX transactions.</div>
+    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64 only at this stage; macOS and Windows targets will follow. Reproducible Guix builds are not yet wired in. The 805 lines of integration code are in 29 modified Core files; the 19,336-line library lives in 39 new files under <code>src/rung/</code>.</div>
+  </div>
+
+  <!-- -- BUILD FROM SOURCE -- -->
+  <div class="section" id="build-from-source">
+    <div class="section-head">Build from Source</div>
+
+    <p>If you would rather build it yourself (any platform, full test suite):</p>
+    <div class="code-block"><span class="cmd">git clone https://github.com/defenwycke/bitcoin-core-ladder-script.git</span>
+<span class="cmd">cd bitcoin-core-ladder-script</span>
+<span class="cmd">cmake -B build -DCMAKE_BUILD_TYPE=Release</span>
+<span class="cmd">cmake --build build -j2  </span><span class="comment"># -j2 keeps WSL2 happy; on a real box use -j$(nproc)</span></div>
+    <p><code>liboqs</code> is a hard build dependency for the post-quantum signature schemes &mdash; install via your package manager or build from <a href="https://github.com/open-quantum-safe/liboqs" target="_blank" rel="noopener">github.com/open-quantum-safe/liboqs</a>.</p>
   </div>
 
   <!-- -- QUICK START -- -->

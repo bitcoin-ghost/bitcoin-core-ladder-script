@@ -1,0 +1,157 @@
+name: Release
+
+# Builds binary tarballs from a v*.*.* tag and publishes them as a
+# GitHub Release. Currently Linux x86_64 only — Windows and macOS
+# targets can be added once the Linux flow is stable.
+#
+# Manual dispatch is also supported (`workflow_dispatch`) for testing
+# against an already-cut tag without re-pushing it.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build (e.g. v30.0-ladder-0.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Build linux-x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ inputs.tag || github.ref_name }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ${VERSION}"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkgconf python3 \
+            libevent-dev libboost-dev libsqlite3-dev \
+            capnproto libcapnp-dev \
+            libssl-dev
+
+      - name: Build and install liboqs
+        run: |
+          git clone --depth 1 --branch 0.10.1 \
+            https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cmake -B /tmp/liboqs/build -S /tmp/liboqs -GNinja \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DOQS_BUILD_ONLY_LIB=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/liboqs/build
+          sudo cmake --install /tmp/liboqs/build
+          sudo ldconfig
+
+      - name: Configure
+        run: |
+          cmake -B build -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_GUI=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_BENCH=OFF \
+            -DBUILD_FUZZ_BINARY=OFF \
+            -DWITH_ZMQ=OFF
+
+      - name: Build binaries
+        run: |
+          cmake --build build -j$(nproc) \
+            --target bitcoind \
+            --target bitcoin-cli \
+            --target bitcoin-tx \
+            --target bitcoin-util \
+            --target bitcoin-wallet
+
+      - name: Package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="bitcoin-core-ladder-${VERSION}-x86_64-linux-gnu"
+          mkdir -p "dist/${PKG}/bin"
+          cp build/bin/bitcoind \
+             build/bin/bitcoin-cli \
+             build/bin/bitcoin-tx \
+             build/bin/bitcoin-util \
+             build/bin/bitcoin-wallet \
+             "dist/${PKG}/bin/"
+          # Bundle liboqs.so so the binary is self-contained.
+          mkdir -p "dist/${PKG}/lib"
+          cp /usr/local/lib/liboqs.so* "dist/${PKG}/lib/" 2>/dev/null || true
+          # Strip to keep the archive small.
+          strip "dist/${PKG}/bin/"* || true
+          tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
+          ls -lh "dist/${PKG}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: [linux-x86_64]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: echo "version=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute SHA256SUMS
+        run: |
+          mkdir release
+          find artifacts -type f -name '*.tar.gz' -exec mv {} release/ \;
+          cd release
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(cat <<EOF
+          Bitcoin Core + Ladder Script — pre-built binary for review and
+          playground use.
+
+          - Connects to the Ladder Script signet at \`ladder-script.org\`.
+          - 805 LOC patched in Bitcoin Core, 19,336 LOC of typed-block library.
+          - 65 block types, FALCON-512 / Dilithium3 / SPHINCS+ post-quantum
+            signatures, MLSC outputs.
+
+          **This is a reviewer / playground binary, not a production release.**
+          Reproducible Guix builds will follow.
+
+          ### Verifying
+
+          \`\`\`
+          sha256sum -c SHA256SUMS
+          \`\`\`
+          EOF
+          )
+          gh release create "$VERSION" release/* \
+            --title "Bitcoin Core + Ladder Script ${VERSION}" \
+            --notes "$NOTES" \
+            --prerelease
