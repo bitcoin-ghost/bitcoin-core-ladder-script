@@ -98,97 +98,77 @@ def select_utxo(utxos):
     raise RuntimeError(f"No UTXO large enough (need {need_btc} BTC)")
 
 
+def _sig_block_for(pubkey_hex):
+    """Return a SIG-typed block whose witness uses this pubkey.
+    The library folds PUBKEY into the Merkle leaf; on-chain conditions
+    end up with SCHEME only."""
+    return {
+        "type": "SIG",
+        "fields": [
+            {"type": "SCHEME", "hex": "01"},
+            {"type": "PUBKEY", "hex": pubkey_hex},
+        ],
+    }
+
+
 def verify_block(block_type, cond_fields, desc, keypair, utxos):
-    """Full fund→mine→spend→mine cycle for one block type."""
+    """Fund a v4 RUNG_TX output, then spend it back to a SIG output.
+    Currently only exercises SIG-typed blocks — other block types have
+    bespoke witness construction and are covered by the playground
+    tools and functional tests."""
     print(f"\n--- {block_type}: {desc} ---")
     pk = keypair["pubkey"]
-    pk_hash = hashlib.sha256(bytes.fromhex(pk)).hexdigest()
 
-    # Select a wallet UTXO as input
     utxo = select_utxo(utxos)
     input_sats = int(utxo["amount"] * 1e8)
     change_sats = input_sats - FUND_SATS - FEE_SATS
 
-    # Build the rung output
-    rung_output = {
-        "amount": FUND_SATS / 1e8,
-        "conditions": [{
-            "blocks": [{
-                "type": block_type,
-                "fields": cond_fields,
-                "merkle_pub_key": pk_hash,
-            }]
+    # Outputs: flat list of BTC amounts.
+    amounts = [FUND_SATS / 1e8]
+    rungs = [{
+        "output_index": 0,
+        "blocks": [{
+            "type": block_type,
+            "fields": cond_fields + [{"type": "PUBKEY", "hex": pk}],
         }],
-    }
-
-    # Build outputs: rung output + change (SIG-locked)
-    outputs = [rung_output]
-    change_addr = get_address()
+    }]
     if change_sats >= 546:
-        change_output = {
-            "amount": change_sats / 1e8,
-            "conditions": [{
-                "blocks": [{
-                    "type": "SIG",
-                    "fields": [{"type": "SCHEME", "hex": "01"}],
-                    "merkle_pub_key": pk_hash,
-                }]
-            }],
-        }
-        outputs.append(change_output)
+        amounts.append(change_sats / 1e8)
+        rungs.append({"output_index": 1, "blocks": [_sig_block_for(pk)]})
 
-    # Create funding tx
-    create_payload = {
+    fund_create = api("createrungtx", {
         "inputs": [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-        "outputs": outputs,
+        "outputs": amounts,
+        "rungs": rungs,
         "locktime": 0,
-    }
-    resp = api("createrungtx", create_payload)
-    fund_hex = resp["hex"]
-
-    # Sign with wallet (P2WPKH input)
-    sign_resp = api("sign", {
-        "hex": fund_hex,
+    })
+    fund_sign = api("sign", {
+        "hex": fund_create["hex"],
         "signers": [{"pubkey": pk, "privkey": keypair["privkey"]}],
         "spent_outputs": [{
             "amount": utxo["amount"],
             "scriptPubKey": utxo.get("scriptPubKey", ""),
         }],
     })
-    if not sign_resp.get("complete"):
-        raise RuntimeError(f"Fund sign failed: {json.dumps(sign_resp)[:200]}")
+    if not fund_sign.get("complete"):
+        raise RuntimeError(f"Fund sign failed: {json.dumps(fund_sign)[:200]}")
 
-    bcast = api("broadcast", {"hex": sign_resp["hex"]})
-    fund_txid = bcast["txid"]
+    fund_bcast = api("broadcast", {"hex": fund_sign["hex"]})
+    fund_txid = fund_bcast["txid"]
     print(f"  Fund: {fund_txid}")
 
-    # Wait briefly for mempool propagation (skip mining to avoid node disruption)
     time.sleep(2)
-
-    # Get funded tx info (may be unconfirmed in mempool)
     tx_info = api(f"tx/{fund_txid}")
     spent_output = tx_info["vout"][0]
-    spend_dest = get_address()
 
-    # Spend output: lock to a simple SIG condition
-    spend_pk_hash = hashlib.sha256(bytes.fromhex(keypair["pubkey"])).hexdigest()
-    spend_payload = {
+    spend_create = api("createrungtx", {
         "inputs": [{"txid": fund_txid, "vout": 0}],
-        "outputs": [{
-            "amount": SPEND_SATS / 1e8,
-            "conditions": [{
-                "blocks": [{
-                    "type": "SIG",
-                    "fields": [{"type": "PUBKEY", "hex": keypair["pubkey"]}],
-                }]
-            }],
-        }],
+        "outputs": [SPEND_SATS / 1e8],
+        "rungs": [{"output_index": 0, "blocks": [_sig_block_for(pk)]}],
         "locktime": 0,
-    }
-    spend_resp = api("createrungtx", spend_payload)
-
+    })
     spend_sign = api("sign", {
-        "hex": spend_resp["hex"],
+        "hex": spend_create["hex"],
         "signers": [{"pubkey": pk, "privkey": keypair["privkey"]}],
         "spent_outputs": [spent_output],
     })
@@ -200,7 +180,6 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
     print(f"  Spend: {spend_txid}")
     print(f"  OK")
 
-    # Remove spent UTXO from pool, add change if present
     utxos[:] = [u for u in utxos if not (u["txid"] == utxo["txid"] and u["vout"] == utxo["vout"])]
     if change_sats >= 546:
         utxos.append({"txid": fund_txid, "vout": 1, "amount": change_sats / 1e8, "confirmations": 1})
@@ -292,7 +271,11 @@ def main():
         else:
             to_verify = sys.argv[1:]
     else:
-        to_verify = list(BLOCKS.keys())
+        # Default: SIG only. Other block types have bespoke witness
+        # construction not implemented in this script — they are exercised
+        # by the playground tools and the functional test suite. Pass
+        # `--all` to attempt every block type listed in BLOCKS.
+        to_verify = ["SIG"]
 
     keypair = get_keypair()
     print(f"Keypair: {keypair['address']}")
