@@ -3,8 +3,8 @@
 ## 1. Overview
 
 The Ladder Script Engine is a single-page React application for building,
-simulating, and deploying RUNG_TX (version 4) transactions on Ghost signet.
-It runs entirely client-side with no build step: open
+simulating, and deploying RUNG_TX (version 4) transactions on the Ladder
+Script signet. It runs entirely client-side with no build step: open
 `tools/ladder-engine/index.html` in any modern browser. The file loads React 18,
 ReactDOM 18, and Babel standalone from CDN, then transpiles an inline JSX
 `<script type="text/babel">` block at page load.
@@ -109,8 +109,8 @@ an entry to view, copy, or compare the raw JSON.
 
 ## 3. Block Palette
 
-The left sidebar organises **64 block types** into
-**10 families**. Each family has a colour-coded dot. Groups are collapsible.
+The left sidebar organises **65 block types** into
+**11 families**. Each family has a colour-coded dot. Groups are collapsible.
 Hovering a palette item shows a tooltip with the block description and hex
 type code.
 
@@ -126,6 +126,7 @@ type code.
 | COMPOUND    | `#ffffff` | TL_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TL_MULTI, ANCHOR_FEE |
 | GOVERNANCE  | `#9e9e9e` | EPOCH, WT_LIMIT, IN_COUNT, OUT_COUNT, REL_VAL, ACCUM, OUT_CHK |
 | LEGACY      | `#00e5ff` | P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR, P2TR_S |
+| QABIO       | `#9b59b6` | QABI_PRIME, QABI_SPEND, PQ_BATCH |
 
 An internal block type `OUTPUT_REF` (not in the palette) references named
 output coils from other rungs.
@@ -297,8 +298,10 @@ Configured in the output inspector under "Wire Format":
 
 | Attestation  | Meaning |
 |--------------|---------|
-| `INLINE`     | Signatures in witness data |
-| `AGGREGATE`  | Half-aggregated Schnorr (R per input, shared s-value) |
+| `INLINE`     | Signatures in witness data — the only defined mode |
+
+Earlier draft modes (`AGGREGATE`, `DEFERRED`) were removed from the enum entirely.
+For tx-level FALCON-512 aggregation see the QABIO playground.
 
 ### Signature schemes
 
@@ -329,8 +332,9 @@ when hosted.
 | `/api/ladder/wallet/keypair`            | GET    | Generate address + pubkey + privkey |
 | `/api/ladder/wallet/utxos`              | GET    | List UTXOs |
 | `/api/ladder/faucet`                    | POST   | Request test coins |
-| `/api/ladder/create`                    | POST   | Create RUNG_TX transaction |
-| `/api/ladder/sign`                      | POST   | Sign transaction |
+| `/api/ladder/createrungtx`              | POST   | Create unsigned v4 RUNG_TX |
+| `/api/ladder/sign`                      | POST   | Sign transaction (raw signrungtx path) |
+| `/api/ladder/signladder`                | POST   | Sign via descriptor notation (one-call) |
 | `/api/ladder/broadcast`                 | POST   | Broadcast signed transaction |
 | `/api/ladder/tx/{txid}`                 | GET    | Look up transaction |
 | `/api/ladder/decode`                    | POST   | Decode ladder witness hex |
@@ -353,8 +357,9 @@ when hosted.
 
 ### Create / Sign / Broadcast pipeline
 
-1. **CREATE**: calls `/api/ladder/create` with the ladder conditions, inputs,
-   and outputs. The engine runs `planFund()` to inventory keys, hashes, and
+1. **CREATE**: calls `/api/ladder/createrungtx` with inputs, output amounts, and
+   a flat `rungs` array (each rung carries `output_index` declaring which output
+   it governs). The engine runs `planFund()` to inventory keys, hashes, and
    timelocks, then auto-assigns pubkeys and generates keypairs as needed. A
    fund record is saved to localStorage for later spending.
 2. **SIGN**: calls `/api/ladder/sign` with the raw hex and signer data.
@@ -404,7 +409,7 @@ The ConvertPanel accepts pasted JSON in three formats:
 
 1. **`decoderung` output**: `{ rungs: [{ blocks: [...], coil: {...} }] }` or
    `{ n_rungs, rungs: [...] }`.
-2. **`createrungtx` format**: `{ inputs: [...], outputs: [{ conditions: [{ blocks: [...] }] }] }`.
+2. **`createrungtx` shared-tree format**: `{ inputs: [...], outputs: [<amount>, ...], rungs: [{ output_index, blocks: [...] }, ...] }`.
 3. **`decoderawtransaction` output**: raw tx with `version: 4` and
    `vout[].rung_conditions`.
 
@@ -473,11 +478,17 @@ so the walkthrough does not reappear.
 
 ## 15. Templates
 
-The ExamplesModal displays a two-column grid of **48 template programs**.
+The ExamplesModal displays a two-column grid of **56 template programs**.
 Each card shows a title, description, and coloured tag badges. Clicking a
-card loads its rungs, TX inputs, and TX outputs into the builder.
+card loads its rungs, TX inputs, and TX outputs into the builder. The
+canonical list lives in `tools/test-presets.py` (each `PRESETS.append(...)`
+mirrors a card; the source script also drives the end-to-end signet test
+that exercises every preset). The first 48 templates are listed below;
+the remaining 8 are recent additions covering DATA_RETURN payloads,
+RECURSE_SAME identity carry, OUTPUT_CHECK governance, and several PQ_BATCH
+batch shapes.
 
-Complete list of template names:
+Selected template names:
 
 1. 2-of-3 MULTISIG VAULT
 2. ATOMIC SWAP (HTLC)
@@ -527,3 +538,29 @@ Complete list of template names:
 46. ANCHOR RESERVE
 47. ANCHOR SEAL
 48. ANCHOR ORACLE
+
+---
+
+## 16. Companion Playgrounds
+
+The Engine handles the full block library, but two specific protocols have
+their own dedicated tools — both shipped under `tools/` and reachable from
+the [Tools landing page](https://ladder-script.org/tools.html):
+
+- **PQ Batch Playground** (`tools/pq-batch-playground/`) — a focused tool
+  for the PQ_BATCH primitive: generate a FALCON-512 keypair, fund N UTXOs
+  gated by the same `SHA256(falcon_pubkey)` commit, and watch the spend
+  amortise via the tx-local cache (anchor input does the verify, others
+  short-circuit). See [`PQ_BATCH_PLAYGROUND_GUIDE.md`](PQ_BATCH_PLAYGROUND_GUIDE.md).
+- **QABIO Playground** (`tools/qabio-playground/`) — multi-party batch
+  ceremony walkthrough: pick a scenario (3-of-3 happy path, 5-with-1-fail
+  escape, 10/20-user realistic, coordinator bails, replace-by-depth),
+  step the participants through priming, coordinator signing, batch
+  broadcast. See [`QABIO_PLAYGROUND_GUIDE.md`](QABIO_PLAYGROUND_GUIDE.md).
+
+The Engine can build PQ_BATCH and QABIO outputs directly from its block
+palette (the QABIO family entries: `QABI_PRIME`, `QABI_SPEND`, `PQ_BATCH`).
+The playgrounds exist because the multi-input cache amortisation
+(PQ_BATCH) and the multi-party priming-then-signing flow (QABIO) are
+easier to demonstrate end-to-end with dedicated UIs than to drive from
+the general-purpose Engine.
