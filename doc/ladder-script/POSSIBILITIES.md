@@ -1,7 +1,8 @@
 # Ladder Script Possibilities
 
 What Ladder Script enables that Bitcoin Script cannot. Each example uses actual block types
-from the 62 active types. All patterns compose freely within the AND/OR rung/ladder model.
+from the 65 active types across 11 families. All patterns compose freely within the AND/OR
+rung/ladder model.
 
 ## Vaults with Clawback
 
@@ -127,6 +128,40 @@ HTLC combines hash verification, timelock, and signature in a single block. PTLC
 adaptor signatures instead of hash preimages (point-locked contracts). HASH_SIG provides
 hash-locked signatures without a timelock. In Bitcoin Script, each of these requires
 multi-opcode templates. In Ladder Script, they are single blocks with typed fields.
+
+## Lightweight PQ Batches (Single-Key Pool)
+
+Spend many UTXOs gated by the same FALCON key in one transaction with one verify.
+
+**Block types:** PQ_BATCH (0x0A03)
+
+`PQ_BATCH` commits `SHA256(falcon_pubkey)` per output. In the spending tx, one
+**anchor** input reveals the pubkey + a FALCON-512 signature; every other input
+gated by the same hash carries an empty witness and short-circuits via a tx-local
+cache. **~55 vB amortised per input** — about an order of magnitude cheaper than
+per-input FALCON sigs (~666 B sig + ~897 B pubkey each). No coordinator, no
+priming round.
+
+Use cases: exchange consolidations, co-owned PQ-key UTXO pools, recurring
+subscription drains. See [`PQ_BATCH_PLAYGROUND_GUIDE.md`](PQ_BATCH_PLAYGROUND_GUIDE.md).
+
+## Multi-Party PQ Batches (QABIO)
+
+N parties settle a single atomic batch transaction under one FALCON-512 signature
+from a coordinator, with no escrow and unilateral escape for every participant.
+
+**Block types:** QABI_PRIME (0x0A01), QABI_SPEND (0x0A02), SIG (0x0001) escape rung
+
+Each participant funds an MLSC UTXO with a 3-rung tree:
+`[SIG_escape, QABI_PRIME, QABI_SPEND]`. Participants prime independently by
+revealing an auth-chain preimage. The coordinator signs `SIGHASH_QABO` once over
+the whole batch. Consensus checks the coordinator's signature once per tx via
+the `QABOSigCache`. **~143 vB per cosigner at N=100** — roughly equivalent to a
+P2WPKH payment per participant. If the coordinator bails, every participant
+sweeps via Rung 0.
+
+Use cases: exchange settlement, atomic issuance, pooled custody. See
+[`QABIO.md`](QABIO.md) and [`QABIO_PLAYGROUND_GUIDE.md`](QABIO_PLAYGROUND_GUIDE.md).
 
 ## Accumulator-Based Access Control
 

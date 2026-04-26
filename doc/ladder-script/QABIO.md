@@ -230,9 +230,9 @@ struct QABIEntry {
 };
 ```
 
-The `qabi_block` is serialised into the witness section of the v4
-transaction (flag 0x02 TX_MLSC format), along with the per-input
-witnesses, creation proof, and aggregated signature. Witness data is
+The `qabi_block` is carried at the tx level in the v4 wire format
+(flag 0x02 TX_MLSC), alongside the per-input witnesses and the
+coordinator's `aggregated_sig` (FALCON-512, 666 B). Witness data is
 weight-discounted 4:1 under BIP-141, so `qabi_block` bytes cost 1
 weight unit each, not 4.
 
@@ -342,42 +342,43 @@ depths.
 
 ## 8. Size and scale
 
-Measured on v1 QABIBlock format with FALCON-512 coordinator signature,
-1-rung MLSC proof per input, per-input LadderWitness carrying the
-full QABI_SPEND block:
+Measured on the current build via the `qabi_tx_size_sweep` boost test
+(see [`SIZING.md`](SIZING.md) for full breakdown):
 
-| participants | qabi_block | tx bytes | vsize | block %   |
-|--------------|------------|----------|-------|-----------|
-| 10           | 1,659      | 5,946    | 2,034 | 0.20 %    |
-| 100          | 8,139      | 44,556   | 16,547 | 1.65 %   |
-| 500          | 37,437     | 216,658  | 81,175 | 8.12 %   |
-| 1,000        | 74,437     | 432,160  | 162,051 | 16.21 % |
-| 2,000        | 148,437    | 863,160  | 323,801 | 32.38 % |
-| 3,000        | 222,437    | 1,294,160 | 485,551 | 48.56 % |
+| participants | qabi_block | tx bytes | vsize    | block %   |
+|--------------|-----------:|---------:|---------:|----------:|
+| 1            |      1,020 |    2,093 |      592 |  0.06 %   |
+| 10           |      1,461 |    5,747 |    1,836 |  0.18 %   |
+| 50           |      3,421 |   21,987 |    7,366 |  0.74 %   |
+| 100          |      5,871 |   42,287 |   14,279 |  1.43 %   |
+| 500          |     25,969 |  205,189 |   69,707 |  6.97 %   |
+| 1,000        |     51,469 |  409,189 |  139,082 | 13.91 %   |
+| 2,000        |    102,469 |  817,191 |  277,833 | 27.78 %   |
+| 3,000        |    153,469 | 1,225,191 | 416,583 | 41.66 %   |
 
-Asymptotic cost is ~432 bytes per participant, converging from N=50
-upward. After witness discount: ~162 vbytes per participant.
+Asymptotic cost is **~409 bytes per participant** on the wire,
+**~139 vB per participant** after witness discount, converging from
+N≈50 upward.
 
 There are three binding ceilings on the maximum number of participants
 in a single QABIO batch:
 
-- **Standard-relay (`MAX_STANDARD_TX_WEIGHT = 400,000 WU`).** Binds at
-  roughly **618 participants**. Batches above this do not propagate
-  through normal p2p relay and must be submitted directly to a mining
-  pool (Stratum V2 selection, private API, or cooperative pool
-  agreement).
+- **Standard-relay (`MAX_STANDARD_TX_WEIGHT = 400,000 WU` = 100,000 vB).**
+  Binds at roughly **720 participants** (100,000 vB / 139 vB per input).
+  Batches above this do not propagate through normal p2p relay and must
+  be submitted directly to a mining pool (Stratum V2 selection, private
+  API, or cooperative pool agreement).
 - **QABIO block cap (`QABI_BLOCK_MAX_HARD = 256 KB`).** Binds at
   roughly **3,500 participants**. This is the `qabi_block` serialised-
   size limit.
 - **Block weight (`MAX_BLOCK_WEIGHT = 4,000,000 WU`).** Binds at
-  roughly **6,100 participants** — an absolute ceiling since a single
+  roughly **7,200 participants** — an absolute ceiling since a single
   transaction cannot exceed the weight of an entire block. In practice
   the qabi_block cap binds first.
 
 The coordinator signature (666 bytes) and pubkey (897 bytes) are
 fixed-size overheads amortised across every participant. Their
-relative share drops from 38 % of the total transaction at N=10 to
-under 0.5 % at N=500.
+relative share drops from ~75% of the tx at N=1 to ~0.4% at N=500.
 
 ---
 
@@ -402,9 +403,9 @@ better for the amortised per-input cost.
 
 The current block format hits the `QABI_BLOCK_MAX_HARD` ceiling at
 roughly 3,500 participants — well above any practical batch shape.
-Standard-relay tx size also caps at ~2,870 inputs at the current
-per-input cost (~143 vB amortised at N=100). Above either limit a
-batch ships via direct-to-miner submission rather than mempool relay.
+Standard-relay tx size caps first at ~720 inputs at the current
+per-input cost (~139 vB amortised at N=100). Above that limit a batch
+ships via direct-to-miner submission rather than mempool relay.
 
 No alternative qabi_block format is planned. v1 is the design.
 
@@ -477,9 +478,9 @@ the bitcoin-core-ladder repository.
 
 Test coverage includes:
 
-- 77 unit tests in the `qabi_tests` suite covering all 9 consensus
-  checks, the QABO sig cache amortisation, multi-party scale testing
-  up to N=3,000, and the SIG escape rung end-to-end.
+- 86 unit tests in the `qabi_tests` boost suite covering all 9
+  consensus checks, the QABO sig cache amortisation, multi-party
+  scale testing up to N=3,000, and the SIG escape rung end-to-end.
 - Functional regression tests in `test/functional/feature_qabi.py`
   exercising the full mined priming lifecycle, the SIG escape after
   priming, and reorg survival on a regtest node.
@@ -494,5 +495,4 @@ published on the ladder-script signet; references:
 - Escape transaction: `7bd0d5e4ced77cb2b5d1f12a0494273e1f61c9e988ede6f38b3e4ad126e4c66a`
 
 QABIO is ready for production use. The remaining work is a BIP
-submission, an external security audit, and — eventually — a v2
-block format for batches beyond ~3,500 participants.
+submission and an external security audit.

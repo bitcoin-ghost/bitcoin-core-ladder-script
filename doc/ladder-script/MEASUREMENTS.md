@@ -129,9 +129,9 @@ reuses the root entry.
 
 - **Per-input asymptotic cost:** ~409 B on the wire, ~139 vB
   after witness discount, converges from N≈50 upward.
-- **Standard-relay ceiling (400 kWU):** hits at ~2,870 inputs at
-  current per-input cost. Above that the tx is non-standard and
-  needs direct-to-miner submission.
+- **Standard-relay ceiling (400 kWU = 100,000 vB):** hits at ~720
+  inputs at current per-input cost (~139 vB). Above that the tx is
+  non-standard and needs direct-to-miner submission.
 - **QABI block hard cap (262,144 B):** binds first at ~3,500
   participants — still well above any realistic batch shape.
 
