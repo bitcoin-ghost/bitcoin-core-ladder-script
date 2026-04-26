@@ -57,7 +57,6 @@ a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-<div style="background:#fff3e0;border-bottom:1px solid #e67e22;padding:10px 16px;text-align:center;font-size:13px;color:#7a4910;font-family:Inter,system-ui,-apple-system,sans-serif;">Upgrading site to new Ladder library — some docs may be out of date.</div>
 
 <header class="site-header">
   <div class="site-header-inner">
@@ -66,6 +65,7 @@ a:hover { text-decoration: underline; }
     </div>
     <nav class="header-nav">
       <a href="ladder-script.html">Intro</a>
+      <a href="comparison.html">Compare</a>
       <a href="rung-tx-anatomy.html">Anatomy</a>
       <a href="block-docs/">Blocks</a>
       <a href="docs/">Docs</a>
@@ -324,6 +324,414 @@ All in one rung, all enforced at consensus</div>
     <div class="comp-verdict"><strong>Ladder Script:</strong> OUTPUT_CHECK, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, EPOCH_GATE, and RELATIVE_VALUE are all native block types. Bitcoin Script has no transaction introspection beyond signature verification.</div>
   </div>
 
+  <!-- 8. BATCH PAYMENT SIZE -->
+  <div class="comparison">
+    <div class="comp-title">8. Batch Payment (100 recipients)</div>
+    <div class="comp-desc">Pay 100 different recipients in a single transaction.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (P2WPKH)</div>
+        <div class="comp-code">100 P2WPKH outputs in one tx
+Each output: 31 bytes (8 value + 23 SPK)
+Per-output cost is paid in full on-chain
+
+Transaction vsize: 3,179 vB
+Fee at 10 sat/vB: 31,790 sats</div>
+        <div class="comp-note"><span class="tag-hacky">Linear cost</span> Every recipient pays for full SPK + value bytes.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (MLSC)</div>
+        <div class="comp-code">100 leaves merkelised into one root
+On-chain SPK: 33 bytes (0xDF || 32B root)
+Per-leaf data is revealed only on spend
+
+Transaction vsize: 911 vB
+Fee at 10 sat/vB: 9,110 sats
+&approx; 3.5&times; smaller (P2WPKH) / 4.8&times; (P2TR)</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Outputs collapse into one Merkle root. Recipients verify their leaf with a Merkle path.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Same payment, 3.5&times; smaller. The economic model flips &mdash; large fan-out becomes the cheap path, not the expensive one.</div>
+  </div>
+
+  <!-- 9. UTXO CHAINSTATE FOOTPRINT -->
+  <div class="comparison">
+    <div class="comp-title">9. UTXO Chainstate Footprint</div>
+    <div class="comp-desc">How much RAM each unspent coin occupies on every full node, forever.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">P2WPKH: 24 bytes per coin (compressed)
+P2TR:   36 bytes per coin (compressed)
+
+Each output adds permanent RAM cost
+Chainstate currently &gt; 9 GB and growing
+UTXO bloat is the dominant scaling concern</div>
+        <div class="comp-note"><span class="tag-hacky">Permanent cost</span> Every UTXO sits in RAM until it is spent.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (MLSC)</div>
+        <div class="comp-code">3 bytes per coin (compressed)
+
+Conditions live in the witness, not the UTXO
+Synthetic root vout (MLSC_ROOT_VOUT) holds
+  the 32-byte root, but per-leaf coins are
+  represented as a one-byte tag + index
+
+8&ndash;12&times; smaller chainstate footprint</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Conditions are revealed at spend, not stored at creation.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> A 100-leaf MLSC output costs ~3 B per coin in chainstate vs 24 B for P2WPKH. Across millions of coins this is the difference between a ~9 GB and a sub-GB chainstate.</div>
+  </div>
+
+  <!-- 10. LIGHTWEIGHT POST-QUANTUM BATCHES -->
+  <div class="comparison">
+    <div class="comp-title">10. Lightweight Post-Quantum Batches</div>
+    <div class="comp-desc">Spend N inputs each guarded by a FALCON-512 signature.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">No PQ verification opcodes exist.
+
+Hypothetical: N independent FALCON sigs
+  Each sig:    666 bytes
+  Each pubkey: 897 bytes
+  ~700 vB per input, no amortisation
+
+100 inputs &rarr; ~70,000 vB
+Exceeds standard relay (100,000 vB cap soon)</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> No PQ opcodes; even if added, every input pays full sig cost.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (PQ_BATCH)</div>
+        <div class="comp-code">Anchor input carries one FALCON signature
+  bound to the entire batch.
+Subsequent inputs reference the anchor
+  with H(falcon_pubkey) only.
+
+Anchor:     ~700 vB
+Per input:  ~55 vB amortised
+100 inputs &rarr; ~6,000 vB total
+&approx; 12&times; cheaper than per-input sigs</div>
+        <div class="comp-note"><span class="tag-native">Native</span> One signature, N spends. Anchor ordering enforced at consensus.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> PQ_BATCH (block 0x0A03) makes post-quantum signatures economically viable for high fan-in spending. Without batching, FALCON-protected wallets would be priced out of consolidation.</div>
+  </div>
+
+  <!-- 11. MULTI-PARTY ATOMIC SETTLEMENT -->
+  <div class="comparison">
+    <div class="comp-title">11. Multi-Party Atomic Settlement (QABIO)</div>
+    <div class="comp-desc">N parties co-spend their inputs in a single atomic transaction.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (CoinJoin / FROST)</div>
+        <div class="comp-code">CoinJoin / FROST workflow:
+
+1. Off-chain coordinator collects intents
+2. Round-trip nonce exchange (multiple)
+3. Aggregate signature construction
+4. Broadcast + monitor for double-spends
+5. On failure: restart from step 1
+
+Liveness depends on coordinator;
+  any drop-out aborts the round.</div>
+        <div class="comp-note"><span class="tag-hacky">Off-chain protocol</span> Atomicity through coordination, not consensus.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (QABIO)</div>
+        <div class="comp-code">Each party publishes a QABI_PRIME UTXO
+  with their batch_id commitment.
+At settlement: one tx with N QABI_SPEND
+  inputs, all bound to the same batch_id.
+
+Atomicity: enforced at consensus
+~143 vB per cosigner at N=100
+Drop-outs cannot block the rest of the batch</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Batch atomicity is a consensus rule, not a coordination protocol.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> QABIO turns multi-party batching into a primitive. No coordinator round-trips, no liveness assumption &mdash; the only failure mode is &ldquo;this batch did not confirm,&rdquo; which is the same failure mode as any other tx.</div>
+  </div>
+
+  <!-- 12. LIGHTNING ANCHOR ANTI-PINNING -->
+  <div class="comparison">
+    <div class="comp-title">12. Lightning Anchor &mdash; Anti-Pinning</div>
+    <div class="comp-desc">Bound the fee rate of an anchor output so it cannot be RBF-pinned by an adversary.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (current LN anchors)</div>
+        <div class="comp-code">Anchor output: tiny P2WSH covenant
+  with no fee-rate constraint.
+
+Pinning attack:
+  Attacker spends anchor at low fee +
+  attaches a long, low-fee descendant.
+  Honest party cannot RBF efficiently
+  because mempool policies cap rate bumps.
+
+Mitigations exist but are mempool-policy.</div>
+        <div class="comp-note"><span class="tag-hacky">Policy-only</span> No consensus-level fee bound on anchor spends.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (ANCHOR_FEE)</div>
+        <div class="comp-code">ladder(anchor_fee(
+  scheme=schnorr,
+  min_fee_rate=10000,   // sat/kvB
+  max_fee_rate=1000000,
+  max_weight=4000,
+  commitment_number=N
+))
+
+Spend tx&apos;s fee rate must lie in [min, max]
+Spend tx weight bounded
+Enforced at consensus, not policy</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Anchor spends carry their own fee-rate envelope.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> ANCHOR_FEE removes pinning as an attack class. The attacker cannot attach a low-fee child because the spend tx itself must clear min_fee_rate.</div>
+  </div>
+
+  <!-- 13. PTLC vs HTLC -->
+  <div class="comparison">
+    <div class="comp-title">13. PTLC vs HTLC (Lightning routing privacy)</div>
+    <div class="comp-desc">Conditional payment without leaking a hash linker across the route.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (HTLC)</div>
+        <div class="comp-code">OP_SHA256 &lt;H&gt; OP_EQUALVERIFY ...
+
+Same hash H is reused on every hop
+Surveillance can correlate hops by H
+Wormhole attack: intermediate node
+  steals fees by skipping the next hop
+Privacy depends on Tor + onion routing</div>
+        <div class="comp-note"><span class="tag-hacky">Linkable</span> Same hash on every hop &mdash; observable on-chain if any hop closes.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (PTLC)</div>
+        <div class="comp-code">ladder(or(
+  ptlc(@receiver, &lt;point P&gt;),
+  and(sig(@sender), cltv(900000))
+))
+
+Each hop uses a different point P_i
+Adaptor sig reveals scalar t_i &mdash; not H
+Hops are unlinkable on-chain
+Wormhole attack mitigated by adaptor binding</div>
+        <div class="comp-note"><span class="tag-native">Native</span> PTLC block uses point-locked adaptor signatures, not preimage reveal.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> PTLC is a typed block, not a script template. Each hop&apos;s point is independent, so the route is unlinkable even if multiple force-close txs land on-chain.</div>
+  </div>
+
+  <!-- 14. ACCUMULATOR ALLOWLIST -->
+  <div class="comparison">
+    <div class="comp-title">14. Accumulator Allowlist (1-of-N from a 1000-key set)</div>
+    <div class="comp-desc">Allow any of 1,000 authorised keys to spend &mdash; without revealing the full set.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (P2SH multisig)</div>
+        <div class="comp-code">OP_1 &lt;pk1&gt; &lt;pk2&gt; ... &lt;pk1000&gt; OP_1000
+  OP_CHECKMULTISIG
+
+Witness reveals all 1,000 pubkeys
+~33 KB script + ~33 KB witness
+Standard relay caps multisig at 20 keys
+Above 20: requires P2WSH workarounds
+  with chained OR or Merkle-tree of scripts</div>
+        <div class="comp-note"><span class="tag-impossible">Not feasible</span> 1,000-key sets blow out script size and witness limits.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (ACCUMULATOR)</div>
+        <div class="comp-code">ladder(accumulator(&lt;set_root&gt;))
+
+Conditions store: 32-byte set commitment
+Witness reveals: 1 pubkey + Merkle path
+  to prove membership in the set.
+
+Witness size: ~32 + 32&times;log&#8322;(N) bytes
+For N=1000: ~352 bytes total
+Set can grow to millions without size impact</div>
+        <div class="comp-note"><span class="tag-native">Native</span> ACCUMULATOR holds the set root; spender proves membership only.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> ACCUMULATOR replaces N-of-M scripts with a Merkle commitment. Witness scales as log(N) instead of O(N), and only the spending key is revealed.</div>
+  </div>
+
+  <!-- 15. RECURSIVE SPLITTING TREE -->
+  <div class="comparison">
+    <div class="comp-title">15. Recursive Splitting Tree (congestion control)</div>
+    <div class="comp-desc">A single UTXO that fans out into a binary tree of pre-committed payments.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (CTV trees)</div>
+        <div class="comp-code">OP_CHECKTEMPLATEVERIFY (BIP-119)
+
+Each tree node: a CTV-locked output
+Spender constructs N-1 internal txs
+  before any leaf can be claimed.
+
+Pre-signed templates: rigid, no flexibility
+CTV not activated on mainnet
+Wallet must store entire pre-computed tree</div>
+        <div class="comp-note"><span class="tag-impossible">Not activated</span> BIP-119 is proposed; tree structure is rigid even when activated.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (RECURSE_SPLIT)</div>
+        <div class="comp-code">ladder(and(
+  sig(@owner),
+  recurse_split(2, @left_root, @right_root)
+))
+
+Each spend produces 2 children
+  inheriting left/right sub-roots
+Tree depth bounded by max_depth
+Children carry their own conditions
+  &mdash; can be re-encumbered or terminated</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Bounded recursive fan-out with per-child conditions.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> RECURSE_SPLIT enables CTV-style congestion trees today &mdash; bounded, typed, with no soft-fork dependency. Each child is a real UTXO with its own conditions, not a pre-signed template.</div>
+  </div>
+
+  <!-- 16. COSIGN PAIRED UTXOs -->
+  <div class="comparison">
+    <div class="comp-title">16. COSIGN &mdash; Paired UTXOs</div>
+    <div class="comp-desc">Two unrelated UTXOs that can only be spent together.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">No equivalent.
+
+Bitcoin Script cannot reference the
+  presence of other UTXOs in the
+  spending transaction.
+
+Workaround: trust + protocol enforcement
+  (e.g. Lightning channel funding tx
+  is a 2-of-2 multisig agreed off-chain)</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> No cross-UTXO co-spend primitive.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (COSIGN)</div>
+        <div class="comp-code">ladder(cosign(&lt;partner_outpoint&gt;))
+
+UTXO A&apos;s conditions reference UTXO B&apos;s
+  outpoint as required co-input.
+Spend tx must include both A and B.
+B can carry its own COSIGN pointing
+  back to A &mdash; mutual binding at consensus</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Cross-UTXO atomic spend, enforced at consensus.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> COSIGN makes paired UTXOs a first-class concept. Useful for: vault + clawback splits, escrow with dispute UTXOs, and federated reserves where halves must move together.</div>
+  </div>
+
+  <!-- 17. COUNTER / LATCH STATE MACHINES -->
+  <div class="comparison">
+    <div class="comp-title">17. Counter / Latch State Machines</div>
+    <div class="comp-desc">A UTXO that remembers state across spends.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">No persistent state.
+
+Each UTXO is &ldquo;memoryless&rdquo;.
+Cross-tx state requires:
+  - Off-chain protocol (channels)
+  - Pre-signed transaction chains
+  - External oracles
+
+No native counter, no native latch.</div>
+        <div class="comp-note"><span class="tag-impossible">Not possible</span> Bitcoin Script is purely stateless within one spend.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (COUNTER / LATCH)</div>
+        <div class="comp-code">ladder(and(
+  sig(@owner),
+  counter_down(start=10),  // or counter_up
+  recurse_same()
+))
+
+Counter decrements each spend, terminates at 0
+LATCH_SET / LATCH_RESET: one-shot toggles
+COUNTER_PRESET: bound counter to a value
+State persists in the next leaf via recursion</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Persistent state via recursion + counter blocks.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> Counters and latches are the building blocks for usage caps, one-shot allowances, multi-stage approvals, and timed escrows &mdash; all native, no external oracle.</div>
+  </div>
+
+  <!-- 18. TYPED DATA_RETURN -->
+  <div class="comparison">
+    <div class="comp-title">18. Typed Data Embedding (DATA_RETURN)</div>
+    <div class="comp-desc">Embed up to 40 bytes of structured data in a tx, with type tagging.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script (OP_RETURN + envelopes)</div>
+        <div class="comp-code">OP_RETURN &lt;raw bytes&gt;
+
+Untyped: parsers race to claim payloads
+Inscription envelopes: hijack witness
+  to embed kilobytes of data, bloating
+  block weight at 1/4 cost
+No size cap that consensus enforces
+Standard relay: 80 bytes (policy only)</div>
+        <div class="comp-note"><span class="tag-hacky">Untyped + abused</span> OP_RETURN is a free-for-all; envelopes weaponise the witness discount.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (DATA_RETURN)</div>
+        <div class="comp-code">ladder(data_return(&lt;type_tag&gt;, &lt;1-40 bytes&gt;))
+
+Type tag identifies the application
+Cap: 40 bytes per output, consensus-enforced
+Cap: 2 DATA_RETURN outputs per tx
+No witness abuse vector
+  &mdash; data lives in conditions, not witness</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Typed, capped, non-bloating.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> DATA_RETURN replaces OP_RETURN with a typed, capped primitive. Inscriptions and similar envelope abuses cannot exist because witness data is not free &mdash; per-tx user-chosen data is bounded at 112 bytes total.</div>
+  </div>
+
+  <!-- 19. ADAPTOR SIGNATURES -->
+  <div class="comparison">
+    <div class="comp-title">19. Adaptor Signatures (cross-chain DLC)</div>
+    <div class="comp-desc">Signature that reveals a scalar to the counterparty when broadcast.</div>
+    <div class="comp-grid">
+      <div class="comp-side">
+        <div class="comp-label old">Bitcoin Script</div>
+        <div class="comp-code">No native adaptor primitive.
+
+DLC implementations:
+  - Off-chain construction
+  - Custom Schnorr nonce arithmetic
+  - Trust the counterparty&apos;s signing
+  - Nonce reuse risk if implemented poorly
+
+Adaptor logic lives in the wallet,
+  not the consensus layer.</div>
+        <div class="comp-note"><span class="tag-hacky">Off-chain</span> Adaptor sigs are a wallet-side construction; brittle to implement.</div>
+      </div>
+      <div class="comp-side">
+        <div class="comp-label new">Ladder Script (ADAPTOR_SIG)</div>
+        <div class="comp-code">ladder(adaptor_sig(@signer, &lt;point T&gt;))
+
+Conditions commit to point T = t&middot;G
+Witness: adaptor signature s&apos;
+Spend reveals t to anyone watching
+  the chain, atomically with confirmation
+DLC settlement, atomic swaps,
+  pay-for-secret &mdash; all primitives</div>
+        <div class="comp-note"><span class="tag-native">Native</span> Adaptor signatures verified at consensus.</div>
+      </div>
+    </div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> ADAPTOR_SIG is a typed block, not a wallet trick. Cross-chain swaps and DLCs become as easy to write as a P2PKH &mdash; the adaptor scalar is revealed atomically with the on-chain spend.</div>
+  </div>
+
   <!-- SUMMARY -->
   <div class="comparison" style="border-top: 2px solid var(--accent); padding-top: 32px;">
     <div class="comp-title">Summary</div>
@@ -342,10 +750,22 @@ All in one rung, all enforced at consensus</div>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Recursive covenant (DCA)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">recurse_count</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Dead man's switch</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">IF/ELSE + CSV</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">or(sig, csv+sig)</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Post-quantum signatures</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">sig(@pk, falcon512)</span></td></tr>
-        <tr><td style="padding:8px 14px;">Governance treasury</td><td style="text-align:center;padding:8px;"><span class="tag-hacky">Multisig only</span></td><td style="text-align:center;padding:8px;"><span class="tag-native">multisig + output_check + weight_limit</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Governance treasury</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Multisig only</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">multisig + output_check + weight_limit</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Batch payment (N=100)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">3,179 vB</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">911 vB (3.5&times;)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Chainstate per coin</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">24&ndash;36 B</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">3 B (8&ndash;12&times;)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PQ batch (N inputs)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">pq_batch (~55 vB/in)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Multi-party batch settlement</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">CoinJoin / FROST</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">qabi_prime + qabi_spend</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">LN anchor anti-pinning</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Policy only</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">anchor_fee</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PTLC (route privacy)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">HTLC (linkable)</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">ptlc</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">1-of-1000 allowlist</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Witness blow-up</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">accumulator</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Recursive split tree</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">CTV (rigid + inactive)</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">recurse_split</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Paired UTXOs</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">cosign</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Persistent state machines</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">counter / latch</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Typed embedded data</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">OP_RETURN + envelopes</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">data_return (capped)</span></td></tr>
+        <tr><td style="padding:8px 14px;">Adaptor signatures</td><td style="text-align:center;padding:8px;"><span class="tag-hacky">Off-chain wallet trick</span></td><td style="text-align:center;padding:8px;"><span class="tag-native">adaptor_sig</span></td></tr>
       </tbody>
     </table>
-    <p style="margin-top:16px;font-size:14px;color:var(--text-dim);">Bitcoin Script works for simple signatures, timelocks, and hash locks. For everything else &mdash; vaults, rate limiting, covenants, PQ signatures, transaction introspection &mdash; it either can't do it or requires proposed opcodes that aren't activated. Ladder Script provides all of these as native, typed block types with bounded execution and deterministic evaluation.</p>
+    <p style="margin-top:16px;font-size:14px;color:var(--text-dim);">Bitcoin Script works for simple signatures, timelocks, and hash locks. For everything else &mdash; vaults, rate limiting, covenants, PQ signatures, batching, transaction introspection, persistent state, paired UTXOs &mdash; it either can&apos;t do it, requires proposed opcodes that aren&apos;t activated, or needs fragile off-chain coordination. Ladder Script provides all of these as native, typed block types with bounded execution and deterministic evaluation.</p>
   </div>
 
 </div>
