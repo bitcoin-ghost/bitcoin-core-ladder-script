@@ -10,17 +10,19 @@
 
 ## 1. Output Format
 
-TX_MLSC is the **only** accepted output format for v4 (rung) transactions.
-Inline conditions (`0xC1`) and per-output MLSC (`0xC2`) are removed and always
-rejected.
+TX_MLSC is the **only** accepted output format for v4 RUNG_TX transactions.
+Earlier draft formats (`0xC1` inline conditions, `0xC2` per-output MLSC) are
+not implemented and reject at deserialisation as defence in depth.
 
 ### TX_MLSC Layout
 
 In the TX_MLSC model, there is one shared Merkle tree per transaction (PLC
-model: one program, multiple output coils). Each output is **8 bytes** (value
-only). The transaction carries a single shared `conditions_root` with prefix
-byte `0xDF`. A creation proof in the witness section is validated at block
-acceptance.
+model: one program, multiple output coils). Each output is **8 bytes** on the
+wire (value only). The transaction carries a single shared `conditions_root`
+with prefix byte `0xDF`. The 32-byte root is recovered at spend time from a
+synthetic UTXO entry written at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)` — the
+mechanism that drops per-coin chainstate cost from ~24 B (P2WPKH) / ~36 B
+(P2TR) to **3 B** for an MLSC coin.
 
 The transaction serialization uses flag byte `0x02` to signal TX_MLSC format.
 
@@ -84,8 +86,8 @@ Two tag domains are defined with pre-computed hashers:
 
 | Domain | Tag String | Hasher |
 |--------|------------|--------|
-| Leaf | `"LadderLeaf"` | `LEAF_HASHER` |
-| Internal node | `"LadderInternal"` | `INTERNAL_HASHER` |
+| Leaf | `"LadderLeaf/v1"` | `LEAF_HASHER` |
+| Internal node | `"LadderInternal/v1"` | `INTERNAL_HASHER` |
 
 **Source**: `conditions.cpp:154-166`.
 
@@ -94,23 +96,25 @@ Two tag domains are defined with pre-computed hashers:
 **Rung leaf**: `ComputeRungLeaf(rung, value_commitment)`
 
 ```
-TaggedHash("LadderLeaf", structural_template || value_commitment)
+TaggedHash("LadderLeaf/v1", structural_template || value_commitment)
 ```
 
-The structural template encodes the rung's condition blocks. The value commitment
-binds the output value to the leaf. This replaces the previous
-`TaggedHash("LadderLeaf", serialized_blocks || pubkeys)` format.
+The structural template encodes the rung's condition blocks. The
+`value_commitment` is `SHA256(field_values || pubkeys)` — the rung's
+condition fields concatenated with the pubkeys from key-consuming blocks
+(folded via `merkle_pub_key`). Mutating either input changes the leaf
+and therefore the root.
 
 **Relay leaf**: `ComputeRelayLeaf(relay, pubkeys)`
 
 ```
-TaggedHash("LadderLeaf", SerializeRelayBlocks(relay, CONDITIONS) || pk[0] || pk[1] || ... || pk[N])
+TaggedHash("LadderLeaf/v1", SerializeRelayBlocks(relay, CONDITIONS) || pk[0] || pk[1] || ... || pk[N])
 ```
 
 **Coil leaf**: `ComputeCoilLeaf(coil)`
 
 ```
-TaggedHash("LadderLeaf", SerializeCoilData(coil))
+TaggedHash("LadderLeaf/v1", SerializeCoilData(coil))
 ```
 
 No pubkeys are appended to the coil leaf.
@@ -120,7 +124,7 @@ No pubkeys are appended to the coil leaf.
 ### Empty Leaf Padding
 
 ```
-MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "")
+MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "")
 ```
 
 A nothing-up-my-sleeve constant. Cannot collide with any valid serialized
@@ -134,7 +138,7 @@ Interior nodes use **sorted child ordering** to produce a canonical tree
 regardless of child position:
 
 ```
-MerkleInterior(a, b) = TaggedHash("LadderInternal", min(a,b) || max(a,b))
+MerkleInterior(a, b) = TaggedHash("LadderInternal/v1", min(a,b) || max(a,b))
 ```
 
 Children are sorted lexicographically by their 32-byte hash before
@@ -385,9 +389,12 @@ The complete MLSC verification path in `VerifyRungTx` (`evaluator.cpp:3309+`):
 ### Step 1: Validate Outputs
 
 All transaction outputs must use valid TX_MLSC format (`0xDF`). Non-Ladder
-outputs (OP\_RETURN, P2TR, P2WPKH, inline `0xC1`, legacy per-output) are rejected
-in v4 transactions. At most one DATA\_RETURN output is allowed (must have zero
-value). A creation proof in the witness is validated at block acceptance.
+outputs (OP\_RETURN, P2TR, P2WPKH, inline `0xC1`, legacy per-output) are
+rejected in v4 transactions. At most one DATA\_RETURN output is allowed
+(it has `nValue == 0` on the wire and 1..40 bytes of `data`). The tx-level
+pass `CheckRungTxLevel` runs once per tx (called by Core's
+`CheckInputScripts`) and enforces these structural rules plus the per-tx
+preimage-field cap.
 
 ### Step 2: Enforce Witness Stack Size
 
@@ -550,12 +557,23 @@ the payload at 40 bytes at consensus level.
 
 ### O(1) Output Size
 
-Every TX_MLSC output is exactly 8 bytes (value only) regardless of the number
-of spending paths, blocks, or fields. The shared conditions_root is stored once
-per transaction. This is a constant-size commitment that does not leak the
-complexity of the spending conditions. Anti-spam surface: 112 bytes per
-transaction (flat, no contiguous block). Zero readable attacker data in UTXOs
-(root is protocol-derived).
+Every TX_MLSC output is exactly 8 bytes (value only) on the wire regardless
+of the number of spending paths, blocks, or fields. The shared
+`conditions_root` is stored once per transaction. This is a constant-size
+commitment that does not leak the complexity of the spending conditions.
+Anti-spam surface: 112 bytes per transaction (flat, no contiguous block).
+Zero readable attacker data in UTXOs (root is protocol-derived).
+
+### Chainstate Compression
+
+Per-coin chainstate cost drops to **3 bytes** (1-byte SPK marker via
+compressor type `0x06` + value varint + height/coinbase byte) versus 24 B
+(P2WPKH) and 36 B (P2TR). The 32-byte `conditions_root` is stored once
+per transaction in the synthetic UTXO entry at
+`(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`, prefixed with marker byte `0xDE`
+(not `0xDF` — the compressor would strip a `0xDF` payload). At spend time
+the validator looks up the synthetic entry and reconstructs the
+`conditions_root`. **8–12× smaller per coin than Taproot.**
 
 ### Hidden Spending Paths
 
@@ -586,8 +604,10 @@ valid tree for any set of leaves, preventing proof ambiguity.
 
 ### Domain Separation
 
-Tagged hashes (`"LadderLeaf"` and `"LadderInternal"`) prevent cross-domain
-collisions. A leaf hash can never be confused with an internal node hash.
+Tagged hashes (`"LadderLeaf/v1"` and `"LadderInternal/v1"`) prevent
+cross-domain collisions. A leaf hash can never be confused with an
+internal node hash. The `/v1` suffix gives a clean upgrade path if the
+hash construction ever rev's.
 
 ### Strict Field Enforcement
 
