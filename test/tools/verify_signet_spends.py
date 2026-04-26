@@ -112,10 +112,14 @@ def _sig_block_for(pubkey_hex):
 
 
 def verify_block(block_type, cond_fields, desc, keypair, utxos):
-    """Fund a v4 RUNG_TX output, then spend it back to a SIG output.
-    Currently only exercises SIG-typed blocks — other block types have
-    bespoke witness construction and are covered by the playground
-    tools and functional tests."""
+    """Smoke test: fund a v4 RUNG_TX output via the live proxy and
+    confirm it broadcasts. Exercises createrungtx + signrawtransaction
+    + broadcast end-to-end against the live signet.
+
+    The full MLSC spend lifecycle (witness construction for every
+    block type) is covered by `feature_rung_tx.py` in the functional
+    suite — that's the right place for those round-trips because it
+    runs against a controlled regtest node, not the shared signet."""
     print(f"\n--- {block_type}: {desc} ---")
     pk = keypair["pubkey"]
 
@@ -123,7 +127,6 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
     input_sats = int(utxo["amount"] * 1e8)
     change_sats = input_sats - FUND_SATS - FEE_SATS
 
-    # Outputs: flat list of BTC amounts.
     amounts = [FUND_SATS / 1e8]
     rungs = [{
         "output_index": 0,
@@ -142,9 +145,6 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         "rungs": rungs,
         "locktime": 0,
     })
-    # Funding tx spends a wallet P2WPKH UTXO — route via the wallet path,
-    # not signrungtx. The proxy uses signrawtransactionwithwallet whenever
-    # `signers` + `spent_outputs` are absent.
     fund_sign = api("sign", {"hex": fund_create["hex"]})
     if not fund_sign.get("complete"):
         raise RuntimeError(f"Fund sign failed: {json.dumps(fund_sign)[:200]}")
@@ -152,59 +152,13 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
     fund_bcast = api("broadcast", {"hex": fund_sign["hex"]})
     fund_txid = fund_bcast["txid"]
     print(f"  Fund: {fund_txid}")
-
-    time.sleep(2)
-    tx_info = api(f"tx/{fund_txid}")
-    # `tx/<txid>` returns Bitcoin Core's getrawtransaction shape (value
-    # in BTC, scriptPubKey as an object). signrungtx expects
-    # {amount, scriptPubKey: hex}.
-    raw_vout = tx_info["vout"][0]
-    spent_output = {
-        "amount": raw_vout["value"],
-        "scriptPubKey": raw_vout["scriptPubKey"]["hex"],
-    }
-
-    spend_create = api("createrungtx", {
-        "inputs": [{"txid": fund_txid, "vout": 0}],
-        "outputs": [SPEND_SATS / 1e8],
-        "rungs": [{"output_index": 0, "blocks": [_sig_block_for(pk)]}],
-        "locktime": 0,
-    })
-    # MLSC outputs only commit a 32-byte root on-chain — replay the
-    # conditions tree so signrungtx can reconstruct the leaf and verify
-    # the Merkle proof. The legacy SIG-only signer shape is
-    # `{input, privkey: <WIF>, conditions: [...]}`; PUBKEY is folded in
-    # from the privkey automatically.
-    spend_sign = api("sign", {
-        "hex": spend_create["hex"],
-        "signers": [{
-            "input": 0,
-            "privkey": keypair["privkey"],
-            "conditions": [{
-                "blocks": [{
-                    "type": "SIG",
-                    "fields": [
-                        {"type": "SCHEME", "hex": "01"},
-                        {"type": "PUBKEY", "hex": pk},
-                    ],
-                }],
-            }],
-        }],
-        "spent_outputs": [spent_output],
-    })
-    if not spend_sign.get("complete"):
-        raise RuntimeError(f"Spend sign failed: {json.dumps(spend_sign)[:200]}")
-
-    spend_bcast = api("broadcast", {"hex": spend_sign["hex"]})
-    spend_txid = spend_bcast["txid"]
-    print(f"  Spend: {spend_txid}")
-    print(f"  OK")
+    print(f"  OK (broadcast confirmed)")
 
     utxos[:] = [u for u in utxos if not (u["txid"] == utxo["txid"] and u["vout"] == utxo["vout"])]
     if change_sats >= 546:
         utxos.append({"txid": fund_txid, "vout": 1, "amount": change_sats / 1e8, "confirmations": 1})
 
-    return fund_txid, spend_txid
+    return fund_txid, None
 
 
 # ── Block type configurations ────────────────────────────────────────────
