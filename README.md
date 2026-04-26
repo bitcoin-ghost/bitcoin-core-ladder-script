@@ -18,7 +18,7 @@ Ladder Script replaces this with **typed function blocks** organised into **rung
 
 **Prototype on a private signet.** The protocol runs end-to-end. The Ladder Engine at ladder-script.org lets you build, sign, and broadcast real transactions on the live signet backed by a node built from this repo. The QABIO playground successfully broadcasts multi-party FALCON-512 batches.
 
-**Not yet BIP-ready.** An earlier full-length draft surfaced enough load-bearing spec gaps (unspecified creation proof, prose-only sighash, consensus rules living in `types.h` rather than the spec) that submission would have been premature. The current [`doc/ladder-script/BIP-XXXX.md`](doc/ladder-script/BIP-XXXX.md) is a wireframe pending extraction of `src/rung/` into a standalone `libladder` library — the BIP will normatively reference the library, in the BIP340 → libsecp256k1 model.
+**Not yet BIP-ready.** An earlier full-length draft surfaced enough load-bearing spec gaps (prose-only sighash, consensus rules living in `types.h` rather than the spec) that submission would have been premature. The library boundary is now in place — `src/rung/` compiles standalone against the adapter types in `src/rung_shims.h` with no Bitcoin Core types crossing the line. The current [`doc/ladder-script/BIP-XXXX.md`](doc/ladder-script/BIP-XXXX.md) is a wireframe; the BIP will normatively reference the library, in the BIP340 → libsecp256k1 model.
 
 **Not for mainnet.** This is research-stage protocol work. Don't point real money at it.
 
@@ -26,9 +26,9 @@ Ladder Script replaces this with **typed function blocks** organised into **rung
 
 The name and structure are borrowed from ladder logic, the programming model used in industrial PLCs (programmable logic controllers) for decades. A spending policy is a ladder. Each rung is a possible spending path containing typed condition blocks. Blocks on the same rung are AND — all must be satisfied. Rungs are OR — the first satisfied rung authorises the spend.
 
-The output format is **MLSC** (Merkelized Ladder Script Conditions): a shared 33-byte commitment (`0xDF || conditions_root`) regardless of policy complexity. Only the exercised spending path is revealed at spend time. Unused paths stay permanently hidden.
+The output format is **TX_MLSC** (Transaction-level Merkelised Ladder Script Conditions): one shared 32-byte `conditions_root` per transaction with `0xDF` prefix. Each output is 8 bytes on the wire (value only); each rung's coil declares its `output_index`. Only the exercised spending path is revealed at spend time. Unused paths stay permanently hidden behind their Merkle leaf hash.
 
-**TX_MLSC** lifts the commitment from per-output to per-transaction: a single `conditions_root` at the transaction level, shared across all outputs in the same transaction, with each rung's coil declaring its `output_index`. This removes duplicated condition trees in batch payments and is the foundation QABIO builds on.
+In chainstate, the per-coin cost drops to **3 bytes** (1-byte SPK after compressor type `0x06`) versus 24 B for P2WPKH and 36 B for P2TR — **8–12× smaller per coin**. The 32-byte root is recovered at spend time from a synthetic UTXO entry at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`.
 
 Transaction version 4 (`RUNG_TX`). Soft fork activation — non-upgraded nodes see v4 as anyone-can-spend, the same upgrade path as SegWit and Taproot.
 
@@ -36,17 +36,19 @@ Transaction version 4 (`RUNG_TX`). Soft fork activation — non-upgraded nodes s
 
 **Contact inversion.** Non-key blocks can be inverted. `[/CSV: 144]` means "spend BEFORE 144 blocks" — a primitive Bitcoin has never had. Key-consuming blocks (SIG, MULTISIG, etc.) cannot be inverted, closing the garbage-pubkey data embedding vector. This enables breach remedies, dead man's switches, governance vetoes, and time-bounded escrows natively.
 
-**Anti-spam hardening.** Eleven data types, enforced at the deserialiser before any cryptographic operation. Three coordinated defenses close all practical data embedding surfaces: `merkle_pub_key` folds public keys into the Merkle leaf hash (no writable pubkey field in conditions), selective inversion prevents key-consuming blocks from being inverted, and hash lock deprecation removes standalone preimage blocks. If it doesn't parse as a typed field, it doesn't enter the mempool.
+**Anti-spam hardening.** Eleven data types, enforced at the deserialiser before any cryptographic operation. Coordinated defences close all practical data embedding surfaces: `merkle_pub_key` folds public keys into the Merkle leaf hash (no writable pubkey field in conditions); selective inversion prevents key-consuming blocks from being inverted; PREIMAGE/SCRIPT_BODY fields are capped at 2 per witness *and* 2 per transaction (binding cap closes multi-input data embedding); typed-field DATA is restricted to DATA_RETURN. Total user-chosen arbitrary data per tx: **112 bytes flat**, regardless of output count.
 
-**Post-quantum signatures.** FALCON-512, FALCON-1024, Dilithium3, and SPHINCS+ are native signature schemes, implemented and running on the live signet. A single SCHEME field on any signature block routes verification to classical Schnorr or any PQ algorithm. The COSIGN pattern lets a single PQ anchor protect unlimited child UTXOs. Incremental migration without a flag day.
+**Post-quantum signatures.** FALCON-512, FALCON-1024, Dilithium3, and SPHINCS+ are native signature schemes, implemented and running on the live signet. A single SCHEME field on any signature block routes verification to classical Schnorr or any PQ algorithm. Incremental migration without a flag day.
 
-**Multi-party post-quantum batches (QABIO).** An N-party extension that lets a set of participants settle a single atomic batch transaction under one FALCON-512 coordinator signature. Each participant commits to the batch via a priming transaction, the coordinator assembles the batch and signs once, and the batch either settles atomically or every participant recovers their funds via an escape-rung SIG sweep. `QABI_PRIME` and `QABI_SPEND` are the two new block types that implement the commit-reveal protocol. See [`doc/ladder-script/QABIO.md`](doc/ladder-script/QABIO.md).
+**Lightweight PQ batches (PQ_BATCH).** A single-block primitive that commits `SHA256(falcon_pubkey)` per output. One "anchor" input in the spend tx reveals the pubkey + signature once; every other input gated by the same hash short-circuits via a tx-local cache. **~55 vB amortised per input** — about an order of magnitude cheaper than per-input FALCON. No coordinator, no priming round. See [`doc/ladder-script/PQ_BATCH_SPEC.md`](doc/ladder-script/PQ_BATCH_SPEC.md).
+
+**Multi-party PQ batches (QABIO).** An N-party extension that lets a set of participants settle a single atomic batch transaction under one FALCON-512 coordinator signature. Each participant commits to the batch via a priming transaction, the coordinator assembles the batch and signs once, and the batch either settles atomically or every participant recovers their funds via an escape-rung SIG sweep. `QABI_PRIME` and `QABI_SPEND` are the two new block types that implement the commit-reveal protocol. **~143 vB per cosigner at N=100** — roughly equivalent to a P2WPKH payment, fully PQ-safe. See [`doc/ladder-script/QABIO.md`](doc/ladder-script/QABIO.md).
 
 **Wire efficiency.** Compound blocks collapse common multi-block patterns (HTLC, PTLC, TIMELOCKED_MULTISIG) into single blocks. Relays allow shared conditions across rungs without duplication. Template references let inputs inherit conditions with field-level diffs.
 
 **Legacy migration.** Seven legacy block types wrap P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR key-path, and P2TR script-path as typed Ladder Script blocks. Identical spending semantics, fully typed fields. Designed for a three-phase migration: coexistence, legacy-in-blocks, then sunset of raw legacy formats.
 
-## 63 Block Types
+## 65 Block Types
 
 | Family | Blocks |
 |--------|--------|
@@ -57,10 +59,10 @@ Transaction version 4 (`RUNG_TX`). Soft fork activation — non-upgraded nodes s
 | Recursion | RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT, RECURSE_SPLIT, RECURSE_DECAY |
 | Anchor | ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE, ANCHOR_SEAL, ANCHOR_ORACLE, DATA_RETURN |
 | PLC | HYSTERESIS_FEE, HYSTERESIS_VALUE, TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET, COUNTER_UP, COMPARE, SEQUENCER, ONE_SHOT, RATE_LIMIT, COSIGN |
-| Compound | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG |
+| Compound | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG, ANCHOR_FEE |
 | Governance | EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, RELATIVE_VALUE, ACCUMULATOR, OUTPUT_CHECK |
 | Legacy | P2PK_LEGACY, P2PKH_LEGACY, P2SH_LEGACY, P2WPKH_LEGACY, P2WSH_LEGACY, P2TR_LEGACY, P2TR_SCRIPT_LEGACY |
-| QABIO | QABI_PRIME, QABI_SPEND |
+| QABI / PQ | QABI_PRIME, QABI_SPEND, PQ_BATCH |
 
 ## Where things live in this repo
 
@@ -95,18 +97,23 @@ All three tools talk to the live signet at `ladder-script.org/api/ladder/*`, whi
 
 ## Build
 
-Build instructions follow upstream Bitcoin Core — see [`doc/build-unix.md`](doc/build-unix.md), [`doc/build-osx.md`](doc/build-osx.md), [`doc/build-windows.md`](doc/build-windows.md). Use CMake. Add `-DWITH_OQS=ON` for post-quantum signature support.
+Build instructions follow upstream Bitcoin Core — see [`doc/build-unix.md`](doc/build-unix.md), [`doc/build-osx.md`](doc/build-osx.md), [`doc/build-windows.md`](doc/build-windows.md). Use CMake. **`liboqs` is a hard dependency** — `find_package(liboqs REQUIRED)` in `src/rung/CMakeLists.txt` — because PQ signature schemes are part of the consensus surface; a node built without liboqs would silently disagree with PQ-enabled nodes on whether a PQ-signed spend is valid (consensus split). The QABIO extension (the multi-party batch ceremony) can be compiled out with `-DENABLE_QABIO=OFF` if you only want the base block set.
 
 ## Documentation
 
 - [`doc/ladder-script/INTRODUCTION.md`](doc/ladder-script/INTRODUCTION.md) — what Ladder Script is and why
+- [`doc/ladder-script/SIZING.md`](doc/ladder-script/SIZING.md) — measured wire and chainstate sizes for every shape
 - [`doc/ladder-script/BLOCK_LIBRARY.md`](doc/ladder-script/BLOCK_LIBRARY.md) — every block type with fields and semantics
 - [`doc/ladder-script/TX_MLSC_SPEC.md`](doc/ladder-script/TX_MLSC_SPEC.md) — transaction-level MLSC specification
-- [`doc/ladder-script/QABIO.md`](doc/ladder-script/QABIO.md) — N-party PQ batch I/O extension
 - [`doc/ladder-script/MERKLE-UTXO-SPEC.md`](doc/ladder-script/MERKLE-UTXO-SPEC.md) — MLSC Merkle commitment and UTXO layout
+- [`doc/ladder-script/QABIO.md`](doc/ladder-script/QABIO.md) — N-party PQ batch I/O extension
+- [`doc/ladder-script/PQ_BATCH_SPEC.md`](doc/ladder-script/PQ_BATCH_SPEC.md) — lightweight PQ batch primitive
+- [`doc/ladder-script/RPC_REFERENCE.md`](doc/ladder-script/RPC_REFERENCE.md) — every RPC the library adds
 - [`doc/ladder-script/EXAMPLES.md`](doc/ladder-script/EXAMPLES.md) — worked scenarios with RPC JSON
 - [`doc/ladder-script/ENGINE_GUIDE.md`](doc/ladder-script/ENGINE_GUIDE.md) — how to use the visual builder
 - [`doc/ladder-script/INTEGRATION.md`](doc/ladder-script/INTEGRATION.md) — wallet and application integration guide
+- [`doc/ladder-script/ANNOTATED_DIFF.md`](doc/ladder-script/ANNOTATED_DIFF.md) — per-section walkthrough of the 805-line Core patch
+- [`doc/ladder-script/ANNOTATED_LIBRARY.md`](doc/ladder-script/ANNOTATED_LIBRARY.md) — file-by-file walkthrough of the 19,336-line library
 - [`doc/ladder-script/REVIEW_GUIDE.md`](doc/ladder-script/REVIEW_GUIDE.md) — recommended reading order for reviewers
 - [`doc/ladder-script/SOFT_FORK_GUIDE.md`](doc/ladder-script/SOFT_FORK_GUIDE.md) — proposed activation path
 - [`doc/ladder-script/POSSIBILITIES.md`](doc/ladder-script/POSSIBILITIES.md) — design space exploration
