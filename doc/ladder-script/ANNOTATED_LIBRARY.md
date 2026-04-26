@@ -1565,15 +1565,3 @@ the library via `src/CMakeLists.txt` (one
 `add_subdirectory(rung)` + four `target_link_libraries(... bitcoin_rung)`
 calls) — see [`ANNOTATED_DIFF.md` §28](ANNOTATED_DIFF.md#28-srccmakeliststxt-5-and-srctestcmakeliststxt-2).
 
----
-
-# Done
-
-Every file in `src/rung/` plus the boundary header `src/rung_shims.h`
-is now annotated. 19,533 LOC across 39 library files + 353 LOC of
-boundary, all reachable from this document with the same template:
-purpose, key types/functions, invariants, gotchas, cross-references.
-
-If a section's level of detail isn't right for what you'd want as
-a reviewer's mental model, point at the section and what to
-change — local edits are cheap from here on.
