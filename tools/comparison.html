@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bitcoin Script vs Ladder Script — Side by Side</title>
+<script>
+// Set theme before first paint to avoid flash.
+(function () {
+  var t = localStorage.getItem('theme');
+  if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,6 +21,26 @@
   --accent: #e67e22; --accent-dark: #d35400; --green: #27ae60; --red: #c0392b; --blue: #2980b9;
   --border: #e0e0e0; --border-light: #eeeeee;
 }
+html[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-alt: #141414;
+  --bg-code: #181818;
+  --text: #ffffff;
+  --text-body: #e0e0e0;
+  --text-dim: #aaaaaa;
+  --text-light: #777777;
+  --border: #2a2a2a;
+  --border-light: #1f1f1f;
+}
+html[data-theme="dark"] .site-header { background: var(--bg) !important; border-bottom-color: var(--border) !important; }
+.theme-toggle { background: none; border: none; cursor: pointer; color: var(--text-dim); display: flex; align-items: center; padding: 4px; border-radius: 4px; }
+.theme-toggle:hover { color: var(--accent); }
+.theme-toggle svg { display: block; }
+html[data-theme="dark"] .theme-toggle .sun { display: block; }
+html[data-theme="dark"] .theme-toggle .moon { display: none; }
+html:not([data-theme="dark"]) .theme-toggle .sun { display: none; }
+html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
+
 body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text-body); line-height: 1.8; font-size: 15px; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -81,6 +109,10 @@ html { scroll-behavior: smooth; }
     <div class="header-top">
       <a href="/" class="header-title">Ladder Script</a>
       <div class="header-right">
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
+          <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        </button>
         <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" rel="noopener" class="gh-icon" aria-label="GitHub">
           <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
@@ -839,6 +871,14 @@ DLC settlement, atomic swaps,
 <footer class="site-footer">
   <a href="/">Ladder Script</a> &middot; Built by <a href="https://defenwycke.org" target="_blank" rel="noopener">defenwycke</a>
 </footer>
+
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('theme', next);
+});
+</script>
 
 </body>
 </html>
