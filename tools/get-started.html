@@ -251,8 +251,10 @@ a:hover { text-decoration: underline; }
 <span class="key">txindex</span>=<span class="val">1</span>
 <span class="key">fallbackfee</span>=<span class="val">0.0001</span>
 
-<span class="comment"># Ladder Script signet challenge — pins this binary to our chain.</span>
-<span class="key">signetchallenge</span>=<span class="val">21036bae004d5cd7bb65742cdbf735bf6f3a384d69f4d52dba84689a3db972848f68ac</span>
+<span class="comment"># Ladder Script signet challenge — `51` is OP_TRUE: anyone can mine,</span>
+<span class="comment"># no key required. The seed node is the canonical miner; other nodes</span>
+<span class="comment"># are free to extend the chain too.</span>
+<span class="key">signetchallenge</span>=<span class="val">51</span>
 
 <span class="comment"># Seed node (Amsterdam).</span>
 <span class="key">addnode</span>=<span class="val">85.9.213.194</span>
