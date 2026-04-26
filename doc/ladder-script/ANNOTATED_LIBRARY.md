@@ -1,7 +1,7 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: 19,318 lines across 39 files in `src/rung/`, plus the
+implementation: 19,336 lines across 39 files in `src/rung/`, plus the
 353-line `src/rung_shims.h` boundary header.
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
@@ -20,7 +20,7 @@ hooks; this is the engine.
 ```
 src/
 ├── rung_shims.h              353 LOC — Core ↔ library boundary (the ONE adapter)
-└── rung/                          ── 19,318 LOC, 39 files
+└── rung/                          ── 19,336 LOC, 39 files
     ├── CMakeLists.txt          97
     │
     ├── api.h                  528  — adapter types (LadderScript, LadderTxView, ...)

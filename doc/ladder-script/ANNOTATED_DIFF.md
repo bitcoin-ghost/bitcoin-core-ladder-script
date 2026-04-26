@@ -16,9 +16,9 @@ each modification.
 | Category                         | Files | Lines added |
 |----------------------------------|------:|------------:|
 | Modified Bitcoin Core files      |    29 |       +805  |
-| New library code (`src/rung/`)   |    39 |    +19,318  |
+| New library code (`src/rung/`)   |    39 |    +19,336  |
 | New tests (`src/test/rung_tests.cpp`) |    1 |    +16,945  |
-| **Total surface change**         |    69 |    +37,068  |
+| **Total surface change**         |    69 |    +37,086  |
 
 The design principle is **minimal core intrusion**: the 805 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
