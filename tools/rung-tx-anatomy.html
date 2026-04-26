@@ -134,7 +134,7 @@ a:hover { text-decoration: underline; }
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-version)"></div><div class="detail-title">Version</div><div class="detail-bytes">4 bytes, little-endian</div></div>
-      <p>Transaction version <code>4</code> signals a TX_MLSC. Nodes without Ladder Script treat it as a standard transaction (soft fork compatibility). The version routes validation to <code>VerifyRungTx</code> instead of <code>VerifyScript</code>.</p>
+      <p>Transaction version <code>4</code> signals a <strong>RUNG_TX</strong> — the new transaction type — which uses the TX_MLSC wire format on the wire. Nodes without Ladder Script treat it as a standard transaction (soft fork compatibility). The version routes validation to <code>VerifyRungTx</code> instead of <code>VerifyScript</code>.</p>
     </div>
 
     <div class="detail">
@@ -148,11 +148,11 @@ a:hover { text-decoration: underline; }
     </div>
 
     <div class="detail">
-      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">33 bytes, one per transaction</div></div>
-      <p>One <code>0xDF</code> prefix + 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where outputs are mapped to conditions via the <code>output()</code> wrapper. A creation proof in the witness validates the root is protocol-derived.</p>
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">32 bytes on the wire, one per transaction</div></div>
+      <p>A 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where outputs are mapped to conditions via the <code>output()</code> wrapper. On deserialisation, each <code>vout[i].scriptPubKey</code> is reconstructed as <code>0xDF || conditions_root</code> (33 bytes) so all downstream code that touches scriptPubKeys sees a normal-looking SPK. The root is also written to a synthetic UTXO entry at <code>(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)</code> so per-coin chainstate cost drops to <strong>3 bytes</strong> &mdash; the root is recovered from the synthetic entry at spend time.</p>
       <table>
-        <tr><td>0xDF</td><td>TX_MLSC prefix (1 byte)</td></tr>
-        <tr><td>root</td><td>SHA-256 Merkle root of conditions, relays, and coil (32 bytes)</td></tr>
+        <tr><td>0xDF</td><td>MLSC SPK prefix (1 byte, reconstructed per output on deserialisation)</td></tr>
+        <tr><td>root</td><td>SHA-256 Merkle root of leaves: <code>TaggedHash("LadderLeaf/v1", ...)</code> per leaf, sorted-pair interior with <code>TaggedHash("LadderInternal/v1", ...)</code> (32 bytes)</td></tr>
       </table>
     </div>
   </div>
@@ -183,7 +183,7 @@ a:hover { text-decoration: underline; }
       <p>The Merkle proof linking the revealed conditions to the conditions_root. Contains the rung index, revealed conditions, and sibling hashes.</p>
     </div>
 
-    <p style="margin-top:12px">The <strong>creation proof</strong> is a separate per-transaction blob (not a per-input witness element). It validates that the conditions_root is protocol-derived from valid typed structure. It is carried after all per-input witness stacks in the TX_MLSC wire format (flag byte 0x02).</p>
+    <p style="margin-top:12px">After the per-input witness stacks, the TX_MLSC wire format (flag byte <code>0x02</code>) carries two tx-level fields: <strong><code>qabi_block</code></strong> (empty for non-QABIO txs; the serialised QABIO batch state otherwise) and <strong><code>aggregated_sig</code></strong> (empty for non-QABIO txs; the coordinator's FALCON-512 signature, exactly 666 bytes, for QABIO batches). These let a single FALCON sig authorise an N-input batch — see <a href="docs/#QABIO">QABIO</a>.</p>
   </div>
 
   <div class="section">
@@ -245,17 +245,17 @@ a:hover { text-decoration: underline; }
       <div class="compare-card">
         <div class="compare-title" style="color:var(--c-inputs)">Funding (coins enter)</div>
         <p><strong>Input:</strong> any standard Bitcoin output</p>
-        <p><strong>Output:</strong> 8 bytes (value only) per output</p>
-        <p><strong>Conditions root:</strong> <code>0xDF</code> + 32-byte Merkle root (one per tx)</p>
-        <p><strong>Witness:</strong> standard Bitcoin witness + creation proof</p>
-        <p>The funding wallet needs the Ladder Script library (or the engine/RPC) to compute the conditions_root from the desired conditions. Each output is just 8 bytes; the shared root is 33 bytes per transaction.</p>
+        <p><strong>Output:</strong> 8 bytes (value only) per output on the wire</p>
+        <p><strong>Conditions root:</strong> 32-byte Merkle root (one per tx)</p>
+        <p><strong>Witness:</strong> standard Bitcoin witness for the input</p>
+        <p>The funding wallet needs the Ladder Script library (or the engine/RPC) to compute the conditions_root from the desired conditions. Each output is just 8 bytes on the wire; the 32-byte shared root is carried once per transaction; per-coin chainstate cost drops to 3 bytes after compression.</p>
       </div>
       <div class="compare-card">
         <div class="compare-title" style="color:var(--c-witness)">Spending (coins leave)</div>
-        <p><strong>Input:</strong> references the TX_MLSC output</p>
-        <p><strong>Output:</strong> another TX_MLSC output (8 bytes value only)</p>
-        <p><strong>Witness:</strong> ladder witness + MLSC proof + creation proof</p>
-        <p>The node verifies the Merkle proof, merges conditions with witness, and evaluates the ladder.</p>
+        <p><strong>Input:</strong> references an MLSC output</p>
+        <p><strong>Output:</strong> another MLSC output (8 bytes value only)</p>
+        <p><strong>Witness:</strong> LadderWitness (revealed rung) + MLSCProof (Merkle path)</p>
+        <p>The node fetches the conditions_root from the synthetic UTXO entry of the creating tx, verifies the Merkle proof, merges conditions with witness, and evaluates the ladder.</p>
       </div>
     </div>
   </div>
@@ -263,17 +263,17 @@ a:hover { text-decoration: underline; }
   <div class="section">
     <div class="section-head">5. Verification flow</div>
     <div class="detail" style="border-left: 3px solid var(--accent);">
-      <p><strong>1.</strong> Node sees tx version 4, input spending a TX_MLSC output</p>
-      <p><strong>2.</strong> Routes to <code>VerifyRungTx</code></p>
-      <p><strong>3.</strong> Validates outputs are value-only (8 bytes each) with one conditions_root per tx</p>
-      <p><strong>4.</strong> Deserialises witness stack[0] as LadderWitness</p>
-      <p><strong>5.</strong> Deserialises witness stack[1] as MLSCProof</p>
-      <p><strong>6.</strong> Validates the per-transaction creation proof (root is protocol-derived)</p>
+      <p><strong>1.</strong> Node sees tx version 4 (RUNG_TX), input spending an MLSC output (<code>0xDF</code> SPK)</p>
+      <p><strong>2.</strong> Routes to <code>rung::VerifyRungTx</code></p>
+      <p><strong>3.</strong> Tx-level <code>CheckRungTxLevel</code> runs once per tx: validates output structure (every output MLSC, max 1 DATA_RETURN, dust threshold) and per-tx preimage-field cap, plus cross-input invariants (PQ_BATCH cache, QABIO output binding) when applicable</p>
+      <p><strong>4.</strong> Looks up the synthetic UTXO entry at <code>(creating_txid, MLSC_ROOT_VOUT)</code> to recover the 32-byte <code>conditions_root</code></p>
+      <p><strong>5.</strong> Deserialises witness stack[0] as <code>LadderWitness</code></p>
+      <p><strong>6.</strong> Deserialises witness stack[1] as <code>MLSCProof</code></p>
       <p><strong>7.</strong> Extracts pubkeys from witness blocks (merkle_pub_key)</p>
-      <p><strong>8.</strong> Verifies Merkle proof against conditions_root</p>
-      <p><strong>9.</strong> Merges conditions with witness into single structure</p>
-      <p><strong>10.</strong> Evaluates the ladder (AND within rung, OR across rungs)</p>
-      <p><strong>11.</strong> If SATISFIED, the input is valid</p>
+      <p><strong>8.</strong> <code>VerifyMLSCProof</code> rebuilds the leaf array from revealed data + proof hashes, computes the Merkle root, compares to <code>conditions_root</code></p>
+      <p><strong>9.</strong> <code>MergeConditionsAndWitness</code> combines the revealed rung with the witness fields (signatures, pubkeys, preimages)</p>
+      <p><strong>10.</strong> <code>EvalLadder</code> evaluates relays first (cached), then dispatches each block in the revealed rung to its evaluator (AND within rung, OR across rungs)</p>
+      <p><strong>11.</strong> If the rung returns <span style="color:var(--green)">SATISFIED</span>, the input is valid</p>
     </div>
   </div>
 
