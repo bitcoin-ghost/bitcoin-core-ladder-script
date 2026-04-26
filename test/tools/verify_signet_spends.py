@@ -172,23 +172,24 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
     })
     # MLSC outputs only commit a 32-byte root on-chain — to sign a spend
     # we must replay the conditions tree so signrungtx can reconstruct
-    # the leaf and verify the Merkle proof.
-    spend_conditions = json.dumps([{
-        "blocks": [{
-            "type": "SIG",
-            "fields": [
-                {"type": "SCHEME", "hex": "01"},
-                {"type": "PUBKEY", "hex": pk},
-            ],
-        }],
-    }])
+    # the leaf and verify the Merkle proof. The schema docs say
+    # conditions/blocks are STR but the code calls .get_array() on
+    # both, so they must be real JSON arrays.
     spend_sign = api("sign", {
         "hex": spend_create["hex"],
         "signers": [{
             "input": 0,
             "rung": 0,
-            "conditions": spend_conditions,
-            "blocks": json.dumps([{"type": "SIG", "privkey": keypair["privkey"]}]),
+            "conditions": [{
+                "blocks": [{
+                    "type": "SIG",
+                    "fields": [
+                        {"type": "SCHEME", "hex": "01"},
+                        {"type": "PUBKEY", "hex": pk},
+                    ],
+                }],
+            }],
+            "blocks": [{"type": "SIG", "privkey": keypair["privkey"]}],
         }],
         "spent_outputs": [spent_output],
     })
