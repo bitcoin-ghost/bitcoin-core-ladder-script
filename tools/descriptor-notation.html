@@ -184,13 +184,13 @@ tr:nth-child(even) td { background: #fafafa; }
 <span class="alias">@alice</span>                            <span class="cm">// resolved from a key map at parse time</span></div>
 
     <div class="note">
-      The <code>output()</code> wrapper is new in TX_MLSC. It maps each output index to its conditions within the shared condition tree. One <code>conditions_root</code> per transaction defines the entire tree. This replaces the old model where each output carried its own <code>0xC2 + root</code>.
+      The <code>output()</code> wrapper maps each output index to its conditions within the shared condition tree. One <code>conditions_root</code> per transaction defines the entire tree (TX_MLSC). The 32-byte root is recovered at spend time from a synthetic UTXO entry — see <a href="docs/#MERKLE-UTXO-SPEC">MLSC Specification</a>.
     </div>
   </div>
 
   <!-- BLOCK TYPES -->
   <div class="section">
-    <div class="section-head">All 61 block types</div>
+    <div class="section-head">All 65 block types</div>
     <p>Every active block type has descriptor notation. Grouped by family:</p>
 
     <p style="font-weight:600; color:var(--text); margin-top:24px">Signature Family</p>
@@ -258,7 +258,7 @@ tr:nth-child(even) td { background: #fafafa; }
         <tr><td>anchor_reserve()</td><td>ANCHOR_RESERVE</td><td>Reserve anchor (guardian set)</td></tr>
         <tr><td>anchor_seal()</td><td>ANCHOR_SEAL</td><td>Seal anchor</td></tr>
         <tr><td>anchor_oracle()</td><td>ANCHOR_ORACLE</td><td>Oracle anchor</td></tr>
-        <tr><td>data_return(hex)</td><td>DATA_RETURN</td><td>1&ndash;32 byte data payload (replaces OP_RETURN)</td></tr>
+        <tr><td>data_return(hex)</td><td>DATA_RETURN</td><td>1&ndash;40 byte data payload (replaces OP_RETURN)</td></tr>
       </tbody>
     </table>
 
@@ -293,6 +293,7 @@ tr:nth-child(even) td { background: #fafafa; }
         <tr><td>ptlc(@pk, @point, csv)</td><td>PTLC</td><td>Key, adaptor point, CSV blocks</td></tr>
         <tr><td>cltv_sig(@pk, height)</td><td>CLTV_SIG</td><td>Signature + absolute timelock</td></tr>
         <tr><td>timelocked_multisig(M, @k1, ..., csv)</td><td>TIMELOCKED_MULTISIG</td><td>Threshold, keys, CSV blocks</td></tr>
+        <tr><td>anchor_fee(@local, @remote, min, max, weight, num)</td><td>ANCHOR_FEE</td><td>2-of-2 sigs + fee rate band + weight limit (anti-pinning L2 anchor)</td></tr>
       </tbody>
     </table>
 
@@ -321,6 +322,16 @@ tr:nth-child(even) td { background: #fafafa; }
         <tr><td>p2wsh(hex)</td><td>P2WSH_LEGACY</td><td>Inner conditions hex</td></tr>
         <tr><td>p2tr(@pk)</td><td>P2TR_LEGACY</td><td>Internal key (Taproot key-path)</td></tr>
         <tr><td>p2tr_script(hex)</td><td>P2TR_SCRIPT_LEGACY</td><td>Inner script hex (Taproot script-path)</td></tr>
+      </tbody>
+    </table>
+
+    <p style="font-weight:600; color:var(--text); margin-top:24px">QABI / PQ Family</p>
+    <table>
+      <thead><tr><th>Notation</th><th>Block type</th><th>Arguments</th></tr></thead>
+      <tbody>
+        <tr><td>qabi_prime()</td><td>QABI_PRIME</td><td>Priming marker — no committed fields</td></tr>
+        <tr><td>qabi_spend(auth_tip, root, depth, expiry, owner_id)</td><td>QABI_SPEND</td><td>Batch-spend gate: auth chain tip, committed root, depth, expiry, owner id (all hex)</td></tr>
+        <tr><td>pq_batch(pubkey_hash)</td><td>PQ_BATCH</td><td>32-byte SHA256(falcon_pubkey) — anchor input reveals pubkey + sig once per tx</td></tr>
       </tbody>
     </table>
   </div>
@@ -455,7 +466,7 @@ tr:nth-child(even) td { background: #fafafa; }
     <div class="example">
       <div class="example-title">parseladder</div>
       <div class="example-desc">Parse a descriptor into conditions hex and MLSC root.</div>
-      <div class="code-block"><span class="cm">$ ghost-cli -signet parseladder \</span>
+      <div class="code-block"><span class="cm">$ bitcoin-cli -signet parseladder \</span>
   <span class="cm">"ladder(or(sig(@alice), and(csv(52560), sig(@bob))))" \</span>
   <span class="cm">'{"alice":"02abc...","bob":"03def..."}'</span>
 
@@ -469,7 +480,7 @@ tr:nth-child(even) td { background: #fafafa; }
     <div class="example">
       <div class="example-title">formatladder</div>
       <div class="example-desc">Convert conditions hex back to a descriptor string.</div>
-      <div class="code-block"><span class="cm">$ ghost-cli -signet formatladder "01010364010101000000"</span>
+      <div class="code-block"><span class="cm">$ bitcoin-cli -signet formatladder "01010364010101000000"</span>
 
 {
   <span class="kw">"descriptor"</span>: <span class="num">"ladder(csv(100))"</span>
@@ -505,22 +516,23 @@ tr:nth-child(even) td { background: #fafafa; }
       <div class="example-title">Step 1: Create</div>
       <div class="example-desc">Get a keypair from the wallet, then build an unsigned transaction with a ladder output.</div>
       <div class="code-block"><span class="cm"># Get a keypair</span>
-$ ghost-cli -signet getnewaddress
+$ bitcoin-cli -signet getnewaddress
 <span class="num">tb1q...</span>
 
-$ ghost-cli -signet getaddressinfo tb1q... | jq .pubkey
+$ bitcoin-cli -signet getaddressinfo tb1q... | jq .pubkey
 <span class="num">"02abc123..."</span>
 
 <span class="cm"># Create an unsigned tx with a vault condition:</span>
-<span class="cm"># hot key + 144-block delay, OR 2-of-3 multisig recovery</span>
-$ ghost-cli -signet createrungtx \
+<span class="cm"># hot key + 144-block delay, in a single rung governing output 0.</span>
+<span class="cm"># createrungtx takes inputs, output amounts, and a rungs array</span>
+<span class="cm"># (shared-tree shape — one conditions_root for the whole tx).</span>
+$ bitcoin-cli -signet createrungtx \
   '[{"txid":"&lt;utxo&gt;","vout":0}]' \
-  '[{"amount":0.001,"conditions":[{
-    "blocks":[
-      {"type":"SIG","fields":[{"type":"PUBKEY","hex":"<span class="alias">02abc...</span>"},{"type":"SCHEME","hex":"01"}]},
-      {"type":"CSV","fields":[{"type":"NUMERIC","hex":"90000000"}]}
-    ]
-  }]}]' 0
+  '[0.001]' \
+  '[{"output_index":0,"blocks":[
+    {"type":"SIG","fields":[{"type":"PUBKEY","hex":"<span class="alias">02abc...</span>"},{"type":"SCHEME","hex":"01"}]},
+    {"type":"CSV","fields":[{"type":"NUMERIC","hex":"90000000"}]}
+  ]}]' 0
 
 <span class="cm">→ {"hex":"04000000..."}</span></div>
     </div>
@@ -530,7 +542,7 @@ $ ghost-cli -signet createrungtx \
       <div class="example-desc">Sign the spending transaction using descriptor notation. One string, one key map.</div>
       <div class="code-block"><span class="cm"># Sign with signladder — the descriptor defines the conditions,</span>
 <span class="cm"># the key map provides WIF private keys</span>
-$ ghost-cli -signet signladder \
+$ bitcoin-cli -signet signladder \
   <span class="num">"04000000..."</span> \
   <span class="fn">"ladder(and(sig(@hot), csv(144)))"</span> \
   <span class="alias">'{"hot":"cVt4o7B..."}'</span> \
@@ -542,13 +554,13 @@ $ ghost-cli -signet signladder \
     <div class="example">
       <div class="example-title">Step 3: Broadcast</div>
       <div class="example-desc">Send the signed transaction to the signet network.</div>
-      <div class="code-block">$ ghost-cli -signet sendrawtransaction <span class="num">"04000000...signed..."</span>
+      <div class="code-block">$ bitcoin-cli -signet sendrawtransaction <span class="num">"04000000...signed..."</span>
 
 <span class="cm">→ "a1b2c3d4e5f6..."  (txid)</span></div>
     </div>
 
     <div class="note">
-      <strong>That's it.</strong> Three commands: <code>createrungtx</code> builds the transaction, <code>signladder</code> signs it using a descriptor string, <code>sendrawtransaction</code> broadcasts it. The descriptor handles all serialization, Merkle commitment, creation proof, and witness construction internally. No manual field ordering, no JSON block specs. Works for all 61 block types.
+      <strong>That's it.</strong> Three commands: <code>createrungtx</code> builds the transaction, <code>signladder</code> signs it using a descriptor string, <code>sendrawtransaction</code> broadcasts it. The descriptor handles all serialisation, Merkle commitment, and witness construction internally. No manual field ordering, no JSON block specs. Works for all 65 block types.
     </div>
   </div>
 
@@ -557,12 +569,12 @@ $ ghost-cli -signet signladder \
     <div class="section-head">HTTP API (no node required)</div>
     <p>If you don't want to run a node, the same flow works via the public proxy API at <code>ladder-script.org</code>:</p>
     <div class="code-block"><span class="cm"># Create</span>
-$ curl -X POST https://ladder-script.org/api/ladder/create \
+$ curl -X POST https://ladder-script.org/api/ladder/createrungtx \
   -H "Content-Type: application/json" \
-  -d '{"inputs":[...],"outputs":[{"amount":0.001,"conditions":[...]}]}'
+  -d '{"inputs":[...],"outputs":[0.001],"rungs":[{"output_index":0,"blocks":[...]}]}'
 
 <span class="cm"># Sign (descriptor path)</span>
-$ curl -X POST https://ladder-script.org/api/ladder/sign-descriptor \
+$ curl -X POST https://ladder-script.org/api/ladder/signladder \
   -H "Content-Type: application/json" \
   -d '{"hex":"...","descriptor":"ladder(sig(@alice))","keys":{"alice":"cVt..."},"spent_outputs":[...]}'
 
