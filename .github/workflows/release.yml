@@ -147,9 +147,14 @@ jobs:
           sudo cmake --install /tmp/liboqs/build
 
       - name: Configure
+        # Point cmake at the Homebrew prefix and our /usr/local liboqs
+        # install so both sets of headers/libs are on the search path.
+        # Without CMAKE_PREFIX_PATH the brew-only packages (boost,
+        # libevent, sqlite3, ...) drop off the include path on arm64.
         run: |
           cmake -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="/opt/homebrew;/usr/local" \
             -DBUILD_GUI=OFF \
             -DBUILD_TESTS=OFF \
             -DBUILD_BENCH=OFF \
