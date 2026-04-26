@@ -20,8 +20,8 @@ jobs:
     name: Proxy unit tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Install proxy deps
@@ -33,10 +33,10 @@ jobs:
     name: Engine smoke test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Run engine smoke test
         run: node test/tools/engine_smoke.js
 
@@ -47,8 +47,8 @@ jobs:
     # push to ladder-script so we don't hammer the proxy from PR forks.
     if: github.event_name == 'push' && github.ref == 'refs/heads/ladder-script'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Verify signet spends via public API
