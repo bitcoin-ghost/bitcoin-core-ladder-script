@@ -10,8 +10,9 @@ name: Tools CI
 # is the lightweight loop that runs on every PR touching tools/proxy/deploy.
 
 on:
-  # Disabled during active site rework — re-enable push/pull_request triggers
-  # when the library migration settles and the tools tree is stable again.
+  push:
+    branches: [ladder-script]
+  pull_request:
   workflow_dispatch:
 
 jobs:
