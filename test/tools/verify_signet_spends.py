@@ -170,16 +170,16 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         "rungs": [{"output_index": 0, "blocks": [_sig_block_for(pk)]}],
         "locktime": 0,
     })
-    # MLSC outputs only commit a 32-byte root on-chain — to sign a spend
-    # we must replay the conditions tree so signrungtx can reconstruct
-    # the leaf and verify the Merkle proof. The schema docs say
-    # conditions/blocks are STR but the code calls .get_array() on
-    # both, so they must be real JSON arrays.
+    # MLSC outputs only commit a 32-byte root on-chain — replay the
+    # conditions tree so signrungtx can reconstruct the leaf and verify
+    # the Merkle proof. The legacy SIG-only signer shape is
+    # `{input, privkey: <WIF>, conditions: [...]}`; PUBKEY is folded in
+    # from the privkey automatically.
     spend_sign = api("sign", {
         "hex": spend_create["hex"],
         "signers": [{
             "input": 0,
-            "rung": 0,
+            "privkey": keypair["privkey"],
             "conditions": [{
                 "blocks": [{
                     "type": "SIG",
@@ -189,7 +189,6 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
                     ],
                 }],
             }],
-            "blocks": [{"type": "SIG", "privkey": keypair["privkey"]}],
         }],
         "spent_outputs": [spent_output],
     })
