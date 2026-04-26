@@ -148,49 +148,48 @@ a:hover { text-decoration: underline; }
 
   <!-- -- DOWNLOAD -- -->
   <div class="section" id="download">
-    <div class="section-head">Download</div>
+    <div class="section-head">Build from Source</div>
 
     <div class="download">
-      <div class="download-title">Ghost Core + Ladder Script</div>
-      <div class="download-meta">Linux x86_64 -- 7.4 MB -- Based on Bitcoin Core v30.1</div>
+      <div class="download-title">Bitcoin Core + Ladder Script</div>
+      <div class="download-meta">Build target: <code>bitcoind</code> (~18 MB) &mdash; based on Bitcoin Core v30.0</div>
       <div class="download-stats">
-        <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">61</span></span>
-        <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">480</span></span>
-        <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">60</span></span>
-        <span><span class="s-key">PATCH_LINES=</span><span class="s-val">197</span></span>
+        <span><span class="s-key">BLOCK_TYPES=</span><span class="s-val">65</span></span>
+        <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">619</span></span>
+        <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">52</span></span>
+        <span><span class="s-key">PATCH_LINES=</span><span class="s-val">805</span></span>
+        <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">19,336</span></span>
       </div>
-      <a href="download/ghost-ladder-signet-linux-x86_64.tar.gz" class="download-btn">Download .tar.gz</a>
+      <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn">View on GitHub</a>
     </div>
 
-    <div class="note">Bitcoin Core v30.1 with 197 lines of integration code and the 11,318-line Ladder Script library. Connects to the Ladder Script signet where you can create and spend rung transactions.</div>
+    <div class="note">No pre-built binaries yet &mdash; build from source against Bitcoin Core v30.0. The 805 lines of integration code are in 29 modified Core files; the 19,336-line library lives in 39 new files under <code>src/rung/</code>. Connects to the Ladder Script signet where you can create and spend RUNG_TX transactions.</div>
   </div>
 
   <!-- -- QUICK START -- -->
   <div class="section">
     <div class="section-head">Quick Start</div>
 
-    <p>Extract and configure:</p>
-    <div class="code-block"><span class="cmd">tar xzf ghost-ladder-signet-linux-x86_64.tar.gz</span>
-<span class="cmd">mkdir -p ~/.bitcoin</span>
-<span class="cmd">cp ladder-signet.conf ~/.bitcoin/bitcoin.conf</span>
-<span class="comment"># edit ~/.bitcoin/bitcoin.conf and change rpcpassword</span></div>
+    <p>Configure (drop the snippet from the next section into <code>~/.bitcoin/bitcoin.conf</code> and pick an rpcpassword):</p>
+    <div class="code-block"><span class="cmd">mkdir -p ~/.bitcoin</span>
+<span class="comment"># Then paste the Signet Configuration block below into ~/.bitcoin/bitcoin.conf</span></div>
 
     <p>Start the node:</p>
-    <div class="code-block"><span class="cmd">./ghostd -daemon</span>
-<span class="output">Ghost Core starting</span>
+    <div class="code-block"><span class="cmd">./build/bin/bitcoind -daemon</span>
+<span class="output">Bitcoin Core starting</span>
 
-<span class="comment"># wait for sync (~30 seconds on fresh node)</span>
-<span class="cmd">./ghost-cli -signet getblockcount</span>
-<span class="output">533</span></div>
+<span class="comment"># wait for sync (~30 seconds on the Ladder Script signet)</span>
+<span class="cmd">./build/bin/bitcoin-cli -signet getblockcount</span>
+<span class="output">1216</span></div>
 
     <p>Create a wallet:</p>
-    <div class="code-block"><span class="cmd">./ghost-cli -signet createwallet test</span>
-<span class="cmd">./ghost-cli -signet -rpcwallet=test getnewaddress "" legacy</span>
-<span class="output">mibryXkbkCBrLMkVZik8UkLKfcjEH3Mstu</span></div>
+    <div class="code-block"><span class="cmd">./build/bin/bitcoin-cli -signet createwallet test</span>
+<span class="cmd">./build/bin/bitcoin-cli -signet -rpcwallet=test getnewaddress</span>
+<span class="output">tb1q...</span></div>
 
     <p>Create a Ladder Script transaction:</p>
     <div class="code-block"><span class="comment"># parse a descriptor</span>
-<span class="cmd">./ghost-cli -signet parseladder "ladder(sig(@alice))" \</span>
+<span class="cmd">./build/bin/bitcoin-cli -signet parseladder "ladder(sig(@alice))" \</span>
 <span class="cmd">  '{"alice":"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"}'</span>
 <span class="output">{
   "conditions_hex": "01010001010101000000",
@@ -199,7 +198,7 @@ a:hover { text-decoration: underline; }
 }</span>
 
 <span class="comment"># format it back</span>
-<span class="cmd">./ghost-cli -signet formatladder "01010001010101000000"</span>
+<span class="cmd">./build/bin/bitcoin-cli -signet formatladder "01010001010101000000"</span>
 <span class="output">{
   "descriptor": "ladder(sig(@?))"
 }</span></div>
@@ -229,51 +228,68 @@ a:hover { text-decoration: underline; }
 
   <!-- -- BUILD FROM SOURCE -- -->
   <div class="section">
-    <div class="section-head">Build from Source</div>
-    <p>Apply the patch to your own Bitcoin Core checkout:</p>
-    <div class="code-block"><span class="cmd">git clone https://github.com/bitcoin/bitcoin.git</span>
-<span class="cmd">cd bitcoin && git checkout v30.1</span>
+    <div class="section-head">Building</div>
+    <p>The repository is a Bitcoin Core v30.0 fork on the <code>ladder-script</code> branch &mdash; clone, install <code>liboqs</code>, and build with CMake:</p>
+    <div class="code-block"><span class="cmd">git clone https://github.com/defenwycke/bitcoin-core-ladder-script.git</span>
+<span class="cmd">cd bitcoin-core-ladder-script</span>
 
-<span class="comment"># download the rung library</span>
-<span class="cmd">git clone https://github.com/defenwycke/bitcoin-core-ladder-script.git /tmp/ladder</span>
-<span class="cmd">cp -r /tmp/ladder/src/rung src/rung</span>
+<span class="comment"># liboqs is a HARD dependency — PQ schemes are part of the consensus surface,</span>
+<span class="comment"># so a node built without liboqs would silently disagree with PQ-enabled nodes.</span>
+<span class="comment"># On Debian/Ubuntu: build from source per https://github.com/open-quantum-safe/liboqs</span>
 
-<span class="comment"># apply the integration patch (197 lines across 18 files)</span>
-<span class="cmd">git apply /tmp/ladder/patches/bitcoin-core-v30-ladder-script.patch</span>
-<span class="cmd">git apply /tmp/ladder/patches/validation-block-height.patch</span>
+<span class="cmd">cmake -B build -DCMAKE_BUILD_TYPE=Release</span>
+<span class="cmd">cmake --build build -j$(nproc)</span>
 
-<span class="comment"># build</span>
-<span class="cmd">cmake -B build && cmake --build build -j$(nproc)</span></div>
-    <div class="note">Tested against Bitcoin Core v30.1. Applying to Knots or other forks that track Core closely should work with minimal or no conflicts.</div>
+<span class="comment"># Optional: -DENABLE_QABIO=OFF for the base block set without the QABIO extension</span></div>
+    <div class="note">Forked from upstream Bitcoin Core v30.0. The 805-line patch lives across 29 files in <code>src/</code>; the 19,336-line library in 39 new files under <code>src/rung/</code>. A single boundary header (<code>src/rung_shims.h</code>) is the only place Core types meet library types. See <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> for the per-file walkthrough.</div>
   </div>
 
   <!-- -- RPC COMMANDS -- -->
   <div class="section">
     <div class="section-head">RPC Commands</div>
     <div class="code-block"><span class="comment"># transaction building</span>
-createrung         <span class="comment">build a ladder witness from JSON</span>
-createrungtx       <span class="comment">create an unsigned v4 TX_MLSC</span>
-signladder         <span class="comment">sign ladder inputs with keys</span>
+createrungtx       <span class="comment">build an unsigned v4 RUNG_TX (shared conditions tree)</span>
+signladder         <span class="comment">one-call sign using descriptor notation</span>
+signrungtx         <span class="comment">raw per-input signing path</span>
+createrung         <span class="comment">build a single LadderWitness from JSON</span>
 
 <span class="comment"># descriptor language</span>
 parseladder        <span class="comment">parse descriptor to conditions hex + MLSC root</span>
 formatladder       <span class="comment">format conditions hex as descriptor string</span>
 
-<span class="comment"># inspection</span>
+<span class="comment"># inspection / validation</span>
 decoderung         <span class="comment">decode a ladder witness from hex</span>
+validateladder     <span class="comment">validate every witness on a raw v4 RUNG_TX</span>
+serialiseconditions <span class="comment">serialise conditions for P2SH/P2WSH/P2TR_SCRIPT inner-script use</span>
 computectvhash     <span class="comment">compute BIP-119 CTV template hash</span>
+computemutation    <span class="comment">compute mutated conditions for RECURSE_MODIFIED / RECURSE_DECAY</span>
 
-<span class="comment"># key generation</span>
-generatepqkeypair  <span class="comment">generate a post-quantum keypair (FALCON/Dilithium/SPHINCS+)</span></div>
+<span class="comment"># PQ helpers</span>
+generatepqkeypair  <span class="comment">FALCON-512 / FALCON-1024 / Dilithium3 / SPHINCS+</span>
+pqpubkeycommit     <span class="comment">SHA256(pubkey) commitment for PQ_BATCH</span>
+
+<span class="comment"># adaptor signatures (PTLC)</span>
+extractadaptorsecret  <span class="comment">recover adaptor secret from sig pair</span>
+verifyadaptorpresig   <span class="comment">verify a Schnorr adaptor pre-signature</span>
+
+<span class="comment"># QABIO suite</span>
+qabi_buildblock    <span class="comment">build a qabi_block from participants + outputs</span>
+qabi_blockinfo     <span class="comment">decode a qabi_block to JSON</span>
+qabi_authchain     <span class="comment">generate an auth hash chain</span>
+qabi_signqabo      <span class="comment">coordinator-side FALCON-512 sign over SIGHASH_QABO</span>
+qabi_sighash       <span class="comment">compute SIGHASH_QABO for a QABIO tx</span></div>
+    <p style="margin-top:8px;font-size:13px;color:var(--text-dim)">Full reference with args / returns / examples for every RPC: <a href="docs/#RPC_REFERENCE">RPC Reference</a>.</p>
   </div>
 
   <!-- -- LINKS -- -->
   <div class="section">
     <div class="section-head">Links</div>
-    <p> -- visual builder with live signet connection</p>
-    <p><a href="block-docs/">Block Reference</a> -- documentation for all 61 block types</p>
-    <p><a href="patch-overview.html">Patch Overview</a> -- what changes and how much code</p>
-    <p><a href="https://github.com/defenwycke/bitcoin-core-ladder-script">GitHub</a> -- full repository</p>
+    <p><a href="ladder-engine.html">Ladder Engine</a> &mdash; visual builder with live signet connection</p>
+    <p><a href="tools.html">Tools</a> &mdash; Engine + PQ Batch playground + QABIO playground</p>
+    <p><a href="block-docs/">Block Reference</a> &mdash; documentation for all 65 block types</p>
+    <p><a href="docs/">Docs</a> &mdash; specs, FAQ, RPC reference, annotated patch + library</p>
+    <p><a href="patch-overview.html">Patch Overview</a> &mdash; what changes and how much code</p>
+    <p><a href="https://github.com/defenwycke/bitcoin-core-ladder-script">GitHub</a> &mdash; full repository</p>
   </div>
 
 </div>
