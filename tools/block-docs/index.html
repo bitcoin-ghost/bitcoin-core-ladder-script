@@ -181,7 +181,7 @@ a:hover { text-decoration: underline; }
       <a href="anchor-reserve.html" class="block-card"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Reserve proof anchor. Minimum reserve amount for proof of reserves.</div></a>
       <a href="anchor-seal.html" class="block-card"><div class="block-code">0x0505</div><div class="block-name">ANCHOR_SEAL</div><div class="block-desc">Tamper-evident seal. Single-use commitment for client-side validation.</div></a>
       <a href="anchor-oracle.html" class="block-card"><div class="block-code">0x0506</div><div class="block-name">ANCHOR_ORACLE</div><div class="block-desc">Oracle attestation anchor. Spending requires oracle's signed event attestation.</div></a>
-      <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. Up to 32 bytes, max one per transaction.</div></a>
+      <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. 1&ndash;40 bytes, max one per transaction.</div></a>
     </div>
   </div>
 
@@ -218,6 +218,7 @@ a:hover { text-decoration: underline; }
       <a href="ptlc.html" class="block-card"><div class="block-code">0x0704</div><div class="block-name">PTLC</div><div class="block-desc">Adaptor point + CSV + signature. For payment channels.</div></a>
       <a href="cltv-sig.html" class="block-card"><div class="block-code">0x0705</div><div class="block-name">CLTV_SIG</div><div class="block-desc">SIG + CLTV in one block. Saves 8 bytes.</div></a>
       <a href="timelocked-multisig.html" class="block-card"><div class="block-code">0x0706</div><div class="block-name">TIMELOCKED_MULTISIG</div><div class="block-desc">M-of-N + CSV for penalty branches and vault recovery.</div></a>
+      <a href="anchor-fee.html" class="block-card"><div class="block-code">0x0707</div><div class="block-name">ANCHOR_FEE</div><div class="block-desc">2-of-2 sigs + fee-rate band + weight limit. Anti-pinning L2 anchor.</div></a>
     </div>
   </div>
 
@@ -258,19 +259,14 @@ a:hover { text-decoration: underline; }
     <div class="block-grid">
       <a href="qabi-prime.html" class="block-card"><div class="block-code">0x0A01</div><div class="block-name">QABI_PRIME</div><div class="block-desc">Priming state transition: reveal next auth-chain preimage, covenant-mutate committed_root / depth / expiry. Participant-authorised only &mdash; no coordinator signature needed.</div></a>
       <a href="qabi-spend.html" class="block-card"><div class="block-code">0x0A02</div><div class="block-name">QABI_SPEND</div><div class="block-desc">Batch spend: verifies primed state, expiry window, spend preimage, and a single tx-level FALCON-512 aggregated signature that authorises the whole batch atomically.</div></a>
+      <a href="pq-batch.html" class="block-card"><div class="block-code">0x0A03</div><div class="block-name">PQ_BATCH</div><div class="block-desc">Lightweight PQ key-sharing pool. Commits SHA256(falcon_pubkey); one anchor input reveals pubkey + sig, every other input gated by the same hash short-circuits via a tx-local cache. ~55 vB amortised per input.</div></a>
     </div>
-  </div>
-
-  <!-- -- COMPACT -- -->
-  <div class="family">
   </div>
 
 </div>
 
 <footer class="site-footer">
-  <a href="/">Ladder Script</a> &middot; 
+  <a href="/">Ladder Script</a> &middot; Built by <a href="https://defenwycke.org" target="_blank" rel="noopener">defenwycke</a>
 </footer>
-
-<footer style="background:#f5f5f5;border-top:1px solid #e0e0e0;padding:24px 0;text-align:center;font-size:13px;color:#999;font-family:Inter,system-ui,sans-serif;margin-top:40px;">Built by <a href="https://defenwycke.org" target="_blank" rel="noopener" style="color:#999;text-decoration:none;">defenwycke</a></footer>
 </body>
 </html>

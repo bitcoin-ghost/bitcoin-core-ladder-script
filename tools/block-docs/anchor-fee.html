@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANCHOR_FEE — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+<div style="background:#fff3e0;border-bottom:1px solid #e67e22;padding:10px 16px;text-align:center;font-size:13px;color:#7a4910;font-family:Inter,system-ui,-apple-system,sans-serif;">Upgrading site to new Ladder library — some docs may be out of date.</div>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="/" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Intro</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">ANCHOR_FEE</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">Compound Family</span>
+</div>
+
+<div class="doc-content">
+
+<!-- Title -->
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0707 &middot; COMPOUND FAMILY</div>
+  <h1 class="block-title">ANCHOR_FEE</h1>
+  <p class="block-subtitle">L2-anchor compound block: 2-of-2 channel signatures + fee-rate hysteresis band + transaction weight ceiling, all bound to a commitment number. Designed for Lightning-style anti-pinning anchor outputs where both parties must agree, the spend must fall inside an honest fee-rate window, and the spending tx cannot exceed a fixed weight cap.</p>
+  <span class="block-family-badge badge-compound">Compound</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
+</div>
+
+<!-- Ladder Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="170" viewBox="0 0 620 170">
+      <line x1="20" y1="10" x2="20" y2="160" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="160" stroke="#cccccc" stroke-width="3"/>
+      <line x1="20" y1="60" x2="80" y2="60" stroke="#333333" stroke-width="2"/>
+      <line x1="540" y1="60" x2="600" y2="60" stroke="#333333" stroke-width="2"/>
+      <rect x="80" y="20" width="460" height="80" rx="2" fill="#f5f5f5" stroke="#333333" stroke-width="1.5"/>
+      <text x="310" y="38" text-anchor="middle" fill="#333333" font-family="Share Tech Mono" font-size="11" letter-spacing="2">ANCHOR_FEE</text>
+      <rect x="100" y="48" width="100" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="150" y="66" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="10" font-weight="600">2-of-2 SIG</text>
+      <text x="210" y="66" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="12">+</text>
+      <rect x="220" y="48" width="120" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="280" y="66" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="10" font-weight="600">FEE BAND</text>
+      <text x="350" y="66" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="12">+</text>
+      <rect x="360" y="48" width="160" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
+      <text x="440" y="66" text-anchor="middle" fill="#2980b9" font-family="IBM Plex Mono" font-size="10" font-weight="600">WEIGHT CEILING</text>
+      <text x="310" y="125" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">All three components must pass &mdash; sigs valid, fee in band, weight under cap</text>
+      <text x="310" y="145" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">Closes the LN anchor pinning vector at the consensus level</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead>
+      <tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="field-name">scheme</td>
+        <td class="field-type">SCHEME</td>
+        <td class="field-size">1 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Signature scheme (Schnorr, ECDSA, or any registered PQ scheme)</td>
+      </tr>
+      <tr>
+        <td class="field-name">min_fee_rate</td>
+        <td class="field-type">NUMERIC</td>
+        <td class="field-size">1&ndash;4 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Minimum acceptable fee rate (sat/vB)</td>
+      </tr>
+      <tr>
+        <td class="field-name">max_fee_rate</td>
+        <td class="field-type">NUMERIC</td>
+        <td class="field-size">1&ndash;4 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Maximum acceptable fee rate (sat/vB) &mdash; pinning ceiling</td>
+      </tr>
+      <tr>
+        <td class="field-name">max_weight</td>
+        <td class="field-type">NUMERIC</td>
+        <td class="field-size">1&ndash;4 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Maximum spending tx weight in WU. Caps oversized "pinning" txs</td>
+      </tr>
+      <tr>
+        <td class="field-name">commitment_number</td>
+        <td class="field-type">NUMERIC</td>
+        <td class="field-size">1&ndash;4 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Channel commitment number this anchor belongs to</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey[0..1]</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32&ndash;33 B each</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">2 public keys (local + remote channel parties), folded into Merkle leaf via merkle_pub_key</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature[0..1]</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64&ndash;65 B each</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">2 valid signatures &mdash; both required (2-of-2)</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public keys folded into the Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+</div>
+
+<!-- Evaluation Logic -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step">
+      <span class="eval-step-num">1.</span>
+      <span class="eval-step-text">Verify both witness <span class="eval-keyword">PUBKEY</span>s against the Merkle leaf (merkle_pub_key). If either mismatches &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2.</span>
+      <span class="eval-step-text">Verify both <span class="eval-keyword">SIGNATURE</span>s against the per-input ladder sighash (with <code>scheme</code>). If either fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">3.</span>
+      <span class="eval-step-text">Compute the spending tx fee rate <code>(sum_in - sum_out) / vsize</code>. If outside <code>[min_fee_rate, max_fee_rate]</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">4.</span>
+      <span class="eval-step-text">Compute the spending tx weight. If <code>tx_weight &gt; max_weight</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">5.</span>
+      <span class="eval-step-text">All four checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Result Table -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
+      <tr><td>min_fee_rate &gt; max_fee_rate</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Either Merkle leaf check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Either signature invalid</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Fee rate outside [min, max] band</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Spending tx exceeds max_weight</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>All checks pass</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON Output -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+
+  <div class="json-label">Conditions (committed at fund time)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_FEE"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"value"</span>: <span class="json-num">1</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">1</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">100</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">2000</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">42</span> }
+  ]
+}</pre></div>
+
+  <p class="section-text" style="margin-top:12px">Fee-rate band <code>[1, 100]</code> sat/vB, weight ceiling 2,000 WU, commitment number 42, Schnorr signature scheme. Pubkeys appear in the witness only and are committed via merkle_pub_key.</p>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+
+  <div class="use-case">
+    <div class="use-case-title">Lightning Anchor Outputs (Anti-Pinning)</div>
+    <div class="use-case-desc">LN commitment transactions include small "anchor" outputs that any channel party can fee-bump to confirm the commitment. Without consensus-level constraints, an attacker can pin the anchor with a low-fee child tx of arbitrary size, blocking the legitimate party from CPFP'ing. ANCHOR_FEE binds the spend to a fee-rate band and a max weight at consensus, structurally closing the pinning vector.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Bounded-Cost Channel Closes</div>
+    <div class="use-case-desc">A unilateral channel close that must land inside a predictable fee window. The 2-of-2 sig requires both parties' agreement; the fee band caps the cost; the weight ceiling prevents oversized witnesses from inflating the close fee.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Cooperative Settlement with Fee Cap</div>
+    <div class="use-case-desc">A 2-party settlement where neither party can drag the other into an over-priced spend. Both sign, both have agreed to a fee corridor, both are protected from a runaway fee-rate environment.</div>
+  </div>
+</div>
+
+<!-- Nav -->
+<div class="doc-nav">
+  <a href="timelocked-multisig.html">&larr; TIMELOCKED_MULTISIG</a>
+  <a href="epoch-gate.html">EPOCH_GATE &rarr;</a>
+</div>
+
+</div>
+<footer style="background:#f5f5f5;border-top:1px solid #e0e0e0;padding:24px 0;text-align:center;font-size:13px;color:#999;font-family:Inter,system-ui,sans-serif;margin-top:40px;">Built by <a href="https://defenwycke.org" target="_blank" rel="noopener" style="color:#999;text-decoration:none;">defenwycke</a></footer>
+</body>
+</html>

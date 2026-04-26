@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PQ_BATCH — LADDER SCRIPT Block Reference</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+<div style="background:#fff3e0;border-bottom:1px solid #e67e22;padding:10px 16px;text-align:center;font-size:13px;color:#7a4910;font-family:Inter,system-ui,-apple-system,sans-serif;">Upgrading site to new Ladder library — some docs may be out of date.</div>
+
+<header class="site-header" style="background:#fff;border-bottom:1px solid #e0e0e0;font-family:'Inter',system-ui,sans-serif;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;height:56px;">
+      <a href="/" style="font-size:14px;font-weight:700;color:#1a1a1a;text-decoration:none;">Ladder Script</a>
+      <div style="display:flex;align-items:center;gap:20px;"><a href="https://github.com/defenwycke/bitcoin-core-ladder-script" target="_blank" style="color:#666;display:flex;align-items:center;">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+    <nav style="display:flex;gap:24px;border-top:1px solid #eee;padding:10px 0;font-size:13px;">
+      <a href="../ladder-script.html" style="color:#666;text-decoration:none;">Intro</a>
+      <a href="../rung-tx-anatomy.html" style="color:#666;text-decoration:none;">Anatomy</a>
+      <a href="./" style="color:#e67e22;text-decoration:none;border-bottom:2px solid #e67e22;padding-bottom:4px;">Blocks</a>
+      <a href="../docs/" style="color:#666;text-decoration:none;">Docs</a>
+      <a href="../patch-overview.html" style="color:#666;text-decoration:none;">Patch</a>
+      <a href="../get-started.html" style="color:#666;text-decoration:none;">Get Started</a>
+      <a href="../ladder-engine.html" style="color:#666;text-decoration:none;">Engine</a>
+      <a href="../qabio-playground.html" style="color:#666;text-decoration:none;">QABIO</a>
+      <a href="../explorer.html" style="color:#666;text-decoration:none;">Explorer</a>
+    </nav>
+  </div>
+</header>
+
+
+<div class="doc-header">
+  <a href="index.html">Block Reference</a>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-title">PQ_BATCH</span>
+  <div class="doc-header-divider"></div>
+  <span class="doc-header-family">QABIO Family</span>
+</div>
+
+<div class="doc-content">
+
+<!-- Title -->
+<div class="block-title-section">
+  <div class="block-type-code">TYPE 0x0A03 &middot; QABIO FAMILY</div>
+  <h1 class="block-title">PQ_BATCH</h1>
+  <p class="block-subtitle">Lightweight post-quantum batch primitive. Conditions commit only <code>SHA256(falcon_pubkey)</code>. In a spending tx, exactly one input per commit group is the <strong>anchor</strong>: its witness reveals the canonical PQ pubkey + a PQ signature over the per-input ladder sighash. Every other input gated by the same hash carries an empty witness and short-circuits via a tx-local cache the anchor populates after its first verify. No coordinator, no priming round, no output-set binding &mdash; the simple "key-sharing pool" complement to QABIO.</p>
+  <span class="block-family-badge badge-qabi">QABIO</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
+</div>
+
+<!-- Ladder Diagram -->
+<div class="doc-section">
+  <div class="section-label">Ladder Diagram</div>
+  <div class="ladder-diagram">
+    <svg width="620" height="220" viewBox="0 0 620 220">
+      <line x1="20" y1="10" x2="20" y2="210" stroke="#cccccc" stroke-width="3"/>
+      <line x1="600" y1="10" x2="600" y2="210" stroke="#cccccc" stroke-width="3"/>
+
+      <!-- Input 0: anchor -->
+      <line x1="20" y1="55" x2="100" y2="55" stroke="#9b59b6" stroke-width="2"/>
+      <line x1="500" y1="55" x2="600" y2="55" stroke="#9b59b6" stroke-width="2"/>
+      <rect x="100" y="20" width="400" height="70" rx="2" fill="#f5f5f5" stroke="#9b59b6" stroke-width="1.5"/>
+      <text x="300" y="40" text-anchor="middle" fill="#9b59b6" font-family="Share Tech Mono" font-size="11" letter-spacing="2">PQ_BATCH (anchor input)</text>
+      <text x="300" y="60" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">witness = [PUBKEY, SIGNATURE]</text>
+      <text x="300" y="78" text-anchor="middle" fill="#27ae60" font-family="IBM Plex Mono" font-size="9">verify FALCON sig &rarr; populate PQBatchCache[commit]</text>
+
+      <!-- Input N: cache read -->
+      <line x1="20" y1="155" x2="100" y2="155" stroke="#aaaaaa" stroke-width="2" stroke-dasharray="4,3"/>
+      <line x1="500" y1="155" x2="600" y2="155" stroke="#aaaaaa" stroke-width="2" stroke-dasharray="4,3"/>
+      <rect x="100" y="120" width="400" height="70" rx="2" fill="#fafafa" stroke="#aaaaaa" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="300" y="140" text-anchor="middle" fill="#aaaaaa" font-family="Share Tech Mono" font-size="11" letter-spacing="2">PQ_BATCH (non-anchor input)</text>
+      <text x="300" y="160" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">witness = [] (empty)</text>
+      <text x="300" y="178" text-anchor="middle" fill="#27ae60" font-family="IBM Plex Mono" font-size="9">read PQBatchCache[commit] &rarr; SATISFIED</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Fields -->
+<div class="doc-section">
+  <div class="section-label">Fields</div>
+  <table class="field-table">
+    <thead>
+      <tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="field-name">pubkey_hash</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc"><code>SHA256(canonical_falcon_pubkey)</code> &mdash; the only thing committed at fund time</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey<br><em>(anchor only)</em></td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">897 / 1,793 / 1,952 / 64 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Canonical PQ pubkey. Scheme is derived from pubkey size: 897 &rarr; FALCON-512, 1,793 &rarr; FALCON-1024, 1,952 &rarr; Dilithium3, 64 &rarr; SPHINCS+/SHA</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature<br><em>(anchor only)</em></td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">scheme-dependent</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">PQ signature over the per-input ladder sighash. FALCON-512 = 666 B exact</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">
+    The witness is variable: <strong>0 fields</strong> for non-anchor inputs (cache reads), <strong>2 fields</strong> for the anchor input (PUBKEY + SIGNATURE). The evaluator enforces the 0-or-2 rule. This is the only block whose witness layout is not fixed (declared <code>nullptr</code> in <code>BlockTypeInfo</code> &mdash; see <code>src/rung/types.h</code>).
+  </p>
+</div>
+
+<!-- Evaluation Logic -->
+<div class="doc-section">
+  <div class="section-label">Evaluation Logic</div>
+  <div class="eval-box">
+    <div class="eval-step">
+      <span class="eval-step-num">1.</span>
+      <span class="eval-step-text">Read the committed <code>pubkey_hash</code> from conditions. Look up the per-tx <code>PQBatchCache</code> for this commit.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2a.</span>
+      <span class="eval-step-text"><strong>If witness is empty</strong> (non-anchor input): if the cache says the commit is verified &rarr; <span class="eval-result-sat">SATISFIED</span>. If no cache entry exists yet (anchor not seen yet) &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">2b.</span>
+      <span class="eval-step-text"><strong>If witness has 2 fields</strong> (anchor input): check <code>SHA256(PUBKEY) == pubkey_hash</code>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">3.</span>
+      <span class="eval-step-text">Derive the PQ scheme from the pubkey size. Compute the per-input ladder sighash via <code>FetchLadderSighash</code>.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">4.</span>
+      <span class="eval-step-text">Verify the signature: <code>VerifyPQSignature(scheme, signature, sighash, pubkey)</code>. If valid &rarr; populate <code>PQBatchCache[pubkey_hash] = true</code> and return <span class="eval-result-sat">SATISFIED</span>. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">5.</span>
+      <span class="eval-step-text">Witness shape other than 0 or 2 fields &rarr; <span class="eval-result-err">ERROR</span>.</span>
+    </div>
+  </div>
+</div>
+
+<!-- Anchor ordering invariant -->
+<div class="doc-section">
+  <div class="section-label">Anchor Ordering Invariant</div>
+  <p class="section-text">Script verification runs in input order (0, 1, 2, ...). The anchor input <strong>must be at the lowest-index PQ_BATCH input per commit group</strong> &mdash; non-anchor inputs at lower indices return <span class="eval-result-unsat">UNSATISFIED</span> because the cache entry doesn't exist yet. This is acceptable: the cost model of "one anchor input per commit group per tx" still delivers ~10&times; amortisation for N=100. Signers must respect this ordering.</p>
+</div>
+
+<!-- Result Table -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Witness has 1 or 3+ fields</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Anchor input: SHA256(pubkey) &ne; pubkey_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Anchor input: PQ signature invalid</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Non-anchor input: cache empty (anchor not yet seen)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Anchor input: PQ sig valid &mdash; populates cache</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Non-anchor input: cache reads true for commit</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- JSON Output -->
+<div class="doc-section">
+  <div class="section-label">JSON Wire Format</div>
+
+  <div class="json-label">Conditions (committed at fund time)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"PQ_BATCH"</span>,
+  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3...32 bytes (SHA256(falcon_pubkey))"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness &mdash; anchor input</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"PQ_BATCH"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...897 bytes (FALCON-512)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...666 bytes (FALCON-512 sig)"</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness &mdash; non-anchor inputs (cache reads)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"PQ_BATCH"</span>,
+  <span class="json-key">"fields"</span>: []
+}</pre></div>
+</div>
+
+<!-- Cost amortisation -->
+<div class="doc-section">
+  <div class="section-label">Cost Amortisation</div>
+  <p class="section-text" style="margin-bottom:12px">For the typical "drain N UTXOs to one sink" shape (FALCON-512):</p>
+  <table class="result-table">
+    <thead><tr><th>N</th><th>Total vsize</th><th>Per-input vsize</th><th>vs N &times; SIG(FALCON-512)</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>~1,610 vB</td><td>1,610 vB</td><td>parity</td></tr>
+      <tr><td>10</td><td>~2,160 vB</td><td>216 vB</td><td>~7&times; cheaper</td></tr>
+      <tr><td>100</td><td>~6,890 vB</td><td>69 vB</td><td>~10&times; cheaper</td></tr>
+      <tr><td>500</td><td>~30,070 vB</td><td>60 vB</td><td>~11&times; cheaper</td></tr>
+      <tr><td>1,000</td><td>~58,900 vB</td><td>59 vB</td><td>~11&times; cheaper</td></tr>
+    </tbody>
+  </table>
+  <p class="section-text" style="margin-top:12px">Asymptote: <strong>~55 vB per non-anchor input</strong>. The anchor input pays the full ~1,575 vB FALCON cost, every cache-read input pays only the PQ_BATCH micro-header + witness scaffolding.</p>
+</div>
+
+<!-- Use Cases -->
+<div class="doc-section">
+  <div class="section-label">Use Cases</div>
+
+  <div class="use-case">
+    <div class="use-case-title">Exchange Sweeps</div>
+    <div class="use-case-desc">A custodian holds many UTXOs all spendable by the same FALCON key. PQ_BATCH collapses the consolidation cost &mdash; one signature, one verify, N inputs.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Co-owned UTXO Pools</div>
+    <div class="use-case-desc">Multiple addresses derived from the same PQ master key share a single batch authorisation primitive without coordination.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Recurring Subscription Drains</div>
+    <div class="use-case-desc">A service that periodically batches small UTXOs into a single PQ-authorised sweep. The subscription model gets PQ safety for almost the cost of a single Schnorr spend.</div>
+  </div>
+
+  <div class="use-case">
+    <div class="use-case-title">Comparison with QABIO</div>
+    <div class="use-case-desc">PQ_BATCH is the single-key complement to QABIO. Use PQ_BATCH for "many UTXOs, one signer" (no coordinator, no output-set binding). Use QABIO for "many parties, one atomic batch" (coordinator-driven, output-set bound, escape-rung-protected). They can coexist in the same tx &mdash; PQ_BATCH gates the inputs, QABIO carries the coordinator's tx-level signature.</div>
+  </div>
+</div>
+
+<!-- Nav -->
+<div class="doc-nav">
+  <a href="qabi-spend.html">&larr; QABI_SPEND</a>
+  <a href="index.html">Block Index &rarr;</a>
+</div>
+
+</div>
+<footer style="background:#f5f5f5;border-top:1px solid #e0e0e0;padding:24px 0;text-align:center;font-size:13px;color:#999;font-family:Inter,system-ui,sans-serif;margin-top:40px;">Built by <a href="https://defenwycke.org" target="_blank" rel="noopener" style="color:#999;text-decoration:none;">defenwycke</a></footer>
+</body>
+</html>
