@@ -99,7 +99,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PKG="bitcoin-core-ladder-${VERSION}-x86_64-linux-gnu"
-          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib"
+          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib" "dist/${PKG}/share/examples"
           cp build/bin/bitcoind \
              build/bin/bitcoin-cli \
              build/bin/bitcoin-tx \
@@ -108,6 +108,8 @@ jobs:
              "dist/${PKG}/bin/"
           # Bundle liboqs.so so the binary is self-contained.
           cp -P /usr/local/lib/liboqs.so* "dist/${PKG}/lib/"
+          # Ship the Ladder Script signet conf so users can `cp share/examples/bitcoin-ladder.conf ~/.bitcoin/bitcoin.conf` and just go.
+          cp share/examples/bitcoin-ladder.conf "dist/${PKG}/share/examples/"
           strip "dist/${PKG}/bin/"* || true
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
@@ -186,7 +188,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PKG="bitcoin-core-ladder-${VERSION}-arm64-apple-darwin"
-          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib"
+          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/lib" "dist/${PKG}/share/examples"
           cp build/bin/bitcoind \
              build/bin/bitcoin-cli \
              build/bin/bitcoin-tx \
@@ -196,6 +198,7 @@ jobs:
           # Bundle liboqs (from /usr/local, not Homebrew) so the binary
           # is self-contained.
           cp -RP /usr/local/lib/liboqs.*dylib "dist/${PKG}/lib/"
+          cp share/examples/bitcoin-ladder.conf "dist/${PKG}/share/examples/"
           strip "dist/${PKG}/bin/"* || true
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
@@ -300,7 +303,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PKG="bitcoin-core-ladder-${VERSION}-x86_64-w64-mingw32"
-          mkdir -p "dist/${PKG}/bin"
+          mkdir -p "dist/${PKG}/bin" "dist/${PKG}/share/examples"
+          cp share/examples/bitcoin-ladder.conf "dist/${PKG}/share/examples/"
           cp build/bin/bitcoind.exe \
              build/bin/bitcoin-cli.exe \
              build/bin/bitcoin-tx.exe \

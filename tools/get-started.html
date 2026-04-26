@@ -202,43 +202,47 @@ a:hover { text-decoration: underline; }
   <div class="section">
     <div class="section-head">Quick Start</div>
 
-    <p>Configure (drop the snippet from the next section into <code>~/.bitcoin/bitcoin.conf</code> and pick an rpcpassword):</p>
-    <div class="code-block"><span class="cmd">mkdir -p ~/.bitcoin</span>
-<span class="comment"># Then paste the Signet Configuration block below into ~/.bitcoin/bitcoin.conf</span></div>
+    <p>The release tarball ships with a pre-configured <code>bitcoin.conf</code> for the Ladder Script signet. Extract, copy the conf into place, and start the daemon:</p>
+    <div class="code-block"><span class="cmd">tar xzf bitcoin-core-ladder-*-x86_64-linux-gnu.tar.gz</span>
+<span class="cmd">cd bitcoin-core-ladder-*-x86_64-linux-gnu</span>
 
-    <p>Start the node:</p>
-    <div class="code-block"><span class="cmd">./build/bin/bitcoind -daemon</span>
+<span class="comment"># Drop the bundled signet config into your bitcoin datadir.</span>
+<span class="cmd">mkdir -p ~/.bitcoin</span>
+<span class="cmd">cp share/examples/bitcoin-ladder.conf ~/.bitcoin/bitcoin.conf</span>
+
+<span class="comment"># Start the node (liboqs.so is bundled in lib/ — point the loader at it).</span>
+<span class="cmd">LD_LIBRARY_PATH=$PWD/lib ./bin/bitcoind -daemon</span>
 <span class="output">Bitcoin Core starting</span>
 
-<span class="comment"># wait for sync (~30 seconds on the Ladder Script signet)</span>
-<span class="cmd">./build/bin/bitcoin-cli -signet getblockcount</span>
+<span class="comment"># Wait for sync (~30 seconds on the Ladder Script signet).</span>
+<span class="cmd">./bin/bitcoin-cli getblockcount</span>
 <span class="output">1216</span></div>
 
     <p>Create a wallet:</p>
-    <div class="code-block"><span class="cmd">./build/bin/bitcoin-cli -signet createwallet test</span>
-<span class="cmd">./build/bin/bitcoin-cli -signet -rpcwallet=test getnewaddress</span>
+    <div class="code-block"><span class="cmd">./bin/bitcoin-cli createwallet test</span>
+<span class="cmd">./bin/bitcoin-cli -rpcwallet=test getnewaddress</span>
 <span class="output">tb1q...</span></div>
 
-    <p>Create a Ladder Script transaction:</p>
-    <div class="code-block"><span class="comment"># parse a descriptor</span>
-<span class="cmd">./build/bin/bitcoin-cli -signet parseladder "ladder(sig(@alice))" \</span>
-<span class="cmd">  '{"alice":"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"}'</span>
+    <p>Generate a post-quantum keypair and a Ladder Script descriptor:</p>
+    <div class="code-block"><span class="cmd">./bin/bitcoin-cli generatepqkeypair FALCON512</span>
 <span class="output">{
-  "conditions_hex": "01010001010101000000",
-  "mlsc_root": "443a7849...",
-  "n_rungs": 1
+  "scheme": "FALCON512",
+  "pubkey": "09a6753b11f72acd2bf11fa3676...  (897 bytes)",
+  "privkey": "590bef41276ef3efa07cf7b18107...  (1281 bytes)"
 }</span>
 
-<span class="comment"># format it back</span>
-<span class="cmd">./build/bin/bitcoin-cli -signet formatladder "01010001010101000000"</span>
+<span class="comment"># parse a descriptor (substitute your own pubkey hex)</span>
+<span class="cmd">./bin/bitcoin-cli parseladder "ladder(sig(@a))" '{"@a":"&lt;pubkey-hex&gt;"}'</span>
 <span class="output">{
-  "descriptor": "ladder(sig(@?))"
+  "conditions_hex": "01010001010101000000",
+  "conditions_root": "443a7849..."
 }</span></div>
   </div>
 
   <!-- -- SIGNET CONFIG -- -->
   <div class="section">
     <div class="section-head">Signet Configuration</div>
+    <p>The bundled <code>share/examples/bitcoin-ladder.conf</code> contains:</p>
     <div class="code-block"><span class="comment"># Ladder Script Signet</span>
 <span class="key">signet</span>=<span class="val">1</span>
 
@@ -247,15 +251,19 @@ a:hover { text-decoration: underline; }
 <span class="key">txindex</span>=<span class="val">1</span>
 <span class="key">fallbackfee</span>=<span class="val">0.0001</span>
 
-<span class="comment"># Ladder Script signet challenge</span>
+<span class="comment"># Ladder Script signet challenge — pins this binary to our chain.</span>
 <span class="key">signetchallenge</span>=<span class="val">21036bae004d5cd7bb65742cdbf735bf6f3a384d69f4d52dba84689a3db972848f68ac</span>
 
-<span class="comment"># Seed node (Amsterdam)</span>
+<span class="comment"># Seed node (Amsterdam).</span>
 <span class="key">addnode</span>=<span class="val">85.9.213.194</span>
 
-<span class="comment"># Your RPC credentials</span>
+<span class="comment"># RPC credentials &mdash; replace the placeholder password before exposing the node.</span>
 <span class="key">rpcuser</span>=<span class="val">ladder</span>
-<span class="key">rpcpassword</span>=<span class="val">changeme</span></div>
+<span class="key">rpcpassword</span>=<span class="val">CHANGE_ME_BEFORE_USING</span>
+
+<span class="comment"># Force v1 p2p transport (current seed only speaks v1).</span>
+<span class="key">v2transport</span>=<span class="val">0</span></div>
+    <p>If you'd rather use a different datadir, pass <code>-datadir=/path/to/dd</code> to <code>bitcoind</code> and put the conf there instead.</p>
   </div>
 
   <!-- -- BUILD FROM SOURCE -- -->
