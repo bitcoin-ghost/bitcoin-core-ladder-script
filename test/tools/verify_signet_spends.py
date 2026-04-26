@@ -172,7 +172,8 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
     })
     spend_sign = api("sign", {
         "hex": spend_create["hex"],
-        "signers": [{"pubkey": pk, "privkey": keypair["privkey"]}],
+        # signrungtx legacy SIG-only shape: [{privkey: <WIF>, input: <idx>}]
+        "signers": [{"privkey": keypair["privkey"], "input": 0}],
         "spent_outputs": [spent_output],
     })
     if not spend_sign.get("complete"):
