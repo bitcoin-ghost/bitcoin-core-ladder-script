@@ -5,9 +5,11 @@ configurations. Each example shows the use case, descriptor notation (when
 applicable), block structure, evaluation logic, and approximate wire format size.
 
 All examples use `RUNG_TX_VERSION = 4` and TX_MLSC (`0xDF`) outputs. Each
-output is 8 bytes (value only) with one shared conditions_root per transaction.
-A creation proof in the witness is validated at block acceptance. Inline
-conditions (`0xC1`) have been removed — all outputs use MLSC (`0xDF`).
+output is 8 bytes (value only) on the wire with one shared `conditions_root`
+per transaction. The 32-byte root is recovered at spend time from the
+synthetic UTXO entry at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`. Inline
+conditions (`0xC1`) — an earlier draft format — are rejected as defence in
+depth.
 
 ---
 
@@ -40,24 +42,26 @@ Ladder:
 3. Finds SIGNATURE field (64-byte Schnorr sig from witness).
 4. Finds SCHEME field (0x01 = SCHNORR).
 5. Library computes the Ladder sighash via `api::SignatureHashLadder` using
-   `TaggedHash("LadderSighash")`, committing to epoch, hash_type, tx version,
-   locktime, prevouts, amounts, sequences, outputs, spend_type, input index,
-   and conditions hash.
+   `TaggedHash("LadderSighash/v1")`, committing to epoch, hash_type, tx
+   version, locktime, prevouts, amounts, sequences, outputs, spend_type,
+   input index, and conditions hash.
 6. Calls `sig_checker.CheckSchnorrSignature(sig, pubkey, sighash)` on the
    supplied `api::LadderSigChecker` adapter.
 7. Returns SATISFIED on valid signature.
 
 ### Wire format size (TX_MLSC)
 
-**Output**: 8 bytes (value only)
+**Output**: 8 bytes (value only) on the wire.
 
-**Shared conditions_root**: `0xDF` + 32-byte Merkle root (once per transaction)
+**Shared conditions_root**: `0xDF` + 32-byte Merkle root (once per transaction).
 
-**Simple payment (1-in, 1-out)**: 110 vB (key-path)
-**Standard payment (1-in, 2-out)**: 118 vB (key-path)
-**Script-path (SIG + CSV)**: 124 vB · **(HASH_SIG)**: 140 vB · **(2-of-3 MULTISIG)**: 175 vB
+**Simple payment (1-in, 1-out)**: **109 vB** (key-path) — 1 vB smaller than
+P2WPKH (110), 2 vB smaller than P2TR key-path (111). **148 vB** for
+script-path no-tweak.
 
-**Batch 100 outputs**: 914 vB (71% cheaper than P2WPKH)
+**Batch 100 outputs**: **911 vB** — 71% smaller than P2WPKH (3,179 vB).
+
+Full sizing breakdown for every shape lives in [`SIZING.md`](SIZING.md).
 
 ---
 
@@ -564,7 +568,7 @@ Ladder:
   Rung 0:
     Block 0: SIG (0x0001)
       Conditions fields: [SCHEME(0x10)]         -- FALCON512
-      Witness fields:    [PUBKEY(897), SIGNATURE(~690)]
+      Witness fields:    [PUBKEY(897), SIGNATURE(666)]
   Coil: UNLOCK(0x01), INLINE(0x01), FALCON512(0x10)
 ```
 
@@ -583,21 +587,25 @@ Ladder:
 ### Field sizes
 
 - PUBKEY: 897 bytes (FALCON-512 public key)
-- SIGNATURE: ~690 bytes (FALCON-512 signature, variable)
-- SCHEME: 1 byte (0x10)
+- SIGNATURE: 666 bytes (FALCON-512 signature — exact, fixed size)
+- SCHEME: 1 byte (`0x10`)
 
-The `FieldMaxSize(PUBKEY) = 2048` and `FieldMaxSize(SIGNATURE) = 50000`
-accommodate all supported PQ schemes. `MAX_LADDER_WITNESS_SIZE = 100000`
+`FieldMaxSize(PUBKEY) = 2,048` and `FieldMaxSize(SIGNATURE) = 50,000`
+accommodate all supported PQ schemes. `MAX_LADDER_WITNESS_SIZE = 100,000`
 provides headroom for SPHINCS+ signatures (49,216 bytes).
 
 ### Wire format size
 
-**Witness**: SIG micro-header(1) + SCHEME(1) + PUBKEY(2+897) + SIGNATURE(2+690)
-+ coil(6) = ~1599 bytes.
+**Witness**: SIG micro-header(1) + SCHEME(1) + PUBKEY(2+897) + SIGNATURE(2+666)
++ coil(6) = ~1,575 bytes.
 
-This is significantly larger than a Schnorr spend (~108 bytes) but provides
+This is significantly larger than a Schnorr spend (~109 vB) but provides
 quantum resistance. A hybrid approach could use two rungs: Rung 0 with Schnorr
-(compact, pre-quantum), Rung 1 with FALCON-512 (quantum-safe fallback).
+(compact, pre-quantum), Rung 1 with FALCON-512 (quantum-safe fallback). For
+**batched** PQ spends (multiple inputs gated by the same FALCON key), see
+the `PQ_BATCH` block — amortises to ~55 vB per input by revealing the pubkey
++ signature once per tx via an anchor input. See
+[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) and [`SIZING.md`](SIZING.md).
 
 ---
 
