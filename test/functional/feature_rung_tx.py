@@ -6,12 +6,12 @@
 """Test Ladder Script (RUNG_TX v4) transactions on regtest.
 
 Tests the full lifecycle of v4 transactions:
-- Creating MLSC outputs via createtxmlsc RPC
+- Creating MLSC outputs via createrungtx RPC
 - Signing with signladder and signrungtx RPCs
 - Broadcasting and mining v4 transactions
 - Script-path spending with MLSC proof
 - Multiple block types (SIG)
-- Creation proofs for 3+ outputs (via createtxmlsc)
+- Creation proofs for 3+ outputs (via createrungtx)
 """
 
 from decimal import Decimal
@@ -41,11 +41,10 @@ from test_framework.wallet import MiniWallet
 from test_framework.wallet_util import bytes_to_wif
 
 
-# All 15 Ladder Script RPCs registered in RegisterRungRPCCommands
+# All Ladder Script RPCs registered in RegisterRungRPCCommands
 LADDER_RPCS = [
     "createrung",
     "createrungtx",
-    "createtxmlsc",
     "computectvhash",
     "computemutation",
     "decoderung",
@@ -236,20 +235,17 @@ class RungTxTest(BitcoinTestFramework):
         # The SIG block in conditions needs SCHEME (Schnorr=0x01) and PUBKEY fields.
         create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [output_amount],
             [
                 {
-                    "amount": output_amount,
-                    "conditions": [
+                    "output_index": 0,
+                    "blocks": [
                         {
-                            "blocks": [
-                                {
-                                    "type": "SIG",
-                                    "fields": [
-                                        {"type": "SCHEME", "hex": "01"},
-                                        {"type": "PUBKEY", "hex": pubkey_hex},
-                                    ],
-                                }
-                            ]
+                            "type": "SIG",
+                            "fields": [
+                                {"type": "SCHEME", "hex": "01"},
+                                {"type": "PUBKEY", "hex": pubkey_hex},
+                            ],
                         }
                     ],
                 }
@@ -319,20 +315,17 @@ class RungTxTest(BitcoinTestFramework):
         # Create a v4 tx spending the MLSC output into a new MLSC output
         create_result = self.node.createrungtx(
             [{"txid": self.v4_txid, "vout": 0}],
+            [spend_amount],
             [
                 {
-                    "amount": spend_amount,
-                    "conditions": [
+                    "output_index": 0,
+                    "blocks": [
                         {
-                            "blocks": [
-                                {
-                                    "type": "SIG",
-                                    "fields": [
-                                        {"type": "SCHEME", "hex": "01"},
-                                        {"type": "PUBKEY", "hex": dest_pubkey_hex},
-                                    ],
-                                }
-                            ]
+                            "type": "SIG",
+                            "fields": [
+                                {"type": "SCHEME", "hex": "01"},
+                                {"type": "PUBKEY", "hex": dest_pubkey_hex},
+                            ],
                         }
                     ],
                 }
@@ -378,16 +371,16 @@ class RungTxTest(BitcoinTestFramework):
         self.log.info("  Spend v4 output: OK")
 
     def test_three_output_tx_supported(self):
-        """Verify that createtxmlsc handles 3+ output txs cleanly: all
+        """Verify that createrungtx handles 3+ output txs cleanly: all
         outputs share the same conditions_root, all carry the 0xDF marker,
         and the resulting tx is well-formed. This was previously named
         `test_creation_proof_required` and was meant to verify the
         creation_proof field, but creation_proof was removed in the
         anti-spam audit pass — it served no useful purpose and opened
         the largest data-embedding channel in the protocol. The test
-        survives because the underlying functionality (createtxmlsc on
+        survives because the underlying functionality (createrungtx on
         3+ outputs) is still important to verify."""
-        self.log.info("Testing createtxmlsc with 3 MLSC outputs...")
+        self.log.info("Testing createrungtx with 3 MLSC outputs...")
 
         # Get a funded UTXO
         utxo = self.wallet.get_utxo()
@@ -397,9 +390,9 @@ class RungTxTest(BitcoinTestFramework):
 
         test_pubkey = "02" + "cc" * 32
 
-        # createtxmlsc creates a TX_MLSC with a shared condition tree.
+        # createrungtx creates a TX_MLSC with a shared condition tree.
         # 3 outputs, each governed by a SIG rung.
-        result = self.node.createtxmlsc(
+        result = self.node.createrungtx(
             # inputs
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             # outputs (3 amounts in BTC)
@@ -444,9 +437,9 @@ class RungTxTest(BitcoinTestFramework):
                 },
             ],
         )
-        assert "hex" in result, "createtxmlsc should return hex"
-        assert "conditions_root" in result, "createtxmlsc should return conditions_root"
-        assert "n_rungs" in result, "createtxmlsc should return n_rungs"
+        assert "hex" in result, "createrungtx should return hex"
+        assert "conditions_root" in result, "createrungtx should return conditions_root"
+        assert "n_rungs" in result, "createrungtx should return n_rungs"
         assert_equal(result["n_rungs"], 3)
         self.log.info(f"  conditions_root: {result['conditions_root'][:16]}...")
 
@@ -464,7 +457,7 @@ class RungTxTest(BitcoinTestFramework):
         assert_equal(spks[0], spks[1])
         assert_equal(spks[1], spks[2])
         self.log.info(f"  All 3 outputs share scriptPubKey: {spks[0][:16]}...")
-        self.log.info("  3-output createtxmlsc: OK")
+        self.log.info("  3-output createrungtx: OK")
 
 
     def test_wallet_funded_v4_structurally_mlsc(self):
@@ -545,13 +538,11 @@ class RungTxTest(BitcoinTestFramework):
 
         create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{
-                "amount": Decimal(str(utxo["value"])) - Decimal("0.001"),
-                "conditions": [{"blocks": [{"type": "SIG", "fields": [
-                    {"type": "SCHEME", "hex": "01"},
-                    {"type": "PUBKEY", "hex": test_pubkey},
-                ]}]}],
-            }],
+            [Decimal(str(utxo["value"])) - Decimal("0.001")],
+            [{"output_index": 0, "blocks": [{"type": "SIG", "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": test_pubkey},
+            ]}]}],
         )
         unsigned_hex = create_result["hex"]
 
@@ -621,13 +612,11 @@ class RungTxTest(BitcoinTestFramework):
         # can pay strictly more.
         original_create = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{
-                "amount": Decimal(str(utxo["value"])) - Decimal("0.005"),  # 5000 sat fee
-                "conditions": [{"blocks": [{"type": "SIG", "fields": [
-                    {"type": "SCHEME", "hex": "01"},
-                    {"type": "PUBKEY", "hex": test_pubkey},
-                ]}]}],
-            }],
+            [Decimal(str(utxo["value"])) - Decimal("0.005")],  # 5000 sat fee
+            [{"output_index": 0, "blocks": [{"type": "SIG", "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": test_pubkey},
+            ]}]}],
         )
         original_tx = tx_from_hex(original_create["hex"])
         # Mark the input as RBF-replaceable (BIP125: nSequence < 0xfffffffe).
@@ -643,13 +632,11 @@ class RungTxTest(BitcoinTestFramework):
         # Build the replacement: same input, lower output value (= higher fee).
         replacement_create = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{
-                "amount": Decimal(str(utxo["value"])) - Decimal("0.010"),  # 10000 sat fee
-                "conditions": [{"blocks": [{"type": "SIG", "fields": [
-                    {"type": "SCHEME", "hex": "01"},
-                    {"type": "PUBKEY", "hex": test_pubkey},
-                ]}]}],
-            }],
+            [Decimal(str(utxo["value"])) - Decimal("0.010")],  # 10000 sat fee
+            [{"output_index": 0, "blocks": [{"type": "SIG", "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": test_pubkey},
+            ]}]}],
         )
         replacement_tx = tx_from_hex(replacement_create["hex"])
         replacement_tx.vin[0].nSequence = 0
@@ -706,19 +693,16 @@ class RungTxTest(BitcoinTestFramework):
         # for a regtest test, mempool accepts arbitrarily-high-fee txs.
         create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
+            [0],
             [
                 {
-                    "amount": 0,
-                    "conditions": [
+                    "output_index": 0,
+                    "blocks": [
                         {
-                            "blocks": [
-                                {
-                                    "type": "DATA_RETURN",
-                                    "fields": [
-                                        {"type": "DATA", "hex": payload_hex},
-                                    ],
-                                }
-                            ]
+                            "type": "DATA_RETURN",
+                            "fields": [
+                                {"type": "DATA", "hex": payload_hex},
+                            ],
                         }
                     ],
                 }

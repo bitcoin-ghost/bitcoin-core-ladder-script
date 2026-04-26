@@ -1,7 +1,7 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: 19,533 lines across 39 files in `src/rung/`, plus the
+implementation: 19,318 lines across 39 files in `src/rung/`, plus the
 353-line `src/rung_shims.h` boundary header.
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
@@ -20,7 +20,7 @@ hooks; this is the engine.
 ```
 src/
 ├── rung_shims.h              353 LOC — Core ↔ library boundary (the ONE adapter)
-└── rung/                          ── 19,533 LOC, 39 files
+└── rung/                          ── 19,318 LOC, 39 files
     ├── CMakeLists.txt          97
     │
     ├── api.h                  528  — adapter types (LadderScript, LadderTxView, ...)
@@ -60,7 +60,7 @@ src/
     │
     ├── write_helpers.h       103
     │
-    ├── rpc.cpp             4,432  — every RPC: createtxmlsc, signrungtx, qabi_*
+    ├── rpc.cpp             4,217  — every RPC: createrungtx, signrungtx, qabi_*
     │
     └── blocks/                  ── 11 files, 3,649 LOC — per-family block evaluators
         ├── sig.cpp             334  — SIG, KEY_REF_SIG, MULTISIG, MUSIG_THRESHOLD
@@ -130,9 +130,9 @@ the same tx with otherwise identical conditions produce different roots.
 This is the structural reason an attacker can't smuggle arbitrary data
 by replicating one output across N: the leaves are bound to position.
 
-## 3. Build the transaction (`createtxmlsc`)
+## 3. Build the transaction (`createrungtx`)
 
-The user calls `createtxmlsc` (RPC implementation in `rpc.cpp`,
+The user calls `createrungtx` (RPC implementation in `rpc.cpp`,
 ~lines 1100-1500). The RPC takes:
 
 - `inputs` — the UTXOs to consume (any mix of MLSC, P2WPKH, P2TR).
@@ -1460,7 +1460,7 @@ The library itself never has to change.
 
 ---
 
-## `rpc.cpp` (4,432 lines — the largest single file)
+## `rpc.cpp` (4,217 lines — the largest single file)
 
 All 21 RPC commands plus the dispatch table and registration
 function. Organised by RPC suite, each suite contiguous.
@@ -1476,7 +1476,7 @@ function. Organised by RPC suite, each suite contiguous.
 | 2877..2966  | Adaptor signatures | `extractadaptorsecret`, `verifyadaptorpresig` |
 | 2967..3209  | Descriptor I/O     | `parseladder`, `formatladder`, `computemutation` |
 | 3210..3723  | Descriptor signing | `signladder` |
-| 3727..4028  | TX_MLSC modern     | `createtxmlsc` |
+| 3727..4028  | TX_MLSC modern     | `createrungtx` |
 | 4029..4397  | QABIO              | `qabi_buildblock`, `qabi_blockinfo`, `qabi_authchain`, `qabi_signqabo`, `qabi_sighash` |
 | 4399..end   | Registration       | `RegisterRungRPCCommands(CRPCTable&)` |
 

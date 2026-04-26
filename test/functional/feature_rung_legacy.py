@@ -88,12 +88,14 @@ class RungLegacyTest(BitcoinTestFramework):
 
         # Fund side: a single rung gated on this legacy wrapper, PUBKEY in
         # conditions. For P2PKH/P2WPKH the node will auto-HASH160 the pubkey.
-        fund_conditions = [{"blocks": [
+        fund_blocks = [
             {"type": btype, "fields": [{"type": "PUBKEY", "hex": pubkey_hex}]}
-        ]}]
+        ]
+        fund_conditions = [{"blocks": fund_blocks}]
         create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{"amount": fund_amount, "conditions": fund_conditions}],
+            [fund_amount],
+            [{"output_index": 0, "blocks": fund_blocks}],
         )
         fund_tx = tx_from_hex(create_result["hex"])
         self.wallet.sign_tx(fund_tx)  # MiniWallet taproot input
@@ -117,12 +119,11 @@ class RungLegacyTest(BitcoinTestFramework):
 
         spend_create = self.node.createrungtx(
             [{"txid": fund_txid, "vout": 0}],
-            [{"amount": spend_amount, "conditions": [
-                {"blocks": [{"type": "SIG", "fields": [
-                    {"type": "SCHEME", "hex": "01"},
-                    {"type": "PUBKEY", "hex": dest_pubkey_hex},
-                ]}]}
-            ]}],
+            [spend_amount],
+            [{"output_index": 0, "blocks": [{"type": "SIG", "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": dest_pubkey_hex},
+            ]}]}],
         )
 
         # signrungtx wants the original conditions (what was committed at fund

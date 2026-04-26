@@ -62,7 +62,7 @@ key-path outputs in Bitcoin today.
 
 ### Auto-tweak behaviour
 
-When `createtxmlsc` detects a single-SIG rung, it automatically tweaks the
+When `createrungtx` detects a single-SIG rung, it automatically tweaks the
 output to enable key-path spending:
 `conditions_root = internal_pubkey + H("LadderTweak", pubkey || merkle_root) × G`
 

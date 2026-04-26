@@ -214,7 +214,7 @@ const { apiCallBase, makeApiCall } = window.LadderAPI;
 // Constants
 // ────────────────────────────────────────────────────────────
 const MIN_N = 2;
-// MAX_RUNGS = 16 in serialize.h caps a single createtxmlsc tx at 16 rungs
+// MAX_RUNGS = 16 in serialize.h caps a single createrungtx tx at 16 rungs
 // in its conditions tree. We fund N PQ_BATCH UTXOs in one tx (one rung per
 // output_index), so N is bound by that consensus limit. Stress runs in
 // feature_rung_pq_batch_stress.py go higher by funding via N separate txs.
@@ -244,7 +244,7 @@ async function sha256Hex(hex) {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// createtxmlsc rungs shape: one rung per (output_index, condition). For N
+// createrungtx rungs shape: one rung per (output_index, condition). For N
 // PQ_BATCH outputs sharing one commit, emit N rungs all with the same
 // PQ_BATCH(commit) gate. signrungtx takes the SAME N-rung tree at spend
 // time (with output_index per rung) so it can reconstruct the MLSC
@@ -370,10 +370,10 @@ function App() {
   //  1. Ask the wallet to sendtoaddress an EXACT amount to a self
   //     address. Bitcoin Core's wallet handles coin selection + change
   //     automatically — no risk of donating a 50 BTC UTXO to fees just
-  //     because createtxmlsc has no auto-change. Result: a small,
+  //     because createrungtx has no auto-change. Result: a small,
   //     known-size UTXO under our control.
   //
-  //  2. Use that UTXO as the single input to createtxmlsc, producing N
+  //  2. Use that UTXO as the single input to createrungtx, producing N
   //     PQ_BATCH outputs all gated by the same commit (one rung per
   //     output_index, so N ≤ MAX_RUNGS=16).
   const handleFund = useCallback(async () => {
@@ -398,7 +398,7 @@ function App() {
     // Mine so the source UTXO is confirmed before the fund tx spends it.
     await apiCall('/api/ladder/mine', { blocks: 1 }, true);
 
-    // Step 2: build createtxmlsc with N PQ_BATCH outputs.
+    // Step 2: build createrungtx with N PQ_BATCH outputs.
     log('Building fund tx — 1 input → ' + state.n + ' PQ_BATCH UTXOs...');
     const rungsForCreate = buildPqBatchRungsForCreate(state.pqKey.commitHex, state.n);
     const outputAmounts = Array(state.n).fill(perOutSats / 1e8);
@@ -407,10 +407,10 @@ function App() {
       outputs: outputAmounts,
       rungs: rungsForCreate,
     };
-    storeJson('fund_create_req', 'fund createtxmlsc request', fundCreateReq);
-    const created = await apiCall('/api/ladder/createtxmlsc', fundCreateReq);
-    if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
-    storeJson('fund_create_resp', 'fund createtxmlsc response', created);
+    storeJson('fund_create_req', 'fund createrungtx request', fundCreateReq);
+    const created = await apiCall('/api/ladder/createrungtx', fundCreateReq);
+    if (!created || !created.hex) { log('createrungtx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    storeJson('fund_create_resp', 'fund createrungtx response', created);
     const signed = await apiCall('/api/ladder/sign', { hex: created.hex });
     if (!signed || !signed.hex) { log('wallet sign of fund tx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
     const bcast = await apiCall('/api/ladder/broadcast', { hex: signed.hex });
@@ -457,10 +457,10 @@ function App() {
       outputs: [sinkBtc],
       rungs: rungsForCreate,
     };
-    storeJson('spend_create_req', 'spend createtxmlsc request', createReq);
-    const created = await apiCall('/api/ladder/createtxmlsc', createReq);
-    if (!created || !created.hex) { log('createtxmlsc failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
-    storeJson('spend_create_resp', 'spend createtxmlsc response', created);
+    storeJson('spend_create_req', 'spend createrungtx request', createReq);
+    const created = await apiCall('/api/ladder/createrungtx', createReq);
+    if (!created || !created.hex) { log('createrungtx failed', 'err'); dispatch({ type: 'SET_BUSY', busy: false }); return; }
+    storeJson('spend_create_resp', 'spend createrungtx response', created);
     dispatch({ type: 'PATCH_SPEND', patch: { unsignedHex: created.hex } });
 
     // Anchor at index 0 (full witness), siblings at 1..N-1 (empty witness).
@@ -609,7 +609,7 @@ function LeftPanel({ state, dispatch, onGenKey, onFund, onSpend }) {
         <div className="pg-section-title"><span className="pg-section-num">3</span> FUND POOL</div>
         <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
           Wallet pulls {(FUND_PER_UTXO_SATS * state.n / 1e8).toFixed(5)} BTC + 2,000 sats fee into a self UTXO,
-          then one createtxmlsc splits it across {state.n} PQ_BATCH vouts ({FUND_PER_UTXO_SATS} sats each)
+          then one createrungtx splits it across {state.n} PQ_BATCH vouts ({FUND_PER_UTXO_SATS} sats each)
           all gated by the same commit. Bitcoin Core's wallet handles change automatically — no wallet
           balance is wasted to fees.
         </div>

@@ -100,10 +100,8 @@ class RungPQBatchTest(BitcoinTestFramework):
             amount_btc = amount_btc.quantize(Decimal("0.00000001"))
             result = self.node.createrungtx(
                 [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-                [{
-                    "amount": amount_btc,
-                    "conditions": self._pq_batch_conditions(commit),
-                }],
+                [amount_btc],
+                [{"output_index": 0, "blocks": self._pq_batch_conditions(commit)[0]["blocks"]}],
             )
             tx = tx_from_hex(result["hex"])
             self.wallet.sign_tx(tx)
@@ -134,7 +132,8 @@ class RungPQBatchTest(BitcoinTestFramework):
         sink_conditions = self._pq_batch_conditions(funded_inputs[0]["commit"])
         result = self.node.createrungtx(
             [{"txid": fi["txid"], "vout": fi["vout"]} for fi in funded_inputs],
-            [{"amount": sink_amount_btc, "conditions": sink_conditions}],
+            [sink_amount_btc],
+            [{"output_index": 0, "blocks": sink_conditions[0]["blocks"]}],
         )
         return result["hex"]
 

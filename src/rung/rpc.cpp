@@ -1015,220 +1015,6 @@ static RungConditions ParseConditionsSpec(const UniValue& rungs_arr,
     return conditions;
 }
 
-static RPCHelpMan createrungtx()
-{
-    return RPCHelpMan{
-        "createrungtx",
-        "Create an unsigned v4 RUNG_TX transaction with rung condition outputs.\n"
-        "Inputs are outpoints to spend. Outputs specify rung conditions and amounts.\n",
-        {
-            {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Transaction inputs",
-                {
-                    {"input", RPCArg::Type::OBJ, RPCArg::Optional::NO, "An input",
-                        {
-                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
-                            {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output index"},
-                            {"sequence", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "nSequence value (default 0xfffffffe). Set for CSV spends."},
-                        },
-                    },
-                },
-            },
-            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Transaction outputs",
-                {
-                    {"output", RPCArg::Type::OBJ, RPCArg::Optional::NO, "An output",
-                        {
-                            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The amount in BTC"},
-                            {"conditions", RPCArg::Type::ARR, RPCArg::Optional::NO, "Rung conditions spec",
-                                {
-                                    {"rung", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A rung spec",
-                                        {
-                                            {"blocks", RPCArg::Type::ARR, RPCArg::Optional::NO, "Block specs",
-                                                {
-                                                    {"block", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A block",
-                                                        {
-                                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Block type"},
-                                                            {"inverted", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Invert evaluation"},
-                                                            {"fields", RPCArg::Type::ARR, RPCArg::Optional::NO, "Fields",
-                                                                {
-                                                                    {"field", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A field",
-                                                                        {
-                                                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Data type"},
-                                                                            {"hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Field data hex"},
-                                                                        },
-                                                                    },
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            {"coil", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Coil metadata (per-output, default UNLOCK/SCHNORR).",
-                                {
-                                    {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "UNLOCK or UNLOCK_TO"},
-                                    {"scheme", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "SCHNORR or ECDSA"},
-                                    {"address", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Destination scriptPubKey hex"},
-                                },
-                            },
-                            {"mlsc", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Create MLSC output (0xDF + Merkle root) instead of inline conditions"},
-                        },
-                    },
-                },
-            },
-            {"locktime", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Transaction nLockTime (default 0). Set for CLTV spends."},
-            {"relays", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Relay definitions (shared condition sets referenced by rung relay_refs)",
-                {
-                    {"relay", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A relay definition",
-                        {
-                            {"blocks", RPCArg::Type::ARR, RPCArg::Optional::NO, "Block specs (same format as rung blocks)",
-                                {
-                                    {"block", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A block",
-                                        {
-                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Block type"},
-                                            {"inverted", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Invert evaluation"},
-                                            {"fields", RPCArg::Type::ARR, RPCArg::Optional::NO, "Fields",
-                                                {
-                                                    {"field", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A field",
-                                                        {
-                                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Data type"},
-                                                            {"hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Field data hex"},
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            {"relay_refs", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Indices of required relays (must be < own index)",
-                                {{"index", RPCArg::Type::NUM, RPCArg::Optional::NO, "Relay index"}},
-                            },
-                        },
-                    },
-                },
-            },
-        },
-        RPCResult{RPCResult::Type::OBJ, "", "", {
-            {RPCResult::Type::STR_HEX, "hex", "The unsigned transaction hex"},
-        }},
-        RPCExamples{
-            HelpExampleCli("createrungtx", "'[{\"txid\":\"...\",\"vout\":0}]' '[{\"amount\":0.001,\"conditions\":[{\"blocks\":[{\"type\":\"SIG\",\"fields\":[{\"type\":\"PUBKEY\",\"hex\":\"02...\"}]}]}]}]'")
-        },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
-{
-    const UniValue& inputs_arr = request.params[0].get_array();
-    const UniValue& outputs_arr = request.params[1].get_array();
-
-    CMutableTransaction mtx;
-    mtx.version = CTransaction::RUNG_TX_VERSION;
-
-    // Optional locktime (3rd param)
-    if (!request.params[2].isNull()) {
-        mtx.nLockTime = request.params[2].getInt<uint32_t>();
-    }
-
-    // Optional relays (4th param) — shared across all outputs
-    UniValue relays_val = !request.params[3].isNull() ? request.params[3] : UniValue();
-
-    for (size_t i = 0; i < inputs_arr.size(); ++i) {
-        const UniValue& inp = inputs_arr[i];
-        CTxIn txin;
-        auto hash = uint256::FromHex(inp["txid"].get_str());
-        if (!hash) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid txid: " + inp["txid"].get_str());
-        }
-        txin.prevout.hash = Txid::FromUint256(*hash);
-        txin.prevout.n = inp["vout"].getInt<uint32_t>();
-        if (inp.exists("sequence")) {
-            txin.nSequence = inp["sequence"].getInt<uint32_t>();
-        } else {
-            txin.nSequence = CTxIn::MAX_SEQUENCE_NONFINAL;
-        }
-        mtx.vin.push_back(txin);
-    }
-
-    // Parse outputs. All outputs in a v4 tx MUST share a single
-    // conditions_root (the wire format has only one slot). We compute
-    // the root for the first output and require subsequent outputs to
-    // match. Multi-output txs that need independent per-output trees
-    // should use createtxmlsc, which builds a shared Merkle commitment
-    // across N rung layouts.
-    uint256 tx_conditions_root;
-    bool root_set = false;
-    for (size_t i = 0; i < outputs_arr.size(); ++i) {
-        const UniValue& outp = outputs_arr[i];
-        CAmount amount = AmountFromValue(outp["amount"]);
-
-        const UniValue& cond_arr = outp["conditions"].get_array();
-        UniValue coil_val = outp.exists("coil") ? outp["coil"] : UniValue();
-        std::vector<std::vector<std::vector<uint8_t>>> rung_pubkeys, relay_pubkeys;
-        RungConditions conditions = ParseConditionsSpec(cond_arr, coil_val, relays_val, rung_pubkeys, relay_pubkeys);
-
-        CTxOut txout;
-        txout.nValue = amount;
-
-        // Compute the TX_MLSC Merkle root over CreationProofRung leaves
-        // (matches what VerifyRungTx expects — ComputeTxMLSCLeaf, not
-        // ComputeRungLeaf).
-        std::vector<rung::CreationProofRung> cp_rungs;
-        for (size_t r = 0; r < conditions.rungs.size(); ++r) {
-            rung::CreationProofRung cp_rung;
-            for (const auto& block : conditions.rungs[r].blocks) {
-                cp_rung.blocks.push_back({
-                    static_cast<uint16_t>(block.type),
-                    static_cast<uint8_t>(block.inverted ? 1 : 0)
-                });
-            }
-            cp_rung.coil = conditions.coil;
-            cp_rung.coil.output_index = static_cast<uint32_t>(i);
-            std::vector<std::vector<uint8_t>> rpks;
-            if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
-            cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
-            cp_rungs.push_back(std::move(cp_rung));
-        }
-        uint256 root = rung::ComputeTxMLSCRoot(cp_rungs);
-
-        if (!root_set) {
-            tx_conditions_root = root;
-            root_set = true;
-        } else if (root != tx_conditions_root) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER,
-                "createrungtx: all outputs must share the same conditions_root "
-                "(TX_MLSC wire format has a single per-tx root). Output " +
-                std::to_string(i) + " has a different root. Use createtxmlsc for "
-                "multi-rung shared trees.");
-        }
-
-        // DATA_RETURN: append data payload to MLSC scriptPubKey
-        if (conditions.rungs.size() == 1 &&
-            conditions.rungs[0].blocks.size() == 1 &&
-            conditions.rungs[0].blocks[0].type == RungBlockType::DATA_RETURN &&
-            !conditions.rungs[0].blocks[0].fields.empty() &&
-            conditions.rungs[0].blocks[0].fields[0].type == RungDataType::DATA) {
-            const auto& data = conditions.rungs[0].blocks[0].fields[0].data;
-            txout.scriptPubKey = rung::CreateMLSCScript(root, data);
-        } else {
-            txout.scriptPubKey = rung::CreateMLSCScript(root);
-        }
-        mtx.vout.push_back(txout);
-    }
-
-    // Commit the shared root to the tx body so the serializer picks it
-    // up via the TX_MLSC wire format (compact value-only vout).
-    if (root_set) {
-        mtx.conditions_root = tx_conditions_root;
-    }
-
-    UniValue result(UniValue::VOBJ);
-    result.pushKV("hex", EncodeHexTx(CTransaction(mtx)));
-    return result;
-},
-    };
-}
-
 /** Determine if a PQ scheme string is valid. Returns the scheme enum if so. */
 static bool ParsePQScheme(const std::string& s, RungScheme& out)
 {
@@ -1241,7 +1027,7 @@ static bool ParsePQScheme(const std::string& s, RungScheme& out)
 
 /** Push an externally-supplied pubkey into a spend block, normalizing
  *  x-only (32-byte) keys to compressed (33-byte, even-Y) so the spend-time
- *  leaf hash matches the fund-time leaf produced by createtxmlsc (which
+ *  leaf hash matches the fund-time leaf produced by createrungtx (which
  *  does the same normalization on rung-level pubkeys). */
 static void PushWitnessPubkey(RungBlock& block, std::vector<uint8_t> pk)
 {
@@ -2662,9 +2448,9 @@ static RPCHelpMan signrungtx()
             mtx.vin[input_idx].scriptWitness.stack.push_back(proof_bytes);
 
             // Auto-tweak detection: when all rungs were single-block SIG with the
-            // same pubkey at fund time, createtxmlsc tweaked the conditions_root
+            // same pubkey at fund time, createrungtx tweaked the conditions_root
             // for key-path spending. The verifier then needs the internal_pubkey
-            // as a 3rd witness element to recompute the tweak. Mirror createtxmlsc's
+            // as a 3rd witness element to recompute the tweak. Mirror createrungtx's
             // detection logic here so the spend witness is shaped correctly.
             {
                 uint256 raw_merkle = uint256();
@@ -3298,7 +3084,7 @@ static RPCHelpMan signladder()
 
             // Sign with the INTERNAL key tweaked by LadderTweak. Caller passes
             // the optional keypath_merkle_root (param 7) when the output was
-            // created with createtxmlsc + internal_pubkey + a script tree —
+            // created with createrungtx + internal_pubkey + a script tree —
             // SignSchnorrLadder applies the tweak via ComputeLadderTweakHash.
             // For pure key-path-only outputs the merkle_root is null.
             std::vector<unsigned char> sig(64);
@@ -3724,12 +3510,12 @@ static RPCHelpMan signladder()
 // TX_MLSC: Create a transaction with shared condition tree
 // ============================================================================
 
-static RPCHelpMan createtxmlsc()
+static RPCHelpMan createrungtx()
 {
     return RPCHelpMan{
-        "createtxmlsc",
-        "Create an unsigned v4 TX_MLSC transaction with a shared condition tree.\n"
-        "One conditions_root for the entire transaction. Outputs are value-only.\n"
+        "createrungtx",
+        "Create an unsigned v4 RUNG_TX transaction with a shared condition tree.\n"
+        "One conditions_root for the entire transaction. Outputs are value-only on the wire (TX_MLSC format).\n"
         "Each rung's coil specifies which output it governs (output_index).\n",
         {
             {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Transaction inputs",
@@ -3800,7 +3586,7 @@ static RPCHelpMan createtxmlsc()
             {RPCResult::Type::STR_HEX, "scriptPubKey", /*optional=*/ true, "The shared MLSC scriptPubKey hex (0xDF + root)"},
         }},
         RPCExamples{
-            HelpExampleCli("createtxmlsc",
+            HelpExampleCli("createrungtx",
                 "'[{\"txid\":\"...\",\"vout\":0}]' "
                 "'[0.001, 0.002]' "
                 "'[{\"output_index\":0,\"blocks\":[{\"type\":\"SIG\",\"fields\":[{\"type\":\"SCHEME\",\"hex\":\"01\"}]}]},"
@@ -3970,11 +3756,29 @@ static RPCHelpMan createtxmlsc()
 
     // Inflate outputs with the shared MLSC scriptPubKey so downstream
     // tooling that reads vout[i].scriptPubKey sees the expected 0xDF form.
+    // For DATA_RETURN outputs (single rung with one DATA_RETURN block,
+    // value == 0), the data payload is appended to the SPK so the wire-
+    // format serialiser writes the data_len + data bytes that the
+    // TX_MLSC DATA_RETURN encoding requires.
     CScript mlsc_spk;
     mlsc_spk.push_back(0xDF);
     mlsc_spk.insert(mlsc_spk.end(), mtx.conditions_root.begin(), mtx.conditions_root.end());
-    for (auto& out : mtx.vout) {
-        out.scriptPubKey = mlsc_spk;
+    for (size_t oi = 0; oi < mtx.vout.size(); ++oi) {
+        std::vector<uint8_t> data_payload;
+        for (size_t r = 0; r < cp_rungs.size(); ++r) {
+            if (cp_rungs[r].coil.output_index != oi) continue;
+            if (all_rungs[r].blocks.size() != 1) continue;
+            const auto& blk = all_rungs[r].blocks[0];
+            if (blk.type != rung::RungBlockType::DATA_RETURN) continue;
+            if (blk.fields.empty() || blk.fields[0].type != rung::RungDataType::DATA) continue;
+            data_payload = blk.fields[0].data;
+            break;
+        }
+        if (!data_payload.empty()) {
+            mtx.vout[oi].scriptPubKey = rung::CreateMLSCScript(mtx.conditions_root, data_payload);
+        } else {
+            mtx.vout[oi].scriptPubKey = mlsc_spk;
+        }
     }
 
     // QABIO: optional qabi_block tx-level field. When set, this tx is a
@@ -4404,7 +4208,6 @@ void RegisterRungRPCCommands(CRPCTable& t)
         {"rung", &serialiseconditions},
         {"rung", &validateladder},
         {"rung", &createrungtx},
-        {"rung", &createtxmlsc},
         {"rung", &signrungtx},
         {"rung", &signladder},
         {"rung", &computemutation},

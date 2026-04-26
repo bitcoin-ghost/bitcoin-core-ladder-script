@@ -319,10 +319,10 @@ static const CRPCConvertParam vRPCConvertParams[] =
     // server-side type check rejects them with "JSON value of type
     // string is not of expected type number". Covers every non-string
     // positional arg of the ladder RPCs as currently declared.
-    { "createtxmlsc", 0, "inputs" },
-    { "createtxmlsc", 1, "amounts" },
-    { "createtxmlsc", 2, "rungs" },
-    { "createtxmlsc", 3, "locktime" },
+    { "createrungtx", 0, "inputs" },
+    { "createrungtx", 1, "amounts" },
+    { "createrungtx", 2, "rungs" },
+    { "createrungtx", 3, "locktime" },
     { "signrungtx", 1, "signers" },
     { "signrungtx", 2, "spent_outputs" },
     { "qabi_authchain", 1, "chain_length" },

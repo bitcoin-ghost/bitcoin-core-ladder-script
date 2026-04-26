@@ -125,7 +125,8 @@ class RungPQBatchStressTest(BitcoinTestFramework):
         amount_btc = amount_btc.quantize(Decimal("0.00000001"))
         result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{"amount": amount_btc, "conditions": self._pq_batch_conditions(commit)}],
+            [amount_btc],
+            [{"output_index": 0, "blocks": self._pq_batch_conditions(commit)[0]["blocks"]}],
         )
         tx = tx_from_hex(result["hex"])
         self.wallet.sign_tx(tx)
@@ -173,7 +174,8 @@ class RungPQBatchStressTest(BitcoinTestFramework):
         self.log.info(f"  building unsigned spend tx (n={n})...")
         unsigned = self.node.createrungtx(
             [{"txid": f["txid"], "vout": f["vout"]} for f in funded],
-            [{"amount": sink_amount_btc, "conditions": conditions}],
+            [sink_amount_btc],
+            [{"output_index": 0, "blocks": conditions[0]["blocks"]}],
         )["hex"]
 
         # input 0 = anchor, inputs 1..n-1 = non-anchor.
@@ -263,13 +265,14 @@ class RungPQBatchStressTest(BitcoinTestFramework):
         amount_btc = amount_btc.quantize(Decimal("0.00000001"))
         result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{"amount": amount_btc, "conditions": [{"blocks": [{
+            [amount_btc],
+            [{"output_index": 0, "blocks": [{
                 "type": "SIG",
                 "fields": [
                     {"type": "SCHEME", "hex": "10"},  # FALCON-512
                     {"type": "PUBKEY", "hex": pubkey_hex},
                 ],
-            }]}]}],
+            }]}],
         )
         tx = tx_from_hex(result["hex"])
         self.wallet.sign_tx(tx)
@@ -315,7 +318,8 @@ class RungPQBatchStressTest(BitcoinTestFramework):
         self.log.info(f"  building unsigned spend (n={n}, no batching)...")
         unsigned = self.node.createrungtx(
             [{"txid": f["txid"], "vout": f["vout"]} for f in funded],
-            [{"amount": sink_amount_btc, "conditions": sink_conditions}],
+            [sink_amount_btc],
+            [{"output_index": 0, "blocks": sink_conditions[0]["blocks"]}],
         )["hex"]
 
         signers = []

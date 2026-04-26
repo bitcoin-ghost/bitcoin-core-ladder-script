@@ -123,10 +123,10 @@ Computes SIGHASH_QABO, signs it with the FALCON-512 private key, pads to exactly
 
 ## 3. Extended existing RPCs
 
-### `createtxmlsc` — now accepts `qabi_block` (6th positional arg)
+### `createrungtx` — now accepts `qabi_block` (6th positional arg)
 
 ```
-createtxmlsc <inputs> <outputs> <rungs> [<locktime> [<internal_pubkey> [<qabi_block_hex>]]]
+createrungtx <inputs> <outputs> <rungs> [<locktime> [<internal_pubkey> [<qabi_block_hex>]]]
 ```
 
 When `qabi_block_hex` is non-empty, the RPC strict-parses it and populates `tx.qabi_block` on the returned tx. Coordinators use this to build QABIO batch tx templates before signing via `qabi_signqabo`.
@@ -170,7 +170,7 @@ Store `AUTH_SEED` as the wallet secret. `auth_tip` will be committed into new QA
 ### Creating a QABI-enabled UTXO
 
 ```bash
-bitcoin-cli createtxmlsc \
+bitcoin-cli createrungtx \
   '[{"txid":"<funding_txid>","vout":0}]' \
   '[0.001]' \
   '[
@@ -235,7 +235,7 @@ Each participant constructs a priming tx that transitions their UTXO's `committe
 
 ```bash
 # Build the priming tx template
-PRIMED_HEX=$(bitcoin-cli createtxmlsc \
+PRIMED_HEX=$(bitcoin-cli createrungtx \
   '[{"txid":"<alice_qabi_utxo>","vout":0}]' \
   '[0.00099]' \
   '[
@@ -290,7 +290,7 @@ Once all participants have primed:
 ```bash
 # Build the batch tx — all primed inputs as vin, destinations as vout
 # (vout MUST match block.outputs bit-exactly)
-BATCH_HEX=$(bitcoin-cli createtxmlsc \
+BATCH_HEX=$(bitcoin-cli createrungtx \
   '[
     {"txid": "<alice_primed_txid>", "vout": 0},
     {"txid": "<bob_primed_txid>",   "vout": 0}
@@ -319,7 +319,7 @@ On confirmation, all primed UTXOs are consumed and all destinations receive thei
 
 ### NUMERIC field canonical form
 
-Wire format for `NUMERIC` fields is 4-byte little-endian. When building conditions specs for `createtxmlsc` or signing specs for `signrungtx`, encode integers as 4-byte LE hex:
+Wire format for `NUMERIC` fields is 4-byte little-endian. When building conditions specs for `createrungtx` or signing specs for `signrungtx`, encode integers as 4-byte LE hex:
 
 ```python
 def u32_le_hex(n: int) -> str:
@@ -351,7 +351,7 @@ The sighash is deterministic over all tx fields **except** `tx.aggregated_sig`. 
 - **Reference implementation**:
   - Core: `src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp` (EvalQABIPrimeBlock, EvalQABISpendBlock), `src/rung/policy.cpp` (RBD helpers)
   - Consensus wiring: `src/validation.cpp` (RBD in ReplacementChecks), `src/primitives/transaction.h` (tx-level fields)
-  - RPC: `src/rung/rpc.cpp` (5 QABI commands + signrungtx/createtxmlsc extensions)
+  - RPC: `src/rung/rpc.cpp` (5 QABI commands + signrungtx/createrungtx extensions)
   - Descriptors: `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens)
 - **Tests**:
   - C++: `src/test/rung_tests.cpp` — 86 test cases in the `qabi_tests` suite covering serialisation, root determinism, sighash, full FALCON end-to-end, per-check failure modes, RBD policy, multi-party scale (up to 1000 participants), and adversarial edge cases

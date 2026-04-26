@@ -418,7 +418,7 @@ Every file entry below uses this structure:
 
 ## `src/rung/rpc.cpp` (4295 LOC)
 
-- **Purpose**: JSON-RPC commands — `createrungtx`, `signrungtx`, `createtxmlsc`,
+- **Purpose**: JSON-RPC commands — `createrungtx`, `signrungtx`, `createrungtx`,
   `decoderungtx`, `validateladder`, `computectvhash`, `extractadaptorsecret`,
   `verifyadaptorpresig`, `formatladder`, `parseladder`, `generatepqkeypair`, plus
   QABIO-gated commands.

@@ -59,13 +59,11 @@ class RungP2PTest(BitcoinTestFramework):
         utxo = self.wallet.get_utxo()
         create_result = self.nodes[0].createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
-            [{
-                "amount": Decimal(str(utxo["value"])) - Decimal("0.001"),
-                "conditions": [{"blocks": [{"type": "SIG", "fields": [
-                    {"type": "SCHEME", "hex": "01"},
-                    {"type": "PUBKEY", "hex": pubkey_hex},
-                ]}]}],
-            }],
+            [Decimal(str(utxo["value"])) - Decimal("0.001")],
+            [{"output_index": 0, "blocks": [{"type": "SIG", "fields": [
+                {"type": "SCHEME", "hex": "01"},
+                {"type": "PUBKEY", "hex": pubkey_hex},
+            ]}]}],
         )
         tx = tx_from_hex(create_result["hex"])
         self.wallet.sign_tx(tx)

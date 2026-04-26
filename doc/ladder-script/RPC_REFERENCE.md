@@ -1,6 +1,6 @@
 # RPC reference
 
-The Ladder Script library adds **21 RPCs** to Bitcoin Core. They cluster
+The Ladder Script library adds **20 RPCs** to Bitcoin Core. They cluster
 into six groups: descriptor-based authoring (the recommended modern path),
 raw conditions construction, inspection, templates and commitments,
 post-quantum helpers, and the QABIO suite.
@@ -22,10 +22,9 @@ array/object args as JSON strings and the server rejects them.
 | `parseladder`             | Descriptor string → conditions hex + MLSC root                                |
 | `formatladder`            | Serialised conditions → descriptor string                                     |
 | `signladder`              | One-call sign of a v4 RUNG_TX using descriptor notation                       |
-| `createtxmlsc`            | Build an unsigned v4 RUNG_TX with a shared condition tree                     |
+| `createrungtx`            | Build an unsigned v4 RUNG_TX with a shared condition tree                     |
 | `signrungtx`              | Sign a v4 RUNG_TX's inputs (raw path)                                         |
 | `createrung`              | Build a single rung from JSON spec                                            |
-| `createrungtx`            | Legacy path: build v4 RUNG_TX with per-output rung specs                      |
 | `serialiseconditions`     | Serialise a LadderWitness in CONDITIONS context (P2SH/P2WSH/P2TR_SCRIPT inner)|
 | `decoderung`              | Decode a hex witness into a typed structure                                   |
 | `validateladder`          | Validate every witness on a raw v4 RUNG_TX                                    |
@@ -95,21 +94,22 @@ signladder "raw_tx" "descriptor" '{"alias":"wif", ...}'
 
 | Arg          | Type   | Description                                              |
 |--------------|--------|----------------------------------------------------------|
-| `raw_tx`     | string | Unsigned v4 RUNG_TX hex (from `createtxmlsc`)            |
+| `raw_tx`     | string | Unsigned v4 RUNG_TX hex (from `createrungtx`)            |
 | `descriptor` | string | The spending-side descriptor                             |
 | `keys`       | object | Alias→WIF map (private keys)                             |
 
 **Returns:** the signed transaction hex.
 
-### `createtxmlsc`
+### `createrungtx`
 
 Build an unsigned v4 RUNG_TX with a single shared `conditions_root` for
-every output. This is the headline construction RPC for the modern
-path — every output shares one Merkelised condition tree, and each
-rung's coil specifies which output it governs (`output_index`).
+every output. The headline construction RPC: every output shares one
+Merkelised condition tree, and each rung's coil specifies which output
+it governs (`output_index`). The wire format used is TX_MLSC (8-byte
+value-only outputs, conditions_root once per tx).
 
 ```
-createtxmlsc inputs amounts rungs locktime
+createrungtx inputs amounts rungs locktime
 ```
 
 | Arg        | Type    | Description                                                    |
@@ -151,13 +151,6 @@ transactions by hand. Most users should prefer the descriptor-based path.
 
 Build a single rung from a JSON specification (block types + fields +
 coil). Returns the serialised LadderWitness hex.
-
-### `createrungtx`
-
-The pre-`createtxmlsc` construction RPC: takes outpoints + per-output
-rung specs and emits an unsigned v4 RUNG_TX. Predates the shared-tree
-design — kept for tools that still produce per-output rung specs rather
-than a single shared tree.
 
 ### `serialiseconditions`
 
@@ -206,7 +199,7 @@ how a created output can later be spent.
 ### `pqpubkeycommit`
 
 Compute `SHA256(canonical_pq_pubkey_bytes)` — the commitment used by
-`PQ_BATCH` blocks. Informational; `createrungtx` and `createtxmlsc`
+`PQ_BATCH` blocks. Informational; `createrungtx` and `createrungtx`
 compute commitments automatically when the PQ_BATCH block carries a
 PUBKEY field. Use this RPC when you want to inspect or precompute the
 commitment for a given key.

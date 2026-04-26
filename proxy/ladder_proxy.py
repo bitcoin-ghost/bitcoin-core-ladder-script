@@ -6,8 +6,7 @@ Builder. Runs on the same VM as bitcoind, proxying browser requests to localhost
 RPC with rate limiting and input validation.
 
 Endpoints:
-  POST /api/ladder/create        - createrungtx (build v4 tx, legacy)
-  POST /api/ladder/createtxmlsc  - createtxmlsc (build v4 TX_MLSC tx)
+  POST /api/ladder/createrungtx  - createrungtx (build v4 RUNG_TX, shared condition tree)
   POST /api/ladder/sign          - signrungtx (sign with wallet keys, legacy)
   POST /api/ladder/signladder    - signladder (sign with auto-lookup)
   POST /api/ladder/broadcast     - sendrawtransaction (push to signet)
@@ -123,7 +122,7 @@ WALLET_METHODS = {
     "getbalance", "getbalances", "getwalletinfo", "getnewaddress",
     "listunspent", "sendtoaddress", "sendmany",
     "signrawtransactionwithwallet",
-    "signrungtx", "signladder", "createrungtx", "createtxmlsc",
+    "signrungtx", "signladder", "createrungtx",
     "validateaddress", "generatetoaddress",
     "getaddressinfo", "listdescriptors",
 }
@@ -338,9 +337,17 @@ async def status():
     }
 
 
-@app.post("/api/ladder/create")
+@app.post("/api/ladder/createrungtx")
 async def create_rungtx(request: Request):
-    """Build a v4 ladder transaction from JSON spec."""
+    """Build a v4 RUNG_TX transaction from JSON spec.
+    RPC: createrungtx(inputs, outputs, rungs, locktime, internal_pubkey, qabi_block)
+      inputs:      [{txid, vout, sequence?}, ...]
+      outputs:     [amount_btc, ...]  — flat list of BTC amounts
+      rungs:       [{output_index, blocks: [{type, fields: [{type, hex}]}]}, ...]
+      locktime:    uint32 (optional, default 0)
+      internal_pubkey: optional hex string for explicit key-path tweak
+      qabi_block:  optional hex blob produced by qabi_buildblock
+    """
     body = await request.body()
     if len(body) > MAX_JSON_SIZE:
         raise HTTPException(400, "Request too large.")
@@ -354,18 +361,19 @@ async def create_rungtx(request: Request):
 
     inputs = data.get("inputs", [])
     outputs = data.get("outputs", [])
+    rungs = data.get("rungs", [])
     locktime = data.get("locktime", 0)
-    relays = data.get("relays")
 
-    params = [inputs, outputs, locktime]
-    if relays:
-        params.append(relays)
+    params = [inputs, outputs, rungs, locktime]
+    internal_pubkey = data.get("internal_pubkey")
+    qabi_block = data.get("qabi_block")
+    if internal_pubkey or qabi_block:
+        params.append(internal_pubkey or "")
+    if qabi_block:
+        params.append(qabi_block)
 
     result = await rpc_call("createrungtx", params)
-    # RPC returns {"hex": "..."} — unwrap if needed
-    if isinstance(result, dict) and "hex" in result:
-        return {"hex": result["hex"]}
-    return {"hex": result}
+    return result
 
 
 @app.post("/api/ladder/sign")
@@ -395,49 +403,6 @@ async def sign_rungtx(request: Request):
     else:
         # Wallet-owned inputs (funding txs) via signrawtransactionwithwallet
         result = await rpc_call("signrawtransactionwithwallet", [tx_hex])
-    return result
-
-
-@app.post("/api/ladder/createtxmlsc")
-async def create_txmlsc(request: Request):
-    """Build a v4 TX_MLSC transaction from JSON spec (new RPC).
-    RPC: createtxmlsc(inputs, outputs, rungs, locktime, internal_pubkey, qabi_block)
-      inputs:      [{txid, vout, sequence?}, ...]
-      outputs:     [amount_btc, ...]  — array of BTC amounts (one per output)
-      rungs:       [{output_index, blocks: [{type, fields: [{type, hex}]}]}, ...]
-      locktime:    uint32 (optional, default 0)
-      internal_pubkey: optional hex string for explicit key-path tweak
-      qabi_block:  optional hex blob produced by qabi_buildblock, embedded in
-                   the resulting tx's QABI extension
-    """
-    body = await request.body()
-    if len(body) > MAX_JSON_SIZE:
-        raise HTTPException(400, "Request too large.")
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        raise HTTPException(400, "Invalid JSON.")
-
-    if not isinstance(data, dict):
-        raise HTTPException(400, "Request must be a JSON object.")
-
-    inputs = data.get("inputs", [])
-    outputs = data.get("outputs", [])
-    rungs = data.get("rungs", [])
-    locktime = data.get("locktime", 0)
-
-    params = [inputs, outputs, rungs, locktime]
-    # qabi_block sits at positional index 5 (after internal_pubkey). When a
-    # caller supplies qabi_block without internal_pubkey we still have to
-    # pass an empty string placeholder so the positional slot lines up.
-    internal_pubkey = data.get("internal_pubkey")
-    qabi_block = data.get("qabi_block")
-    if internal_pubkey or qabi_block:
-        params.append(internal_pubkey or "")
-    if qabi_block:
-        params.append(qabi_block)
-
-    result = await rpc_call("createtxmlsc", params)
     return result
 
 

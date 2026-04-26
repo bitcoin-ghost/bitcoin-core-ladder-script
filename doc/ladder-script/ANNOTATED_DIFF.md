@@ -16,9 +16,9 @@ each modification.
 | Category                         | Files | Lines added |
 |----------------------------------|------:|------------:|
 | Modified Bitcoin Core files      |    29 |       +805  |
-| New library code (`src/rung/`)   |    39 |    +19,533  |
+| New library code (`src/rung/`)   |    39 |    +19,318  |
 | New tests (`src/test/rung_tests.cpp`) |    1 |    +16,945  |
-| **Total surface change**         |    69 |    +37,283  |
+| **Total surface change**         |    69 |    +37,068  |
 
 The design principle is **minimal core intrusion**: the 805 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
@@ -373,7 +373,7 @@ Adds RPC argument-type entries for the ladder RPCs. Without these,
 and the server-side type check rejects them with
 `"JSON value of type string is not of expected type number"`.
 
-Covers every non-string positional arg for `createtxmlsc`, `signrungtx`,
+Covers every non-string positional arg for `createrungtx`, `signrungtx`,
 `qabi_authchain`, and `qabi_buildblock`. No effect on validation; this
 is purely the CLI-to-RPC type bridge.
 
@@ -419,7 +419,7 @@ the existing code only computes it inside the BIP341 branch.
 
 Pure correctness fix: `RPCArg::ToStringObj(...)` previously hit
 `NONFATAL_UNREACHABLE()` for `OBJ` and `OBJ_USER_KEYS` types. The ladder
-RPCs use nested objects in their argument schemas (`createtxmlsc`'s
+RPCs use nested objects in their argument schemas (`createrungtx`'s
 `rungs` array is an array of objects with nested arrays of blocks with
 nested arrays of fields), so the help text generator started exercising
 this code path for the first time.
@@ -642,7 +642,7 @@ the two vectors are moved in the move constructor.
 
 Registers `RegisterRungRPCCommands(CRPCTable&)` alongside the other
 core RPC registrations. Implementation lives in `src/rung/rpc.cpp` —
-`createtxmlsc`, `signrungtx`, `qabi_*`, `serialiseconditions`, etc.
+`createrungtx`, `signrungtx`, `qabi_*`, `serialiseconditions`, etc.
 
 ---
 

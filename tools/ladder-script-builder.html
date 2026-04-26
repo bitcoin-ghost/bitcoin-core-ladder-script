@@ -1768,11 +1768,11 @@ async function broadcastTx() {
     const tx = buildPhaseJSON(P());
     toast('Creating transaction...', 'success');
 
-    // Build createtxmlsc params
+    // Build createrungtx params
     const inputs = tx.inputs.map(i => ({ txid: i.txid, vout: i.vout, ...(i.sequence !== undefined ? { sequence: i.sequence } : {}) }));
     const outputs = tx.outputs.map(o => ({ amount: o.amount, conditions: o.conditions, ...(o.coil ? { coil: o.coil } : {}) }));
 
-    const result = await rpcCall('createtxmlsc', [inputs, outputs]);
+    const result = await rpcCall('createrungtx', [inputs, outputs]);
     toast(`Created unsigned tx: ${result.hex.length / 2} bytes`, 'success');
 
     // For now, just show the hex — signing requires private keys

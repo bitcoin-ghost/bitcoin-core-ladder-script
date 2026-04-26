@@ -236,7 +236,7 @@ then tries each rung in order; the first satisfied rung wins.
 ### LadderTweak
 The mechanism that enables key-path spending on outputs that also have script-path
 conditions. `conditions_root = internal_pubkey + H("LadderTweak", internal_pubkey || merkle_root) × G`.
-Same approach as Taproot's output tweaking but with a distinct tag. `createtxmlsc`
+Same approach as Taproot's output tweaking but with a distinct tag. `createrungtx`
 auto-detects single-SIG ladders and tweaks automatically. Functions:
 `ComputeLadderTweakHash()`, `CheckLadderTweak()`, `CreateLadderTweak()` in `pubkey.cpp`.
 `SignSchnorrLadder()` in `key.cpp` signs with the tweaked keypair.

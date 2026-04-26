@@ -152,7 +152,7 @@ The `MAX_LADDER_WITNESS_SIZE` of 100,000 bytes accommodates PQ signatures.
 
 ## Broadcasting
 
-Use `createtxmlsc` to build a raw v4 transaction (replaces `createrungtx`), `signladder`
+Use `createrungtx` to build a raw v4 transaction, `signladder`
 to sign it (with funding tx auto-lookup), then `sendrawtransaction` to broadcast. The
 mempool policy check (`IsStandardRungTx`) verifies:
 - Every input has a witness that deserializes successfully
@@ -275,8 +275,8 @@ The full validation pipeline for a v4 RUNG_TX:
 | `decoderung` | Decode a ladder witness from hex |
 | `createrung` | Build conditions and compute MLSC root |
 | `validateladder` | Validate a ladder witness structure |
-| `createtxmlsc` | Build a raw v4 RUNG_TX transaction (replaces `createrungtx`) |
-| `signladder` | Sign a v4 transaction input with funding tx auto-lookup (replaces `signrungtx`) |
+| `createrungtx` | Build an unsigned v4 RUNG_TX with shared conditions tree |
+| `signladder` | One-call sign a v4 transaction using descriptor notation |
 | `computectvhash` | Compute BIP-119 CTV template hash |
 | `generatepqkeypair` | Generate a PQ keypair |
 | `pqpubkeycommit` | Compute PQ pubkey commitment |
@@ -284,6 +284,5 @@ The full validation pipeline for a v4 RUNG_TX:
 | `verifyadaptorpresig` | Verify an adaptor pre-signature |
 | `parseladder` | Parse descriptor string to conditions |
 | `formatladder` | Format conditions as descriptor string |
-| `createrungtx` | Build a raw v4 transaction (legacy, superseded by `createtxmlsc`) |
-| `signrungtx` | Sign a v4 transaction input (legacy, superseded by `signladder`) |
+| `signrungtx` | Sign a v4 transaction input (raw path, used internally by `signladder`) |
 | `computemutation` | Compute mutated conditions root for recursive covenants |

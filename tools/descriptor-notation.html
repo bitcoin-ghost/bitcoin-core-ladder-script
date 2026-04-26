@@ -513,7 +513,7 @@ $ ghost-cli -signet getaddressinfo tb1q... | jq .pubkey
 
 <span class="cm"># Create an unsigned tx with a vault condition:</span>
 <span class="cm"># hot key + 144-block delay, OR 2-of-3 multisig recovery</span>
-$ ghost-cli -signet createtxmlsc \
+$ ghost-cli -signet createrungtx \
   '[{"txid":"&lt;utxo&gt;","vout":0}]' \
   '[{"amount":0.001,"conditions":[{
     "blocks":[
@@ -548,7 +548,7 @@ $ ghost-cli -signet signladder \
     </div>
 
     <div class="note">
-      <strong>That's it.</strong> Three commands: <code>createtxmlsc</code> builds the transaction, <code>signladder</code> signs it using a descriptor string, <code>sendrawtransaction</code> broadcasts it. The descriptor handles all serialization, Merkle commitment, creation proof, and witness construction internally. No manual field ordering, no JSON block specs. Works for all 61 block types.
+      <strong>That's it.</strong> Three commands: <code>createrungtx</code> builds the transaction, <code>signladder</code> signs it using a descriptor string, <code>sendrawtransaction</code> broadcasts it. The descriptor handles all serialization, Merkle commitment, creation proof, and witness construction internally. No manual field ordering, no JSON block specs. Works for all 61 block types.
     </div>
   </div>
 

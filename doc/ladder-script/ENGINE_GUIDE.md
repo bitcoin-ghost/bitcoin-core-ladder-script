@@ -73,7 +73,7 @@ annotations (cursor, passed, failed, executed, blocked).
 ### Convert
 
 Full-width panel replacing the three-column layout. Paste JSON from
-`decoderung`, `createtxmlsc`, or `decoderawtransaction` and click
+`decoderung`, `createrungtx`, or `decoderawtransaction` and click
 VIEW AS LADDER to import it into the builder. Works offline with no signet
 connection.
 
@@ -83,7 +83,7 @@ Full-width SignetPanel. Connects to the signet node to:
 - Check node status, wallet balance, mempool info, and recent blocks.
 - Generate a new signet address.
 - Request test coins from the faucet.
-- Execute the three-step pipeline: CREATE (createtxmlsc) then SIGN
+- Execute the three-step pipeline: CREATE (createrungtx) then SIGN
   (signrawtransactionwithwallet) then BROADCAST (sendrawtransaction).
 - Look up transactions by txid.
 - Decode raw hex and validate rung transactions.
@@ -218,7 +218,7 @@ Merkle roots.
 
 ### RPC tab (both modes)
 
-Shows the `createtxmlsc` wire-format JSON. In Build mode this is plain green
+Shows the `createrungtx` wire-format JSON. In Build mode this is plain green
 text. In Simulate mode it is rendered by HighlightedJson with line-level
 colour coding (green for passed/executed, red for failed/blocked, pulsing
 white for the active cursor, dim for neutral/pending).
@@ -404,7 +404,7 @@ The ConvertPanel accepts pasted JSON in three formats:
 
 1. **`decoderung` output**: `{ rungs: [{ blocks: [...], coil: {...} }] }` or
    `{ n_rungs, rungs: [...] }`.
-2. **`createtxmlsc` format**: `{ inputs: [...], outputs: [{ conditions: [{ blocks: [...] }] }] }`.
+2. **`createrungtx` format**: `{ inputs: [...], outputs: [{ conditions: [{ blocks: [...] }] }] }`.
 3. **`decoderawtransaction` output**: raw tx with `version: 4` and
    `vout[].rung_conditions`.
 

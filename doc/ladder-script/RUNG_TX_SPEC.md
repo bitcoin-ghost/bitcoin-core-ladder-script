@@ -98,7 +98,7 @@ or N (MULTISIG, TIMELOCKED_MULTISIG — counted dynamically).
 
 ## 3. LadderTweak (Key-path Enablement)
 
-When `createtxmlsc` detects a single-SIG ladder, it automatically tweaks the output:
+When `createrungtx` detects a single-SIG ladder, it automatically tweaks the output:
 
 ```
 conditions_root = internal_pubkey + H("LadderTweak", internal_pubkey || merkle_root) × G

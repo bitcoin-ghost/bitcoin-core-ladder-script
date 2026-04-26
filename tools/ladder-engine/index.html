@@ -4117,7 +4117,7 @@ async function computeMerkleProof(leafHexes, targetIdx) {
   return { siblings, leaf: leafHexes[targetIdx] };
 }
 
-// Convert stored rung objects back to createtxmlsc conditions format
+// Convert stored rung objects back to createrungtx conditions format
 function rungsToConditions(storedRungs) {
   return storedRungs.map(rung => {
     const cond = {
@@ -4340,9 +4340,9 @@ function exportCreateRungtxLegacy(rungs, txOutputs, txInputs, locktime) {
   return result;
 }
 
-// Export as createtxmlsc wire format (TX_MLSC: shared condition tree)
-function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
-  // Build inputs (same as createtxmlsc)
+// Export as createrungtx wire format (TX_MLSC: shared condition tree)
+function exportCreateRungTx(rungs, txOutputs, txInputs, locktime) {
+  // Build inputs (same as createrungtx)
   const inputs = txInputs
     .filter(i => i.txid)
     .map(i => {
@@ -4436,7 +4436,7 @@ function exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime) {
     const rungObj = { output_index: outputIdx, blocks };
     if (pubkeys.length > 0) rungObj.pubkeys = pubkeys;
     // Attach per-rung coil so PQ schemes (FALCON512/DILITHIUM3/SPHINCS_SHA)
-    // bind into the fund-time Merkle leaf. If omitted, createtxmlsc commits
+    // bind into the fund-time Merkle leaf. If omitted, createrungtx commits
     // every rung with the default SCHNORR coil, and a spend-time witness
     // carrying the real scheme fails Merkle reconstruction.
     const scheme = rung.output.scheme || 'SCHNORR';
@@ -6749,7 +6749,7 @@ function HighlightedJson({ scanStep }) {
 
   // Build line-level annotation map: each JSON line gets a state + optional marker
   const { lines, lineAnnotations } = React.useMemo(() => {
-    const data = exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime);
+    const data = exportCreateRungTx(rungs, txOutputs, txInputs, locktime);
     const fullJson = JSON.stringify(data, null, 2);
     const jsonLines = fullJson.split('\n');
     // annotations[i] = { state: 'neutral'|'executed'|'blocked'|'active'|'passed'|'next', marker: bool }
@@ -8388,7 +8388,7 @@ function ExamplesModal({ onClose, onLoad }) {
 // DECODED JSON → BUILDER RUNG CONVERTER
 // ═══════════════════════════════════════════════════════════════
 
-// Convert decoded rung JSON (from decoderung RPC, createtxmlsc format, or raw tx)
+// Convert decoded rung JSON (from decoderung RPC, createrungtx format, or raw tx)
 // into the builder's internal rung format for visualization.
 function decodedToBuilderRungs(data) {
   if (!data || typeof data !== 'object') return null;
@@ -8468,7 +8468,7 @@ function decodedToBuilderRungs(data) {
   if (Array.isArray(data) && data.length > 0 && (data[0].blocks || data[0].contacts)) {
     return { rungs: data.map(convertRung), txInputs: [], txOutputs: [] };
   }
-  // Format 3: createtxmlsc / wire format --{ inputs, outputs[].conditions[].blocks[] }
+  // Format 3: createrungtx / wire format --{ inputs, outputs[].conditions[].blocks[] }
   if (data.outputs && Array.isArray(data.outputs)) {
     const txInputs = (data.inputs || []).map(i => ({ id: uid(), txid: i.txid || '', vout: i.vout || 0, sequence: i.sequence !== undefined ? String(i.sequence) : '' }));
     const txOutputs = [];
@@ -8731,7 +8731,7 @@ function ConvertPanel() {
       <div style={sty.section}>
         <div style={sty.label}>PASTE RUNG TX JSON</div>
         <div style={{ color: 'var(--text-dim)', fontSize: 10, marginBottom: 6, lineHeight: 1.5 }}>
-          Paste decoded JSON from <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>decoderung</code>, <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>createtxmlsc</code>, or <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>decoderawtransaction</code> output to visualize it as a ladder diagram. Works offline --no signet connection needed.
+          Paste decoded JSON from <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>decoderung</code>, <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>createrungtx</code>, or <code style={{ color: 'var(--amber)', background: 'var(--bg-primary)', padding: '0 3px' }}>decoderawtransaction</code> output to visualize it as a ladder diagram. Works offline --no signet connection needed.
         </div>
         <textarea
           style={{ ...sty.input, height: 160, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 11 }}
@@ -8765,7 +8765,7 @@ function ConvertPanel() {
           <strong style={{ color: 'var(--text-secondary)' }}>Supported formats:</strong>
           <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
             <li><code style={{ color: 'var(--amber)' }}>decoderung</code> output --decoded witness/conditions with block_type, params</li>
-            <li><code style={{ color: 'var(--amber)' }}>createtxmlsc</code> format --inputs, outputs with conditions and blocks</li>
+            <li><code style={{ color: 'var(--amber)' }}>createrungtx</code> format --inputs, outputs with conditions and blocks</li>
             <li><code style={{ color: 'var(--amber)' }}>decoderawtransaction</code> output --raw tx with scriptPubKey</li>
           </ul>
         </div>
@@ -9676,15 +9676,11 @@ function SignetPanel() {
     if (data) { addToHistory('faucet', data.txid, 'Faucet: ' + data.amount + ' tBTC'); setTimeout(refreshWallet, 2000); }
   };
   const handleCreate = async () => {
-    const txData = exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime);
-    // exportCreateTxMLSC produces the TX_MLSC shape (flat `outputs: [amount_btc]`
-    // + shared `rungs[]` with `output_index`). That matches the new `createtxmlsc`
-    // RPC, not the legacy `createrungtx` that the `/api/ladder/create` endpoint
-    // routes to. Routing to `/api/ladder/create` here hits the legacy RPC which
-    // expects `outputs: [{amount, conditions}]`, so `outputs_arr[i]["amount"]`
-    // lands on a bare number, returns null, and the evaluator throws
-    // "Amount is not a number or string". Use the typed endpoint instead.
-    const data = await apiCall('/api/ladder/createtxmlsc', txData);
+    const txData = exportCreateRungTx(rungs, txOutputs, txInputs, locktime);
+    // exportCreateRungTx produces the shared-tree shape: flat `outputs: [amount_btc]`
+    // + `rungs[]` with `output_index`. The createrungtx RPC takes one
+    // conditions_root for the whole tx (TX_MLSC wire format).
+    const data = await apiCall('/api/ladder/createrungtx', txData);
     if (data) { setTxHex(data.hex); setSignedHex(''); setTxid(''); setMined(false); }
   };
   const handleSign = async () => {
@@ -9711,11 +9707,11 @@ function SignetPanel() {
       addToHistory('broadcast', data.txid, rungs.length + ' rungs');
       // Save to session log for Review tab (decoded tx with full wire data)
       const fundSize = hex ? Math.floor(hex.length / 2) : null;
-      let fundPayload = exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime);
+      let fundPayload = exportCreateRungTx(rungs, txOutputs, txInputs, locktime);
       try {
         const decoded = await apiCallBase('/api/ladder/tx/' + data.txid);
         if (decoded) fundPayload = decoded;
-      } catch (e) { /* use createtxmlsc fallback */ }
+      } catch (e) { /* use createrungtx fallback */ }
       saveSessionTx({ fundTxid: data.txid, label: rungs.length + ' rungs', fundJson: fundPayload, fundSize });
       setTimeout(refreshWallet, 2000);
       refreshMempool();
@@ -9866,7 +9862,7 @@ function SignetPanel() {
 
       // Wire the hash into every COSIGN block in rungs. Dispatch via setRungs
       // (not direct mutation) so React state captures the update for later
-      // reads by buildRungSnapshot / exportCreateTxMLSC.
+      // reads by buildRungSnapshot / exportCreateRungTx.
       setRungs(prev => prev.map(r => ({
         ...r,
         blocks: (r.blocks || []).map(b => b.type === 'COSIGN'
@@ -9980,7 +9976,7 @@ function SignetPanel() {
         }
         const preimageHex = serResult.hex;
 
-        // Store serialised inner conditions as script_body so exportCreateTxMLSC
+        // Store serialised inner conditions as script_body so exportCreateRungTx
         // emits a SCRIPT_BODY field on the block. The library auto-converts
         // SCRIPT_BODY → HASH256 (or HASH160 for P2SH) in conditions_only parsing,
         // populating the implicit layout expected by P2WSH_LEGACY_CONDITIONS
@@ -10094,12 +10090,20 @@ function SignetPanel() {
           }];
         }
 
+        const templateAmounts = templateOutputs.map(o => o.amount);
+        const templateRungs = [];
+        templateOutputs.forEach((out, oi) => {
+          out.conditions.forEach(cond => {
+            templateRungs.push({ output_index: oi, blocks: cond.blocks });
+          });
+        });
         const templateTxData = {
           inputs: [{ txid: '0'.repeat(64), vout: 0 }],
-          outputs: templateOutputs,
+          outputs: templateAmounts,
+          rungs: templateRungs,
         };
         try {
-          const templateResult = await apiCall('/api/ladder/create', templateTxData, true);
+          const templateResult = await apiCall('/api/ladder/createrungtx', templateTxData, true);
           if (templateResult && templateResult.hex) {
             const ctvResult = await apiCall('/api/ladder/ctv-hash', { hex: templateResult.hex, input_index: 0 }, true);
             if (ctvResult && ctvResult.hash) {
@@ -10369,7 +10373,7 @@ function SignetPanel() {
       <div style={sty.sectionTitle}>BUILD &amp; BROADCAST</div>
       {/* TX PREVIEW --inputs, outputs, rungs + JSON */}
       {(() => {
-        const txJson = exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime);
+        const txJson = exportCreateRungTx(rungs, txOutputs, txInputs, locktime);
         const jsonStr = JSON.stringify(txJson, null, 2);
         const hasInputs = txJson.inputs && txJson.inputs.length > 0;
         const hasOutputs = txJson.outputs && txJson.outputs.length > 0;
@@ -10500,8 +10504,8 @@ function SignetPanel() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ flex: '1 1 160px', minWidth: 140, textAlign: 'center' }}>
             <div style={sty.label}>1. CREATE</div>
-            <button style={{ ...sty.btn, ...(txHex ? sty.btnGreen : sty.btnPrimary), opacity: online ? 1 : 0.3 }} onClick={handleCreate} disabled={!online || loading === '/api/ladder/createtxmlsc'}>
-              {loading === '/api/ladder/createtxmlsc' ? 'CREATING...' : txHex ? '\u2713 CREATED' : 'CREATETXMLSC'}
+            <button style={{ ...sty.btn, ...(txHex ? sty.btnGreen : sty.btnPrimary), opacity: online ? 1 : 0.3 }} onClick={handleCreate} disabled={!online || loading === '/api/ladder/createrungtx'}>
+              {loading === '/api/ladder/createrungtx' ? 'CREATING...' : txHex ? '\u2713 CREATED' : 'CREATETXMLSC'}
             </button>
           </div>
           <div style={{ color: txHex ? 'var(--green-bright)' : 'var(--border-light)', fontSize: 20 }}>&#x2192;</div>
@@ -11142,7 +11146,7 @@ function SpendPanel() {
             const maxSplits = parseInt(splitBlock.values?.max_splits) || 0;
             addLog('RECURSE_SPLIT: 2-way (' + half + ' + ' + (sendSats - half) + ' sats), splits ' + maxSplits + ' → ' + (maxSplits - 1), 'info');
           } else if (identityRecurse) {
-            // createtxmlsc requires output_index < n_outputs, so we need
+            // createrungtx requires output_index < n_outputs, so we need
             // to create enough outputs to cover every output_index in the
             // original tree. First output holds the bulk; padding outputs
             // get dust each.
@@ -11192,41 +11196,32 @@ function SpendPanel() {
         }
       }
 
-      // Build create payload. /api/ladder/create (createrungtx) is single-
-      // output; multi-output spends (RECURSE_SPLIT, RATE_LIMIT carry-forward,
-      // etc.) must route through /api/ladder/createtxmlsc so the library
-      // builds a shared conditions_root across the new outputs.
-      let createPayload;
-      let createEndpoint;
-      if (createOutputs.length === 1) {
-        createPayload = { inputs: spendInputs, outputs: createOutputs };
-        createEndpoint = '/api/ladder/create';
-      } else {
-        const amounts = createOutputs.map(o => o.amount);
-        const rungsFlat = [];
-        // Identity-recurse shares one carry `conditions` array across all
-        // padding outputs; dedupe so each committed rung appears exactly
-        // once with its original output_index. For other multi-output
-        // shapes (RATE_LIMIT payment + carry, RECURSE_SPLIT 2-way), each
-        // output has its own conditions and the iteration index is the
-        // correct output_index.
-        const seen = new Set();
-        createOutputs.forEach((out, oi) => {
-          (out.conditions || []).forEach(cond => {
-            const hasOi = typeof cond.output_index === 'number';
-            const effOi = hasOi ? cond.output_index : oi;
-            const key = effOi + ':' + JSON.stringify(cond.blocks);
-            if (hasOi && seen.has(key)) return;
-            seen.add(key);
-            const rungEntry = { output_index: effOi, blocks: cond.blocks };
-            if (cond.coil) rungEntry.coil = cond.coil;
-            if (cond.relay_refs && cond.relay_refs.length > 0) rungEntry.relay_refs = cond.relay_refs;
-            rungsFlat.push(rungEntry);
-          });
+      // Build create payload — always the shared-tree shape. createrungtx
+      // takes one conditions_root for the whole tx (TX_MLSC wire format).
+      // Identity-recurse shares one carry `conditions` array across all
+      // padding outputs; dedupe so each committed rung appears exactly
+      // once with its original output_index. For other multi-output
+      // shapes (RATE_LIMIT payment + carry, RECURSE_SPLIT 2-way), each
+      // output has its own conditions and the iteration index is the
+      // correct output_index.
+      const amounts = createOutputs.map(o => o.amount);
+      const rungsFlat = [];
+      const seen = new Set();
+      createOutputs.forEach((out, oi) => {
+        (out.conditions || []).forEach(cond => {
+          const hasOi = typeof cond.output_index === 'number';
+          const effOi = hasOi ? cond.output_index : oi;
+          const key = effOi + ':' + JSON.stringify(cond.blocks);
+          if (hasOi && seen.has(key)) return;
+          seen.add(key);
+          const rungEntry = { output_index: effOi, blocks: cond.blocks };
+          if (cond.coil) rungEntry.coil = cond.coil;
+          if (cond.relay_refs && cond.relay_refs.length > 0) rungEntry.relay_refs = cond.relay_refs;
+          rungsFlat.push(rungEntry);
         });
-        createPayload = { inputs: spendInputs, outputs: amounts, rungs: rungsFlat };
-        createEndpoint = '/api/ladder/createtxmlsc';
-      }
+      });
+      const createPayload = { inputs: spendInputs, outputs: amounts, rungs: rungsFlat };
+      const createEndpoint = '/api/ladder/createrungtx';
       if (rec.relays && rec.relays.length > 0) {
         createPayload.relays = rec.relays.map(r => ({
           blocks: (r.blocks || []).filter(b => b.type !== 'OUTPUT_REF').map(exportBlockFields)
@@ -12821,7 +12816,7 @@ function App() {
   const totalBlocks = rungs.reduce((s, r) => s + r.blocks.length, 0);
   const liveValidation = useMemo(() => validateLadder(rungs, txInputs, txOutputs, locktime), [rungs, txInputs, txOutputs, locktime]);
   const jsonOutput = useMemo(() => {
-    return JSON.stringify(exportCreateTxMLSC(rungs, txOutputs, txInputs, locktime), null, 2);
+    return JSON.stringify(exportCreateRungTx(rungs, txOutputs, txInputs, locktime), null, 2);
   }, [rungs, txInputs, txOutputs, locktime]);
 
   const descriptorOutput = useMemo(() => rungsToDescriptor(rungs), [rungs]);
@@ -13209,14 +13204,14 @@ ${ladderRows.map(r => `
   }, []);
 
   const handleImport = useCallback(() => {
-    const input = prompt('Paste createtxmlsc JSON (or legacy conditions array):');
+    const input = prompt('Paste createrungtx JSON (or legacy conditions array):');
     if (!input) return;
     try {
       const data = JSON.parse(input);
 
-      // Detect format: createtxmlsc has { inputs, outputs } at top level
+      // Detect format: createrungtx has { inputs, outputs } at top level
       if (data.inputs && data.outputs && !Array.isArray(data)) {
-        // createtxmlsc wire format
+        // createrungtx wire format
         const newTxInputs = (data.inputs || []).map(i => ({
           id: uid(), txid: i.txid || '', vout: i.vout || 0, sequence: i.sequence !== undefined ? String(i.sequence) : ''
         }));
@@ -13316,7 +13311,7 @@ ${ladderRows.map(r => `
         <div className="header-actions">
           <button className="header-btn" onClick={() => window.open('docs/index.html#ENGINE_GUIDE', '_blank')} title={showTooltips ? 'Open the Ladder Script engine guide in a new window' : undefined}>HELP</button>
           <button className="header-btn primary" onClick={() => dispatch({ type: 'SET_SHOW_EXAMPLES', value: true })} title={showTooltips ? 'Load pre-built example programs' : undefined}>EXAMPLES</button>
-          <button className="header-btn" onClick={handleImport} title={showTooltips ? 'Import createtxmlsc JSON from clipboard' : undefined}>IMPORT</button>
+          <button className="header-btn" onClick={handleImport} title={showTooltips ? 'Import createrungtx JSON from clipboard' : undefined}>IMPORT</button>
           <button className="header-btn" onClick={handleCopyJson} title={showTooltips ? 'Validate and copy wire-format JSON to clipboard' : undefined}>COPY JSON</button>
           <button className="header-btn" onClick={handlePrint} title={showTooltips ? 'Print ladder diagram' : undefined}>PRINT</button>
           <button className="header-btn" onClick={() => setWalkthroughActive(true)} title={showTooltips ? 'Start the guided walkthrough tutorial' : undefined} style={{ color: 'var(--cyan)' }}>TUTORIAL</button>
@@ -13368,7 +13363,7 @@ ${ladderRows.map(r => `
             {!isSimMode && <button className={`panel-tab ${rightTab === 'tx' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_RIGHT_TAB', value: 'tx' })} title={showTooltips ? 'Configure transaction inputs, outputs, and locktime' : undefined}>TX</button>}
             {isSimMode && <button className={`panel-tab ${rightTab === 'simulate' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_RIGHT_TAB', value: 'simulate' })} title={showTooltips ? 'Set simulation context --amounts, heights, timestamps' : undefined}>CONTEXT</button>}
             <button className={`panel-tab ${rightTab === 'descriptor' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_RIGHT_TAB', value: 'descriptor' })} title={showTooltips ? 'View the descriptor notation for the current conditions' : undefined}>DESCRIPTOR</button>
-            <button className={`panel-tab ${rightTab === 'json' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_RIGHT_TAB', value: 'json' })} title={showTooltips ? 'View the createtxmlsc RPC JSON for this transaction' : undefined}>RPC</button>
+            <button className={`panel-tab ${rightTab === 'json' ? 'active' : ''}`} onClick={() => dispatch({ type: 'SET_RIGHT_TAB', value: 'json' })} title={showTooltips ? 'View the createrungtx RPC JSON for this transaction' : undefined}>RPC</button>
           </div>
           <div className="panel-content">
             {!isSimMode && rightTab === 'properties' && selectedInputId ? (

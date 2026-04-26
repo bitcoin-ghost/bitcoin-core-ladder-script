@@ -1523,7 +1523,11 @@ def fund_preset(preset, verbose=True):
         }
         # Create a dummy TX to get the scriptPubKey serialization
         dummy_input = {"txid": "0" * 64, "vout": 0, "sequence": 0xfffffffe}
-        dummy_create = api("/api/ladder/create", {"inputs": [dummy_input], "outputs": [ctv_spend_output]}, silent=True)
+        dummy_create = api("/api/ladder/createrungtx", {
+            "inputs": [dummy_input],
+            "outputs": [ctv_spend_output["amount"]],
+            "rungs": [{"output_index": 0, "blocks": ctv_spend_output["conditions"][0]["blocks"]}],
+        }, silent=True)
         if dummy_create and "hex" in dummy_create:
             dummy_decoded = api("/api/ladder/decode-tx", {"hex": dummy_create["hex"]}, silent=True)
             if dummy_decoded and "vout" in dummy_decoded:
@@ -1630,33 +1634,21 @@ def fund_preset(preset, verbose=True):
     # Build inputs
     wire_inputs = [{"txid": u["txid"], "vout": u["vout"]} for u in selected]
 
-    # 13. Create TX. Route on output count:
-    #   - 1 output  → /api/ladder/create (createrungtx) — still the
-    #     simplest path; the shared-root requirement is trivially
-    #     satisfied with a single output.
-    #   - N outputs → /api/ladder/createtxmlsc — TX_MLSC requires all
-    #     outputs to share one conditions_root; createtxmlsc builds the
-    #     shared Merkle commitment across N rung layouts. createrungtx
-    #     rejects multi-output mixed-root inputs explicitly.
-    #
-    # createtxmlsc's input shape: outputs is a flat list of amounts;
-    # rungs is a flat list of {output_index, blocks} entries.
+    # 13. Create TX. createrungtx takes the shared-tree shape: outputs is
+    # a flat list of amounts; rungs is a flat list of {output_index, blocks}
+    # entries. One conditions_root for the whole tx — true for both N=1
+    # and N>1 outputs.
     log("Creating transaction...")
-    if len(wire_outputs) == 1:
-        create_payload = {"inputs": wire_inputs, "outputs": wire_outputs}
-        create_endpoint = "/api/ladder/create"
-    else:
-        amounts = [out["amount"] for out in wire_outputs]
-        rungs_flat = []
-        for oi, out in enumerate(wire_outputs):
-            for cond in out["conditions"]:
-                rungs_flat.append({"output_index": oi, "blocks": cond["blocks"]})
-        create_payload = {"inputs": wire_inputs, "outputs": amounts, "rungs": rungs_flat}
-        create_endpoint = "/api/ladder/createtxmlsc"
-    create_result = api(create_endpoint, create_payload)
+    amounts = [out["amount"] for out in wire_outputs]
+    rungs_flat = []
+    for oi, out in enumerate(wire_outputs):
+        for cond in out["conditions"]:
+            rungs_flat.append({"output_index": oi, "blocks": cond["blocks"]})
+    create_payload = {"inputs": wire_inputs, "outputs": amounts, "rungs": rungs_flat}
+    create_result = api("/api/ladder/createrungtx", create_payload)
     if not create_result or "hex" not in create_result:
         raise RuntimeError("Failed to create TX")
-    log(f"Created via {create_endpoint}: {len(create_result['hex'])//2} bytes")
+    log(f"Created via /api/ladder/createrungtx: {len(create_result['hex'])//2} bytes")
 
     # 14. Sign TX. Funding txs spend wallet-owned P2WPKH UTXOs, not
     # MLSC inputs. signrungtx in core only signs MLSC inputs (it skips
@@ -2262,7 +2254,7 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                 if identity_recurse:
                     # RECURSE_SAME / RECURSE_UNTIL must reproduce the original
                     # tree exactly so the spend's MLSC root equals the input's
-                    # frozen root. createtxmlsc requires output_index < N
+                    # frozen root. createrungtx requires output_index < N
                     # outputs, so pad amounts to cover every original
                     # output_index. The first output keeps the bulk of the
                     # value; padding outputs get dust each.
@@ -2291,47 +2283,37 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
     else:
         create_outputs = [fresh_sig_output]
 
-    # 5. Create spend TX. Same routing logic as the funding tx: 1
-    # output uses createrungtx (legacy single-output path is fine);
-    # multi-output (RECURSE_SPLIT, RATE_LIMIT carry-forward) needs
-    # createtxmlsc because all outputs share one conditions_root.
+    # 5. Create spend TX via the shared-tree createrungtx. Two cases:
+    # carry-forward (RECURSE_SPLIT/RATE_LIMIT) where every output shares
+    # the mutated conditions tree from output 0, and the general case
+    # where each output carries its own conditions.
     spend_inputs = [{"txid": txid, "vout": vout, "sequence": input_sequence}]
 
     log(f"Creating spend TX ({send_sats} sats after {fee_sats} fee)...")
     is_carry_forward_split = (
         len(create_outputs) > 1 and all(out.get("_isCarryForward") for out in create_outputs)
     )
-    if len(create_outputs) == 1:
-        create_payload = {"inputs": spend_inputs, "outputs": create_outputs}
-        if tx_locktime > 0:
-            create_payload["locktime"] = tx_locktime
-        create_result = api("/api/ladder/create", create_payload, silent=True)
-    elif is_carry_forward_split:
-        # RECURSE_SPLIT/RATE_LIMIT etc.: all spend outputs share the same
-        # mutated conditions tree (the recurse covenant requires every
-        # output to be MLSC with the new expected_root). Use the conditions
-        # from the first output and let each rung keep its original
-        # output_index so leaves match what the verifier reconstructs.
-        amounts = [out["amount"] for out in create_outputs]
+    amounts = [out["amount"] for out in create_outputs]
+    if is_carry_forward_split:
+        # All spend outputs share the same mutated conditions tree (the
+        # recurse covenant requires every output to be MLSC with the new
+        # expected_root). Use the conditions from the first output and
+        # keep each rung's original output_index so leaves match the
+        # verifier's reconstruction.
         shared = create_outputs[0]["conditions"]
         rungs_flat = [
             {"output_index": cond.get("output_index", 0), "blocks": cond["blocks"]}
             for cond in shared
         ]
-        create_payload = {"inputs": spend_inputs, "outputs": amounts, "rungs": rungs_flat}
-        if tx_locktime > 0:
-            create_payload["locktime"] = tx_locktime
-        create_result = api("/api/ladder/createtxmlsc", create_payload, silent=True)
     else:
-        amounts = [out["amount"] for out in create_outputs]
         rungs_flat = []
         for oi, out in enumerate(create_outputs):
             for cond in out["conditions"]:
                 rungs_flat.append({"output_index": oi, "blocks": cond["blocks"]})
-        create_payload = {"inputs": spend_inputs, "outputs": amounts, "rungs": rungs_flat}
-        if tx_locktime > 0:
-            create_payload["locktime"] = tx_locktime
-        create_result = api("/api/ladder/createtxmlsc", create_payload, silent=True)
+    create_payload = {"inputs": spend_inputs, "outputs": amounts, "rungs": rungs_flat}
+    if tx_locktime > 0:
+        create_payload["locktime"] = tx_locktime
+    create_result = api("/api/ladder/createrungtx", create_payload, silent=True)
     if not create_result or "hex" not in create_result:
         raise RuntimeError("Failed to create spending TX")
     log(f"Created: {len(create_result['hex'])//2} bytes")
@@ -2435,9 +2417,12 @@ def run_qabio_batch(verbose=True):
     for i in range(3):
         kp = api("/api/ladder/wallet/keypair")
         keys.append(kp)
-        out = {"amount": 0.001,
-               "conditions": [{"blocks": [{"type": "SIG", "fields": [{"type": "PUBKEY", "hex": kp["pubkey"]}]}]}]}
-        res = api("/api/ladder/create", {"inputs": [{"txid": big[i]["txid"], "vout": big[i]["vout"]}], "outputs": [out]})
+        sig_blocks = [{"type": "SIG", "fields": [{"type": "PUBKEY", "hex": kp["pubkey"]}]}]
+        res = api("/api/ladder/createrungtx", {
+            "inputs": [{"txid": big[i]["txid"], "vout": big[i]["vout"]}],
+            "outputs": [0.001],
+            "rungs": [{"output_index": 0, "blocks": sig_blocks}],
+        })
         signed = api("/api/ladder/sign", {"hex": res["hex"]})
         bc = api("/api/ladder/broadcast", {"hex": signed["hex"]})
         fund_txids.append(bc["txid"])
@@ -2451,7 +2436,7 @@ def run_qabio_batch(verbose=True):
 
     dest_key = api("/api/ladder/wallet/keypair")
     dest_rung = {"output_index": 0, "blocks": [{"type": "SIG", "fields": [{"type": "PUBKEY", "hex": dest_key["pubkey"]}]}]}
-    dummy = api("/api/ladder/createtxmlsc", {"inputs": [{"txid": "0"*64, "vout": 0}], "outputs": [0.001], "rungs": [dest_rung]})
+    dummy = api("/api/ladder/createrungtx", {"inputs": [{"txid": "0"*64, "vout": 0}], "outputs": [0.001], "rungs": [dest_rung]})
     outputs_root = dummy["conditions_root"]
 
     total, entries = 0, []
@@ -2469,7 +2454,7 @@ def run_qabio_batch(verbose=True):
     })
     log(f"QABI block: {len(qabi['qabi_block'])//2} bytes")
 
-    batch_tx = api("/api/ladder/createtxmlsc", {
+    batch_tx = api("/api/ladder/createrungtx", {
         "inputs": [{"txid": t, "vout": 0} for t in fund_txids],
         "outputs": [total / 1e8], "rungs": [dest_rung], "qabi_block": qabi["qabi_block"],
     })
