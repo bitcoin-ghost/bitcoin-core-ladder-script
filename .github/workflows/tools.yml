@@ -13,7 +13,6 @@ on:
   # Disabled during active site rework — re-enable push/pull_request triggers
   # when the library migration settles and the tools tree is stable again.
   workflow_dispatch:
-  workflow_dispatch:
 
 jobs:
   proxy:
