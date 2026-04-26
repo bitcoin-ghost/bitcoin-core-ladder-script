@@ -14,15 +14,20 @@ SATISFIED wins.
 
 Ladder Script is carried in two places:
 
-1. **Conditions** (locking side): stored on-chain as a TX_MLSC output.
-   Each output is 8 bytes (value only); the transaction carries one shared
-   `conditions_root` with prefix byte `0xDF`. A creation proof in the witness
-   is validated at block acceptance. The full conditions are never on-chain;
-   only the root hash is published. Inline conditions (`0xC1`) are removed.
-2. **Witness** (spending side): carried in the transaction witness. Contains
-   signatures, preimages, and other secrets required to satisfy the conditions.
+1. **Conditions** (locking side): stored on-chain as TX_MLSC outputs.
+   Each output is 8 bytes (value only) on the wire; the transaction
+   carries one shared `conditions_root` with prefix byte `0xDF`. The
+   full conditions are never on-chain — only the root hash. The 32-byte
+   root is recovered at spend time from a synthetic UTXO entry written
+   at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`.
+2. **Witness** (spending side): carried in the transaction witness.
+   Contains signatures, preimages, and other secrets required to
+   satisfy the conditions, plus an `MLSCProof` that ties the revealed
+   rung back to the committed `conditions_root`.
 
-The transaction version for Ladder Script transactions is **4** (`RUNG_TX_VERSION = 4`).
+The transaction version for Ladder Script transactions is **4**
+(`RUNG_TX_VERSION = 4`). Inline conditions (`0xC1`) — an earlier design
+that never shipped — remain rejected as defence in depth.
 
 ---
 
@@ -46,7 +51,7 @@ The transaction version for Ladder Script transactions is **4** (`RUNG_TX_VERSIO
 
 ## Q3: What are the block type families?
 
-There are **10 families** containing **61 block types**.
+There are **11 families** containing **65 block types**.
 
 | # | Family | Range | Block types | Count |
 |---|--------|-------|-------------|-------|
@@ -57,9 +62,10 @@ There are **10 families** containing **61 block types**.
 | 5 | **Recursion** | `0x0400`-`0x04FF` | RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT, RECURSE_SPLIT, RECURSE_DECAY | 6 |
 | 6 | **Anchor/L2** | `0x0500`-`0x05FF` | ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE, ANCHOR_SEAL, ANCHOR_ORACLE, DATA_RETURN | 7 |
 | 7 | **PLC** | `0x0600`-`0x06FF` | HYSTERESIS_FEE, HYSTERESIS_VALUE, TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET, COUNTER_UP, COMPARE, SEQUENCER, ONE_SHOT, RATE_LIMIT, COSIGN | 14 |
-| 8 | **Compound** | `0x0700`-`0x07FF` | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG | 6 |
+| 8 | **Compound** | `0x0700`-`0x07FF` | TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG, ANCHOR_FEE | 7 |
 | 9 | **Governance** | `0x0800`-`0x08FF` | EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, RELATIVE_VALUE, ACCUMULATOR, OUTPUT_CHECK | 7 |
 | 10 | **Legacy** | `0x0900`-`0x09FF` | P2PK_LEGACY, P2PKH_LEGACY, P2SH_LEGACY, P2WPKH_LEGACY, P2WSH_LEGACY, P2TR_LEGACY, P2TR_SCRIPT_LEGACY | 7 |
+| 11 | **QABI / PQ** | `0x0A00`-`0x0AFF` | QABI_PRIME, QABI_SPEND, PQ_BATCH | 3 |
 
 ---
 
@@ -156,14 +162,16 @@ COUNTER_DOWN, COUNTER_UP.
 
 ## Q7: What is TX_MLSC?
 
-**TX_MLSC** (Transaction-level Merkelized Ladder Script Conditions) is the output
-format for Ladder Script. In the TX_MLSC model, there is one shared Merkle tree
-per transaction (PLC model: one program, multiple output coils). Each output is
-8 bytes (value only); the transaction carries a single shared `conditions_root`
-with prefix byte `0xDF`. A creation proof in the witness section is validated at
-block acceptance.
+**TX_MLSC** (Transaction-level Merkelised Ladder Script Conditions) is
+the output wire format for Ladder Script. In the TX_MLSC model there is
+one shared Merkle tree per transaction (PLC model: one program,
+multiple output coils). Each output is 8 bytes (value only) on the
+wire; the transaction carries a single shared `conditions_root` with
+prefix byte `0xDF`. The 32-byte root is recovered at spend time from
+the synthetic UTXO entry at `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`.
 
-Each rung's coil has an `output_index` field declaring which output it governs.
+Each rung's coil has an `output_index` field declaring which output it
+governs.
 
 The `conditions_root` is a Merkle tree root computed from leaves:
 
@@ -171,10 +179,10 @@ The `conditions_root` is a Merkle tree root computed from leaves:
 Leaf order: [rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1], coil_leaf]
 ```
 
-Leaf hashing uses `TaggedHash("LadderLeaf", structural_template || value_commitment)`.
-Interior nodes use `TaggedHash("LadderInternal", min(a,b) || max(a,b))` with
-sorted children (lexicographic order). The tree is padded to the next power of 2
-with `MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "")`.
+Leaf hashing uses `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`.
+Interior nodes use `TaggedHash("LadderInternal/v1", min(a,b) || max(a,b))`
+with sorted children (lexicographic order). The tree is padded to the
+next power of 2 with `MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "")`.
 
 The transaction serialization uses flag byte `0x02` to signal the TX_MLSC format.
 
@@ -199,8 +207,11 @@ Zero readable attacker data in UTXOs (root is protocol-derived).
 
 ## Q8: What sighash types are supported?
 
-Ladder Script sighash computation uses `TaggedHash("LadderSighash")` and
-supports these hash types:
+Ladder Script sighash uses two tagged hashes:
+`TaggedHash("LadderSighash/v1")` for script-path spends and
+`TaggedHash("LadderKeyPathSighash/v1")` for key-path spends. Key-path
+deliberately omits the conditions commitment (the tweak already binds
+to it via the x-only key tweak). Supported hash types:
 
 | Hash type | Value | Behavior |
 |-----------|-------|----------|
@@ -246,8 +257,10 @@ via a 128-entry lookup table (`MICRO_HEADER_TABLE`):
 - `0x80`: Escape byte, followed by `uint16_t LE` block type (3 bytes total, not inverted)
 - `0x81`: Escape byte, followed by `uint16_t LE` block type (3 bytes total, inverted)
 
-All 61 block types have assigned micro-header slots (slots 0x00 through
-0x3E). Slots 0x07 and 0x08 are reserved.
+62 of the 65 block types have assigned micro-header slots (slots
+`0x00`-`0x3F`); `0x07` and `0x08` are reserved. Three blocks
+(`ANCHOR_FEE`, `QABI_PRIME`, `QABI_SPEND`) use the escape-byte encoding
+because they were added late and aren't in the table yet.
 
 ### Implicit field layouts
 
@@ -352,7 +365,7 @@ Every Ladder Script output carries a **coil** with three metadata bytes:
 
 | Field | Type | Values |
 |-------|------|--------|
-| `attestation` | `RungAttestationMode` | `INLINE (0x01)`: signatures inline in witness. `AGGREGATE (0x02)` and `DEFERRED (0x03)` are reserved for future extension (rejected at deserialization). |
+| `attestation` | `RungAttestationMode` | Only `INLINE (0x01)` is defined — signatures sit inline in the witness. Earlier draft modes (`AGGREGATE`, `DEFERRED`) were removed from the enum entirely; values other than `0x01` reject at deserialisation. |
 | `scheme` | `RungScheme` | `SCHNORR (0x01)`, `ECDSA (0x02)`, `FALCON512 (0x10)`, `FALCON1024 (0x11)`, `DILITHIUM3 (0x12)`, `SPHINCS_SHA (0x13)` |
 
 The coil also carries:
@@ -467,10 +480,10 @@ Ladder Script supports four post-quantum signature schemes via liboqs:
 
 | Scheme | Enum | Value | Pubkey size | Sig size |
 |--------|------|-------|-------------|----------|
-| FALCON-512 | `FALCON512` | `0x10` | 897 bytes | ~690 bytes |
-| FALCON-1024 | `FALCON1024` | `0x11` | 1793 bytes | ~1330 bytes |
-| Dilithium3 | `DILITHIUM3` | `0x12` | 1952 bytes | 3293 bytes |
-| SPHINCS+-SHA2-256f | `SPHINCS_SHA` | `0x13` | 64 bytes | 49216 bytes |
+| FALCON-512 | `FALCON512` | `0x10` | 897 bytes | 666 bytes |
+| FALCON-1024 | `FALCON1024` | `0x11` | 1,793 bytes | ~1,330 bytes |
+| Dilithium3 | `DILITHIUM3` | `0x12` | 1,952 bytes | 3,293 bytes |
+| SPHINCS+-SHA2-256f | `SPHINCS_SHA` | `0x13` | 64 bytes | 49,216 bytes |
 
 PQ schemes are identified by `IsPQScheme()`: any scheme with value >= `0x10`.
 
@@ -481,13 +494,24 @@ support is not compiled in (`HasPQSupport()` returns false), verification
 returns ERROR.
 
 PQ schemes work with: SIG, MULTISIG, TIMELOCKED_SIG, CLTV_SIG,
-TIMELOCKED_MULTISIG, and KEY_REF_SIG blocks. The SCHEME field in conditions
-routes the evaluator to the PQ verification path.
+TIMELOCKED_MULTISIG, and KEY_REF_SIG blocks. The SCHEME field in
+conditions routes the evaluator to the PQ verification path.
 
-The PUBKEY data type allows up to 2048 bytes, and SIGNATURE allows up to 50000
-bytes, accommodating even SPHINCS+ signatures.
+The PUBKEY data type allows up to 2,048 bytes, and SIGNATURE allows up
+to 50,000 bytes, accommodating even SPHINCS+ signatures.
+`MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates the rest.
 
-The `MAX_LADDER_WITNESS_SIZE = 100000` bytes accommodates PQ signatures.
+**Two PQ batch primitives** sit on top of these schemes:
+
+- **PQ_BATCH** (`0x0A03`) commits `SHA256(falcon_pubkey)` per output. One
+  anchor input in a spend tx reveals the pubkey + signature; every
+  other input gated by the same hash short-circuits via a tx-local
+  cache. Amortised cost ~55 vB per input (vs ~666 B for a bare
+  FALCON sig).
+- **QABIO** (`QABI_PRIME`, `QABI_SPEND`, plus the tx-level `qabi_block`
+  and `aggregated_sig` fields): a coordinator + N participants
+  ceremony that produces one FALCON-512 signature covering the whole
+  tx. ~143 vB per cosigner at N=100. See [`QABIO.md`](QABIO.md).
 
 ---
 
@@ -685,12 +709,13 @@ only. Using DATA in any other block type causes a deserialization error.
 **Size limits**: DATA fields are 1-40 bytes (hash 32 bytes + 8 bytes protocol
 metadata).
 
-**TX_MLSC integration**: DATA_RETURN payload can be appended to the shared
-conditions root, producing output data of 34-73 bytes:
-`0xDF + conditions_root(32) + data(1-40)`.
+**TX_MLSC integration**: DATA_RETURN payload is signalled on the wire
+by `nValue == 0` followed by `data_len` (1..40) and the payload bytes.
+The deserialiser reconstructs `vout[i].scriptPubKey = 0xDF || conditions_root || data`,
+producing output data of 34-73 bytes total.
 
 **Consensus**: `ValidateRungOutputs` allows exactly one DATA_RETURN per
-transaction. The maximum data payload is 80 bytes.
+transaction. The maximum data payload is 40 bytes (`FieldMaxSize(DATA)`).
 
 ---
 
@@ -748,14 +773,19 @@ slot assignment:
 - Slots 0x0D-0x12: Recursion (6 types)
 - Slots 0x13-0x18: Anchor (6 types, excluding DATA_RETURN)
 - Slots 0x19-0x26: PLC (14 types)
-- Slots 0x27-0x2C: Compound (6 types)
+- Slots 0x27-0x2C: Compound (6 types, excluding ANCHOR_FEE)
 - Slots 0x2D-0x32: Governance (6 types, excluding OUTPUT_CHECK)
 - Slots 0x33-0x34: Late-added Signature (MUSIG_THRESHOLD, KEY_REF_SIG)
 - Slots 0x35-0x3B: Legacy (7 types)
-- Slot 0x3C: DATA_RETURN
-- Slot 0x3D: HASH_GUARDED
-- Slot 0x3E: OUTPUT_CHECK
-- Slots 0x3F-0x7F: Unused (65 slots reserved for future block types)
+- Slot 0x3C: DATA_RETURN (late-added Anchor)
+- Slot 0x3D: HASH_GUARDED (late-added Hash)
+- Slot 0x3E: OUTPUT_CHECK (late-added Governance)
+- Slot 0x3F: PQ_BATCH (late-added QABI / PQ)
+- Slots 0x40-0x7F: Unused (64 slots reserved for future block types)
+
+`ANCHOR_FEE`, `QABI_PRIME`, and `QABI_SPEND` use the escape-byte
+encoding (`0x80` non-inverted, `0x81` inverted) followed by the
+`uint16_t` block type — they don't have micro-header slots yet.
 
 ### Implicit field layouts
 
