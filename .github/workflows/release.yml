@@ -129,7 +129,22 @@ jobs:
         run: |
           brew install --quiet \
             cmake ninja pkgconf coreutils \
-            boost libevent sqlite3 capnp liboqs
+            boost libevent sqlite3 capnp
+
+      - name: Build and install liboqs
+        # Match the Linux job — pin to 0.10.1 from source instead of
+        # Homebrew's liboqs (0.13+), which renamed OQS_SIG_alg_dilithium_3
+        # → OQS_SIG_alg_ml_dsa_65 and broke pq_verify.cpp.
+        run: |
+          git clone --depth 1 --branch 0.10.1 \
+            https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cmake -B /tmp/liboqs/build -S /tmp/liboqs -GNinja \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DOQS_BUILD_ONLY_LIB=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/liboqs/build
+          sudo cmake --install /tmp/liboqs/build
 
       - name: Configure
         run: |
@@ -164,8 +179,9 @@ jobs:
              build/bin/bitcoin-util \
              build/bin/bitcoin-wallet \
              "dist/${PKG}/bin/"
-          # Bundle liboqs from Homebrew so the binary is self-contained.
-          cp -RP $(brew --prefix liboqs)/lib/liboqs.*dylib "dist/${PKG}/lib/"
+          # Bundle liboqs (from /usr/local, not Homebrew) so the binary
+          # is self-contained.
+          cp -RP /usr/local/lib/liboqs.*dylib "dist/${PKG}/lib/"
           strip "dist/${PKG}/bin/"* || true
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
