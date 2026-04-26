@@ -22,6 +22,24 @@ Ladder Script replaces this with **typed function blocks** organised into **rung
 
 **Not for mainnet.** This is research-stage protocol work. Don't point real money at it.
 
+## Verifying releases
+
+Pre-built binaries on the [Releases page](https://github.com/defenwycke/bitcoin-core-ladder-script/releases) ship a `SHA256SUMS` file plus a detached PGP signature `SHA256SUMS.asc`.
+
+Release-signing key fingerprint:
+
+```
+777FE81F8CC077FD3D08055E852C2B3190F5B928
+```
+
+This README and [ladder-script.org/get-started.html#verify](https://ladder-script.org/get-started.html#verify) are the canonical publications. If `gpg --verify` reports any other key, do not trust the binary.
+
+```bash
+gpg --keyserver keys.openpgp.org --recv-keys 777FE81F8CC077FD3D08055E852C2B3190F5B928
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
 ## How it works
 
 The name and structure are borrowed from ladder logic, the programming model used in industrial PLCs (programmable logic controllers) for decades. A spending policy is a ladder. Each rung is a possible spending path containing typed condition blocks. Blocks on the same rung are AND — all must be satisfied. Rungs are OR — the first satisfied rung authorises the spend.
