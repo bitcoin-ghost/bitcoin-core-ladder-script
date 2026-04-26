@@ -459,3 +459,24 @@ html[data-theme="dark"] .theme-toggle .sun { display: block; }
 html[data-theme="dark"] .theme-toggle .moon { display: none; }
 html:not([data-theme="dark"]) .theme-toggle .sun { display: none; }
 html:not([data-theme="dark"]) .theme-toggle .moon { display: block; }
+
+/* Dark-mode tweaks for legibility on light-coloured zebra rows / chips. */
+html[data-theme="dark"] .field-table tr:nth-child(even) td { background: var(--bg-alt); }
+html[data-theme="dark"] .result-table tr:nth-child(even) td { background: var(--bg-alt); }
+html[data-theme="dark"] .doc-content { background: var(--bg); color: var(--text-body); }
+html[data-theme="dark"] .doc-section { background: transparent; }
+html[data-theme="dark"] .field-table th,
+html[data-theme="dark"] .result-table th { background: var(--bg-alt); color: var(--text); }
+html[data-theme="dark"] .field-table td,
+html[data-theme="dark"] .result-table td { color: var(--text-body); border-color: var(--border-light); }
+html[data-theme="dark"] .eval-box { background: var(--bg-alt); border-color: var(--border); color: var(--text-body); }
+html[data-theme="dark"] .use-case { background: var(--bg-alt); border-color: var(--border); }
+html[data-theme="dark"] .use-case-desc { color: var(--text-body); }
+html[data-theme="dark"] code { background: var(--bg-code); color: var(--accent); }
+html[data-theme="dark"] .ladder-diagram { background: var(--bg-alt); border-color: var(--border); }
+html[data-theme="dark"] .badge-hash,
+html[data-theme="dark"] .badge-anchor,
+html[data-theme="dark"] .badge-recursion,
+html[data-theme="dark"] .wire-type,
+html[data-theme="dark"] .wire-field-hash,
+html[data-theme="dark"] .wire-field-sig { background: var(--bg-alt); }
