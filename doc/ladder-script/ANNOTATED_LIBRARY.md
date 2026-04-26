@@ -372,25 +372,263 @@ ladder script flows through this file.
 
 ---
 
+## `api.h` (528 lines)
+
+The library's public surface — the **only** header Core code includes.
+Read this header first; everything else is internal.
+
+### Purpose
+
+- Define adapter types that decouple the library from Core's concrete
+  C++ types (`CTransaction`, `CTxOut`, `CScript`, `BaseSignatureChecker`,
+  `XOnlyPubKey`, etc.). The library accepts byte spans, primitives, and
+  the structs declared here.
+- Define the `LadderScriptError` enum — independent of Core's
+  `SCRIPT_ERR_*`. `rung_shims.h` translates between the two.
+- Declare the host callbacks (`LadderSigChecker`,
+  `LadderBlockAccessor`) so the library never reaches into Core's
+  global state (chainstate, mempool, net, wallet, RPC server).
+
+### Key types
+
+| Symbol                            | Lines | Purpose |
+|-----------------------------------|------:|---------|
+| `enum class LadderScriptError`    |   ~70 | Library-internal error codes. Translated to `SCRIPT_ERR_*` at the boundary. |
+| `struct LadderScript`             |   143 | A typed view of a scriptPubKey: a byte span + a "kind" tag (MLSC, P2WPKH, etc.). |
+| `struct LadderWitnessElement`     |   154 | One stack item: byte span. |
+| `struct LadderWitnessStack`       |   160 | Vector of witness elements with a count. |
+| `struct LadderInputView`          |   172 | One input: outpoint + sequence + witness stack. |
+| `struct LadderOutputView`         |   180 | One output: value + scriptPubKey span. |
+| `struct LadderTxView`             |   189 | Whole transaction: version, vin, vout, locktime, qabi_block, aggregated_sig. |
+| `struct LadderPrecomputedTxData`  |   232 | Sighash midstate caches — the adapter equivalent of `PrecomputedTransactionData`. |
+| `class LadderSigChecker`          |   267 | Virtual: how the library asks the host to verify a Schnorr/ECDSA signature. |
+| `class LadderBlockAccessor`       |   295 | Virtual: how the library asks the host to fetch the synthetic root coin (`GetMLSCRoot(txid) → uint256`). |
+| `struct LadderEvalContext`        |   326 | Per-input evaluation context: `tx`, `input_index`, `sig_checker`, `block_accessor`, optional caches, weight, height, etc. |
+| `using LadderBlockEvalFn = ...`   |   393 | Function pointer type for block evaluators. Each block-type registers one of these. |
+| `struct LadderBlockDescriptor`    |   416 | The per-block-type registration record: type id, name, eval fn, validate fn, conditions/witness layouts. |
+
+### Design rules
+
+The header's top comment states three rules explicitly:
+
+1. **No Core types in this header.** Every external type crosses the
+   boundary as a byte span, a primitive, or an adapter struct defined
+   here.
+2. **No Core global state.** The library never touches chainstate,
+   mempool, net, wallet, or RPC server directly. Everything comes in
+   via callback or explicit value.
+3. **Each block type lives in its own translation unit.** Under
+   `src/rung/blocks/`, exporting a `register_XYZ_block()` function the
+   host calls from `ladder_init()`. A block compiled out never
+   registers; transactions using it are rejected with
+   `LADDER_ERR_UNKNOWN_BLOCK_TYPE`. This is what makes selective
+   activation possible — a BIP sub-proposal can be declined by
+   disabling its blocks, with no Core integration change.
+
+The header uses C++ (namespaces, references, virtual classes for
+callbacks). Deliberately conservative: no templates at the ABI
+surface, no exceptions, no STL containers in function signatures. A
+narrow `extern "C"` wrapper for language bindings is anticipated
+(libsecp256k1 pattern) but not yet present.
+
+### Gotchas
+
+- `LadderTxView` is a **view**, not an owner. The lifetime of the
+  underlying `CTransaction` (or whatever the host passes) must outlast
+  the view. The Core-typed `VerifyRungTx` overload in `evaluator.cpp`
+  constructs a view per call — fine because the `CTransaction` is
+  stack-allocated by the caller.
+- `LadderBlockAccessor::GetMLSCRoot(txid)` is the load-bearing
+  callback. If the host can't fetch the root (snapshot loading without
+  conditions_root reconstruction, library used standalone), the
+  evaluator returns `MLSC_ROOT_UNAVAILABLE`. See the invariant in
+  [`ANNOTATED_DIFF.md` §3](ANNOTATED_DIFF.md#3-srccompressorcpp-68--1-and-srccompressorh-1--1).
+- Forward-compatibility: an unknown block type returns
+  `UNKNOWN_BLOCK_TYPE` (NOT a consensus error). This lets future
+  block additions activate as a soft fork — old nodes treat unknown
+  blocks as failing, but they don't crash.
+
+### Cross-references
+
+- `LadderScriptError` translation table: `rung_shims.h` (the
+  boundary header).
+- Block registration: `block_dispatch.h` + `RegisterBlock` in
+  `evaluator.cpp:1200`.
+- Concrete eval entry: `VerifyRungTx` in `evaluator.cpp:623`.
+
+---
+
+## `types.h` (1,566 lines)
+
+The library's master type registry. Defines `RungBlockType`,
+`RungDataType`, the in-memory `RungBlock` / `Rung` / `LadderWitness`
+structs, and — critically — the **`ImplicitFieldLayout` table** and
+the **`BlockTypeInfo` registry** that together drive the structural
+anti-spam regime.
+
+### Key types
+
+| Symbol                            | Lines | Purpose |
+|-----------------------------------|------:|---------|
+| `enum class RungBlockType`        |    80 | Every block type id. 16-bit enum with explicit hex values (`0x01XX` for sig family, `0x09XX` for legacy, `0x0AXX` for QABIO/PQ_BATCH, etc.). 65 active values. |
+| `enum class RungDataType`         |   176 | Field types: `PUBKEY`, `SIGNATURE`, `NUMERIC`, `HASH256`, `PREIMAGE`, `SCHEME`, `PUBKEY_COMMIT`, `SCRIPT_BODY`, etc. |
+| `enum class RungCoilType`         |   536 | Coil types: `UNLOCK`, `RECURSE_*`. The "output" of a rung. |
+| `enum class RungAttestationMode`  |   542 | Witness attestation modes (INLINE / NONE etc.). |
+| `enum class RungScheme`           |   547 | Signature scheme: `SCHNORR`, `ECDSA`, `FALCON512`, `FALCON1024`, `DILITHIUM3`, `SPHINCS_SHA`. |
+| `struct RungCoil`                 |   601 | Coil = `{type, output_index, scheme, attestation}`. |
+| `struct RungField`                |   611 | One field: `{type, data}`. |
+| `struct RungBlock`                |   621 | One block: `{type, fields[]}`. |
+| `struct Rung`                     |   628 | One rung: `{blocks[], relay_refs[]}`. |
+| `struct Relay`                    |   637 | Reusable pubkey/script reference indexed by `KEY_REF_SIG`. |
+| `struct LadderWitness`            |   717 | Top-level witness: `{rungs[], coil, relays[], commitments[]}`. |
+| `struct ImplicitFieldEntry`       |   846 | One row in a layout: `{type, size}`. |
+| `struct ImplicitFieldLayout`      |   855 | A block's implicit field layout: count + entries. Used to validate field shape without explicit per-block parsers. |
+| `struct BlockTypeInfo`            |  ~1490| Per-type metadata record: name, conditions/witness layouts, flags. |
+
+### The two registry tables
+
+Two compile-time tables drive almost every consensus check:
+
+**`*_CONDITIONS` constants** (lines 866 onward) — one
+`ImplicitFieldLayout` per block type, declaring exactly what fields
+appear in the conditions context. Example:
+
+```cpp
+inline constexpr ImplicitFieldLayout SIG_CONDITIONS = {1, {
+    {RungDataType::PUBKEY, 0}     // size 0 = variable
+}};
+inline constexpr ImplicitFieldLayout HTLC_CONDITIONS = {3, {
+    {RungDataType::PUBKEY, 0},    // sender
+    {RungDataType::PUBKEY, 0},    // receiver
+    {RungDataType::HASH256, 32}   // hashlock
+}};
+```
+
+The deserialiser uses these layouts to validate field count, type, and
+size as it reads — no per-block bespoke parser. Adding a new block
+type means adding one `ImplicitFieldLayout` and registering an
+evaluator; the wire format and anti-spam coverage come for free.
+
+**`BlockTypeInfo` registry** (line ~1490) — the master table mapping
+each `RungBlockType` to its metadata: human-readable name, conditions
+layout, witness layout, and flags (e.g. `is_pq` for blocks that
+require PQ scheme support).
+
+### Invariants
+
+- **Every active block type must have a `*_CONDITIONS` layout.**
+  If a deserialised block doesn't match its layout (wrong count,
+  wrong type, wrong size), the conditions deserialise rejects with
+  `FIELD_*_INVALID`. This is the structural anti-spam: every byte in
+  every field is type-checked.
+- **PQ_BATCH witness layout is `nullptr` (variable-length).** Only
+  exception in the table — the witness for the anchor input has 2
+  fields (PUBKEY + SIGNATURE), the witness for non-anchor inputs has
+  0 fields. The evaluator enforces the 0-or-2 rule. Documented in the
+  `PQ_BATCH_CONDITIONS` comment block (line 1257).
+- **The block-type enum is forward-compatible.** Unknown types
+  deserialise OK (the layout lookup returns nullptr, the evaluator
+  returns `UNKNOWN_BLOCK_TYPE`). Activation by soft fork doesn't
+  break existing wire-format readers.
+
+### Cross-references
+
+- Layouts are consumed by `DeserializeRungConditions` in
+  `conditions.cpp` and by the per-field parsers in `serialize.cpp`.
+- The `BlockTypeInfo` registry is the source of truth for what's
+  "active" — disabling a block (compile-time) removes its
+  `register_*_block()` call, and the registry entry stays but no
+  evaluator backs it. The block becomes UNKNOWN_BLOCK_TYPE in
+  practice.
+
+---
+
+## `conditions.h` (310 lines) and `conditions.cpp` (1,078 lines)
+
+The **conditions_root** is the 32-byte commitment that lives at the
+tx level. This pair of files defines `RungConditions`, the
+in-memory representation, and the Merkle-tree machinery that
+collapses it to a root. They also define `MLSCProof` — the
+spend-time witness companion that proves a particular rung is in
+the committed tree — and `VerifyMLSCProof`, the function that
+checks it.
+
+### Key types and functions
+
+| Symbol                             | File:Line | Purpose |
+|------------------------------------|-----------|---------|
+| `struct RungConditions`            | h:60      | `{rungs[], relays[], commitments[], template_diffs[]}`. The full in-memory condition tree. |
+| `IsRungConditionsScript(span)`     | h:77      | Recogniser for the wire-format conditions byte. |
+| `DeserializeRungConditions(...)`   | h:78      | Parse a span into `RungConditions`. Validates against `*_CONDITIONS` layouts as it goes. |
+| `IsMLSCScript(span)`               | h:109     | True iff `script.size()==33 && script[0]==0xDF`. |
+| `IsLadderScript(span)`             | h:112     | True for any ladder-recognised SPK (MLSC, conditions, compact). |
+| `IsCompactMLSC(span)`              | h:116     | True iff the SPK is the 1-byte 0xDF form (UTXO-compressor compact). |
+| `GetMLSCRoot(span, root_out)`      | h:120     | Extract the 32-byte root from a 33-byte MLSC SPK. |
+| `ComputeRungLeaf(rung, ...)`       | h:141     | One Merkle leaf: tagged-hash of the rung's blocks + output_index. |
+| `ComputeCoilLeaf(coil)`            | h:145     | Coil-specific leaf for the coil position in the tree. |
+| `ComputeRelayLeaf(relay, ...)`     | h:148     | Relay leaf — relays go into the tree alongside rungs. |
+| `BuildMerkleTree(leaves)`          | h:155     | Standard binary Merkle tree. Returns the root. |
+| `VerifyMerklePath(leaf, ...)`      | h:172     | Check that a leaf + path hashes to the claimed root. |
+| `ComputeMerkleRootFromPath(...)`   | h:187     | Inverse: rebuild the root from a leaf + path. |
+| `ComputeConditionsRoot(c, idx)`    | h:193     | The headline function: `RungConditions` → `uint256` for output `idx`. |
+| `enum class MLSCProofMode`         | h:210     | `MERKLE_PATH` (full path) or `LEAF_REVEAL` (relay-only). |
+| `struct MLSCProof`                 | h:236     | The spend-time witness companion. |
+| `DeserializeMLSCProof(...)`        | h:249     | Parse proof bytes from the witness stack. |
+| `VerifyMLSCProof(proof, root, ...)`| h:265     | Check that the asserted rung's leaf hashes to the committed root. Populates `MLSCVerifiedLeaves` for downstream covenant checks. |
+
+### Invariants
+
+- **Output index is mixed into every leaf.** Two outputs of the same
+  tx with otherwise identical rungs produce different leaves (and
+  different roots). This is the structural reason an attacker can't
+  smuggle data by replicating one output across N — see
+  [`feedback_mlsc_witness_coil`](../../../../.claude/projects/-home-defenwycke/memory/feedback_mlsc_witness_coil.md)
+  and the `MLSCWitnessCoil` invariants (per-rung output_index,
+  witness coil = spent_vout, auto-tweak detection).
+- **`ComputeConditionsRoot` is deterministic.** Two callers with the
+  same `RungConditions` and `output_index` always produce the same
+  root. Construction-side (RPC) and verification-side (evaluator)
+  rely on this.
+- **`VerifyMLSCProof` is the single gate** for "this rung is
+  authorised to spend". The block evaluators run after this returns
+  SATISFIED; if the proof fails, no evaluator runs.
+
+### Gotchas
+
+- `MLSCProof` carries the **revealed rung in full**, not just its
+  leaf hash. The verifier needs the rung's blocks to dispatch the
+  evaluators. The Merkle path verifies the rung's leaf hash; the
+  evaluators then run on the revealed rung's blocks.
+- `MLSCProofMode::LEAF_REVEAL` skips the Merkle path verification —
+  used by single-rung descriptors where the entire conditions tree
+  is the revealed rung itself. The proof carries `proof_mode` so the
+  evaluator picks the right code path.
+- `template_diffs` and `commitments` in `RungConditions` are
+  optional sub-tree compression mechanisms for repeated patterns.
+  Empty for most txs.
+- `CreationProofRung` (h:283) and `ComputeTxMLSCRoot` (h:300) are
+  used by the v4 wire-format helpers — historically related to the
+  removed `creation_proof` field, kept around for the few internal
+  callers that still need them.
+
+### Cross-references
+
+- The `*_CONDITIONS` layouts consumed by `DeserializeRungConditions`
+  live in `types.h` (lines 866+).
+- `IsLadderScript` is the recogniser used by Core's policy.cpp
+  (`AreInputsStandard`, `IsWitnessStandard`) to skip MLSC inputs —
+  see [`ANNOTATED_DIFF.md` §6](ANNOTATED_DIFF.md#6-srcpolicypolicycpp-14).
+- `VerifyMLSCProof` is called from `VerifyRungTx`
+  (`evaluator.cpp:623`) before any block evaluator runs.
+
+---
 ## Files awaiting documentation
 
-The remaining 38 files will be filled in following the same template:
-purpose, key functions, invariants, gotchas, cross-references. Order
-of priority for completion:
+Sections complete: `evaluator.cpp`, `api.h`, `types.h`, `conditions.{h,cpp}`.
 
-1. `api.h` — adapter types; gate to understanding everything else.
-2. `types.h` — block-type registry and field layouts.
-3. `conditions.h` / `conditions.cpp` — root computation.
-4. `block_dispatch.h` + `block_helpers.{h,cpp}` — registry plumbing.
-5. `sighash.{h,cpp}` — SIGHASH_LADDER + SIGHASH_QABO domain definitions.
-6. `pq_verify.{h,cpp}` — FALCON / Dilithium / SPHINCS+ wrappers.
-7. `qabi.{h,cpp}` — QABIO state types.
-8. `serialize.{h,cpp}` — wire format read/write.
-9. `descriptor.{h,cpp}` — descriptor parser and formatter.
-10. `policy.{h,cpp}` — `IsStandardRungTx` and structural anti-spam.
-11. `rpc.cpp` — every RPC, in suite order.
-12. `blocks/*.cpp` — one section per family.
-13. `adaptor.{h,cpp}` — adaptor signatures (PTLC).
-14. `write_helpers.h`, `types.cpp`, `CMakeLists.txt` — small files,
-    grouped at the end.
-15. `rung_shims.h` (lives in `src/`, not `src/rung/`) — the boundary.
+Next batches in priority order:
+
+- **Tier 2:** `block_dispatch.h`, `block_helpers.{h,cpp}`, `evaluator.h`, `sighash.{h,cpp}`, `pq_verify.{h,cpp}`
+- **Tier 3:** `qabi.{h,cpp}`, `serialize.{h,cpp}`, `descriptor.{h,cpp}`, `policy.{h,cpp}`, `adaptor.{h,cpp}`
+- **Tier 4:** `blocks/*.cpp` (one section per family — sig, timelock, hash, covenant, recursion, anchor, plc, compound, governance, legacy, qabi)
+- **Tier 5:** `rung_shims.h` (the boundary), `rpc.cpp` (4,432 LOC, organised by suite), `write_helpers.h`, `types.cpp`, `CMakeLists.txt`
