@@ -142,14 +142,10 @@ def verify_block(block_type, cond_fields, desc, keypair, utxos):
         "rungs": rungs,
         "locktime": 0,
     })
-    fund_sign = api("sign", {
-        "hex": fund_create["hex"],
-        "signers": [{"pubkey": pk, "privkey": keypair["privkey"]}],
-        "spent_outputs": [{
-            "amount": utxo["amount"],
-            "scriptPubKey": utxo.get("scriptPubKey", ""),
-        }],
-    })
+    # Funding tx spends a wallet P2WPKH UTXO — route via the wallet path,
+    # not signrungtx. The proxy uses signrawtransactionwithwallet whenever
+    # `signers` + `spent_outputs` are absent.
+    fund_sign = api("sign", {"hex": fund_create["hex"]})
     if not fund_sign.get("complete"):
         raise RuntimeError(f"Fund sign failed: {json.dumps(fund_sign)[:200]}")
 
