@@ -77,6 +77,7 @@ target_link_libraries(bitcoin_rung
     bitcoin_util
     secp256k1
     univalue
+    Boost::headers
     OQS::oqs
 )
 
