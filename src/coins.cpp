@@ -7,6 +7,7 @@
 #include <consensus/consensus.h>
 #include <logging.h>
 #include <random.h>
+#include <rung/conditions.h>  // MLSC_SYNTHETIC_MARKER
 #include <util/trace.h>
 
 TRACEPOINT_SEMAPHORE(utxocache, add);
@@ -128,14 +129,15 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
 
     // TX_MLSC: write a synthetic root entry at (txid, MLSC_ROOT_VOUT).
     // This stores the conditions_root once, enabling UTXO deduplication.
-    // Individual MLSC coins store a 1-byte scriptPubKey (0xDF) via compression;
-    // the root is recovered from this synthetic entry at spend time.
-    // Use prefix 0xDE (not 0xDF) so the compressor doesn't strip the root.
+    // Individual MLSC coins store a 1-byte scriptPubKey (MLSC_MARKER) via
+    // compression; the root is recovered from this synthetic entry at spend
+    // time. The synthetic-root marker is distinct from MLSC_MARKER so the
+    // compressor does not strip the root.
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
         CTxOut root_out;
         root_out.nValue = 0; // sentinel: not a real output, not spendable
         root_out.scriptPubKey.resize(33);
-        root_out.scriptPubKey[0] = 0xDE; // synthetic root marker (NOT 0xDF — avoids compression)
+        root_out.scriptPubKey[0] = rung::MLSC_SYNTHETIC_MARKER;
         memcpy(&root_out.scriptPubKey[1], tx.conditions_root.data(), 32);
         cache.AddCoin(COutPoint(txid, MLSC_ROOT_VOUT), Coin(std::move(root_out), nHeight, false), false);
     }

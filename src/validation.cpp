@@ -1150,13 +1150,26 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
     //
     // QABI RBD: when the replacement is a deeper-depth priming tx, the
     // fee-based feerate comparison does not apply — the depth progression
-    // IS the economic/cryptographic signal.
+    // IS the economic/cryptographic signal. The replacement still has to
+    // clear the relay floor (`incremental_relay_feerate`) so an RBD path
+    // doesn't enable arbitrarily-low-fee mempool churn even with the
+    // depth-gap rule.
     if (!is_rbd_replacement) {
         if (const auto err_string{PaysMoreThanConflicts(ws.m_iters_conflicting, newFeeRate, hash)}) {
             // This fee-related failure is TX_RECONSIDERABLE because validating in a package may change
             // the result.
             return state.Invalid(TxValidationResult::TX_RECONSIDERABLE,
                                  strprintf("insufficient fee%s", ws.m_sibling_eviction ? " (including sibling eviction)" : ""), *err_string);
+        }
+    } else {
+        // RBD floor: replacement must pay at least the incremental relay
+        // feerate. Closes the "owner self-floods at zero fee" path.
+        if (newFeeRate < m_pool.m_opts.incremental_relay_feerate) {
+            return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY,
+                "rbd-below-relay-floor",
+                strprintf("rbd replacement feerate %s below relay floor %s",
+                          newFeeRate.ToString(),
+                          m_pool.m_opts.incremental_relay_feerate.ToString()));
         }
     }
 
@@ -2327,7 +2340,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                         // Look up the synthetic root entry from the UTXO cache
                         const Coin& root_coin = inputs.AccessCoin(COutPoint(source_txid, MLSC_ROOT_VOUT));
                         if (!root_coin.IsSpent() && root_coin.out.scriptPubKey.size() == 33 &&
-                            root_coin.out.scriptPubKey[0] == 0xDE) { // synthetic root marker
+                            root_coin.out.scriptPubKey[0] == rung::MLSC_SYNTHETIC_MARKER) {
                             memcpy(root.data(), &root_coin.out.scriptPubKey[1], 32);
                             root_cache[source_txid] = root;
                         }
@@ -2335,7 +2348,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     if (!root.IsNull()) {
                         // Inflate: replace 1-byte scriptPubKey with full 33-byte form
                         spent_outputs[i].scriptPubKey.clear();
-                        spent_outputs[i].scriptPubKey.push_back(0xDF);
+                        spent_outputs[i].scriptPubKey.push_back(rung::MLSC_MARKER);
                         spent_outputs[i].scriptPubKey.insert(
                             spent_outputs[i].scriptPubKey.end(),
                             root.begin(), root.end());
@@ -2362,9 +2375,14 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
     // PQ_BATCH: per-tx cache so non-anchor PQ_BATCH inputs can validate
     // from the anchor's verification result. See rung::PQBatchCache comment.
     std::shared_ptr<ThreadSafePQBatchCache> pq_batch_cache;
+    // QABIO: per-tx FALCON sig verify cache. All primed inputs of a QABIO tx
+    // share the same (sighash, sig, pubkey), so the verify only needs to run
+    // once. Snapshot/merge handled inside CScriptCheck::operator().
+    std::shared_ptr<ThreadSafeQABOSigCache> qabo_sig_cache;
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
         shared_tree_cache = std::make_shared<ThreadSafeSharedTreeCache>();
         pq_batch_cache = std::make_shared<ThreadSafePQBatchCache>();
+        qabo_sig_cache = std::make_shared<ThreadSafeQABOSigCache>();
 
         // Tx-level rung consensus checks. These run for EVERY v4 tx,
         // regardless of whether its inputs are MLSC or standard (P2WPKH/P2TR).
@@ -2393,7 +2411,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // spent being checked as a part of CScriptCheck.
 
         // Verify signature
-        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height, shared_tree_cache, /*qabo_sig_cache=*/nullptr, pq_batch_cache);
+        CScriptCheck check(txdata.m_spent_outputs[i], tx, validation_cache.m_signature_cache, i, flags, cacheSigStore, &txdata, block_height, shared_tree_cache, qabo_sig_cache, pq_batch_cache);
         if (pvChecks) {
             pvChecks->emplace_back(std::move(check));
         } else if (auto result = check(); result.has_value()) {

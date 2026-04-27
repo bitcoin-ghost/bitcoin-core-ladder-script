@@ -7,22 +7,28 @@
 
 #include <logging.h>
 
-#ifdef HAVE_LIBOQS
-#include <oqs/oqs.h>
+#ifndef HAVE_LIBOQS
+#error \
+    "Ladder Script consensus requires liboqs. Building without it would " \
+    "produce a binary that silently disagrees with liboqs-enabled nodes " \
+    "on every PQ signature, splitting the network. Set HAVE_LIBOQS via " \
+    "find_package(liboqs REQUIRED) (see src/rung/CMakeLists.txt) and " \
+    "rebuild."
 #endif
+
+#include <oqs/oqs.h>
 
 namespace rung {
 
 bool HasPQSupport()
 {
-#ifdef HAVE_LIBOQS
+    // Compile-time guaranteed by the #error above. The runtime function
+    // is kept as a stable ABI surface for code that wants to advertise
+    // PQ support to RPC / tooling, but in this build it always returns
+    // true — a binary without liboqs cannot exist.
     return true;
-#else
-    return false;
-#endif
 }
 
-#ifdef HAVE_LIBOQS
 static const char* SchemeToAlgName(RungScheme scheme)
 {
     switch (scheme) {
@@ -33,14 +39,12 @@ static const char* SchemeToAlgName(RungScheme scheme)
     default: return nullptr;
     }
 }
-#endif
 
 bool VerifyPQSignature(RungScheme scheme,
                        std::span<const uint8_t> sig,
                        std::span<const uint8_t> msg,
                        std::span<const uint8_t> pubkey)
 {
-#ifdef HAVE_LIBOQS
     const char* alg_name = SchemeToAlgName(scheme);
     if (!alg_name) return false;
 
@@ -50,16 +54,29 @@ bool VerifyPQSignature(RungScheme scheme,
         return false;
     }
 
-    // Validate key and signature sizes match the scheme before calling OQS
+    // Validate key and signature sizes match the scheme before calling OQS.
     if (pubkey.size() != oqs_sig->length_public_key) {
         LogPrintf("PQ: pubkey size mismatch for %s: got %zu, expected %zu\n",
                   alg_name, pubkey.size(), oqs_sig->length_public_key);
         OQS_SIG_free(oqs_sig);
         return false;
     }
-    if (sig.size() > oqs_sig->length_signature) {
-        LogPrintf("PQ: signature too large for %s: got %zu, max %zu\n",
-                  alg_name, sig.size(), oqs_sig->length_signature);
+
+    // FALCON signatures are variable-length up to length_signature.
+    // Dilithium and SPHINCS+ are fixed-length — accept only the exact size.
+    // This prevents under-sized payloads from reaching OQS_SIG_verify, where
+    // different liboqs versions might handle them inconsistently and produce
+    // a consensus split.
+    const bool is_variable_length =
+        (scheme == RungScheme::FALCON512 || scheme == RungScheme::FALCON1024);
+    const bool sig_size_ok = is_variable_length
+        ? (sig.size() > 0 && sig.size() <= oqs_sig->length_signature)
+        : (sig.size() == oqs_sig->length_signature);
+    if (!sig_size_ok) {
+        LogPrintf("PQ: signature size invalid for %s: got %zu, expected %s%zu\n",
+                  alg_name, sig.size(),
+                  is_variable_length ? "<=" : "==",
+                  oqs_sig->length_signature);
         OQS_SIG_free(oqs_sig);
         return false;
     }
@@ -68,14 +85,6 @@ bool VerifyPQSignature(RungScheme scheme,
                                          sig.data(), sig.size(), pubkey.data());
     OQS_SIG_free(oqs_sig);
     return (result == OQS_SUCCESS);
-#else
-    (void)scheme;
-    (void)sig;
-    (void)msg;
-    (void)pubkey;
-    LogPrintf("PQ: Post-quantum signature verification unavailable (liboqs not compiled in)\n");
-    return false;
-#endif
 }
 
 bool SignPQ(RungScheme scheme,
@@ -83,13 +92,23 @@ bool SignPQ(RungScheme scheme,
             std::span<const uint8_t> msg,
             std::vector<uint8_t>& sig_out)
 {
-#ifdef HAVE_LIBOQS
     const char* alg_name = SchemeToAlgName(scheme);
     if (!alg_name) return false;
 
     OQS_SIG* oqs_sig = OQS_SIG_new(alg_name);
     if (!oqs_sig) {
         LogPrintf("PQ: Failed to initialize algorithm %s for signing\n", alg_name);
+        return false;
+    }
+
+    // Validate the privkey is the right size for the scheme — OQS_SIG_sign
+    // reads exactly `length_secret_key` bytes from `privkey.data()` and a
+    // short buffer would read OOB. RPC callers can submit arbitrary blobs;
+    // do not trust the length.
+    if (privkey.size() != oqs_sig->length_secret_key) {
+        LogPrintf("PQ: privkey size mismatch for %s: got %zu, expected %zu\n",
+                  alg_name, privkey.size(), oqs_sig->length_secret_key);
+        OQS_SIG_free(oqs_sig);
         return false;
     }
 
@@ -103,21 +122,12 @@ bool SignPQ(RungScheme scheme,
     if (result != OQS_SUCCESS) return false;
     sig_out.resize(sig_len);
     return true;
-#else
-    (void)scheme;
-    (void)privkey;
-    (void)msg;
-    (void)sig_out;
-    LogPrintf("PQ: Post-quantum signing unavailable (liboqs not compiled in)\n");
-    return false;
-#endif
 }
 
 bool GeneratePQKeypair(RungScheme scheme,
                        std::vector<uint8_t>& pubkey_out,
                        std::vector<uint8_t>& privkey_out)
 {
-#ifdef HAVE_LIBOQS
     const char* alg_name = SchemeToAlgName(scheme);
     if (!alg_name) return false;
 
@@ -134,13 +144,6 @@ bool GeneratePQKeypair(RungScheme scheme,
     OQS_SIG_free(oqs_sig);
 
     return (result == OQS_SUCCESS);
-#else
-    (void)scheme;
-    (void)pubkey_out;
-    (void)privkey_out;
-    LogPrintf("PQ: Post-quantum keygen unavailable (liboqs not compiled in)\n");
-    return false;
-#endif
 }
 
 } // namespace rung

@@ -6,14 +6,27 @@
 #ifndef BITCOIN_RUNG_QABI_H
 #define BITCOIN_RUNG_QABI_H
 
-// QABIO (BIP-YYYY) is a separable soft-fork extension to Ladder Script.
-// All types and functions declared in this header are gated on the
-// ENABLE_QABIO compile-time flag. When the flag is off, this header
-// expands to an empty translation unit and any caller that tries to
-// reference a QABIO symbol is caught by the compiler. Every QABIO call
-// site in the rest of the codebase must therefore be wrapped in its
-// own `#ifdef ENABLE_QABIO` guard. See src/rung/CMakeLists.txt for the
-// option definition.
+// QABIO (BIP-YYYY) is a Ladder Script consensus surface. Building
+// without ENABLE_QABIO would produce a binary that rejects every
+// QABIO transaction (returns UNSATISFIED) while the rest of the
+// network accepts them — a hard chain split. The flag must be ON
+// in any deployable binary; the conditional compilation below
+// preserves the single-point-of-control benefit without permitting
+// a real disabled build.
+//
+// To intentionally produce a stripped binary for BIP-review or
+// host-side tooling that does not need QABIO, define
+// LADDER_BUILD_QABIO_DISABLED_FOR_REVIEW=1 explicitly. That flag
+// is not exposed in CMakeLists by design — it requires a manual
+// override and operators must accept the consensus-divergence risk.
+#if !defined(ENABLE_QABIO) && !defined(LADDER_BUILD_QABIO_DISABLED_FOR_REVIEW)
+#error \
+    "Ladder Script consensus requires ENABLE_QABIO. Building without " \
+    "it produces a binary that disagrees with the activated network " \
+    "on every QABIO transaction. See src/rung/CMakeLists.txt for the " \
+    "option definition."
+#endif
+
 #ifdef ENABLE_QABIO
 
 #include <hash.h>

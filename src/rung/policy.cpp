@@ -184,20 +184,25 @@ static bool PolicyReadNumeric(const RungField& f, int64_t& out)
 
 /** Scan a LadderWitness for the first QABI_PRIME block and return its
  *  prime_depth. Returns false if no QABI_PRIME block is present or the
- *  prime_depth field is missing/malformed. */
+ *  prime_depth field is missing/malformed.
+ *
+ *  QABI_PRIME's witness has exactly four fields, in order:
+ *    [0] HASH256   new_committed_root
+ *    [1] NUMERIC   prime_depth        ← what we want
+ *    [2] NUMERIC   new_committed_expiry
+ *    [3] PREIMAGE  prime_preimage
+ *  See `EvalQABIPrimeBlock` in src/rung/blocks/qabi.cpp for the
+ *  consensus-side schema. Index by position so a future field-order
+ *  change at the consensus layer surfaces here as a wrong-type
+ *  assertion rather than silently reading the wrong NUMERIC. */
 static bool FindPrimeDepthInLadder(const LadderWitness& ladder, int64_t& depth_out)
 {
     for (const auto& rung : ladder.rungs) {
         for (const auto& block : rung.blocks) {
             if (block.type != RungBlockType::QABI_PRIME) continue;
-
-            // The first NUMERIC field in QABI_PRIME's witness is prime_depth.
-            for (const auto& f : block.fields) {
-                if (f.type == RungDataType::NUMERIC) {
-                    return PolicyReadNumeric(f, depth_out);
-                }
-            }
-            return false;
+            if (block.fields.size() != 4) return false;
+            if (block.fields[1].type != RungDataType::NUMERIC) return false;
+            return PolicyReadNumeric(block.fields[1], depth_out);
         }
     }
     return false;
@@ -285,7 +290,10 @@ bool IsValidRBDReplacement(const LadderTxView& new_tx,
     }
 
     // For every QABI_PRIME input in new_tx that shares a prevout with old_tx,
-    // require new_tx.depth > old_tx.depth.
+    // require new_tx.depth ≥ old_tx.depth + MIN_RBD_DEPTH_GAP. The gap
+    // prevents the legitimate owner from free-flooding the mempool with
+    // depth+1, depth+2, ... replacements: each RBD step now requires
+    // committing a meaningful jump in the auth chain.
     bool found_shared = false;
     for (uint32_t i = 0; i < new_tx.input_count; ++i) {
         int64_t new_depth;
@@ -295,8 +303,8 @@ bool IsValidRBDReplacement(const LadderTxView& new_tx,
         if (it == old_primes.end()) continue;
 
         found_shared = true;
-        if (new_depth <= it->second.depth) {
-            reason = "rbd-depth-not-deeper";
+        if (new_depth < it->second.depth + MIN_RBD_DEPTH_GAP) {
+            reason = "rbd-depth-gap-too-small";
             return false;
         }
     }

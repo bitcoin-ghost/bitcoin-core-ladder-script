@@ -102,6 +102,20 @@ inline bool IsConditionFieldType(RungDataType type) { return IsConditionDataType
 // MLSC (Merkelized Ladder Script Conditions)
 // ============================================================================
 
+/** MLSC scriptPubKey marker: full or compact MLSC outputs all start with this
+ *  byte. (`0xDF` was chosen to be in the upper-half of the byte space, well
+ *  away from any existing OP_* opcode.) */
+inline constexpr uint8_t MLSC_MARKER = 0xDF;
+
+/** Synthetic-root coin marker: per-tx synthetic UTXO entries at
+ *  `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)` carry the 32-byte conditions_root
+ *  prefixed with this byte. Distinct from `MLSC_MARKER` (`0xDF`) so the
+ *  standard UTXO compressor does not strip the root from the synthetic
+ *  entry. Defined in one place so any divergence between the writer
+ *  (`coins.cpp`) and the reader (`validation.cpp`) is a compile-time
+ *  collision rather than a silent runtime drift. */
+inline constexpr uint8_t MLSC_SYNTHETIC_MARKER = 0xDE;
+
 namespace api {
 
 /** Check if scriptPubKey is an MLSC output (0xDF prefix).

@@ -50,6 +50,13 @@ bool IsStandardRungTx(const LadderTxView& tx, std::string& reason);
  *  separate wiring step.
  */
 
+/** Minimum prime_depth gap for an RBD replacement. The legitimate UTXO
+ *  owner can produce arbitrarily deep preimages and could otherwise
+ *  flood the mempool with `depth+1, depth+2, depth+3, …` replacements
+ *  at zero fee cost. Requiring a 5-step gap forces the owner to either
+ *  pay the regular RBF rule or commit a meaningful depth jump. */
+inline constexpr int64_t MIN_RBD_DEPTH_GAP = 5;
+
 // QABIO (BIP-YYYY) Replace-By-Depth mempool policy helpers. These
 // signatures are always visible so validation.cpp callers don't need
 // conditional compilation — when ENABLE_QABIO is off, IsQABIPrimingTx
