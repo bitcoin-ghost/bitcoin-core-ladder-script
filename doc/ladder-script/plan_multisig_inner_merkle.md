@@ -116,26 +116,35 @@ Comparable to current MULTISIG.
 
 ### Limits
 
-- `MAX_PUBKEYS_PER_MULTISIG = 1024` — bounds the inner Merkle tree to 10
-  levels, MERKLE_PROOF to ≤320 bytes per signing position. Replaces
-  the implicit cap that came from `MAX_FIELDS_PER_BLOCK = 16`.
+- `MAX_PUBKEYS_PER_MULTISIG = 16` — bounds the inner Merkle tree to
+  4 levels, MERKLE_PROOF to ≤128 bytes per signing position. Matches
+  the existing `MAX_FIELDS_PER_BLOCK = 16` for consistency. Covers
+  every realistic K-of-N use case (the largest ever shipped in
+  Bitcoin land is ~11-of-15 federation multisigs); a future block-
+  type extension can lift the cap if needed.
 - `MIN_THRESHOLD = 1`, `MAX_THRESHOLD = MAX_PUBKEYS_PER_MULTISIG`.
 
 ### Wire-format size table
 
-| K-of-N    | Old conditions | New conditions | Old witness | New witness | Δ witness |
-|----------:|---------------:|---------------:|------------:|------------:|----------:|
-| 1-of-1    |   1 + 32 = 33 B |   1 + 32 = 33 B |    33 + 64 = 97 B  |    33 + 0 + 64 = 97 B    |   0 |
-| 2-of-3    |   1 + 96 = 97 B |   1 + 32 = 33 B |   96 + 128 = 224 B |  2×(33 + 32 + 64) = 258 B | +34 |
-| 3-of-5    |   1 + 160 = 161 B |   1 + 32 = 33 B |  160 + 192 = 352 B |  3×(33 + 96 + 64) = 579 B | +227 |
-| 7-of-11   |   1 + 352 = 353 B |   1 + 32 = 33 B |  352 + 448 = 800 B |  7×(33 + 128 + 64) = 1575 B | +775 |
-| 1-of-1024 |     would not fit |   1 + 32 = 33 B |          n/a       | 1×(33 + 320 + 64) = 417 B  |  n/a |
+Tree depth `d = ⌈log₂(N)⌉` (rounded up because the leaf layer pads to
+the next power of two with `MLSC_EMPTY_LEAF`). MERKLE_PROOF size per
+signer = `1 + 32 × d` bytes (1 CompactSize byte for depth + the
+sibling hashes).
+
+| K-of-N    | Tree depth | Old conditions | New conditions | Old witness | New witness | Δ witness |
+|----------:|-----------:|---------------:|---------------:|------------:|------------:|----------:|
+| 1-of-1    | 0 | 1 + 32 = 33 B |   1 + 32 = 33 B |    33 + 64 = 97 B  |   33 + 1 + 64 = 98 B     |   +1 |
+| 2-of-3    | 2 | 1 + 96 = 97 B |   1 + 32 = 33 B |   96 + 128 = 224 B |  2×(33 + 65 + 64) = 324 B | +100 |
+| 3-of-5    | 3 | 1 + 160 = 161 B | 1 + 32 = 33 B |  160 + 192 = 352 B |  3×(33 + 97 + 64) = 582 B | +230 |
+| 7-of-11   | 4 | 1 + 352 = 353 B | 1 + 32 = 33 B |  352 + 448 = 800 B |  7×(33 + 129 + 64) = 1582 B | +782 |
+| 11-of-15  | 4 | 1 + 480 = 481 B | 1 + 32 = 33 B | 480 + 704 = 1184 B | 11×(33 + 129 + 64) = 2486 B | +1302 |
+| 8-of-16   | 4 | 1 + 512 = 513 B | 1 + 32 = 33 B | 512 + 512 = 1024 B |  8×(33 + 129 + 64) = 1808 B | +784 |
+| 16-of-16  | 4 | 1 + 512 = 513 B | 1 + 32 = 33 B | 512 + 1024 = 1536 B | 16×(33 + 129 + 64) = 3616 B | +2080 |
 
 Conditions size strictly drops (always 33 B vs O(N)). Witness size
 grows for K > 1 because each signing position carries a Merkle proof.
-The growth is sublinear in N (`log N` per signer). The 1-of-1024 column
-illustrates that the new format unlocks set sizes the old format
-couldn't represent.
+The growth is sublinear in N (`log N` per signer). All cases stay
+well under `MAX_LADDER_WITNESS_SIZE = 100,000 B`.
 
 ---
 
@@ -146,7 +155,7 @@ existing test suite passing.
 
 ### Step 1: deserialiser + constants  (smallest possible PR)
 
-`src/rung/serialize.h`: add `MAX_PUBKEYS_PER_MULTISIG = 1024`.
+`src/rung/serialize.h`: add `MAX_PUBKEYS_PER_MULTISIG = 16`.
 `src/rung/serialize.cpp`: extend the MULTISIG conditions parser to
 accept the new shape (NUMERIC + HASH256), reject the legacy shape
 (NUMERIC + N×PUBKEY) with a clear error.
@@ -163,11 +172,11 @@ parse paths and the helpers' round-trip. ~80 LOC of test code.
 `src/rung/types.h`: add `RungDataType::MERKLE_PROOF = 0x0C` (next
 unused). Wire encoding: CompactSize depth, then `depth × 32` sibling
 bytes.
-`src/rung/serialize.cpp`: add deserialiser + cap (depth ≤ 10).
+`src/rung/serialize.cpp`: add deserialiser + cap (depth ≤ 4).
 `src/rung/conditions.cpp`: mark MERKLE_PROOF as witness-only in
 `IsConditionDataType`.
 
-Tests: round-trip per depth 0..10, oversize rejection. ~40 LOC.
+Tests: round-trip per depth 0..4, oversize rejection. ~40 LOC.
 
 ### Step 3: evaluator rewrite
 
@@ -189,7 +198,7 @@ conditions field shape. At spend time it generates K Merkle inclusion
 proofs and signs each.
 
 Tests: `signrungtx` test cases covering fund-then-spend round trip with
-K=1, 2, 3, K=N, varying N up to 1024. Adds ~150 LOC.
+K=1, 2, 3, K=N, varying N up to 16. Adds ~150 LOC.
 
 ### Step 5: descriptor parser
 
@@ -285,12 +294,13 @@ under a `multisig_inner_merkle` suite. Each case takes < 50 LOC.
 | `multisig_v2_round_trip_2of3_other_pair` | 2-of-3 with a different pair signing |
 | `multisig_v2_round_trip_3of5` | 3-of-5 (the user's "lost-friend" scenario) |
 | `multisig_v2_round_trip_kn_full` | K=N=11 (all-sign), regression for full multisig |
-| `multisig_v2_round_trip_large_n` | 5-of-1024, exercises depth-10 proofs |
+| `multisig_v2_round_trip_max_n` | K=8, N=16 (the cap), exercises depth-4 proofs |
 | `multisig_v2_reject_proof_tamper` | flip one sibling byte → UNSATISFIED |
 | `multisig_v2_reject_pubkey_not_in_set` | reveal a pubkey not in the original N → UNSATISFIED |
 | `multisig_v2_reject_duplicate_pubkey` | reveal the same pubkey twice in K → ERROR |
 | `multisig_v2_reject_too_many_groups` | reveal K+1 groups → ERROR |
-| `multisig_v2_reject_oversize_proof` | proof depth > 10 → ERROR at deserialise |
+| `multisig_v2_reject_oversize_proof` | proof depth > 4 → ERROR at deserialise |
+| `multisig_v2_reject_oversize_n` | conditions claim N > 16 → ERROR at deserialise |
 | `multisig_v2_pq_falcon` | K=2, N=3 with FALCON-512 keys |
 | `multisig_v2_pq_dilithium` | K=2, N=3 with Dilithium3 keys |
 | `multisig_v2_legacy_format_rejected` | old (NUMERIC + N×PUBKEY) parse → deserialiser ERROR |
@@ -350,9 +360,10 @@ For the live signet:
   that asserts the root matches a hand-computed expected value.
 
 - **Spend-side bandwidth growth.** A 3-of-5 spend grows from ~352 B
-  witness to ~580 B. A 7-of-11 grows from ~800 B to ~1,575 B.
-  Document in the BIP rationale; this is the price of closing the
-  embedding hole.
+  witness to ~582 B. A 7-of-11 grows from ~800 B to ~1,582 B. The
+  worst case at the cap (16-of-16) is ~3,616 B — comfortably under
+  `MAX_LADDER_WITNESS_SIZE = 100,000 B`. Document in the BIP
+  rationale; this is the price of closing the embedding hole.
 
 - **Wallet UX.** A wallet authorising a 3-of-5 spend now needs the
   inner Merkle inclusion proofs at spend time, which means it needs
