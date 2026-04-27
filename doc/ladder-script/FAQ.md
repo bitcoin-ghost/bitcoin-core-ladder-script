@@ -561,7 +561,7 @@ block = sig(@alias)                   -- Schnorr signature (default)
       | sig(@alias, scheme)           -- signature with explicit scheme
       | csv(N) | csv_time(N)          -- relative timelocks
       | cltv(N) | cltv_time(N)        -- absolute timelocks
-      | multisig(M, @pk1, @pk2, ...)  -- M-of-N threshold
+      | multisig(K, @pk1, @pk2, ...)  -- K-of-N threshold (inner-Merkle commit)
       | hash_guarded(hex)             -- SHA256 preimage check
       | tagged_hash(hex1, hex2)       -- tagged hash verification
       | ctv(hex)                      -- CTV template hash

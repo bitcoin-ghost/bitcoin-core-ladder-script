@@ -84,11 +84,13 @@ ladder(or(
 
 ```
 Ladder:
-  Rung 0: (hot path: 2-of-3 multisig)
+  Rung 0: (hot path: 2-of-3 multisig, v2 inner-Merkle)
     Block 0: MULTISIG
-      Conditions fields: [NUMERIC(2), SCHEME(0x01)] -- threshold M=2, Schnorr
-      Witness fields:    [PUBKEY(32), PUBKEY(32), PUBKEY(32),
-                          SIGNATURE(64), SIGNATURE(64)]
+      Conditions fields: [NUMERIC(2), SCHEME(0x01), HASH256(pubkey_root, 32)]
+                         -- K=2, Schnorr, pubkey_root commits the 3-pubkey set
+      Witness fields:    K=2 triplets of (PUBKEY, MERKLE_PROOF, SIGNATURE)
+                         -- the third pubkey is never on chain, only its
+                         contribution to pubkey_root is
   Rung 1: (recovery path: timelocked single sig)
     Block 0: TIMELOCKED_SIG
       Conditions fields: [SCHEME(0x01), NUMERIC(26280)]
@@ -99,12 +101,13 @@ Ladder:
 ### Evaluation (Rung 0 path)
 
 1. `EvalMultisigBlock` is called.
-2. Reads NUMERIC threshold field: M=2.
-3. Finds 3 PUBKEY fields and 2 SIGNATURE fields in the merged block.
-4. For each signature, iterates over unused pubkeys.
-5. Schnorr verification: 64-byte sig against 32-byte x-only pubkey.
-6. Tracks `pubkey_used` bitmask to ensure each pubkey is used at most once.
-7. If `valid_count >= 2`, returns SATISFIED.
+2. Reads `NUMERIC(K=2)` and `HASH256(pubkey_root)` from conditions.
+3. Witness must contain exactly `3K = 6` fields in repeating
+   `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplet order.
+4. For each triplet: verify the MERKLE_PROOF binds the revealed PUBKEY to
+   `pubkey_root`, then verify the SIGNATURE under that PUBKEY.
+5. Reject if any pubkey is revealed twice (no double-counting).
+6. All K verified, all distinct → SATISFIED.
 
 ### Evaluation (Rung 1 path)
 
@@ -117,8 +120,11 @@ Ladder:
 
 **MLSC proof**: ~42 bytes (reveal rung 0, provide rung 1 leaf hash)
 
-**Witness**: n_rungs(1) + n_blocks(1) + MULTISIG micro-header(1) + NUMERIC(1+1)
-+ 3xPUBKEY(3x33) + 2xSIGNATURE(2x65) + coil(6) = ~240 bytes
+**Witness**: n_rungs(1) + n_blocks(1) + MULTISIG escape header(3) + n_fields(1)
++ 2 × (PUBKEY(33+1) + MERKLE_PROOF(64+1) + SIGNATURE(64+1)) + coil(6)
+= ~340 bytes (depth-2 inner tree, each proof carries 1 sibling × 32 B,
+plus length prefixes). Conditions side stays constant ~38 B regardless of N
+because the pubkey set is committed via the 32-byte HASH256 root.
 
 ---
 

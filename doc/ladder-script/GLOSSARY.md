@@ -273,6 +273,10 @@ pubkeys each key-consuming block contributes. `ComputeRungLeaf()` appends pubkey
 serialized rung data before hashing. This prevents arbitrary data embedding through the
 PUBKEY_COMMIT writable surface.
 
+`MULTISIG` and `TIMELOCKED_MULTISIG` use a different mechanism (inner pubkey-Merkle root
+in conditions, see `BuildPubkeyMerkleRoot`); their `PubkeyCountForBlock` returns 0 and
+the outer leaf does not append their pubkeys directly.
+
 ### Micro-header
 A 1-byte encoding for common block types, replacing the 2-byte type code + inversion flag.
 Values 0x00 through 0x7F index into `MICRO_HEADER_TABLE[]` (128 slots, 62 active across
@@ -304,9 +308,13 @@ verified root, rung index, and counts. Used by covenant evaluators to mutate a l
 rebuild the Merkle tree, and compare against the output root.
 
 ### MULTISIG
-Block type 0x0002 (Signature family). M-of-N threshold signature. Key-consuming with
-variable pubkey count (counted from PUBKEY fields). Conditions: NUMERIC(threshold_M).
-Not invertible.
+Block type 0x0002 (Signature family). K-of-N threshold signature (v2, inner-Merkle).
+Conditions: `NUMERIC(K), SCHEME, HASH256(pubkey_root)`. The N pubkeys are committed
+via an inner Merkle root (tagged-hash domains `LadderMultisigPubkey/v1` /
+`LadderMultisigInternal/v1`); `MAX_PUBKEYS_PER_MULTISIG = 16`, depth ≤ 4. Witness
+carries exactly K `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets (`MAX_MULTISIG_WITNESS_FIELDS = 48`).
+Not invertible. Closes the K<N data-embedding bypass that the legacy inline-pubkey
+shape exposed.
 
 ### MUSIG_THRESHOLD
 Block type 0x0004 (Signature family). MuSig2/FROST aggregate threshold signature.
@@ -606,8 +614,10 @@ Block type 0x0203 (Hash family). BIP-340 tagged hash verification. Conditions:
 HASH256(tag_hash), HASH256(content_hash). Witness adds PREIMAGE. Invertible.
 
 ### TIMELOCKED_MULTISIG
-Block type 0x0706 (Compound family). MULTISIG + CSV combined. Key-consuming with variable
-pubkey count. Conditions: NUMERIC(threshold_M), NUMERIC(csv). Not invertible.
+Block type 0x0706 (Compound family). MULTISIG v2 + CSV combined. Conditions:
+`NUMERIC(K), NUMERIC(csv), SCHEME, HASH256(pubkey_root)`. Same inner-Merkle pubkey
+commitment as MULTISIG; spend reveals K `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets
+**and** the CSV must elapse. Not invertible.
 
 ### TIMELOCKED_SIG
 Block type 0x0701 (Compound family). SIG + CSV combined. Key-consuming with 1 pubkey.

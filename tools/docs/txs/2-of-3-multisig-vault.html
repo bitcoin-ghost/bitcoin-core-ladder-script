@@ -247,15 +247,15 @@
   <div class="eval-box">
     <div class="eval-step">
       <div class="eval-step-num">1.</div>
-      <div class="eval-step-text">Funding transaction creates three outputs. Vout 0 carries <span class="eval-keyword">rung_conditions</span> with a single MULTISIG block: NUMERIC threshold = 2, three PUBKEY_COMMITs, and SCHEME = SCHNORR.</div>
+      <div class="eval-step-text">Funding transaction creates three outputs. Vout 0 carries <span class="eval-keyword">rung_conditions</span> with a single MULTISIG v2 block: <code>NUMERIC(K=2)</code>, <code>SCHEME=SCHNORR</code>, and <code>HASH256(pubkey_root)</code> &mdash; the inner Merkle root over the 3 pubkey set. The pubkeys themselves are not on chain; only the 32-byte root.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">2.</div>
-      <div class="eval-step-text">To spend, 2 of the 3 keyholders construct a transaction. The ladder witness contains paired PUBKEY + SIGNATURE fields for each signer.</div>
+      <div class="eval-step-text">To spend, 2 of the 3 keyholders construct the witness as exactly K=2 triplets of <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code>. The third key never appears on chain.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">3.</div>
-      <div class="eval-step-text">The evaluator reads the threshold (2) from the conditions, then validates each pubkey against the PUBKEY_COMMITs and each signature against the Ladder sighash. 2 valid signatures from distinct committed keys &ge; threshold. <span class="eval-result-sat">SATISFIED</span>.</div>
+      <div class="eval-step-text">The evaluator reads K and pubkey_root from conditions, then for each triplet verifies the MERKLE_PROOF binds the revealed PUBKEY to pubkey_root and the SIGNATURE verifies under that PUBKEY. 2 distinct, valid signers &ge; K. <span class="eval-result-sat">SATISFIED</span>.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">4.</div>
@@ -272,7 +272,7 @@
       <tr><th>Approach</th><th>Threshold</th><th>Key Privacy</th><th>On-chain Cost</th></tr>
     </thead>
     <tbody>
-      <tr style="background: rgba(168, 85, 247, 0.04);"><td class="field-name" style="color: #a855f7;">Ladder MULTISIG</td><td>M-of-N, single block</td><td>PUBKEY_COMMIT (32B each)</td><td>~310 vB fund, ~160 vB spend</td></tr>
+      <tr style="background: rgba(168, 85, 247, 0.04);"><td class="field-name" style="color: #a855f7;">Ladder MULTISIG v2</td><td>K-of-N, single block</td><td>32-byte inner-Merkle root (N-set hidden)</td><td>~38 B conditions, ~330 B 2-of-3 spend</td></tr>
       <tr><td class="field-name">P2SH Multisig</td><td>OP_CHECKMULTISIG</td><td>Keys in redeemScript</td><td>~370 vB spend</td></tr>
       <tr><td class="field-name">Taproot MuSig2</td><td>N-of-N key path</td><td>Single aggregate key</td><td>~111 vB spend</td></tr>
     </tbody>

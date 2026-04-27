@@ -57,7 +57,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0706 &middot; COMPOUND FAMILY</div>
   <h1 class="block-title">TIMELOCKED_MULTISIG</h1>
-  <p class="block-subtitle">M-of-N threshold signature verification combined with a relative timelock (CSV) in a single block. Collapses the common MULTISIG + CSV two-block pattern for time-delayed multi-party authorization.</p>
+  <p class="block-subtitle">K-of-N threshold (v2) plus relative timelock (CSV) in one block. The N pubkeys are committed via an inner Merkle root in conditions; at spend time the witness reveals K signers as <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> triplets <em>and</em> the CSV must elapse. Unrevealed slots cost no on-chain bytes.</p>
   <span class="block-family-badge badge-compound">Compound</span>
   <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
@@ -79,7 +79,7 @@
       <text x="300" y="38" text-anchor="middle" fill="#333333" font-family="Share Tech Mono" font-size="11" letter-spacing="2">TIMELOCKED_MULTISIG</text>
       <!-- Internal components -->
       <rect x="120" y="48" width="130" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
-      <text x="185" y="66" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="10" font-weight="600">M-of-N SIG</text>
+      <text x="185" y="66" text-anchor="middle" fill="#e74c3c" font-family="IBM Plex Mono" font-size="10" font-weight="600">K-of-N SIG</text>
       <text x="260" y="66" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="12">+</text>
       <rect x="270" y="48" width="100" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
       <text x="320" y="66" text-anchor="middle" fill="#e67e22" font-family="IBM Plex Mono" font-size="10" font-weight="600">CSV CHECK</text>
@@ -87,7 +87,7 @@
       <rect x="390" y="48" width="90" height="28" rx="2" fill="#333333" stroke="#dddddd"/>
       <text x="435" y="66" text-anchor="middle" fill="#2980b9" font-family="IBM Plex Mono" font-size="10" font-weight="600">SCHEME</text>
       <!-- Annotation -->
-      <text x="300" y="125" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">M-of-N threshold + timelock: all checks must pass</text>
+      <text x="300" y="125" text-anchor="middle" fill="#999999" font-family="IBM Plex Mono" font-size="9">K-of-N inner-Merkle threshold + timelock: all checks must pass</text>
     </svg>
   </div>
 </div>
@@ -101,11 +101,11 @@
     </thead>
     <tbody>
       <tr>
-        <td class="field-name">threshold</td>
+        <td class="field-name">threshold (K)</td>
         <td class="field-type">NUMERIC</td>
-        <td class="field-size">1-4 B</td>
+        <td class="field-size">1 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Required number of valid signatures (M)</td>
+        <td class="field-desc">Required number of valid signatures (K, 1 &le; K &le; 16)</td>
       </tr>
       <tr>
         <td class="field-name">timelock</td>
@@ -119,25 +119,39 @@
         <td class="field-type">SCHEME</td>
         <td class="field-size">1 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Signature scheme selector (Schnorr, ECDSA, or PQ)</td>
+        <td class="field-desc">Signature scheme shared by all signers (Schnorr, ECDSA, FALCON-512, &hellip;)</td>
       </tr>
       <tr>
-        <td class="field-name">pubkey[0..N]</td>
+        <td class="field-name">pubkey_root</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Inner Merkle root over the N pubkey set (tagged-hash domain <code>LadderMultisigPubkey/v1</code>)</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey[i]</td>
         <td class="field-type">PUBKEY</td>
-        <td class="field-size">32-33 B each</td>
+        <td class="field-size">32-33 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">N public keys (each verified against Merkle leaf via merkle_pub_key)</td>
+        <td class="field-desc">Position i of K signer triplets &mdash; revealed pubkey</td>
       </tr>
       <tr>
-        <td class="field-name">signature[0..M]</td>
-        <td class="field-type">SIGNATURE</td>
-        <td class="field-size">64-65 B each</td>
+        <td class="field-name">merkle_proof[i]</td>
+        <td class="field-type">MERKLE_PROOF</td>
+        <td class="field-size">0-128 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">M valid signatures (empty sigs for non-participating keys)</td>
+        <td class="field-desc">Inclusion proof for pubkey[i] against pubkey_root (depth &le; 4)</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature[i]</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64-65 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Signature under pubkey[i]</td>
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = N). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">v2 inner-Merkle commitment + CSV. Conditions size is fixed at ~39 B regardless of N; witness scales as <code>K &middot; (PUBKEY + MERKLE_PROOF + SIGNATURE)</code> with proof depth growing logarithmically in N (max 128 B per signer for N=16).</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -146,23 +160,27 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">For each key: verify witness <span class="eval-keyword">PUBKEY[i]</span> against Merkle leaf (merkle_pub_key). If any mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Read <span class="eval-keyword">K</span> from NUMERIC[0] and <span class="eval-keyword">pubkey_root</span> from HASH256. Witness must contain exactly K (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets &rarr; otherwise <span class="eval-result-unsat">UNSATISFIED</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Count valid <span class="eval-keyword">SIGNATURE</span> verifications. Non-empty sigs checked against corresponding PUBKEY.</span>
+      <span class="eval-step-text">For each triplet: verify the MERKLE_PROOF binds the revealed PUBKEY to <span class="eval-keyword">pubkey_root</span>. Failure &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">If valid count < <span class="eval-keyword">threshold</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">For each triplet: verify the SIGNATURE under that PUBKEY for the SIGHASH_LADDER message. Failure &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">CheckSequence</span>(timelock). If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Reject if any pubkey is revealed twice (duplicate signers cannot satisfy K).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">Threshold met AND timelock elapsed &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Verify <span class="eval-keyword">CheckSequence</span>(timelock). Failure &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">6.</span>
+      <span class="eval-step-text">All K verified, no duplicates, timelock elapsed &rarr; <span class="eval-result-sat">SATISFIED</span>.</span>
     </div>
   </div>
 </div>
@@ -173,12 +191,13 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Threshold M = 0 or M > N</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails for any key</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Fewer than M valid signatures</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Missing required fields, K=0, or K &gt; MAX_PUBKEYS_PER_MULTISIG (16)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness field count &ne; 3 &times; K, or non-triplet shape</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Any MERKLE_PROOF fails to bind pubkey to pubkey_root</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Any SIGNATURE fails to verify under its revealed PUBKEY</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Duplicate pubkey revealed in two triplets</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>CSV sequence check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>M+ sigs valid AND timelock elapsed</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>K verified, distinct, timelock elapsed</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

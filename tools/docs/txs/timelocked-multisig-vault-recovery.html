@@ -265,7 +265,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <div class="eval-step-num">1.</div>
-      <div class="eval-step-text">TIMELOCKED_MULTISIG combines threshold multisig with CSV timelock in a single block. The evaluator checks: M valid signatures from N committed keys AND nSequence satisfies the CSV delay.</div>
+      <div class="eval-step-text">TIMELOCKED_MULTISIG (v2) combines K-of-N inner-Merkle threshold multisig with a CSV timelock in a single block. The evaluator checks: K signers each reveal a <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> triplet whose proof binds to the conditions <code>HASH256(pubkey_root)</code>, all distinct &mdash; <em>and</em> <code>nSequence</code> satisfies the CSV delay.</div>
     </div>
     <div class="eval-step">
       <div class="eval-step-num">2.</div>

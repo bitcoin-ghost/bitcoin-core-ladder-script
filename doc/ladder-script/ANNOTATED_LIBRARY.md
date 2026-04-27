@@ -1074,7 +1074,7 @@ Signature-bearing blocks. The most-used block in the library.
 | `RungBlockType` | Function                       | Purpose |
 |-----------------|--------------------------------|---------|
 | `SIG`           | `EvalSigBlock`                 | One pubkey + one signature. Schnorr (default), ECDSA, or any registered PQ scheme. |
-| `MULTISIG`      | `EvalMultisigBlock`            | M-of-N with a fixed pubkey set. |
+| `MULTISIG`      | `EvalMultisigBlock`            | K-of-N (v2). N pubkeys committed via inner Merkle root in conditions; spend reveals K `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets. Closes the K<N data-embedding bypass. |
 | `MUSIG_THRESHOLD` | `EvalMusigThresholdBlock`    | M-of-N with MuSig2 aggregation (single Schnorr sig in witness). |
 | `ADAPTOR_SIG`   | `EvalAdaptorSigBlock`          | A SIG block whose signature was produced via the adaptor scheme — verified as a normal Schnorr sig. |
 | `KEY_REF_SIG`   | `EvalKeyRefSigBlock`           | SIG that references a relay (reusable pubkey table) instead of carrying the pubkey inline. Saves bytes when the same key signs many rungs. |
@@ -1289,7 +1289,7 @@ is a single descriptor primitive that expands into multiple gates.
 | `HTLC`                  | Hash Time-Locked Contract: hash preimage OR sig + timelock. |
 | `HASH_SIG`              | Hash preimage AND signature. |
 | `PTLC`                  | Point Time-Locked Contract — uses the adaptor scheme from `adaptor.{h,cpp}`. |
-| `TIMELOCKED_MULTISIG`   | M-of-N + CSV in one block. |
+| `TIMELOCKED_MULTISIG`   | MULTISIG v2 + CSV in one block (same inner-Merkle pubkey commitment). |
 
 ### Invariants
 

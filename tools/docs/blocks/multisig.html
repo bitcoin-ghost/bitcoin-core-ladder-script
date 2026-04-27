@@ -22,7 +22,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0002 &middot; SIGNATURE FAMILY</div>
   <h1 class="block-title">MULTISIG</h1>
-  <p class="block-subtitle">M-of-N threshold signature verification. Multiple pubkeys are bound via merkle_pub_key with a threshold. The witness provides N pubkeys and M valid signatures to satisfy the block.</p>
+  <p class="block-subtitle">K-of-N threshold (v2): N pubkeys committed via inner Merkle root in conditions; the witness reveals K signers as <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> triplets verified against that root. Unrevealed slots cost no on-chain bytes &mdash; closes the K&lt;N data-embedding bypass.</p>
   <span class="block-family-badge" style="color: #ff1744; border-color: #ff174440;">Signature</span>
   <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
@@ -44,7 +44,7 @@
       <text x="300" y="38" text-anchor="middle" fill="#ff1744" font-family="Share Tech Mono" font-size="13" letter-spacing="2">MULTISIG</text>
       <!-- Internal: threshold -->
       <rect x="160" y="48" width="80" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
-      <text x="200" y="66" text-anchor="middle" fill="#ff6d00" font-family="IBM Plex Mono" font-size="10" font-weight="600">M-of-N</text>
+      <text x="200" y="66" text-anchor="middle" fill="#ff6d00" font-family="IBM Plex Mono" font-size="10" font-weight="600">K-of-N</text>
       <!-- Internal: sig verify slots -->
       <rect x="260" y="48" width="60" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
       <text x="290" y="66" text-anchor="middle" fill="#ff1744" font-family="IBM Plex Mono" font-size="10" font-weight="600">SIG 1</text>
@@ -53,8 +53,8 @@
       <rect x="400" y="48" width="50" height="28" rx="2" fill="#1e1e1e" stroke="#3a3a3a"/>
       <text x="425" y="66" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="10" font-weight="600">...</text>
       <!-- Annotation -->
-      <text x="300" y="140" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">At least M of N signatures must be valid</text>
-      <text x="300" y="158" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">Pubkeys resolved via merkle_pub_key binding</text>
+      <text x="300" y="140" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">Exactly K of N signatures revealed and verified</text>
+      <text x="300" y="158" text-anchor="middle" fill="#555555" font-family="IBM Plex Mono" font-size="9">Pubkeys committed via inner Merkle root (HASH256 in conditions)</text>
     </svg>
   </div>
 </div>
@@ -68,35 +68,46 @@
     </thead>
     <tbody>
       <tr>
-        <td class="field-name">threshold</td>
+        <td class="field-name">threshold (K)</td>
         <td class="field-type">NUMERIC</td>
-        <td class="field-size">1-4 B</td>
+        <td class="field-size">1 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Required number of valid signatures (M)</td>
-      </tr>
-      <tr>
-        <td class="field-name" colspan="5" style="color:#888;font-style:italic;">Public keys bound via merkle_pub_key (folded into Merkle leaf hash, not stored in conditions)</td>
-      </tr>
-      <tr>
-        <td class="field-name">pubkey[0..N]</td>
-        <td class="field-type">PUBKEY</td>
-        <td class="field-size">32-33 B each</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">All N public keys (x-only 32B or compressed 33B)</td>
-      </tr>
-      <tr>
-        <td class="field-name">signature[0..M]</td>
-        <td class="field-type">SIGNATURE</td>
-        <td class="field-size">64-65 B each</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">M valid signatures corresponding to M distinct pubkeys</td>
+        <td class="field-desc">Required number of valid signatures (K, 1 &le; K &le; 16)</td>
       </tr>
       <tr>
         <td class="field-name">scheme</td>
         <td class="field-type">SCHEME</td>
         <td class="field-size">1 B</td>
-        <td class="field-side-w">Witness (opt)</td>
-        <td class="field-desc">Optional PQ signature scheme identifier for post-quantum routing</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Signature scheme shared by all signers (Schnorr, ECDSA, FALCON-512, &hellip;)</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey_root</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Inner Merkle root over the N pubkey set (tagged-hash domain <code>LadderMultisigPubkey/v1</code>)</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey[i]</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32-33 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Position i of K signer triplets &mdash; revealed pubkey</td>
+      </tr>
+      <tr>
+        <td class="field-name">merkle_proof[i]</td>
+        <td class="field-type">MERKLE_PROOF</td>
+        <td class="field-size">0-128 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Inclusion proof for pubkey[i] against pubkey_root (depth &le; 4)</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature[i]</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64-65 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Signature under pubkey[i]</td>
       </tr>
     </tbody>
   </table>
@@ -106,41 +117,41 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (example 2-of-3):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (example 2-of-3 &mdash; size independent of N):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0002</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">4</span>
-      <span class="wire-segment wire-field-num" style="min-width:90px">NUMERIC &middot; 3B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">merkle_pub_key &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">merkle_pub_key &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">merkle_pub_key &middot; 32B</span>
-      <span class="wire-bytes">= 111 bytes</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-num" style="min-width:80px">NUMERIC K &middot; 1B</span>
+      <span class="wire-segment wire-field-num" style="min-width:80px">SCHEME &middot; 1B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">HASH256 root &middot; 32B</span>
+      <span class="wire-bytes">= 38 bytes</span>
     </div>
   </div>
 
-  <p class="section-text" style="margin-bottom:16px">Witness side (example 2-of-3):</p>
+  <p class="section-text" style="margin-bottom:16px">Witness side (example 2-of-3 &mdash; depth-2 inner tree, 1 sibling per proof):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0002</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">5</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
+      <span class="wire-segment wire-count">6</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 33B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:90px">PROOF &middot; 64B</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SIG &middot; 64B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 33B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:90px">PROOF &middot; 64B</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SIG &middot; 64B</span>
-      <span class="wire-bytes">= 238 bytes</span>
+      <span class="wire-bytes">= ~330 bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness, 2-of-3)</span>
-      <span class="wire-total-bytes">351 bytes</span>
+      <span class="wire-total-bytes">~368 bytes</span>
     </div>
   </div>
 
-  <p class="section-text">Wire size scales linearly: N merkle_pub_key bindings + N pubkeys + M signatures in witness.</p>
+  <p class="section-text">Conditions size is fixed at 38 bytes regardless of N. Witness scales as <code>K &middot; (PUBKEY + MERKLE_PROOF + SIGNATURE)</code>; the proof grows logarithmically in N (max 128 bytes per signer for N=16).</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -149,19 +160,23 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Read threshold <span class="eval-keyword">M</span> from NUMERIC field. If M &lt; 1 or M &gt; N &rarr; <span class="eval-result-unsat">ERROR</span></span>
+      <span class="eval-step-text">Read <span class="eval-keyword">K</span> from NUMERIC[0] and <span class="eval-keyword">pubkey_root</span> from HASH256. If K &lt; 1 or K &gt; <code>MAX_PUBKEYS_PER_MULTISIG</code> (16) &rarr; <span class="eval-result-unsat">ERROR</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Resolve each <span class="eval-keyword">merkle_pub_key</span> binding to a witness PUBKEY via Merkle leaf hash match. If any binding unresolved &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Witness must contain exactly <span class="eval-keyword">3K</span> fields in repeating <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> order &rarr; otherwise <span class="eval-result-unsat">UNSATISFIED</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">For each <span class="eval-keyword">SIGNATURE</span>, try each unused pubkey. On valid match, increment valid_count and mark pubkey used.</span>
+      <span class="eval-step-text">For each triplet: verify the MERKLE_PROOF binds the PUBKEY to <span class="eval-keyword">pubkey_root</span>; verify the SIGNATURE under that PUBKEY for SIGHASH_LADDER. Any failure &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">If <span class="eval-keyword">valid_count</span> &ge; M &rarr; <span class="eval-result-sat">SATISFIED</span>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Reject if any pubkey is revealed twice (duplicate signers cannot satisfy K).</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">5.</span>
+      <span class="eval-step-text">All K verified, no duplicates &rarr; <span class="eval-result-sat">SATISFIED</span>.</span>
     </div>
   </div>
 </div>
@@ -172,12 +187,12 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC or merkle_pub_key fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Threshold M &lt; 1 or M &gt; N</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Fewer than N pubkeys in witness</td><td class="r-err">ERROR</td></tr>
-      <tr><td>merkle_pub_key resolution fails for any key</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Fewer than M valid signatures</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>M or more valid signatures from distinct keys</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Missing required fields, K=0, or K &gt; MAX_PUBKEYS_PER_MULTISIG (16)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness field count &ne; 3 &times; K, or non-triplet shape</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Any MERKLE_PROOF fails to bind pubkey to pubkey_root</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Any SIGNATURE fails to verify under its revealed PUBKEY</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Duplicate pubkey revealed in two triplets</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>K verified, distinct signers</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -191,25 +206,26 @@
   <span class="json-key">"type"</span>: <span class="json-str">"MULTISIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">2</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"merkle_pub_key"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a3b1c4...32 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"merkle_pub_key"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"d7e2f1...32 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"merkle_pub_key"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"9c4a88...32 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a3b1c4...32 bytes (pubkey_root)"</span> }
   ]
 }</pre></div>
 
-  <div class="json-label" style="margin-top:16px">Witness (input, 2-of-3 example)</div>
+  <div class="json-label" style="margin-top:16px">Witness (input, 2-of-3 example &mdash; K=2 triplets)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"MULTISIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02789a...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e5f71...64 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"d7e2f1...64 bytes (depth-2 proof)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"9c4a88...64 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"e5f71...64 bytes"</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">The third pubkey (the non-signer) is never on chain &mdash; it&apos;s committed via the inner Merkle root and remains hidden.</p>
 </div>
 
 <!-- Use Cases -->
@@ -223,7 +239,7 @@
 
   <div class="use-case">
     <div class="use-case-title">Corporate Treasury</div>
-    <div class="use-case-desc">Organizational funds protected by M-of-N threshold policy. Requires multiple officers to authorize spending, preventing single-point-of-compromise theft.</div>
+    <div class="use-case-desc">Organisational funds protected by K-of-N threshold policy. Requires multiple officers to authorise spending, preventing single-point-of-compromise theft.</div>
   </div>
 
   <div class="use-case">
