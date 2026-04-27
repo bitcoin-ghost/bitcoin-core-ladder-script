@@ -45,3 +45,8 @@ spec/*.tar.gz
 spec/tla2tools.jar
 proxy/analytics.db
 doc/audit/
+
+# Internal planning docs — never published to the public repo. See
+# the historical mistake at commits 5b8c8be761 / 314aa28b6b which
+# pushed `plan_multisig_inner_merkle.md` before this rule existed.
+doc/ladder-script/plan_*.md

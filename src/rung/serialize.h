@@ -68,6 +68,24 @@ static constexpr size_t MAX_MULTISIG_TREE_DEPTH = 4;
  *  witness-side cap is 3 × MAX_PUBKEYS_PER_MULTISIG = 48. This special-cases
  *  the global MAX_FIELDS_PER_BLOCK = 16 cap which is too tight for K=16. */
 static constexpr size_t MAX_MULTISIG_WITNESS_FIELDS = 3 * MAX_PUBKEYS_PER_MULTISIG;
+
+/** ACCUMULATOR v2: maximum proof depth (number of sibling hashes carried in the
+ *  witness MERKLE_PROOF field). 4 levels matches MAX_MULTISIG_TREE_DEPTH and
+ *  bounds the per-spend MERKLE_PROOF field to 4 × 32 = 128 bytes. */
+static constexpr size_t MAX_ACCUMULATOR_PROOF_DEPTH = 4;
+/** ACCUMULATOR v2: maximum number of ACCUMULATOR blocks per rung. The legacy
+ *  shape allowed up to MAX_BLOCKS_PER_RUNG = 8 ACCUMULATORs, contributing
+ *  ~2 KB of attacker-controlled bytes per spend. v2 limits real set-membership
+ *  use to one proof per rung. */
+static constexpr size_t MAX_ACCUMULATOR_BLOCKS_PER_RUNG = 1;
+/** ACCUMULATOR v2: maximum number of ACCUMULATOR blocks across ALL inputs of
+ *  a single transaction. Mirrors the MAX_PREIMAGE_FIELDS_PER_TX = 2 pattern. */
+static constexpr size_t MAX_ACCUMULATOR_BLOCKS_PER_TX = 2;
+/** ACCUMULATOR v2: maximum element id (positional index of the proven element
+ *  inside the committed set). Bounds the leaf-domain input so the leaf hash
+ *  cannot be a fully-attacker-chosen 32 bytes. 65535 fits a varint with no
+ *  meaningful bandwidth cost. */
+static constexpr size_t MAX_ACCUMULATOR_ELEMENT_ID = 0xFFFF;
 /** Compact coil sentinel: 0x00 + output_index(1) = 2 bytes total.
  *  Expands to default coil: UNLOCK + INLINE + SCHNORR + no address + no rung_destinations. */
 static constexpr uint8_t COMPACT_COIL_SENTINEL = 0x00;

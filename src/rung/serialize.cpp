@@ -352,9 +352,16 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
             error = "ADAPTOR_SIG has no condition fields: got " + std::to_string(n_fields);
             return false;
         }
-        // ACCUMULATOR: cap at 10 HASH256 fields (root + 8 proof nodes + leaf)
-        if (block_out.type == RungBlockType::ACCUMULATOR && n_fields > 10) {
-            error = "ACCUMULATOR too many fields: " + std::to_string(n_fields) + " > 10";
+        // ACCUMULATOR v2 witness: exactly [NUMERIC(element_id), MERKLE_PROOF].
+        // The legacy v1 shape (1 root HASH256 + up to 8 sibling HASH256 + 1
+        // leaf HASH256, all attacker-chosen) carried up to 9 × 32 = 288 B of
+        // attacker payload per spend — fixed at v0.6.
+        const bool is_accumulator_witness =
+            ctx == static_cast<uint8_t>(SerializationContext::WITNESS) &&
+            block_out.type == RungBlockType::ACCUMULATOR;
+        if (is_accumulator_witness && n_fields != 2) {
+            error = "ACCUMULATOR witness must be [NUMERIC(element_id), MERKLE_PROOF], got " +
+                    std::to_string(n_fields) + " fields";
             return false;
         }
 
@@ -389,20 +396,28 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
                 }
             }
 
-            // ACCUMULATOR: all fields must be HASH256 (root + proof nodes + leaf)
-            if (block_out.type == RungBlockType::ACCUMULATOR && dtype != RungDataType::HASH256) {
-                error = "ACCUMULATOR fields must be HASH256, got " + DataTypeName(dtype);
-                return false;
+            // ACCUMULATOR v2 witness: enforce field shape [NUMERIC, MERKLE_PROOF].
+            // ACCUMULATOR conditions are still 1×HASH256 enforced via implicit
+            // layout (ACCUMULATOR_CONDITIONS).
+            if (is_accumulator_witness) {
+                static constexpr RungDataType kAccumWitnessTypes[2] = {
+                    RungDataType::NUMERIC,
+                    RungDataType::MERKLE_PROOF,
+                };
+                if (dtype != kAccumWitnessTypes[f]) {
+                    error = "ACCUMULATOR witness field " + std::to_string(f) +
+                            " type mismatch: got " + DataTypeName(dtype) +
+                            ", expected " + DataTypeName(kAccumWitnessTypes[f]);
+                    return false;
+                }
             }
 
             // Consensus: for blocks with NO implicit layout (any context), reject
             // high-bandwidth data types that could carry unvalidated payload.
             // This closes the ANCHOR/RECURSE_MODIFIED/RECURSE_DECAY/COMPARE gap
             // where layout-less blocks could carry 16 x DATA(80) = 1280 bytes.
-            // ACCUMULATOR: HASH256 fields carry Merkle proof (variable count).
-            // Whitelisted from the data-embedding check (all fields validated above).
             if (expected.count == 0 && IsDataEmbeddingType(dtype) &&
-                block_out.type != RungBlockType::ACCUMULATOR) {
+                !is_accumulator_witness) {
                 error = "data-embedding type " + DataTypeName(dtype) +
                         " not allowed in block without implicit layout: " +
                         BlockTypeName(block_out.type);
@@ -444,11 +459,14 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
                     return false;
                 }
             }
-            // MERKLE_PROOF only legal inside MULTISIG/TIMELOCKED_MULTISIG witness;
-            // reject everywhere else so it cannot be a generic embedding vector.
-            if (dtype == RungDataType::MERKLE_PROOF && !is_multisig_witness) {
-                error = "MERKLE_PROOF only allowed in MULTISIG/TIMELOCKED_MULTISIG witness, "
-                        "got block type " + BlockTypeName(block_out.type);
+            // MERKLE_PROOF legal only inside MULTISIG/TIMELOCKED_MULTISIG witness
+            // (inner pubkey-Merkle proofs) and ACCUMULATOR v2 witness (set-membership
+            // proofs). Reject elsewhere so it cannot be a generic embedding vector.
+            if (dtype == RungDataType::MERKLE_PROOF &&
+                !is_multisig_witness && !is_accumulator_witness) {
+                error = "MERKLE_PROOF only allowed in MULTISIG/TIMELOCKED_MULTISIG/"
+                        "ACCUMULATOR witness, got block type " +
+                        BlockTypeName(block_out.type);
                 return false;
             }
 
@@ -853,6 +871,23 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
             error = "too many PREIMAGE/SCRIPT_BODY fields: " + std::to_string(preimage_field_count) +
                     " > " + std::to_string(MAX_PREIMAGE_FIELDS_PER_WITNESS);
             return false;
+        }
+
+        // Consensus (v0.6): bound ACCUMULATOR blocks per rung. Per-tx cap is
+        // enforced separately in evaluator.cpp alongside the PREIMAGE per-tx
+        // counter. Closes audit #2 finding E-001 second half — without this
+        // cap a single rung could hold 8 ACCUMULATORs ≈ 1 KB of payload.
+        for (const auto& rung : ladder_out.rungs) {
+            size_t acc_count = 0;
+            for (const auto& block : rung.blocks) {
+                if (block.type == RungBlockType::ACCUMULATOR) ++acc_count;
+            }
+            if (acc_count > MAX_ACCUMULATOR_BLOCKS_PER_RUNG) {
+                error = "rung has too many ACCUMULATOR blocks: " +
+                        std::to_string(acc_count) + " > " +
+                        std::to_string(MAX_ACCUMULATOR_BLOCKS_PER_RUNG);
+                return false;
+            }
         }
 
         // Consensus: validate relay chain depth

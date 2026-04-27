@@ -2020,8 +2020,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::OUTPUT_COUNT, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
         // RELATIVE_VALUE: explicit — NUMERIC, NUMERIC
         {RungBlockType::RELATIVE_VALUE, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num2}}},
-        // ACCUMULATOR: all fields must be HASH256 (root + proof nodes + leaf)
-        {RungBlockType::ACCUMULATOR, {{RungDataType::HASH256, h256}}},
+        // ACCUMULATOR v2 witness: NUMERIC(element_id) + MERKLE_PROOF(siblings)
+        {RungBlockType::ACCUMULATOR, {{RungDataType::NUMERIC, num1}, {RungDataType::MERKLE_PROOF, std::vector<uint8_t>{}}}},
 
         // === Legacy family ===
         // P2PK_LEGACY witness: [PUBKEY, SIGNATURE] (= SIG_WITNESS)
@@ -6754,47 +6754,39 @@ BOOST_AUTO_TEST_CASE(accumulator_valid_proof)
     unsigned char root[32];
     CSHA256().Write(combined, 64).Finalize(root);
 
-    // Prove L0 membership: root + [sibling=L1] + [leaf=L0]
+    (void)l0; (void)l1; (void)combined; (void)root;
+    // ACCUMULATOR v2: build a 2-leaf tree using the new tagged-leaf helper.
+    uint256 leaf_0 = BuildAccumulatorLeaf(0);
+    uint256 leaf_1 = BuildAccumulatorLeaf(1);
+    uint256 root_v2 = BuildAccumulatorInterior(leaf_0, leaf_1);
+
+    // Build proof for element_id=0: 1 sibling = leaf_1.
+    std::vector<uint8_t> proof_bytes(leaf_1.begin(), leaf_1.end());
+
     RungBlock block;
     block.type = RungBlockType::ACCUMULATOR;
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(root, root + 32)});       // root
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(l1, l1 + 32)});           // sibling
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(l0, l0 + 32)});           // leaf
-
-    auto result = EvalAccumulatorBlock(block);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(root_v2.begin(), root_v2.end())});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
+    block.fields.push_back({RungDataType::MERKLE_PROOF, proof_bytes});
+    BOOST_CHECK(EvalAccumulatorBlock(block) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(accumulator_invalid_proof)
 {
-    // Same tree but wrong leaf → unsatisfied
-    unsigned char l0[32], l1[32];
-    const char* d0 = "leaf0"; const char* d1 = "leaf1";
-    CSHA256().Write((const unsigned char*)d0, 5).Finalize(l0);
-    CSHA256().Write((const unsigned char*)d1, 5).Finalize(l1);
-
-    unsigned char combined[64];
-    if (memcmp(l0, l1, 32) < 0) {
-        memcpy(combined, l0, 32);
-        memcpy(combined + 32, l1, 32);
-    } else {
-        memcpy(combined, l1, 32);
-        memcpy(combined + 32, l0, 32);
-    }
-    unsigned char root[32];
-    CSHA256().Write(combined, 64).Finalize(root);
-
-    // Wrong leaf: use random bytes instead of L0
-    std::vector<uint8_t> wrong_leaf(32, 0xFF);
+    // Tampered proof: change the root → must not verify against the (correct)
+    // proof for element_id=0.
+    uint256 leaf_0 = BuildAccumulatorLeaf(0);
+    uint256 leaf_1 = BuildAccumulatorLeaf(1);
+    uint256 wrong_root;
+    std::memset(wrong_root.data(), 0xAB, 32);
+    std::vector<uint8_t> proof_bytes(leaf_1.begin(), leaf_1.end());
 
     RungBlock block;
     block.type = RungBlockType::ACCUMULATOR;
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(root, root + 32)});
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(l1, l1 + 32)});
-    block.fields.push_back({RungDataType::HASH256, wrong_leaf});
-
-    auto result = EvalAccumulatorBlock(block);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(wrong_root.begin(), wrong_root.end())});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
+    block.fields.push_back({RungDataType::MERKLE_PROOF, proof_bytes});
+    BOOST_CHECK(EvalAccumulatorBlock(block) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(compound_block_types_recognized)
@@ -11951,15 +11943,15 @@ BOOST_AUTO_TEST_CASE(serialize_accumulator_rejects_non_hash256)
         "ACCUMULATOR with NUMERIC should be rejected: " + error);
 }
 
-BOOST_AUTO_TEST_CASE(serialize_accumulator_accepts_hash256)
+BOOST_AUTO_TEST_CASE(serialize_accumulator_v2_witness_shape)
 {
-    // ACCUMULATOR block with HASH256 field → accepted by deserializer
-    // (Note: ACCUMULATOR eval requires 3+ fields but deserializer allows 1+)
+    // ACCUMULATOR v2 witness: [NUMERIC(element_id), MERKLE_PROOF(siblings)]
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
     block.type = RungBlockType::ACCUMULATOR;
-    block.fields.push_back({RungDataType::HASH256, MakeHash256()});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(7)});
+    block.fields.push_back({RungDataType::MERKLE_PROOF, std::vector<uint8_t>(64, 0xCC)});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
@@ -11968,10 +11960,11 @@ BOOST_AUTO_TEST_CASE(serialize_accumulator_accepts_hash256)
     LadderWitness result;
     std::string error;
     BOOST_CHECK_MESSAGE(DeserializeLadderWitness(data, result, error),
-        "ACCUMULATOR with HASH256 should be accepted: " + error);
+        "ACCUMULATOR v2 witness should be accepted: " + error);
     BOOST_CHECK_EQUAL(result.rungs.size(), 1U);
     BOOST_CHECK_EQUAL(result.rungs[0].blocks.size(), 1U);
     BOOST_CHECK(result.rungs[0].blocks[0].type == RungBlockType::ACCUMULATOR);
+    BOOST_CHECK_EQUAL(result.rungs[0].blocks[0].fields.size(), 2U);
 }
 
 // ============================================================================
@@ -12681,6 +12674,128 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_merkle_proof_outside_multisig)
     std::string err;
     BOOST_CHECK(!DeserializeBlock(ss, block,
         static_cast<uint8_t>(SerializationContext::WITNESS), err));
+}
+
+// ============================================================================
+// ACCUMULATOR v2 helpers + anti-embed regression
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(accumulator_helper_single_leaf_tree)
+{
+    // N=1 tree: empty proof, leaf hash IS the root.
+    uint256 leaf = BuildAccumulatorLeaf(0);
+    std::string err;
+    BOOST_CHECK(VerifyAccumulatorProof(0, std::vector<uint8_t>{}, leaf, err));
+    BOOST_CHECK(err.empty());
+}
+
+BOOST_AUTO_TEST_CASE(accumulator_helper_depth_4_max)
+{
+    // Build a depth-4 tree of 16 leaves. Walk to root, then verify proof
+    // for every leaf index.
+    std::vector<uint256> level;
+    for (uint32_t i = 0; i < 16; ++i) level.push_back(BuildAccumulatorLeaf(i));
+    auto leaves_copy = level;
+    while (level.size() > 1) {
+        std::vector<uint256> next;
+        for (size_t i = 0; i < level.size(); i += 2) {
+            next.push_back(BuildAccumulatorInterior(level[i], level[i + 1]));
+        }
+        level = std::move(next);
+    }
+    uint256 root = level[0];
+
+    // Build proof for element_id=5: walk siblings bottom-up.
+    auto build_proof = [&](uint32_t target_idx) {
+        std::vector<uint8_t> proof;
+        std::vector<uint256> cur = leaves_copy;
+        size_t idx = target_idx;
+        while (cur.size() > 1) {
+            size_t sib = (idx % 2 == 0) ? idx + 1 : idx - 1;
+            proof.insert(proof.end(), cur[sib].begin(), cur[sib].end());
+            std::vector<uint256> next;
+            for (size_t i = 0; i < cur.size(); i += 2)
+                next.push_back(BuildAccumulatorInterior(cur[i], cur[i + 1]));
+            cur = std::move(next);
+            idx /= 2;
+        }
+        return proof;
+    };
+
+    for (uint32_t eid = 0; eid < 16; ++eid) {
+        std::string err;
+        auto proof = build_proof(eid);
+        BOOST_CHECK_EQUAL(proof.size(), 4u * 32u); // depth 4
+        BOOST_CHECK_MESSAGE(VerifyAccumulatorProof(eid, proof, root, err),
+            "verify failed for eid " + std::to_string(eid) + ": " + err);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(accumulator_helper_rejects_oversize_proof)
+{
+    // Proof depth > MAX_ACCUMULATOR_PROOF_DEPTH must reject.
+    std::vector<uint8_t> too_deep((rung::MAX_ACCUMULATOR_PROOF_DEPTH + 1) * 32, 0);
+    uint256 root;
+    std::memset(root.data(), 0, 32);
+    std::string err;
+    BOOST_CHECK(!VerifyAccumulatorProof(0, too_deep, root, err));
+    BOOST_CHECK(err.find("too deep") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(accumulator_helper_rejects_misaligned_proof)
+{
+    std::vector<uint8_t> misaligned(33, 0); // 33 bytes — not multiple of 32
+    uint256 root;
+    std::string err;
+    BOOST_CHECK(!VerifyAccumulatorProof(0, misaligned, root, err));
+    BOOST_CHECK(err.find("multiple of 32") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(accumulator_helper_rejects_oversize_element_id)
+{
+    uint256 root;
+    std::string err;
+    BOOST_CHECK(!VerifyAccumulatorProof(rung::MAX_ACCUMULATOR_ELEMENT_ID + 1,
+                                        std::vector<uint8_t>{}, root, err));
+    BOOST_CHECK(err.find("element_id") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_legacy_accumulator_8_hash256)
+{
+    // E-001 anti-embed regression: the legacy v1 ACCUMULATOR shape (1 root +
+    // 8 sibling + 1 leaf, all HASH256) carried up to 9 × 32 = 288 B of
+    // attacker-chosen bytes per spend. v2 strict witness shape rejects.
+    DataStream ss;
+    // ACCUMULATOR escape header (block_type 0x0805).
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x05} << uint8_t{0x08};
+    WriteCompactSize(ss, 9); // legacy: 9 HASH256 fields
+    for (int i = 0; i < 9; ++i) {
+        ss << uint8_t{static_cast<uint8_t>(RungDataType::HASH256)};
+        WriteCompactSize(ss, 32);
+        ss.write(MakeByteSpan(MakeHash256()));
+    }
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK_MESSAGE(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::WITNESS), err),
+        "should reject; got err=" + err);
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_accumulator_witness_wrong_field_order)
+{
+    DataStream ss;
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x05} << uint8_t{0x08};
+    WriteCompactSize(ss, 2);
+    // Wrong order: MERKLE_PROOF first, NUMERIC second.
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::MERKLE_PROOF)};
+    WriteCompactSize(ss, 0);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::NUMERIC)};
+    WriteCompactSize(ss, 0);
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK_MESSAGE(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::WITNESS), err),
+        "should reject; got err=" + err);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

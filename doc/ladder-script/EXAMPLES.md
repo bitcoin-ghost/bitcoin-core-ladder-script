@@ -622,7 +622,7 @@ whose identity hash is in a Merkle accumulator. The accumulator root can be
 updated through RECURSE_MODIFIED to add or remove members without changing
 the UTXO structure.
 
-### Conditions structure
+### Conditions structure (v0.6 inner-Merkle redesign)
 
 ```
 Ladder:
@@ -631,56 +631,45 @@ Ladder:
       Conditions fields: [SCHEME(0x01)]
       Witness fields:    [PUBKEY(32), SIGNATURE(64)]
     Block 1: ACCUMULATOR (0x0806)
-      Conditions fields: [HASH256(merkle_root)]
-      Witness fields:    [HASH256(proof_node_1), ..., HASH256(proof_node_N),
-                          HASH256(leaf_hash)]
+      Conditions fields: [HASH256(set_root)]
+      Witness fields:    [NUMERIC(element_id), MERKLE_PROOF(siblings)]
   Coil: UNLOCK(0x01), INLINE(0x01), SCHNORR(0x01)
 ```
+
+The set members are addressed by positional `element_id` (0 ≤ id ≤ 65535).
+The leaf hash for member i is `TaggedHash("LadderAccumulatorLeaf/v1", i_LE)`
+— not free attacker bytes, which closes the v0.5 audit-2 finding E-001.
 
 ### Evaluation
 
 1. **Block 0 (SIG)**: Verifies signer's Schnorr signature. SATISFIED.
+2. **Block 1 (ACCUMULATOR)**: `EvalAccumulatorBlock` reads the conditions
+   `set_root`, the witness `element_id` and `MERKLE_PROOF`. Computes
+   `leaf = TaggedHash("LadderAccumulatorLeaf/v1", element_id_LE)`, walks
+   `current = TaggedHash("LadderAccumulatorInterior/v1", min(current, sibling) || max(current, sibling))`
+   for each 32-byte sibling in MERKLE_PROOF (max depth = 4), and SATISFIED
+   iff the final `current` equals `set_root`.
 
-2. **Block 1 (ACCUMULATOR)**: `EvalAccumulatorBlock` is called.
-   - Collects all HASH256 fields. Minimum 3 required (root + 1 proof node + leaf).
-     Maximum 10 allowed (root + 8 proof nodes + leaf, supporting trees up to
-     256 leaves).
-   - `hashes[0]` = merkle_root (from conditions).
-   - `hashes[N]` = leaf_hash (the member's identity being proven).
-   - `hashes[1..N-1]` = sibling proof nodes.
-   - Computes the Merkle path bottom-up:
-     ```
-     current = leaf_hash
-     for each sibling:
-       if current < sibling:
-         current = SHA256(current || sibling)
-       else:
-         current = SHA256(sibling || current)
-     ```
-   - Compares final `current` to `merkle_root`.
-   - SATISFIED if the Merkle proof verifies (member is in the accumulator).
+Caps: 1 ACCUMULATOR per rung; 2 ACCUMULATOR blocks per tx (across all inputs).
 
 ### Inverted accumulator (blocklist)
 
 ACCUMULATOR is invertible. An inverted ACCUMULATOR acts as a **blocklist**:
-SATISFIED when the leaf is NOT in the Merkle tree. This could be used to ban
-specific identities from spending.
+SATISFIED when the proof fails (element NOT in the set).
 
 ```
 Block: !ACCUMULATOR (inverted)
-  -- SATISFIED when Merkle proof fails (identity not in set)
-  -- UNSATISFIED when proof succeeds (identity is blocked)
+  -- SATISFIED when membership proof fails (element not in set)
+  -- UNSATISFIED when proof succeeds (element is blocked)
 ```
 
 ### Wire format size
 
-**Conditions**: ACCUMULATOR uses explicit encoding (no implicit layout;
-whitelisted from data-embedding rejection). Root hash: escape(3) + n_fields(1) +
-type(1) + HASH256(1+32) = 38 bytes.
+**Conditions**: 38 bytes (block header + 1 HASH256), constant in set size.
 
-**Witness**: Additional HASH256 fields for proof (each: type(1) + hash(1+32)).
-For an 8-level tree: 8 siblings + 1 leaf = 9 x 34 = 306 bytes. Plus SIG
-witness = ~406 bytes total.
+**Witness**: NUMERIC(element_id, ~3 B) + MERKLE_PROOF(depth × 32 B).
+At max depth 4: 5 + 130 = 135 bytes. Plus SIG witness ≈ 235 bytes total
+per spend.
 
 ---
 

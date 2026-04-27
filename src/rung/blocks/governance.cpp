@@ -220,45 +220,41 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
 
 EvalResult EvalAccumulatorBlock(const RungBlock& block)
 {
-    // ACCUMULATOR: Merkle set membership proof
-    // Conditions fields: HASH256[0] = merkle_root
-    // Witness fields: HASH256[1..N] = merkle_proof (sibling hashes from leaf to root)
-    //                 HASH256[N+1] = leaf_hash (the element being proven)
-    // Proof verification: hash leaf with siblings bottom-up, compare to root.
-    auto hashes = FindAllFields(block, RungDataType::HASH256);
-    if (hashes.size() < 3) return EvalResult::ERROR; // root + at least 1 proof node + leaf
-    if (hashes.size() > 10) return EvalResult::ERROR; // root + max 8 proof nodes + leaf
-
-    const RungField* root_field = hashes[0];
-    const RungField* leaf_field = hashes[hashes.size() - 1];
-    if (root_field->data.size() != 32 || leaf_field->data.size() != 32) {
+    // ACCUMULATOR v2: structured-leaf set-membership proof.
+    // After MergeConditionsAndWitness:
+    //   block.fields[0] = HASH256(set_root)        — conditions
+    //   block.fields[1] = NUMERIC(element_id)      — witness
+    //   block.fields[2] = MERKLE_PROOF(siblings)   — witness (depth × 32 B)
+    //
+    // The leaf hash is `H_tag("LadderAccumulatorLeaf/v1", element_id_LE)` —
+    // NOT free attacker bytes. Sibling hashes are 32 B opaque each but bound
+    // by depth ≤ MAX_ACCUMULATOR_PROOF_DEPTH and by must-reach-root.
+    //
+    // Closes audit #2 finding E-001 (legacy v1 shape allowed up to 9 × 32 =
+    // 288 B of attacker-chosen bytes per spend × 8 blocks/rung = ~2 KB).
+    if (block.fields.size() != 3) return EvalResult::ERROR;
+    if (block.fields[0].type != RungDataType::HASH256 ||
+        block.fields[1].type != RungDataType::NUMERIC ||
+        block.fields[2].type != RungDataType::MERKLE_PROOF) {
         return EvalResult::ERROR;
     }
+    if (block.fields[0].data.size() != 32) return EvalResult::ERROR;
 
-    // Compute Merkle path: start from leaf, hash with each sibling
-    // Convention: if computed_hash < sibling, hash(computed || sibling), else hash(sibling || computed)
-    unsigned char current[32];
-    memcpy(current, leaf_field->data.data(), 32);
-
-    for (size_t i = 1; i < hashes.size() - 1; ++i) {
-        const auto& sibling = hashes[i]->data;
-        if (sibling.size() != 32) return EvalResult::ERROR;
-
-        unsigned char combined[64];
-        if (memcmp(current, sibling.data(), 32) < 0) {
-            memcpy(combined, current, 32);
-            memcpy(combined + 32, sibling.data(), 32);
-        } else {
-            memcpy(combined, sibling.data(), 32);
-            memcpy(combined + 32, current, 32);
-        }
-        CSHA256().Write(combined, 64).Finalize(current);
+    auto eid_opt = ReadNumeric(block.fields[1]);
+    if (!eid_opt || *eid_opt < 0 ||
+        static_cast<uint64_t>(*eid_opt) > MAX_ACCUMULATOR_ELEMENT_ID) {
+        return EvalResult::ERROR;
     }
+    uint32_t element_id = static_cast<uint32_t>(*eid_opt);
 
-    if (memcmp(current, root_field->data.data(), 32) == 0) {
-        return EvalResult::SATISFIED;
+    uint256 root;
+    std::memcpy(root.data(), block.fields[0].data.data(), 32);
+
+    std::string err;
+    if (!VerifyAccumulatorProof(element_id, block.fields[2].data, root, err)) {
+        return EvalResult::UNSATISFIED;
     }
-    return EvalResult::UNSATISFIED;
+    return EvalResult::SATISFIED;
 }
 
 EvalResult EvalOutputCheckBlock(const RungBlock& block, const RungEvalContext& ctx)

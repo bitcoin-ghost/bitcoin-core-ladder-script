@@ -241,6 +241,12 @@ const uint256 MLSC_EMPTY_LEAF = ComputeEmptyLeaf();
 static const CSHA256 MULTISIG_PUBKEY_HASHER  = InitTaggedHasher("LadderMultisigPubkey/v1");
 static const CSHA256 MULTISIG_INTERNAL_HASHER = InitTaggedHasher("LadderMultisigInternal/v1");
 
+// ACCUMULATOR v2 inner-tree domain separation. Leaves hash a 4-byte LE
+// element_id (NOT free attacker bytes). Interior nodes hash sorted children
+// like the MLSC tree but under their own domain tag.
+static const CSHA256 ACCUMULATOR_LEAF_HASHER     = InitTaggedHasher("LadderAccumulatorLeaf/v1");
+static const CSHA256 ACCUMULATOR_INTERIOR_HASHER = InitTaggedHasher("LadderAccumulatorInterior/v1");
+
 /** Padding leaf for the inner pubkey tree (empty-input tagged hash). */
 static const uint256 MULTISIG_EMPTY_LEAF = TaggedHash("LadderMultisigPubkey/v1", nullptr, 0);
 
@@ -584,6 +590,72 @@ bool VerifyPubkeyMerkleProof(const std::vector<uint8_t>& pubkey,
     for (const auto& sibling : proof) current = MultisigInterior(current, sibling);
     if (current != expected_root) {
         error = "pubkey proof does not reach expected root";
+        return false;
+    }
+    return true;
+}
+
+uint256 BuildAccumulatorLeaf(uint32_t element_id)
+{
+    uint8_t id_le[4] = {
+        static_cast<uint8_t>(element_id & 0xFF),
+        static_cast<uint8_t>((element_id >> 8) & 0xFF),
+        static_cast<uint8_t>((element_id >> 16) & 0xFF),
+        static_cast<uint8_t>((element_id >> 24) & 0xFF),
+    };
+    CSHA256 hasher = ACCUMULATOR_LEAF_HASHER;
+    hasher.Write(id_le, sizeof(id_le));
+    uint256 result;
+    hasher.Finalize(result.data());
+    return result;
+}
+
+uint256 BuildAccumulatorInterior(const uint256& a, const uint256& b)
+{
+    unsigned char children[32 + 32];
+    if (memcmp(a.data(), b.data(), 32) <= 0) {
+        memcpy(children, a.data(), 32);
+        memcpy(children + 32, b.data(), 32);
+    } else {
+        memcpy(children, b.data(), 32);
+        memcpy(children + 32, a.data(), 32);
+    }
+    CSHA256 hasher = ACCUMULATOR_INTERIOR_HASHER;
+    hasher.Write(children, sizeof(children));
+    uint256 result;
+    hasher.Finalize(result.data());
+    return result;
+}
+
+bool VerifyAccumulatorProof(uint32_t element_id,
+                             const std::vector<uint8_t>& proof_bytes,
+                             const uint256& expected_root,
+                             std::string& error)
+{
+    if (element_id > MAX_ACCUMULATOR_ELEMENT_ID) {
+        error = "accumulator element_id out of range: " + std::to_string(element_id);
+        return false;
+    }
+    if (proof_bytes.size() % 32 != 0) {
+        error = "accumulator proof length not a multiple of 32: " +
+                std::to_string(proof_bytes.size());
+        return false;
+    }
+    const size_t depth = proof_bytes.size() / 32;
+    if (depth > MAX_ACCUMULATOR_PROOF_DEPTH) {
+        error = "accumulator proof too deep: " + std::to_string(depth) +
+                " > MAX_ACCUMULATOR_PROOF_DEPTH (" +
+                std::to_string(MAX_ACCUMULATOR_PROOF_DEPTH) + ")";
+        return false;
+    }
+    uint256 current = BuildAccumulatorLeaf(element_id);
+    for (size_t i = 0; i < depth; ++i) {
+        uint256 sibling;
+        std::memcpy(sibling.data(), proof_bytes.data() + i * 32, 32);
+        current = BuildAccumulatorInterior(current, sibling);
+    }
+    if (current != expected_root) {
+        error = "accumulator proof does not reach expected root";
         return false;
     }
     return true;

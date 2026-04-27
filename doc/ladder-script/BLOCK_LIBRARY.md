@@ -112,7 +112,7 @@ little-endian on the wire.
 | 0x0803 | INPUT_COUNT | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Input count bounds |
 | 0x0804 | OUTPUT_COUNT | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Output count bounds |
 | 0x0805 | RELATIVE_VALUE | no | no | 0 | NUMERIC(num), NUMERIC(denom) | Output value as ratio of input |
-| 0x0806 | ACCUMULATOR | yes | no | 0 | HASH256(root) | Merkle accumulator set membership |
+| 0x0806 | ACCUMULATOR | yes | no | 0 | HASH256(set_root) | v2: structured-leaf set-membership; witness = NUMERIC(element_id) + MERKLE_PROOF (≤4 levels = 128 B); leaf = `H_tag("LadderAccumulatorLeaf/v1", element_id_LE)` |
 | 0x0807 | OUTPUT_CHECK | no | no | 0 | NUMERIC(idx), NUMERIC(min), NUMERIC(max), HASH256(script) | Per-output value and script constraint |
 
 ## Legacy Family (0x0900 - 0x09FF)

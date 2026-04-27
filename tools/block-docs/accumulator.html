@@ -56,7 +56,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0806 &middot; GOVERNANCE FAMILY</div>
   <h1 class="block-title">ACCUMULATOR</h1>
-  <p class="block-subtitle">Merkle set membership proof. Verifies that a value belongs to a committed set using sorted-pair Merkle proofs. The conditions commit to a Merkle root; the witness provides the leaf and proof path. No Tapscript equivalent.</p>
+  <p class="block-subtitle">v2 structured-leaf set-membership proof. The conditions commit to a Merkle root over a set of element ids; the witness provides the element id (NUMERIC) plus a Merkle inclusion proof (depth ≤ 4). The leaf hash is <code>TaggedHash("LadderAccumulatorLeaf/v1", element_id_LE)</code> &mdash; not free attacker bytes. Closes the v0.5 audit #2 finding E-001.</p>
   <span class="block-family-badge badge-governance">Governance</span>
   <span class="invertible-badge inv-yes">Invertible</span>
 </div>
@@ -112,55 +112,54 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">merkle_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Root of the Merkle tree committing to the allowed set</td></tr>
-      <tr><td class="field-name">siblings[0..N]</td><td class="field-type">HASH256</td><td class="field-size">32 B each</td><td class="field-side-w">Witness</td><td class="field-desc">Sibling hashes from leaf to root (proof path). One per tree level.</td></tr>
-      <tr><td class="field-name">leaf</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-w">Witness</td><td class="field-desc">The leaf hash being proven (last HASH256 field in the block)</td></tr>
+      <tr><td class="field-name">set_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Root of the inner Merkle tree committing the set; tagged-hash domain <code>LadderAccumulatorInterior/v1</code>.</td></tr>
+      <tr><td class="field-name">element_id</td><td class="field-type">NUMERIC</td><td class="field-size">1-3 B</td><td class="field-side-w">Witness</td><td class="field-desc">Position of the proven element (0 ≤ id ≤ 65535). The leaf hash is <code>H_tag("LadderAccumulatorLeaf/v1", element_id_LE)</code>.</td></tr>
+      <tr><td class="field-name">proof</td><td class="field-type">MERKLE_PROOF</td><td class="field-size">0-128 B</td><td class="field-side-w">Witness</td><td class="field-desc">Sibling hashes from leaf to root, packed as `depth × 32` raw bytes (depth ≤ 4).</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">Minimum 3 HASH256 fields required: root + at least 1 sibling + leaf. Fields are ordered: [root, sibling_0, sibling_1, ..., leaf].</p>
+  <p class="section-text" style="margin-top:12px">Per-rung cap: 1 ACCUMULATOR. Per-tx cap (across all inputs): 2 ACCUMULATORs. Conditions side fixed at ~38 B regardless of set size; witness is `~5 + 5 + (depth × 32)` ≤ 138 B.</p>
 </div>
 
 <!-- Wire -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
-  <p class="section-text" style="margin-bottom:12px">Example: depth-2 tree (4 leaves), proving membership of one leaf:</p>
+  <p class="section-text" style="margin-bottom:12px">Example: depth-2 tree (4 leaves), proving membership of element_id=2:</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0806</span>
       <span class="wire-segment wire-inv">0</span>
       <span class="wire-segment wire-count">1</span>
-      <span class="wire-segment wire-field-hash">HASH256 &middot; root</span>
+      <span class="wire-segment wire-field-hash">HASH256 &middot; set_root</span>
       <span class="wire-bytes">Conditions = 38 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0806</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
-      <span class="wire-segment wire-field-hash">HASH256 &middot; sib0</span>
-      <span class="wire-segment wire-field-hash">HASH256 &middot; sib1</span>
-      <span class="wire-segment wire-field-hash">HASH256 &middot; leaf</span>
-      <span class="wire-bytes">Witness = 106 bytes</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; eid</span>
+      <span class="wire-segment wire-field-hash">MERKLE_PROOF &middot; 64B</span>
+      <span class="wire-bytes">Witness = ~72 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total (depth 2)</span>
-      <span class="wire-total-bytes">144 bytes</span>
+      <span class="wire-total-bytes">~110 bytes</span>
     </div>
   </div>
-  <p class="section-text" style="margin-top:12px">Witness grows by 34 bytes per tree level (1B type + 1B len + 32B hash).</p>
+  <p class="section-text" style="margin-top:12px">MERKLE_PROOF grows by 32 B per tree level. Conditions side stays at 38 B regardless of set size.</p>
 </div>
 
 <!-- Evaluation -->
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract all <span class="eval-keyword">HASH256</span> fields. If fewer than 3 &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">First hash = <span class="eval-keyword">root</span>, last hash = <span class="eval-keyword">leaf</span>, middle hashes = proof siblings</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Start with <span class="eval-keyword">current</span> = leaf</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">For each sibling: <span class="eval-keyword">current</span> = SHA256(min(current, sibling) || max(current, sibling))</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If computed root == committed root &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Block must have exactly 3 fields: <code>HASH256(set_root), NUMERIC(element_id), MERKLE_PROOF</code> &rarr; otherwise <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read element_id; reject if &gt; <code>MAX_ACCUMULATOR_ELEMENT_ID</code> (65535) &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Compute leaf = <code>TaggedHash("LadderAccumulatorLeaf/v1", element_id_LE)</code></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">For each 32-byte sibling in MERKLE_PROOF: <code>current = TaggedHash("LadderAccumulatorInterior/v1", min(current, sibling) || max(current, sibling))</code></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If computed root == committed set_root &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
     <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
-  <p class="section-text" style="margin-top:12px"><strong>Sorted pair convention:</strong> At each level, the two children are sorted lexicographically before hashing. This makes the proof deterministic — no left/right direction bits needed, saving 1 bit per level.</p>
+  <p class="section-text" style="margin-top:12px"><strong>Sorted pair convention:</strong> Children are sorted lexicographically before hashing — no direction bits needed. <strong>Domain separation:</strong> the inner Merkle tree uses dedicated tagged-hash domains so cross-tree collisions with the outer MLSC tree, the MULTISIG inner tree, or BIP-340 internal nodes are impossible.</p>
 </div>
 
 <!-- JSON -->
@@ -170,17 +169,17 @@
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ACCUMULATOR"</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3d4...merkle root...32 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3d4... set_root, 32 bytes"</span> }
   ]
 }</pre></div>
 
-  <div class="json-label" style="margin-top:16px">Witness (prove membership)</div>
+  <div class="json-label" style="margin-top:16px">Spend (signrungtx signer spec)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ACCUMULATOR"</span>,
-  <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...sibling at level 0..."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...sibling at level 1..."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...leaf being proven..."</span> }
+  <span class="json-key">"element_id"</span>: <span class="json-num">5</span>,
+  <span class="json-key">"proof"</span>: [
+    <span class="json-str">"...sibling at level 0 (32-byte hex)..."</span>,
+    <span class="json-str">"...sibling at level 1..."</span>
   ]
 }</pre></div>
 </div>

@@ -221,6 +221,35 @@ bool VerifyPubkeyMerkleProof(const std::vector<uint8_t>& pubkey,
                               const uint256& expected_root,
                               std::string& error);
 
+/** ACCUMULATOR v2 helpers (BIP-XXXX §ACCUMULATOR).
+ *
+ *  Set-membership proofs over an inner Merkle tree where leaves are
+ *  domain-separated tagged hashes of a small structured payload (the
+ *  element id). This eliminates the legacy v1 shape in which both leaf and
+ *  sibling hashes were free 32-byte attacker-chosen blobs (~288 B per spend).
+ *
+ *  Hash domains:
+ *    leaf:     TaggedHash("LadderAccumulatorLeaf/v1",     element_id_LE)
+ *    interior: TaggedHash("LadderAccumulatorInterior/v1", min(a,b) || max(a,b))
+ *
+ *  Sorted-children interior nodes — same convention as the legacy shape but
+ *  domain-separated from MLSC and inner-pubkey trees so cross-tree collisions
+ *  are impossible. */
+
+/** Compute the leaf hash for the element with the given id. */
+uint256 BuildAccumulatorLeaf(uint32_t element_id);
+
+/** Sorted interior hash for the accumulator tree. */
+uint256 BuildAccumulatorInterior(const uint256& a, const uint256& b);
+
+/** Verify that the element with the given id is committed to by `expected_root`
+ *  via the proof bytes (concatenated 32-byte sibling hashes, depth ≤
+ *  MAX_ACCUMULATOR_PROOF_DEPTH). */
+bool VerifyAccumulatorProof(uint32_t element_id,
+                             const std::vector<uint8_t>& proof_bytes,
+                             const uint256& expected_root,
+                             std::string& error);
+
 /** Compute a Ladder Script tweaked conditions root for key-path spending.
  *  tweaked_key = internal_pubkey + H_LadderTweak(internal_pubkey || merkle_root) * G
  *  @return (tweaked x-only key as uint256, parity) or nullopt on failure. */

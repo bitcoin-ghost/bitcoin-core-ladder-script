@@ -1687,27 +1687,47 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::ACCUMULATOR: {
-        // Merkle proof witness: array of HASH256 sibling hashes followed by leaf hash
-        // The evaluator expects: conditions=[root], witness=[sibling_0..N, leaf]
-        if (block_spec.exists("proof")) {
-            const UniValue& proof_arr = block_spec["proof"].get_array();
-            for (size_t i = 0; i < proof_arr.size(); ++i) {
-                auto h = ParseHex(proof_arr[i].get_str());
-                if (h.size() != 32) {
-                    throw JSONRPCError(RPC_INVALID_PARAMETER,
-                        "ACCUMULATOR proof hash at index " + std::to_string(i) + " must be exactly 32 bytes");
-                }
-                block.fields.push_back({RungDataType::HASH256, h});
-            }
+        // ACCUMULATOR v2 witness: NUMERIC(element_id) + MERKLE_PROOF(siblings).
+        // Signer args:
+        //   element_id (int): position of the proven element in the committed set
+        //   proof (array of hex): sibling hashes from leaf to root, each 32 B
+        if (!block_spec.exists("element_id") || !block_spec.exists("proof")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "ACCUMULATOR v2 requires both 'element_id' (int) and 'proof' (array of 32-byte hex sibling hashes)");
         }
-        if (block_spec.exists("leaf")) {
-            auto leaf = ParseHex(block_spec["leaf"].get_str());
-            if (leaf.size() != 32) {
+        int64_t eid = block_spec["element_id"].getInt<int64_t>();
+        if (eid < 0 || static_cast<uint64_t>(eid) > rung::MAX_ACCUMULATOR_ELEMENT_ID) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "ACCUMULATOR element_id out of range [0, " +
+                std::to_string(rung::MAX_ACCUMULATOR_ELEMENT_ID) + "]");
+        }
+        // 4-byte LE NUMERIC for element_id (consistent with descriptor parser).
+        std::vector<uint8_t> eid_bytes(4);
+        eid_bytes[0] = static_cast<uint8_t>(eid & 0xFF);
+        eid_bytes[1] = static_cast<uint8_t>((eid >> 8) & 0xFF);
+        eid_bytes[2] = static_cast<uint8_t>((eid >> 16) & 0xFF);
+        eid_bytes[3] = static_cast<uint8_t>((eid >> 24) & 0xFF);
+        block.fields.push_back({RungDataType::NUMERIC, std::move(eid_bytes)});
+
+        const UniValue& proof_arr = block_spec["proof"].get_array();
+        if (proof_arr.size() > rung::MAX_ACCUMULATOR_PROOF_DEPTH) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "ACCUMULATOR proof depth " + std::to_string(proof_arr.size()) +
+                " > MAX_ACCUMULATOR_PROOF_DEPTH (" +
+                std::to_string(rung::MAX_ACCUMULATOR_PROOF_DEPTH) + ")");
+        }
+        std::vector<uint8_t> proof_bytes;
+        proof_bytes.reserve(proof_arr.size() * 32);
+        for (size_t i = 0; i < proof_arr.size(); ++i) {
+            auto h = ParseHex(proof_arr[i].get_str());
+            if (h.size() != 32) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER,
-                    "ACCUMULATOR leaf must be exactly 32 bytes");
+                    "ACCUMULATOR proof sibling at index " + std::to_string(i) +
+                    " must be exactly 32 bytes");
             }
-            block.fields.push_back({RungDataType::HASH256, leaf});
+            proof_bytes.insert(proof_bytes.end(), h.begin(), h.end());
         }
+        block.fields.push_back({RungDataType::MERKLE_PROOF, std::move(proof_bytes)});
         break;
     }
     case RungBlockType::P2PK_LEGACY:

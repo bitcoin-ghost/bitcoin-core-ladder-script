@@ -597,6 +597,34 @@ static size_t CountTxPreimageFields(const LadderTxView& tx)
     return total;
 }
 
+/** Count ACCUMULATOR blocks across ALL inputs in a transaction (v0.6).
+ *  Mirrors CountTxPreimageFields. Per-rung cap is enforced at deserialise; this
+ *  per-tx cap closes the cross-input accumulation channel found in audit #2. */
+static size_t CountTxAccumulatorBlocks(const LadderTxView& tx)
+{
+    size_t total = 0;
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
+        LadderWitness lw;
+        std::string err;
+        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
+        for (const auto& rung : lw.rungs) {
+            for (const auto& block : rung.blocks) {
+                if (block.type == RungBlockType::ACCUMULATOR) ++total;
+            }
+        }
+        for (const auto& relay : lw.relays) {
+            for (const auto& block : relay.blocks) {
+                if (block.type == RungBlockType::ACCUMULATOR) ++total;
+            }
+        }
+    }
+    return total;
+}
+
 namespace api {
 
 bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
@@ -610,6 +638,12 @@ bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
     // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
     if (CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx preimage field count exceeds limit";
+        return false;
+    }
+
+    // Consensus (v0.6): ACCUMULATOR block count across ALL inputs.
+    if (CountTxAccumulatorBlocks(tx) > MAX_ACCUMULATOR_BLOCKS_PER_TX) {
+        error = "TX_MLSC: per-tx ACCUMULATOR block count exceeds limit";
         return false;
     }
 
