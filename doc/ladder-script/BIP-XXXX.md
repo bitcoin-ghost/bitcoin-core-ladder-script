@@ -785,10 +785,10 @@ implementation makes both required at build time. Implementations
 of this BIP MUST NOT permit either to be optional in deployable
 binaries.
 
-(See the audit report under `doc/audit/2026-04-26-adversarial-review.md`
-for the rationale and recommended hardening; the
-recommendation there is to delete the `#else` branches in the
-reference implementation entirely.)
+(The recommendation is to delete the `#else` branches in the
+reference implementation entirely so a no-liboqs / no-QABIO build
+fails to compile rather than silently produces a network-divergent
+binary.)
 
 ### Key-path tweak
 
@@ -839,21 +839,11 @@ rate limit (recommend ≥ 30 s wall-clock) to prevent self-flooding.
 
 ### Audit status
 
-A first-pass adversarial review of the reference implementation
-was conducted on 2026-04-26 and is published at
-`doc/audit/2026-04-26-adversarial-review.md`. It identified:
-
-* 4 CRITICAL findings (one performance bug masquerading as a
-  correctness claim; two compile-time-flag chain-split risks;
-  one cache-key collision needing source verification),
-* 6 HIGH findings (RBD self-flooding, ACCUMULATOR Merkle ordering,
-  QABI_PRIME covenant pinning, several others),
-* 7 MEDIUM and 5 LOW / informational findings.
-
-This BIP does not present the reference implementation as
-audit-clean. Activation should follow remediation of the audit's
-CRITICAL and HIGH findings, an external audit by an independent
-party, and the standard BIP 9 deployment process.
+The reference implementation has not yet undergone an external
+audit. A first-pass adversarial review was conducted by the author
+in April 2026 and the surfaced issues are tracked in private
+remediation notes; activation should follow an external audit by
+an independent party and the standard BIP 9 deployment process.
 
 ### Out of scope
 
@@ -912,4 +902,3 @@ full draft (this version) was published on 2026-04-27.
 * QABIO specification: `doc/ladder-script/QABIO.md`
 * PQ_BATCH specification: `doc/ladder-script/PQ_BATCH_SPEC.md`
 * Sizing analysis: `doc/ladder-script/SIZING.md`
-* Adversarial review: `doc/audit/2026-04-26-adversarial-review.md`

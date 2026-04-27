@@ -44,3 +44,4 @@ spec/jdk-*/
 spec/*.tar.gz
 spec/tla2tools.jar
 proxy/analytics.db
+doc/audit/
