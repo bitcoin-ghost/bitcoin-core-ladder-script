@@ -87,6 +87,9 @@ EvalResult EvalHysteresisFeeBlock(const RungBlock& block, const RungEvalContext&
         return EvalResult::UNSATISFIED;
     }
     // fee_rate = fee / vsize (sat/vB); vsize = (weight + 3) / 4 per BIP 141.
+    // Truncating integer division — fee_rate is rounded toward zero, so
+    // the consensus check uses the floor. Sub-sat/vB precision is
+    // intentionally not enforced.
     int64_t vsize = (ctx.tx_weight + 3) / 4;
     if (vsize <= 0) {
         return EvalResult::ERROR;

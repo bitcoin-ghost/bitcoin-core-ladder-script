@@ -147,8 +147,8 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        const CCoinsViewCache& inputs, unsigned int flags, bool cacheSigStore,
                        bool cacheFullScriptStore, PrecomputedTransactionData& txdata,
                        ValidationCache& validation_cache,
-                       std::vector<CScriptCheck>* pvChecks = nullptr,
-                       int32_t block_height = 0)
+                       std::vector<CScriptCheck>* pvChecks,
+                       int32_t block_height)
                        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 bool CheckFinalTxAtTip(const CBlockIndex& active_chain_tip, const CTransaction& tx)
@@ -405,7 +405,7 @@ void Chainstate::MaybeUpdateMempoolForReorg(
 static bool CheckInputsFromMempoolAndCache(const CTransaction& tx, TxValidationState& state,
                 const CCoinsViewCache& view, const CTxMemPool& pool,
                 unsigned int flags, PrecomputedTransactionData& txdata, CCoinsViewCache& coins_tip,
-                ValidationCache& validation_cache)
+                ValidationCache& validation_cache, int32_t block_height)
                 EXCLUSIVE_LOCKS_REQUIRED(cs_main, pool.cs)
 {
     AssertLockHeld(cs_main);
@@ -437,7 +437,7 @@ static bool CheckInputsFromMempoolAndCache(const CTransaction& tx, TxValidationS
     }
 
     // Call CheckInputScripts() to cache signature and script validity against current tip consensus rules.
-    return CheckInputScripts(tx, state, view, flags, /* cacheSigStore= */ true, /* cacheFullScriptStore= */ true, txdata, validation_cache);
+    return CheckInputScripts(tx, state, view, flags, /* cacheSigStore= */ true, /* cacheFullScriptStore= */ true, txdata, validation_cache, /*pvChecks=*/nullptr, block_height);
 }
 
 namespace {
@@ -1322,7 +1322,13 @@ bool MemPoolAccept::PolicyScriptChecks(const ATMPArgs& args, Workspace& ws)
 
     // Check input scripts and signatures.
     // This is done last to help prevent CPU exhaustion denial-of-service attacks.
-    if (!CheckInputScripts(tx, state, m_view, scriptVerifyFlags, true, false, ws.m_precomputed_txdata, GetValidationCache())) {
+    // The block_height we pass is the height the tx would be confirmed at if
+    // mined into the next block. Height-aware Ladder Script blocks
+    // (EPOCH_GATE, COUNTER_*, RATE_LIMIT, …) read this — for txs sitting in
+    // the mempool across multiple blocks the cached result may need
+    // invalidation; that's a follow-up beyond this audit pass.
+    const int32_t script_block_height = m_active_chainstate.m_chain.Height() + 1;
+    if (!CheckInputScripts(tx, state, m_view, scriptVerifyFlags, true, false, ws.m_precomputed_txdata, GetValidationCache(), /*pvChecks=*/nullptr, script_block_height)) {
         // Detect a failure due to a missing witness so that p2p code can handle rejection caching appropriately.
         if (!tx.HasWitness() && SpendsNonAnchorWitnessProg(tx, m_view)) {
             state.Invalid(TxValidationResult::TX_WITNESS_STRIPPED,
@@ -1359,7 +1365,8 @@ bool MemPoolAccept::ConsensusScriptChecks(const ATMPArgs& args, Workspace& ws)
     // transactions into the mempool can be exploited as a DoS attack.
     unsigned int currentBlockScriptVerifyFlags{GetBlockScriptFlags(*m_active_chainstate.m_chain.Tip(), m_active_chainstate.m_chainman)};
     if (!CheckInputsFromMempoolAndCache(tx, state, m_view, m_pool, currentBlockScriptVerifyFlags,
-                                        ws.m_precomputed_txdata, m_active_chainstate.CoinsTip(), GetValidationCache())) {
+                                        ws.m_precomputed_txdata, m_active_chainstate.CoinsTip(), GetValidationCache(),
+                                        /*block_height=*/m_active_chainstate.m_chain.Height() + 1)) {
         LogPrintf("BUG! PLEASE REPORT THIS! CheckInputScripts failed against latest-block but not STANDARD flags %s, %s\n", hash.ToString(), state.ToString());
         return Assume(false);
     }
@@ -2214,7 +2221,13 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             pq_batch_cache_ptr = &local_pq_batch_cache;
         }
         bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr);
-        // Write back any new cache entries
+        // Write back any new cache entries. We use emplace() here, not
+        // insert_or_assign() — the cache is best-effort dedup, not exact:
+        // parallel input checks may each compute the same entry from
+        // their stale snapshots and race to write it back. emplace's
+        // first-writer-wins semantics is intentional. The redundant
+        // recomputations are bounded by the number of parallel script
+        // workers (typically par=N CPU cores), not the number of inputs.
         if (m_shared_tree_cache && cache_ptr) {
             LOCK(m_shared_tree_cache->mutex);
             for (const auto& [k, v] : local_cache) {

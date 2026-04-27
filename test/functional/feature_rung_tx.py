@@ -474,7 +474,15 @@ class RungTxTest(BitcoinTestFramework):
         it, deserialise it, and assert the output scriptPubKey comes back
         as the MLSC form regardless of what we put in. Any future
         regression in the serializer/deserializer that reintroduces a
-        standard-SegWit path for v4 would fail this round-trip."""
+        standard-SegWit path for v4 would fail this round-trip.
+
+        Audit cross-reference (H-6 in the 2026-04-26 review): "v4 tx
+        with all-P2WPKH inputs and zero MLSC outputs must reject". The
+        zero-MLSC-outputs case is closed at the deserialiser (the
+        regenerated SPK is always MLSC), which this test asserts. The
+        all-P2WPKH-inputs case is intentional bootstrap funding —
+        validated by VerifyScript on the P2WPKH side and gated by
+        CheckRungTxLevel's per-tx output-shape rules on the v4 side."""
         self.log.info("Testing v4 tx wire format is structurally MLSC...")
 
         # Fabricate a v4 tx with a conditions_root and a single output.

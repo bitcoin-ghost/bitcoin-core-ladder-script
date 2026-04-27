@@ -69,6 +69,15 @@ EvalResult EvalEpochGateBlock(const RungBlock& block, const RungEvalContext& ctx
         return EvalResult::ERROR;
     }
 
+    // ctx.block_height is unsigned at the consensus layer (always >= 0
+    // for any block actually being validated). Defensive guard for the
+    // test-harness path where block_height could be passed as -1
+    // (no-context evaluation). C++ % with a negative left operand is
+    // implementation-defined in C++03 and "truncates toward zero" since
+    // C++11, which would yield a negative `position` and confuse the
+    // comparison below. Fail closed.
+    if (ctx.block_height < 0) return EvalResult::ERROR;
+
     int64_t position = ctx.block_height % epoch_size;
     if (position < window_size) {
         return EvalResult::SATISFIED;
@@ -164,11 +173,13 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
     int64_t numerator = *numerator_opt;
     int64_t denominator = *denominator_opt;
     if (numerator < 0 || denominator <= 0) return EvalResult::ERROR;
-    // Reject numerator / denominator outside uint32. The cross-division below
-    // relies on `(a % n) * d` staying inside int64; that holds only when n
-    // and d each fit in 32 bits. Without this guard an 8-byte NUMERIC with
-    // a large value triggers signed-overflow UB and a consensus split between
-    // platforms that wrap differently.
+    // Reject numerator / denominator outside uint32. The cross-division
+    // below uses (a % n) * d and (c % d) * n — both expressions are
+    // bounded by n*d, which must fit in int64_t. n*d < 2^63 requires
+    // each of n and d to be < 2^32 (since 2^32 * 2^32 = 2^64 > int64
+    // max). Without this guard, an 8-byte NUMERIC NUMERIC paired with
+    // amounts near MAX_MONEY would overflow the remainder products and
+    // the comparison would silently take the wrong branch.
     if (numerator > 0xFFFFFFFFLL || denominator > 0xFFFFFFFFLL) {
         return EvalResult::ERROR;
     }

@@ -157,6 +157,11 @@ EvalResult EvalAnchorFeeBlock(const RungBlock& block,
         int64_t vsize = (ctx.tx_weight + 3) / 4;
         if (vsize <= 0) return EvalResult::ERROR;
 
+        // Truncating integer division — fee_rate is rounded toward zero.
+        // Consensus rule: the *floor* of the fee rate must lie in
+        // [min_fee_rate, max_fee_rate]. A tx paying 100 sat over 3 vB
+        // has fee_rate=33, not 33.33, so a min_fee_rate of 34 would
+        // reject it. Sub-sat/vB precision is intentionally not enforced.
         int64_t fee_rate = fee / vsize;
         if (fee_rate < min_fee_rate || fee_rate > max_fee_rate) {
             return EvalResult::UNSATISFIED;

@@ -243,19 +243,11 @@ bool IsValidRBDReplacement(const LadderTxView& new_tx,
                             const LadderTxView& old_tx,
                             std::string& reason)
 {
-    // Both must be priming txs.
-    if (!IsQABIPrimingTx(new_tx)) {
-        reason = "rbd-new-not-priming";
-        return false;
-    }
-    if (!IsQABIPrimingTx(old_tx)) {
-        reason = "rbd-old-not-priming";
-        return false;
-    }
-
-    // Collect (prevout-as-36-bytes → prime_depth) for each priming input of
-    // the old tx. The map key is an opaque 36-byte blob (32-byte txid + 4-byte
-    // vout LE) built at the boundary so the library never sees COutPoint.
+    // Build (prevout → prime_depth) maps for both txs in a single pass each.
+    // Replaces the previous O(N²)-style flow that called IsQABIPrimingTx
+    // (which itself iterates every input and deserialises every witness)
+    // twice up front, then iterated again to extract depths. Now each
+    // witness is deserialised exactly once.
     struct PrimeKey {
         std::array<uint8_t, 36> bytes;
         bool operator<(const PrimeKey& o) const {
@@ -273,19 +265,25 @@ bool IsValidRBDReplacement(const LadderTxView& new_tx,
         return k;
     };
 
-    struct PrimeEntry {
-        uint32_t input_idx;
-        int64_t depth;
-    };
-    std::map<PrimeKey, PrimeEntry> old_primes;
-    for (uint32_t i = 0; i < old_tx.input_count; ++i) {
-        int64_t d;
-        if (ExtractQABIPrimeDepth(old_tx, i, d)) {
-            old_primes.emplace(make_key(old_tx.inputs[i].prevout), PrimeEntry{i, d});
+    auto build_primes = [&](const LadderTxView& tx) {
+        std::map<PrimeKey, int64_t> m;
+        for (uint32_t i = 0; i < tx.input_count; ++i) {
+            int64_t d;
+            if (ExtractQABIPrimeDepth(tx, i, d)) {
+                m.emplace(make_key(tx.inputs[i].prevout), d);
+            }
         }
+        return m;
+    };
+
+    auto new_primes = build_primes(new_tx);
+    if (new_primes.empty()) {
+        reason = "rbd-new-not-priming";
+        return false;
     }
+    auto old_primes = build_primes(old_tx);
     if (old_primes.empty()) {
-        reason = "rbd-old-has-no-primings";
+        reason = "rbd-old-not-priming";
         return false;
     }
 
@@ -295,15 +293,11 @@ bool IsValidRBDReplacement(const LadderTxView& new_tx,
     // depth+1, depth+2, ... replacements: each RBD step now requires
     // committing a meaningful jump in the auth chain.
     bool found_shared = false;
-    for (uint32_t i = 0; i < new_tx.input_count; ++i) {
-        int64_t new_depth;
-        if (!ExtractQABIPrimeDepth(new_tx, i, new_depth)) continue;
-
-        auto it = old_primes.find(make_key(new_tx.inputs[i].prevout));
+    for (const auto& [prevout, new_depth] : new_primes) {
+        auto it = old_primes.find(prevout);
         if (it == old_primes.end()) continue;
-
         found_shared = true;
-        if (new_depth < it->second.depth + MIN_RBD_DEPTH_GAP) {
+        if (new_depth < it->second + MIN_RBD_DEPTH_GAP) {
             reason = "rbd-depth-gap-too-small";
             return false;
         }
