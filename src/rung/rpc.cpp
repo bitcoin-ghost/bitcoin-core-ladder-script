@@ -306,6 +306,10 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
         }
         block.inverted = true;
     }
+    // MULTISIG v2 / TIMELOCKED_MULTISIG v2: snapshot the pubkeys_out length
+    // before per-field collection so we can compute the inner pubkey-Merkle
+    // root over only THIS block's pubkeys at the end.
+    const size_t multisig_pk_start = (pubkeys_out ? pubkeys_out->size() : 0);
     const UniValue& fields_arr = block_obj["fields"].get_array();
     for (size_t f = 0; f < fields_arr.size(); ++f) {
         const UniValue& field_obj = fields_arr[f];
@@ -370,7 +374,12 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
         }
         // Auto-convert PUBKEY in conditions:
         // P2PKH/P2WPKH legacy: PUBKEY → HASH160 (RIPEMD160(SHA256(pubkey))) — these use HASH160 in conditions
-        // All others: raw pubkey is collected into pubkeys_out for Merkle leaf computation (not stored in block.fields)
+        // MULTISIG/TIMELOCKED_MULTISIG (v2): collected locally into a per-block list,
+        //   committed via HASH256(pubkey_root) post-pass — NOT pushed to the
+        //   positional pubkeys_out (PubkeyCountForBlock returns 0, so the verifier
+        //   would not consume them and leaf hashes would diverge).
+        // All other key-consuming blocks: raw pubkey is collected into pubkeys_out
+        //   for Merkle leaf computation (not stored in block.fields).
         if (conditions_only && field.type == RungDataType::PUBKEY) {
             if (block.type == RungBlockType::P2PKH_LEGACY ||
                 block.type == RungBlockType::P2WPKH_LEGACY) {
@@ -379,6 +388,17 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                 commit_field.data.resize(CHash160::OUTPUT_SIZE);
                 CHash160().Write(field.data).Finalize(commit_field.data);
                 block.fields.push_back(std::move(commit_field));
+            } else if (block.type == RungBlockType::MULTISIG ||
+                       block.type == RungBlockType::TIMELOCKED_MULTISIG) {
+                // Stash on the block temporarily via the inverted-flag-as-marker
+                // trick is fragile — instead, the post-pass below reads PUBKEY
+                // fields directly from a side buffer. Use a single ms_pubkeys
+                // vector kept in scope for the function (declared later).
+                auto pk = field.data;
+                if (pk.size() == 32) pk.insert(pk.begin(), 0x02);
+                // Push into pubkeys_out so the post-pass can slice [start..end);
+                // the post-pass will pop them back off after computing the root.
+                if (pubkeys_out) pubkeys_out->push_back(std::move(pk));
             } else if (pubkeys_out) {
                 // Normalize x-only (32 bytes) → compressed (33 bytes, even-Y)
                 // so the Merkle leaf binds a canonical pubkey encoding regardless
@@ -463,6 +483,41 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                 }
             }
         }
+    }
+
+    // MULTISIG v2 / TIMELOCKED_MULTISIG v2: compute the inner pubkey-Merkle
+    // root over the pubkeys collected for this block, append HASH256(root) as
+    // the final conditions field, then POP those pubkeys back off pubkeys_out.
+    // The outer leaf hash MUST NOT fold them in (PubkeyCountForBlock returns
+    // 0); leaving them in pubkeys_out would cause a fund/spend leaf mismatch
+    // because the verifier's ExtractBlockPubkeys would skip MULTISIG entirely.
+    // The spender supplies the N pubkeys explicitly via signrungtx's
+    // 'pubkeys' field so SignMultiKey can rebuild proofs.
+    if (conditions_only && pubkeys_out &&
+        (block.type == RungBlockType::MULTISIG ||
+         block.type == RungBlockType::TIMELOCKED_MULTISIG)) {
+        const size_t pk_end = pubkeys_out->size();
+        if (pk_end <= multisig_pk_start) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                type_str + " requires at least one PUBKEY field");
+        }
+        const size_t n_pks = pk_end - multisig_pk_start;
+        if (n_pks > rung::MAX_PUBKEYS_PER_MULTISIG) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                type_str + " has " + std::to_string(n_pks) +
+                " pubkeys, max " + std::to_string(rung::MAX_PUBKEYS_PER_MULTISIG));
+        }
+        std::vector<std::vector<uint8_t>> ms_pubkeys(
+            pubkeys_out->begin() + multisig_pk_start, pubkeys_out->end());
+        uint256 pubkey_root = rung::BuildPubkeyMerkleRoot(ms_pubkeys);
+        RungField root_field{RungDataType::HASH256,
+            std::vector<uint8_t>(pubkey_root.begin(), pubkey_root.end())};
+        block.fields.push_back(std::move(root_field));
+        // Stash on the block as a non-wire side hint so descriptor printers
+        // and wallet signer-derive paths can recover the N-pubkey list.
+        block.merkle_pubkeys = ms_pubkeys;
+        // Remove the staged MULTISIG pubkeys from the positional list.
+        pubkeys_out->resize(multisig_pk_start);
     }
 
     // Fund-time strict layout enforcement. Mirrors the spend-time
@@ -1120,8 +1175,27 @@ static void SignSingleKey(const UniValue& block_spec,
     block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
 }
 
-/** PQ-aware multi-key signing for MULTISIG and TIMELOCKED_MULTISIG.
- *  Routes to PQ if "scheme" + "pq_privkeys" present, else classical. */
+/** Push a (PUBKEY, MERKLE_PROOF, SIGNATURE) triplet for one signer. */
+static void PushMultisigTriplet(RungBlock& block,
+                                 const std::vector<uint8_t>& pubkey,
+                                 const std::vector<uint256>& proof,
+                                 std::vector<uint8_t> signature)
+{
+    block.fields.push_back({RungDataType::PUBKEY, pubkey});
+    std::vector<uint8_t> proof_bytes;
+    proof_bytes.reserve(proof.size() * 32);
+    for (const auto& sib : proof) {
+        proof_bytes.insert(proof_bytes.end(), sib.begin(), sib.end());
+    }
+    block.fields.push_back({RungDataType::MERKLE_PROOF, std::move(proof_bytes)});
+    block.fields.push_back({RungDataType::SIGNATURE, std::move(signature)});
+}
+
+/** PQ-aware multi-key signing for MULTISIG v2 and TIMELOCKED_MULTISIG v2.
+ *  Emits K × (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets. The full N-pubkey
+ *  list must be supplied by the caller (`pubkeys` for classical or
+ *  `pq_pubkeys` for PQ) so we can derive each signer's index in the
+ *  inner pubkey-Merkle tree and produce the inclusion proof. */
 static void SignMultiKey(const UniValue& block_spec,
                          RungBlock& block,
                          const CMutableTransaction& mtx,
@@ -1130,56 +1204,98 @@ static void SignMultiKey(const UniValue& block_spec,
                          const RungConditions& conditions,
                          const char* block_name)
 {
-    // Check for PQ scheme
+    auto find_pubkey_index = [&](const std::vector<std::vector<uint8_t>>& haystack,
+                                 const std::vector<uint8_t>& needle) -> std::optional<size_t> {
+        for (size_t i = 0; i < haystack.size(); ++i) {
+            if (haystack[i] == needle) return i;
+        }
+        return std::nullopt;
+    };
+
+    // PQ scheme path
     if (block_spec.exists("scheme")) {
         std::string scheme_str = block_spec["scheme"].get_str();
         RungScheme scheme;
         if (ParsePQScheme(scheme_str, scheme)) {
-            if (!block_spec.exists("pq_privkeys")) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER,
-                    strprintf("%s: PQ scheme %s requires 'pq_privkeys' (hex array), not 'privkeys' (WIF array)", block_name, scheme_str));
+            if (!block_spec.exists("pq_privkeys") || !block_spec.exists("pq_pubkeys")) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+                    "%s: PQ scheme %s requires both 'pq_privkeys' and 'pq_pubkeys' (full N-key list, hex)",
+                    block_name, scheme_str));
             }
             if (!rung::HasPQSupport()) {
-                throw JSONRPCError(RPC_INTERNAL_ERROR,
-                    strprintf("%s: PQ signing requires liboqs support (not compiled in)", block_name));
+                throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf(
+                    "%s: PQ signing requires liboqs support (not compiled in)", block_name));
+            }
+            const UniValue& pq_privkeys_arr = block_spec["pq_privkeys"].get_array();
+            const UniValue& pq_pubkeys_arr = block_spec["pq_pubkeys"].get_array();
+            if (pq_privkeys_arr.empty() || pq_pubkeys_arr.empty()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+                    "%s: requires at least one pq_privkey and one pq_pubkey", block_name));
+            }
+            if (pq_pubkeys_arr.size() > rung::MAX_PUBKEYS_PER_MULTISIG) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+                    "%s: pq_pubkeys size %d > MAX_PUBKEYS_PER_MULTISIG (%d)",
+                    block_name, (int)pq_pubkeys_arr.size(), (int)rung::MAX_PUBKEYS_PER_MULTISIG));
             }
 
-            const UniValue& pq_privkeys_arr = block_spec["pq_privkeys"].get_array();
-            if (pq_privkeys_arr.empty()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s: requires at least one pq_privkey", block_name));
+            std::vector<std::vector<uint8_t>> all_pubkeys;
+            all_pubkeys.reserve(pq_pubkeys_arr.size());
+            for (size_t p = 0; p < pq_pubkeys_arr.size(); ++p) {
+                all_pubkeys.push_back(ParseHex(pq_pubkeys_arr[p].get_str()));
             }
 
             uint256 sighash;
             if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
                 throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Failed to compute sighash", block_name));
             }
-
-            // Include PQ PUBKEYs for Merkle-bound key verification
-            if (block_spec.exists("pq_pubkeys")) {
-                const UniValue& pq_pubkeys_arr = block_spec["pq_pubkeys"].get_array();
-                for (size_t p = 0; p < pq_pubkeys_arr.size(); ++p) {
-                    auto pubkey_bytes = ParseHex(pq_pubkeys_arr[p].get_str());
-                    block.fields.push_back({RungDataType::PUBKEY, std::move(pubkey_bytes)});
-                }
-            }
-
             std::span<const uint8_t> msg{sighash.begin(), 32};
+
             for (size_t s = 0; s < pq_privkeys_arr.size(); ++s) {
                 auto pq_privkey = ParseHex(pq_privkeys_arr[s].get_str());
                 std::vector<uint8_t> pq_sig;
                 if (!rung::SignPQ(scheme, pq_privkey, msg, pq_sig)) {
-                    throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: PQ signing failed for key %d", block_name, s));
+                    throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf(
+                        "%s: PQ signing failed for key %d", block_name, s));
                 }
-                block.fields.push_back({RungDataType::SIGNATURE, std::move(pq_sig)});
+                // Derive the public key from the private key via a probe sign+verify
+                // is not generic — the caller must keep pq_privkeys and pq_pubkeys
+                // index-aligned for the first pq_privkeys.size() entries.
+                if (s >= all_pubkeys.size()) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+                        "%s: pq_privkeys index %d has no matching pq_pubkeys entry",
+                        block_name, s));
+                }
+                std::vector<uint256> proof = rung::BuildPubkeyMerkleProof(all_pubkeys, s);
+                PushMultisigTriplet(block, all_pubkeys[s], proof, std::move(pq_sig));
             }
             return;
         }
     }
 
     // Classical path
+    if (!block_spec.exists("privkeys") || !block_spec.exists("pubkeys")) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+            "%s v2: requires both 'privkeys' (K signers) and 'pubkeys' (full N-key list)",
+            block_name));
+    }
     const UniValue& privkeys_arr = block_spec["privkeys"].get_array();
-    if (privkeys_arr.empty()) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s: requires at least one privkey", block_name));
+    const UniValue& pubkeys_arr = block_spec["pubkeys"].get_array();
+    if (privkeys_arr.empty() || pubkeys_arr.empty()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+            "%s: requires at least one privkey and one pubkey", block_name));
+    }
+    if (pubkeys_arr.size() > rung::MAX_PUBKEYS_PER_MULTISIG) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+            "%s: pubkeys size %d > MAX_PUBKEYS_PER_MULTISIG (%d)",
+            block_name, (int)pubkeys_arr.size(), (int)rung::MAX_PUBKEYS_PER_MULTISIG));
+    }
+
+    std::vector<std::vector<uint8_t>> all_pubkeys;
+    all_pubkeys.reserve(pubkeys_arr.size());
+    for (size_t p = 0; p < pubkeys_arr.size(); ++p) {
+        auto pk = ParseHex(pubkeys_arr[p].get_str());
+        if (pk.size() == 32) pk.insert(pk.begin(), 0x02); // x-only → compressed (even-Y)
+        all_pubkeys.push_back(std::move(pk));
     }
 
     uint256 sighash;
@@ -1187,45 +1303,28 @@ static void SignMultiKey(const UniValue& block_spec,
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Failed to compute sighash", block_name));
     }
 
-    // merkle_pub_key: all N pubkeys must be in the witness for Merkle leaf
-    // verification, not just the M signing keys. If "pubkeys" array is
-    // provided, add ALL pubkeys first, then only signing signatures.
-    if (block_spec.exists("pubkeys")) {
-        const UniValue& all_pubkeys = block_spec["pubkeys"].get_array();
-        for (size_t p = 0; p < all_pubkeys.size(); ++p) {
-            PushWitnessPubkey(block, ParseHex(all_pubkeys[p].get_str()));
+    for (size_t s = 0; s < privkeys_arr.size(); ++s) {
+        CKey privkey = DecodeSecret(privkeys_arr[s].get_str());
+        if (!privkey.IsValid()) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf(
+                "%s: Invalid private key at index %d", block_name, s));
         }
-        // Sign with each privkey (M of N)
-        for (size_t s = 0; s < privkeys_arr.size(); ++s) {
-            CKey privkey = DecodeSecret(privkeys_arr[s].get_str());
-            if (!privkey.IsValid()) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("%s: Invalid private key at index %d", block_name, s));
-            }
-            unsigned char sig_buf[64];
-            uint256 aux_rand = GetRandHash();
-            if (!privkey.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
-                throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Schnorr signing failed for key %d", block_name, s));
-            }
-            block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
+        CPubKey pubkey = privkey.GetPubKey();
+        std::vector<uint8_t> pk_bytes(pubkey.begin(), pubkey.end());
+        auto idx_opt = find_pubkey_index(all_pubkeys, pk_bytes);
+        if (!idx_opt) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf(
+                "%s: privkey at index %d does not match any 'pubkeys' entry", block_name, s));
         }
-    } else {
-        // Legacy path: derive pubkeys from privkeys (only signing keys present)
-        for (size_t s = 0; s < privkeys_arr.size(); ++s) {
-            CKey privkey = DecodeSecret(privkeys_arr[s].get_str());
-            if (!privkey.IsValid()) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("%s: Invalid private key at index %d", block_name, s));
-            }
-
-            CPubKey pubkey = privkey.GetPubKey();
-            block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(pubkey.begin(), pubkey.end())});
-
-            unsigned char sig_buf[64];
-            uint256 aux_rand = GetRandHash();
-            if (!privkey.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
-                throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("%s: Schnorr signing failed for key %d", block_name, s));
-            }
-            block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
+        std::vector<uint256> proof = rung::BuildPubkeyMerkleProof(all_pubkeys, *idx_opt);
+        unsigned char sig_buf[64];
+        uint256 aux_rand = GetRandHash();
+        if (!privkey.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf(
+                "%s: Schnorr signing failed for key %d", block_name, s));
         }
+        std::vector<uint8_t> sig(sig_buf, sig_buf + 64);
+        PushMultisigTriplet(block, all_pubkeys[*idx_opt], proof, std::move(sig));
     }
 }
 
@@ -1901,7 +2000,12 @@ static RPCHelpMan signrungtx()
                             {"input", RPCArg::Type::NUM, RPCArg::Optional::NO, "Input index to sign"},
                             {"privkey", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "WIF key (legacy SIG-only format)"},
                             {"rung", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Target rung index for multi-rung conditions (default 0)"},
-                            {"blocks", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Block signing specs as JSON array [{type,privkey,privkeys,preimage}]"},
+                            {"blocks", RPCArg::Type::STR, RPCArg::Optional::OMITTED,
+                                "Block signing specs as JSON array. Single-key blocks: [{type,privkey,preimage}]. "
+                                "MULTISIG/TIMELOCKED_MULTISIG v2: [{type:'MULTISIG',privkeys:[wif,...],pubkeys:[hex,...]}] — "
+                                "'pubkeys' MUST be the full N-key list (in commitment order); "
+                                "'privkeys' is the K subset of signing keys. The signer derives Merkle "
+                                "inclusion proofs from 'pubkeys' and emits (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets."},
                             {"relay_blocks", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Per-relay signing specs as JSON array [{blocks:[{type,privkey}]}]"},
                             {"conditions", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Full conditions as JSON string of rung array [{blocks:[{type,fields:[{type,hex}]}]}]. Required for MLSC inputs."},
                             {"diff_witness", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Diff witness as JSON: {source_input, diffs:[{rung_index, block_index, field_index, field:{type,hex,privkey}}]}"},
@@ -3286,18 +3390,47 @@ static RPCHelpMan signladder()
             const auto& cond_block = target_cond_rung.blocks[b];
             size_t n_pks = rung::PubkeyCountForBlock(cond_block.type, cond_block);
 
-            // ParseDescriptor pushes pubkeys into rung_pks (not block.fields) for
-            // key-consuming blocks like MULTISIG. PubkeyCountForBlock only counts
-            // PUBKEY fields, so it returns 0 for conditions-format blocks. Fall back
-            // to the actual rung_pks count for key-consuming blocks.
-            if (n_pks == 0 && rung::IsKeyConsumingBlockType(cond_block.type) &&
-                pk_cursor < rung_pks.size()) {
-                n_pks = rung_pks.size() - pk_cursor;
-            }
-
             // Build a JSON block spec that BuildWitnessBlock understands
             UniValue block_spec(UniValue::VOBJ);
             block_spec.pushKV("type", rung::BlockTypeName(cond_block.type));
+
+            // MULTISIG v2 / TIMELOCKED_MULTISIG v2: pubkeys live in
+            // cond_block.merkle_pubkeys (parser side hint), not in the
+            // positional rung_pks list. Pull them straight from there and
+            // match privkey_map entries by deriving each candidate's pubkey.
+            // Only add up to K privkeys — the threshold lives in the first
+            // NUMERIC conditions field (or first NUMERIC for MULTISIG, second
+            // NUMERIC is CSV for TIMELOCKED_MULTISIG; both have K at index 0).
+            if (cond_block.type == RungBlockType::MULTISIG ||
+                cond_block.type == RungBlockType::TIMELOCKED_MULTISIG) {
+                uint32_t threshold = 0;
+                if (!cond_block.fields.empty() &&
+                    cond_block.fields[0].type == RungDataType::NUMERIC) {
+                    for (size_t i = 0; i < cond_block.fields[0].data.size() && i < 4; ++i)
+                        threshold |= static_cast<uint32_t>(cond_block.fields[0].data[i]) << (8 * i);
+                }
+                UniValue pk_arr(UniValue::VARR);
+                UniValue priv_arr(UniValue::VARR);
+                for (const auto& pk_bytes : cond_block.merkle_pubkeys) {
+                    pk_arr.push_back(HexStr(pk_bytes));
+                }
+                // Pick K matching privkeys (first-match order over merkle_pubkeys).
+                for (const auto& pk_bytes : cond_block.merkle_pubkeys) {
+                    if (priv_arr.size() >= threshold) break;
+                    for (const auto& [alias, key] : privkey_map) {
+                        CPubKey pub = key.GetPubKey();
+                        if (std::vector<uint8_t>(pub.begin(), pub.end()) == pk_bytes) {
+                            priv_arr.push_back(EncodeSecret(key));
+                            break;
+                        }
+                    }
+                }
+                block_spec.pushKV("pubkeys", pk_arr);
+                block_spec.pushKV("privkeys", priv_arr);
+                wit_rung.blocks.push_back(
+                    BuildWitnessBlock(block_spec, mtx, input_idx, txdata, conditions));
+                continue; // MULTISIG handled — skip the generic per-block flow.
+            }
 
             bool is_sig = rung::IsKeyConsumingBlockType(cond_block.type);
 
@@ -3350,9 +3483,10 @@ static RPCHelpMan signladder()
                     }
                     block_spec.pushKV("pubkeys", pk_arr);
 
-                    if (cond_block.type == RungBlockType::MULTISIG ||
-                        cond_block.type == RungBlockType::MUSIG_THRESHOLD ||
-                        cond_block.type == RungBlockType::TIMELOCKED_MULTISIG) {
+                    if (cond_block.type == RungBlockType::MUSIG_THRESHOLD) {
+                        // MUSIG_THRESHOLD wants a `privkeys` array too. MULTISIG
+                        // and TIMELOCKED_MULTISIG already returned above via
+                        // their dedicated merkle_pubkeys branch.
                         UniValue privkeys_arr(UniValue::VARR);
                         for (size_t p = 0; p < n_pks && (pk_cursor + p) < rung_pks.size(); ++p) {
                             for (const auto& [alias, key] : privkey_map) {

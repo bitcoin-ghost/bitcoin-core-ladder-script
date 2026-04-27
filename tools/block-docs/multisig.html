@@ -57,7 +57,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0002 &middot; SIGNATURE FAMILY</div>
   <h1 class="block-title">MULTISIG</h1>
-  <p class="block-subtitle">M-of-N threshold signature verification. Multiple pubkey commitments are locked in conditions with a threshold. The witness provides N pubkeys and M valid signatures to satisfy the block.</p>
+  <p class="block-subtitle">K-of-N threshold signature verification. The N pubkeys are committed via an inner Merkle root in conditions; at spend time the witness reveals K signers as <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> triplets. Unrevealed slots cost no on-chain bytes and cannot carry attacker-chosen data.</p>
   <span class="block-family-badge" style="color: #ff1744; border-color: #ff174440;">Signature</span>
   <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
@@ -103,77 +103,91 @@
     </thead>
     <tbody>
       <tr>
-        <td class="field-name">threshold</td>
+        <td class="field-name">threshold (K)</td>
         <td class="field-type">NUMERIC</td>
-        <td class="field-size">1-4 B</td>
+        <td class="field-size">1 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Required number of valid signatures (M)</td>
-      </tr>
-      <tr>
-        <td class="field-name">pubkey[0..N]</td>
-        <td class="field-type">PUBKEY</td>
-        <td class="field-size">32-33 B each</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">All N public keys (x-only 32B or compressed 33B)</td>
-      </tr>
-      <tr>
-        <td class="field-name">signature[0..M]</td>
-        <td class="field-type">SIGNATURE</td>
-        <td class="field-size">64-65 B each</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">M valid signatures corresponding to M distinct pubkeys</td>
+        <td class="field-desc">Required number of valid signatures (K, 1 &le; K &le; 16)</td>
       </tr>
       <tr>
         <td class="field-name">scheme</td>
         <td class="field-type">SCHEME</td>
         <td class="field-size">1 B</td>
-        <td class="field-side-w">Witness (opt)</td>
-        <td class="field-desc">Optional PQ signature scheme identifier for post-quantum routing</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Signature scheme (Schnorr, ECDSA, FALCON-512, &hellip;) shared by all signers</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey_root</td>
+        <td class="field-type">HASH256</td>
+        <td class="field-size">32 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Inner Merkle root over the N pubkey set (tagged-hash domain <code>LadderMultisigPubkey/v1</code>)</td>
+      </tr>
+      <tr>
+        <td class="field-name">pubkey[i]</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32-33 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Position i of K signer triplets &mdash; revealed pubkey</td>
+      </tr>
+      <tr>
+        <td class="field-name">merkle_proof[i]</td>
+        <td class="field-type">MERKLE_PROOF</td>
+        <td class="field-size">0-128 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Inclusion proof for pubkey[i] against pubkey_root (depth &le; 4)</td>
+      </tr>
+      <tr>
+        <td class="field-name">signature[i]</td>
+        <td class="field-type">SIGNATURE</td>
+        <td class="field-size">64-65 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Signature under pubkey[i]</td>
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = N). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">v2 inner-Merkle commitment: pubkey_root binds the N-pubkey set in conditions; the witness carries exactly K (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets. Unrevealed slots are not on the wire.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (example 2-of-3):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (example 2-of-3 &mdash; size independent of N):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0002</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">4</span>
-      <span class="wire-segment wire-field-num" style="min-width:90px">NUMERIC &middot; 3B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">COMMIT &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">COMMIT &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">COMMIT &middot; 32B</span>
-      <span class="wire-bytes">= 111 bytes</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-num" style="min-width:80px">NUMERIC K &middot; 1B</span>
+      <span class="wire-segment wire-field-num" style="min-width:80px">SCHEME &middot; 1B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">HASH256 root &middot; 32B</span>
+      <span class="wire-bytes">= 38 bytes</span>
     </div>
   </div>
 
-  <p class="section-text" style="margin-bottom:16px">Witness side (example 2-of-3):</p>
+  <p class="section-text" style="margin-bottom:16px">Witness side (example 2-of-3 &mdash; depth-2 inner tree, 1 sibling per proof):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0002</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">5</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 32B</span>
+      <span class="wire-segment wire-count">6</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 33B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:90px">PROOF &middot; 64B</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SIG &middot; 64B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:80px">PK &middot; 33B</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:90px">PROOF &middot; 64B</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SIG &middot; 64B</span>
-      <span class="wire-bytes">= 238 bytes</span>
+      <span class="wire-bytes">= ~330 bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness, 2-of-3)</span>
-      <span class="wire-total-bytes">351 bytes</span>
+      <span class="wire-total-bytes">~368 bytes</span>
     </div>
   </div>
 
-  <p class="section-text">Wire size scales linearly: N pubkey commits in conditions + N pubkeys + M signatures in witness.</p>
+  <p class="section-text">Conditions size is fixed at 38 bytes regardless of N. Witness scales as <code>K &middot; (PUBKEY + MERKLE_PROOF + SIGNATURE)</code>; the proof grows logarithmically in N (max 128 bytes per signer for N=16).</p>
 </div>
 
 <!-- Evaluation Logic -->

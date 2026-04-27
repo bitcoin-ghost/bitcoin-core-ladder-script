@@ -223,6 +223,84 @@ EvalResult VerifySigWithScheme(const RungField& pubkey_field,
     return EvalResult::ERROR;
 }
 
+EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
+                                      uint32_t threshold,
+                                      const std::vector<uint8_t>& pubkey_root_bytes,
+                                      const RungField* scheme_field,
+                                      size_t conditions_field_count,
+                                      const api::LadderSigChecker& sig_checker,
+                                      const RungEvalContext& ctx)
+{
+    if (threshold == 0 || threshold > MAX_PUBKEYS_PER_MULTISIG) {
+        return EvalResult::ERROR;
+    }
+    if (pubkey_root_bytes.size() != 32) {
+        return EvalResult::ERROR;
+    }
+    uint256 pubkey_root;
+    std::memcpy(pubkey_root.data(), pubkey_root_bytes.data(), 32);
+
+    // Witness must be exactly K triplets: (PUBKEY, MERKLE_PROOF, SIGNATURE).
+    // Deserialiser already enforced the triplet pattern and the global cap;
+    // here we cross-check against the K read from conditions.
+    if (block.fields.size() < conditions_field_count) return EvalResult::ERROR;
+    const size_t witness_field_count = block.fields.size() - conditions_field_count;
+    if (witness_field_count != static_cast<size_t>(threshold) * 3) {
+        return EvalResult::UNSATISFIED;
+    }
+
+    std::vector<std::vector<uint8_t>> seen_pubkeys;
+    seen_pubkeys.reserve(threshold);
+    uint32_t valid_count = 0;
+
+    for (uint32_t i = 0; i < threshold; ++i) {
+        const RungField& pk = block.fields[conditions_field_count + 3 * i + 0];
+        const RungField& proof_f = block.fields[conditions_field_count + 3 * i + 1];
+        const RungField& sig = block.fields[conditions_field_count + 3 * i + 2];
+
+        if (pk.type != RungDataType::PUBKEY ||
+            proof_f.type != RungDataType::MERKLE_PROOF ||
+            sig.type != RungDataType::SIGNATURE) {
+            return EvalResult::ERROR;
+        }
+
+        // Reject duplicate pubkey reveals — each signer must be distinct.
+        for (const auto& seen : seen_pubkeys) {
+            if (seen.size() == pk.data.size() &&
+                std::memcmp(seen.data(), pk.data.data(), seen.size()) == 0) {
+                return EvalResult::UNSATISFIED;
+            }
+        }
+
+        // MERKLE_PROOF carries depth × 32 bytes of sibling hashes.
+        if (proof_f.data.size() % 32 != 0) {
+            return EvalResult::ERROR;
+        }
+        const size_t depth = proof_f.data.size() / 32;
+        if (depth > MAX_MULTISIG_TREE_DEPTH) {
+            return EvalResult::ERROR;
+        }
+        std::vector<uint256> proof(depth);
+        for (size_t d = 0; d < depth; ++d) {
+            std::memcpy(proof[d].data(), proof_f.data.data() + d * 32, 32);
+        }
+
+        std::string proof_err;
+        if (!VerifyPubkeyMerkleProof(pk.data, proof, pubkey_root, proof_err)) {
+            return EvalResult::UNSATISFIED;
+        }
+
+        EvalResult r = VerifySigWithScheme(pk, sig, scheme_field, sig_checker, ctx);
+        if (r == EvalResult::ERROR) return EvalResult::ERROR;
+        if (r != EvalResult::SATISFIED) return EvalResult::UNSATISFIED;
+
+        seen_pubkeys.push_back(pk.data);
+        ++valid_count;
+    }
+
+    return (valid_count >= threshold) ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
+}
+
 bool HasRequiredHashes(const RungBlock& block, size_t count)
 {
     return FindAllFields(block, RungDataType::HASH256).size() >= count;

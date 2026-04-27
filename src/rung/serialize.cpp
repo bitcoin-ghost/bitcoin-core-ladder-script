@@ -311,8 +311,23 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
     } else {
         // Explicit fields: read field count + per-field type + data
         uint64_t n_fields = ReadCompactSize(ss);
-        if (n_fields > MAX_FIELDS_PER_BLOCK) {
+        // MULTISIG / TIMELOCKED_MULTISIG witness: K × (PUBKEY, MERKLE_PROOF,
+        // SIGNATURE) triplets, K ≤ MAX_PUBKEYS_PER_MULTISIG. Use the wider cap.
+        const bool is_multisig_witness =
+            ctx == static_cast<uint8_t>(SerializationContext::WITNESS) &&
+            (block_out.type == RungBlockType::MULTISIG ||
+             block_out.type == RungBlockType::TIMELOCKED_MULTISIG);
+        const size_t fields_cap = is_multisig_witness
+                                      ? MAX_MULTISIG_WITNESS_FIELDS
+                                      : MAX_FIELDS_PER_BLOCK;
+        if (n_fields > fields_cap) {
             error = "block has too many fields: " + std::to_string(n_fields);
+            return false;
+        }
+        // Witness side must carry an integer number of triplets, > 0.
+        if (is_multisig_witness && (n_fields == 0 || n_fields % 3 != 0)) {
+            error = "MULTISIG witness must be K × (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets, got " +
+                    std::to_string(n_fields) + " fields";
             return false;
         }
 
@@ -410,6 +425,31 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
                             DataTypeName(expected.fields[f].type);
                     return false;
                 }
+            }
+
+            // MULTISIG witness: enforce repeating (PUBKEY, MERKLE_PROOF, SIGNATURE)
+            // triplet pattern. This closes the K<N data-embedding bypass — only
+            // these three types are legal in the witness, any other type rejects.
+            if (is_multisig_witness) {
+                static constexpr RungDataType kTripletTypes[3] = {
+                    RungDataType::PUBKEY,
+                    RungDataType::MERKLE_PROOF,
+                    RungDataType::SIGNATURE,
+                };
+                RungDataType expected_t = kTripletTypes[f % 3];
+                if (dtype != expected_t) {
+                    error = "MULTISIG witness field " + std::to_string(f) +
+                            " type mismatch: got " + DataTypeName(dtype) +
+                            ", expected " + DataTypeName(expected_t);
+                    return false;
+                }
+            }
+            // MERKLE_PROOF only legal inside MULTISIG/TIMELOCKED_MULTISIG witness;
+            // reject everywhere else so it cannot be a generic embedding vector.
+            if (dtype == RungDataType::MERKLE_PROOF && !is_multisig_witness) {
+                error = "MERKLE_PROOF only allowed in MULTISIG/TIMELOCKED_MULTISIG witness, "
+                        "got block type " + BlockTypeName(block_out.type);
+                return false;
             }
 
             if (!DeserializeField(ss, block_out.fields[f], dtype, 0, error)) {

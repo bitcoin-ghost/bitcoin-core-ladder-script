@@ -70,85 +70,25 @@ EvalResult EvalMultisigBlock(const RungBlock& block,
                         const api::LadderSigChecker& sig_checker,
                         const RungEvalContext& ctx)
 {
-    // Layout: NUMERIC(threshold M), N × PUBKEY (witness), M × SIGNATURE (witness).
-    // Pubkeys are bound to the Merkle leaf — nothing leaks into conditions.
-    const RungField* threshold_field = FindField(block, RungDataType::NUMERIC);
-    if (!threshold_field || threshold_field->data.size() < 1) {
+    // MULTISIG v2 layout (after MergeConditionsAndWitness):
+    //   conditions: [NUMERIC(K), SCHEME, HASH256(pubkey_root)]  (3 fields)
+    //   witness:    K × (PUBKEY, MERKLE_PROOF, SIGNATURE)       (3K fields)
+    // Pubkeys are revealed at spend time and proved against the inner Merkle
+    // root carried in conditions — closes the K<N data-embedding bypass.
+    constexpr size_t kCondCount = 3;
+    if (block.fields.size() < kCondCount) return EvalResult::ERROR;
+    if (block.fields[0].type != RungDataType::NUMERIC ||
+        block.fields[1].type != RungDataType::SCHEME ||
+        block.fields[2].type != RungDataType::HASH256) {
         return EvalResult::ERROR;
     }
+    auto threshold_opt = ReadNumeric(block.fields[0]);
+    if (!threshold_opt || *threshold_opt <= 0) return EvalResult::ERROR;
+    uint32_t threshold = static_cast<uint32_t>(*threshold_opt);
 
-    auto threshold_opt = ReadNumeric(*threshold_field);
-    if (!threshold_opt || *threshold_opt <= 0) {
-        return EvalResult::ERROR;
-    }
-    int64_t threshold_val = *threshold_opt;
-    uint32_t threshold = static_cast<uint32_t>(threshold_val);
-
-    auto pubkeys = FindAllFields(block, RungDataType::PUBKEY);
-    auto sigs = FindAllFields(block, RungDataType::SIGNATURE);
-
-    if (pubkeys.empty() || threshold > pubkeys.size()) {
-        return EvalResult::ERROR;
-    }
-    if (sigs.size() < threshold) {
-        return EvalResult::UNSATISFIED;
-    }
-
-    // Check for explicit SCHEME field — routes to PQ verifier if present
-    const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    if (scheme_field && !scheme_field->data.empty()) {
-        auto scheme = static_cast<RungScheme>(scheme_field->data[0]);
-        if (IsPQScheme(scheme)) {
-            // PQ multisig: compute sighash once, verify each sig against pubkeys.
-            uint8_t sighash[32];
-            if (!FetchLadderSighash(ctx, SIGHASH_DEFAULT, sighash)) {
-                return EvalResult::ERROR;
-            }
-            (void)sig_checker;  // PQ path bypasses the Core sig checker.
-
-            std::span<const uint8_t> msg{sighash, 32};
-            std::vector<bool> pubkey_used(pubkeys.size(), false);
-            uint32_t valid_count = 0;
-
-            for (const auto* sig_f : sigs) {
-                std::span<const uint8_t> sig_span{sig_f->data.data(), sig_f->data.size()};
-                for (size_t k = 0; k < pubkeys.size(); ++k) {
-                    if (pubkey_used[k]) continue;
-                    std::span<const uint8_t> pk_span{pubkeys[k]->data.data(), pubkeys[k]->data.size()};
-                    if (VerifyPQSignature(scheme, sig_span, msg, pk_span)) {
-                        pubkey_used[k] = true;
-                        valid_count++;
-                        break;
-                    }
-                }
-            }
-            return (valid_count >= threshold) ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
-        }
-        // SCHNORR/ECDSA scheme values fall through to existing size-based routing
-    }
-
-    // Verify signatures: each signature must match a distinct pubkey.
-    std::vector<bool> pubkey_used(pubkeys.size(), false);
-    uint32_t valid_count = 0;
-
-    for (const auto* sig_field : sigs) {
-        for (size_t k = 0; k < pubkeys.size(); ++k) {
-            if (pubkey_used[k]) continue;
-
-            const auto* pk = pubkeys[k];
-            RungField single_sig = *sig_field;
-            RungField single_pk = *pk;
-            EvalResult r = VerifySigWithScheme(single_pk, single_sig, nullptr, sig_checker, ctx);
-            if (r == EvalResult::SATISFIED) {
-                pubkey_used[k] = true;
-                valid_count++;
-                break;
-            }
-            if (r == EvalResult::ERROR) return EvalResult::ERROR;
-        }
-    }
-
-    return (valid_count >= threshold) ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
+    return VerifyMultisigInnerMerkle(block, threshold, block.fields[2].data,
+                                      &block.fields[1], kCondCount,
+                                      sig_checker, ctx);
 }
 
 EvalResult EvalHashPreimageBlock(const RungBlock& block)

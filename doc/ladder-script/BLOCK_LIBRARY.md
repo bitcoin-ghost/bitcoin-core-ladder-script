@@ -20,7 +20,7 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0001 | SIG | no | yes | 1 | SCHEME(1) | Single Schnorr/ECDSA/PQ signature |
-| 0x0002 | MULTISIG | no | yes | var | NUMERIC(M), SCHEME(1) | M-of-N threshold signature |
+| 0x0002 | MULTISIG | no | yes | 0 | NUMERIC(K), SCHEME(1), HASH256(pubkey_root) | K-of-N threshold; N pubkeys committed via inner Merkle root, K revealed at spend with MERKLE_PROOFs |
 | 0x0003 | ADAPTOR_SIG | no | yes | 2 | (none) | Adaptor signature verification |
 | 0x0004 | MUSIG_THRESHOLD | no | yes | 1 | NUMERIC(M), NUMERIC(N) | MuSig2/FROST aggregate threshold |
 | 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using key from a relay block |
@@ -100,7 +100,7 @@ little-endian on the wire.
 | 0x0703 | HASH_SIG | no | yes | 1 | HASH256(32), SCHEME(1) | Hash preimage + signature |
 | 0x0704 | PTLC | no | yes | 2 | NUMERIC(csv) | Adaptor sig + CSV (point-locked channel) |
 | 0x0705 | CLTV_SIG | no | yes | 1 | SCHEME(1), NUMERIC(cltv) | SIG + CLTV in one block |
-| 0x0706 | TIMELOCKED_MULTISIG | no | yes | var | NUMERIC(M), NUMERIC(csv), SCHEME(1) | MULTISIG + CSV in one block |
+| 0x0706 | TIMELOCKED_MULTISIG | no | yes | 0 | NUMERIC(K), NUMERIC(csv), SCHEME(1), HASH256(pubkey_root) | MULTISIG v2 + CSV in one block |
 | 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning) |
 
 ## Governance Family (0x0800 - 0x08FF)
@@ -145,8 +145,11 @@ little-endian on the wire.
   `merkle_pub_key`. Pubkeys appear in the witness but not in the conditions fields.
   In a RUNG_TX, each output is 8 bytes (value only) with one shared
   conditions_root (MLSC `0xDF` prefix) per transaction.
-- **PK#** = `var` means the pubkey count is determined at runtime by counting PUBKEY fields
-  (MULTISIG, TIMELOCKED_MULTISIG). `0` for key-consuming blocks like P2PKH_LEGACY means the
-  pubkey is in the witness but hashed to HASH160 in conditions (not intercepted to Merkle leaf).
+- **PK#** = `var` means the pubkey count is determined at runtime by counting PUBKEY fields.
+  `0` for key-consuming blocks like P2PKH_LEGACY means the pubkey is in the witness but hashed
+  to HASH160 in conditions (not intercepted to Merkle leaf). MULTISIG and TIMELOCKED_MULTISIG
+  also report `0`: they commit the N pubkeys via an inner Merkle root (`HASH256(pubkey_root)`
+  in conditions), and the spend witness reveals K pubkeys with `MERKLE_PROOF` inclusion proofs
+  — neither the conditions nor the outer leaf carries the raw N-pubkey list.
 - RECURSE_MODIFIED and RECURSE_DECAY have variable-length fields (no implicit layout).
   Anti-spam protection uses `IsDataEmbeddingType` rejection for layout-less blocks.

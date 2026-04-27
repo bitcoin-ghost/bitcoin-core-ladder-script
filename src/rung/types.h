@@ -185,6 +185,7 @@ enum class RungDataType : uint8_t {
     SCHEME        = 0x09, //!< Signature scheme selector: 1 byte
     SCRIPT_BODY   = 0x0A, //!< Serialized inner conditions: 1-80 bytes (witness-only; node computes hash for conditions)
     DATA          = 0x0B, //!< Opaque data: 1-40 bytes (DATA_RETURN block only; hash + protocol metadata)
+    MERKLE_PROOF  = 0x0C, //!< Inclusion proof for the inner pubkey-Merkle tree (MULTISIG v2): 0-128 bytes (sibling hashes, each 32 B; depth ≤ MAX_MULTISIG_TREE_DEPTH = 4)
 };
 
 // Backward-compatible alias
@@ -281,7 +282,7 @@ inline bool IsKnownBlockType(uint16_t b)
 /** Returns true if the byte is a known RungDataType. */
 inline bool IsKnownDataType(uint8_t b)
 {
-    return b >= 0x01 && b <= 0x0B;
+    return b >= 0x01 && b <= 0x0C;
 }
 
 // Backward-compatible alias
@@ -320,6 +321,7 @@ inline size_t FieldMinSize(RungDataType type)
     case RungDataType::NUMERIC:       return 1;
     case RungDataType::SCHEME:        return 1;
     case RungDataType::DATA:          return 1;
+    case RungDataType::MERKLE_PROOF:  return 0;  // depth-0 proof for N=1 trees is the empty path
     }
     return 0;
 }
@@ -339,6 +341,7 @@ inline size_t FieldMaxSize(RungDataType type)
     case RungDataType::NUMERIC:       return 8;
     case RungDataType::SCHEME:        return 1;
     case RungDataType::DATA:          return 40;  // hash (32) + protocol metadata (8)
+    case RungDataType::MERKLE_PROOF:  return 128; // 4 levels * 32 bytes — bounded by MAX_MULTISIG_TREE_DEPTH
     }
     return 0;
 }
@@ -433,6 +436,7 @@ inline std::string DataTypeName(RungDataType type)
     case RungDataType::NUMERIC:       return "NUMERIC";
     case RungDataType::SCHEME:        return "SCHEME";
     case RungDataType::DATA:          return "DATA";
+    case RungDataType::MERKLE_PROOF:  return "MERKLE_PROOF";
     }
     return "UNKNOWN";
 }
@@ -619,9 +623,25 @@ struct RungField {
 
 /** A function block within a rung. Contains typed fields that the evaluator checks. */
 struct RungBlock {
-    RungBlockType type;
+    RungBlockType type{};
     std::vector<RungField> fields;
     bool inverted{false}; //!< If true, evaluation result is inverted (SATISFIED↔UNSATISFIED)
+    /** Side-channel hint for MULTISIG / TIMELOCKED_MULTISIG: the N-pubkey list
+     *  committed via the inner Merkle root (carried in conditions as
+     *  HASH256(pubkey_root)). Populated by parsers (descriptor + JSON); read by
+     *  FormatDescriptor and wallet signer-derive paths so they can recover the
+     *  original signer set without re-walking the conditions tree.
+     *
+     *  NOT part of the wire format. Serialisers, hashers, equality, and
+     *  consensus evaluators must ignore this field. Empty for non-multisig
+     *  block types. */
+    std::vector<std::vector<uint8_t>> merkle_pubkeys;
+
+    RungBlock() = default;
+    // Convenience constructor — lets call sites write `RungBlock{type}` and
+    // get a properly default-initialised block without tripping
+    // -Wmissing-field-initializers on the trailing members.
+    explicit RungBlock(RungBlockType t) : type(t) {}
 };
 
 /** A single rung in a ladder. All blocks must be satisfied (AND logic). */
@@ -629,6 +649,11 @@ struct Rung {
     std::vector<RungBlock> blocks;
     uint8_t rung_id{0};                //!< Rung identifier within the ladder
     std::vector<uint16_t> relay_refs;    //!< Indices into relay array that must be satisfied
+
+    Rung() = default;
+    // Convenience constructor — `Rung{{blockA, blockB}}` becomes a 1-arg ctor
+    // call instead of aggregate init that omits trailing default members.
+    Rung(std::vector<RungBlock> bs) : blocks(std::move(bs)) {}
 };
 
 /** A relay definition: blocks evaluated for cross-referencing, not tied to an output.
@@ -675,16 +700,13 @@ inline size_t PubkeyCountForBlock(RungBlockType type, const RungBlock& block)
     case RungBlockType::COUNTER_DOWN:
     case RungBlockType::COUNTER_UP:
         return 1;
-    // N pubkey blocks: count PUBKEY fields directly (merkle_pub_key).
-    // The witness carries all N pubkeys; they are bound to the Merkle leaf.
+    // MULTISIG v2 / TIMELOCKED_MULTISIG v2: pubkeys are committed via the
+    // inner pubkey-Merkle root carried in the HASH256 conditions field, NOT
+    // via the positional merkle_pub_key list. Returning 0 keeps the outer
+    // leaf hash independent of K — only the root commitment binds them.
     case RungBlockType::MULTISIG:
-    case RungBlockType::TIMELOCKED_MULTISIG: {
-        size_t pk_count = 0;
-        for (const auto& field : block.fields) {
-            if (field.type == RungDataType::PUBKEY) ++pk_count;
-        }
-        return pk_count;
-    }
+    case RungBlockType::TIMELOCKED_MULTISIG:
+        return 0;
     default:
         return 0;
     }
@@ -968,10 +990,14 @@ inline constexpr ImplicitFieldLayout DATA_RETURN_CONDITIONS = {1, {
 // Every block type has an explicit conditions layout — strict field count
 // and types — so the NUMERIC data-multiplication channel stays closed.
 
-/** MULTISIG conditions: [NUMERIC(threshold M), SCHEME(1)] — pubkeys in Merkle leaf */
-inline constexpr ImplicitFieldLayout MULTISIG_CONDITIONS = {2, {
+/** MULTISIG v2 conditions: [NUMERIC(threshold K), SCHEME(1), HASH256(pubkey_root)].
+ *  The pubkey set is committed via an inner Merkle root so unrevealed slots
+ *  cannot carry arbitrary data. At spend time the witness reveals K pubkeys
+ *  with MERKLE_PROOFs against this root. */
+inline constexpr ImplicitFieldLayout MULTISIG_CONDITIONS = {3, {
     {RungDataType::NUMERIC, 0},
     {RungDataType::SCHEME, 1},
+    {RungDataType::HASH256, 32},
 }};
 
 /** KEY_REF_SIG conditions: [NUMERIC(relay_index), NUMERIC(block_index)] */
@@ -1082,11 +1108,15 @@ inline constexpr ImplicitFieldLayout PTLC_CONDITIONS = {1, {
     {RungDataType::NUMERIC, 0},
 }};
 
-/** TIMELOCKED_MULTISIG conditions: [NUMERIC(threshold_M), NUMERIC(CSV), SCHEME(1)] — pubkeys in Merkle leaf */
-inline constexpr ImplicitFieldLayout TIMELOCKED_MULTISIG_CONDITIONS = {3, {
+/** TIMELOCKED_MULTISIG v2 conditions:
+ *    [NUMERIC(threshold K), NUMERIC(CSV), SCHEME(1), HASH256(pubkey_root)].
+ *  Same inner-Merkle commitment as MULTISIG; spend reveals K pubkeys with
+ *  MERKLE_PROOFs and the timelock must also be satisfied. */
+inline constexpr ImplicitFieldLayout TIMELOCKED_MULTISIG_CONDITIONS = {4, {
     {RungDataType::NUMERIC, 0},
     {RungDataType::NUMERIC, 0},
     {RungDataType::SCHEME, 1},
+    {RungDataType::HASH256, 32},
 }};
 
 /** ANCHOR_FEE conditions: [SCHEME(1), NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment)] — pubkeys in Merkle leaf */
@@ -1416,7 +1446,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
     static const BlockDescriptor BLOCK_DESCRIPTORS[] = {
         // Signature family
         {RungBlockType::SIG, "SIG", true, false, true, 1, &SIG_CONDITIONS, &SIG_WITNESS, false},
-        {RungBlockType::MULTISIG, "MULTISIG", true, false, true, 255, &MULTISIG_CONDITIONS, nullptr, true},
+        {RungBlockType::MULTISIG, "MULTISIG", true, false, true, 0, &MULTISIG_CONDITIONS, nullptr, true},
         {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 2, nullptr, nullptr, false},
         {RungBlockType::MUSIG_THRESHOLD, "MUSIG_THRESHOLD", true, false, true, 1, &MUSIG_THRESHOLD_CONDITIONS, &MUSIG_THRESHOLD_WITNESS, false},
         {RungBlockType::KEY_REF_SIG, "KEY_REF_SIG", true, false, true, 0, &KEY_REF_SIG_CONDITIONS, nullptr, true},
@@ -1468,7 +1498,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::HASH_SIG, "HASH_SIG", true, false, true, 1, &HASH_SIG_CONDITIONS, &HASH_SIG_WITNESS, false},
         {RungBlockType::PTLC, "PTLC", true, false, true, 2, &PTLC_CONDITIONS, nullptr, true},
         {RungBlockType::CLTV_SIG, "CLTV_SIG", true, false, true, 1, &CLTV_SIG_CONDITIONS, &CLTV_SIG_WITNESS, false},
-        {RungBlockType::TIMELOCKED_MULTISIG, "TIMELOCKED_MULTISIG", true, false, true, 255, &TIMELOCKED_MULTISIG_CONDITIONS, nullptr, true},
+        {RungBlockType::TIMELOCKED_MULTISIG, "TIMELOCKED_MULTISIG", true, false, true, 0, &TIMELOCKED_MULTISIG_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_FEE, "ANCHOR_FEE", true, false, true, 2, &ANCHOR_FEE_CONDITIONS, nullptr, true},
         // Governance family
         {RungBlockType::EPOCH_GATE, "EPOCH_GATE", true, false, false, 0, &EPOCH_GATE_CONDITIONS, nullptr, true},

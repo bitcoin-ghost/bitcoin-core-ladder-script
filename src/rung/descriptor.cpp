@@ -5,6 +5,9 @@
 
 #include <rung/descriptor.h>
 
+#include <rung/conditions.h>
+#include <rung/serialize.h>
+
 #include <crypto/sha256.h>
 #include <hash.h>
 #include <util/strencodings.h>
@@ -216,7 +219,9 @@ bool ParseCsv(ParseContext& ctx, RungBlock& block, RungBlockType type)
 
 bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // multisig(M, @pk1, @pk2, ...) or multisig(M, @pk1, @pk2, ..., scheme)
+    // multisig(K, @pk1, @pk2, ...) or multisig(K, @pk1, @pk2, ..., scheme)
+    // v2 emits MULTISIG_CONDITIONS = [NUMERIC(K), SCHEME, HASH256(pubkey_root)]
+    // and folds the N pubkeys into the inner pubkey-Merkle root.
     if (!Expect(ctx, '(')) return false;
     uint32_t threshold;
     if (!ReadUint32(ctx, threshold)) return false;
@@ -224,6 +229,7 @@ bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<
     block.type = RungBlockType::MULTISIG;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(threshold)});
 
+    std::vector<std::vector<uint8_t>> ms_pubkeys;
     while (true) {
         if (++ctx.item_count > MAX_PARSE_ITEMS) {
             ctx.error = "descriptor exceeds maximum item count";
@@ -239,6 +245,10 @@ bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<
             if (alias.empty()) return false;
             std::vector<uint8_t> pk;
             if (!LookupKey(ctx, alias, pk)) return false;
+            // Normalize x-only (32 B) → compressed (33 B, even-Y) for canonical
+            // pubkey-tree leaf hashing. Mirrors ParseBlockSpec.
+            if (pk.size() == 32) pk.insert(pk.begin(), 0x02);
+            ms_pubkeys.push_back(pk);
             rung_pks.push_back(pk);
         } else {
             // Must be a scheme name at the end
@@ -246,9 +256,33 @@ bool ParseMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<
         }
     }
 
-    // MULTISIG_CONDITIONS layout: [NUMERIC(threshold_M), SCHEME(1)] — exactly 2 fields.
-    // All keys share the same scheme. Default: SCHNORR.
+    if (ms_pubkeys.empty()) {
+        ctx.error = "multisig requires at least one pubkey";
+        return false;
+    }
+    if (ms_pubkeys.size() > MAX_PUBKEYS_PER_MULTISIG) {
+        ctx.error = "multisig has " + std::to_string(ms_pubkeys.size()) +
+                    " pubkeys, max " + std::to_string(MAX_PUBKEYS_PER_MULTISIG);
+        return false;
+    }
+    if (threshold == 0 || threshold > ms_pubkeys.size()) {
+        ctx.error = "multisig threshold K out of range [1, N]";
+        return false;
+    }
+
+    // SCHEME (default: SCHNORR — all keys share the same scheme).
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
+
+    // HASH256(pubkey_root) — inner Merkle commitment.
+    uint256 pubkey_root = BuildPubkeyMerkleRoot(ms_pubkeys);
+    block.fields.push_back({RungDataType::HASH256,
+        std::vector<uint8_t>(pubkey_root.begin(), pubkey_root.end())});
+
+    // Pop MULTISIG pubkeys back off rung_pks — the outer leaf hash must NOT
+    // fold them in (PubkeyCountForBlock = 0). The descriptor parser/printer
+    // and wallet auto-derive read them from block.merkle_pubkeys instead.
+    rung_pks.resize(rung_pks.size() - ms_pubkeys.size());
+    block.merkle_pubkeys = std::move(ms_pubkeys);
 
     return Expect(ctx, ')');
 }
@@ -876,7 +910,9 @@ bool ParsePtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint
 
 bool ParseTimelockedMultisig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // timelocked_multisig(M, @pk1, @pk2, ..., csv_blocks)
+    // timelocked_multisig(K, @pk1, @pk2, ..., csv_blocks)
+    // v2 emits TIMELOCKED_MULTISIG_CONDITIONS =
+    //   [NUMERIC(K), NUMERIC(CSV), SCHEME, HASH256(pubkey_root)].
     if (!Expect(ctx, '(')) return false;
     uint32_t threshold;
     if (!ReadUint32(ctx, threshold)) return false;
@@ -884,7 +920,7 @@ bool ParseTimelockedMultisig(ParseContext& ctx, RungBlock& block, std::vector<st
     block.type = RungBlockType::TIMELOCKED_MULTISIG;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(threshold)});
 
-    // Read pubkeys until we hit a bare number (the csv_blocks)
+    std::vector<std::vector<uint8_t>> ms_pubkeys;
     uint32_t csv_val = 0;
     while (true) {
         SkipWhitespace(ctx);
@@ -896,6 +932,8 @@ bool ParseTimelockedMultisig(ParseContext& ctx, RungBlock& block, std::vector<st
             if (alias.empty()) return false;
             std::vector<uint8_t> pk;
             if (!LookupKey(ctx, alias, pk)) return false;
+            if (pk.size() == 32) pk.insert(pk.begin(), 0x02);
+            ms_pubkeys.push_back(pk);
             rung_pks.push_back(pk);
         } else {
             // Must be csv_blocks (last numeric argument)
@@ -904,8 +942,31 @@ bool ParseTimelockedMultisig(ParseContext& ctx, RungBlock& block, std::vector<st
         }
     }
 
+    if (ms_pubkeys.empty()) {
+        ctx.error = "timelocked_multisig requires at least one pubkey";
+        return false;
+    }
+    if (ms_pubkeys.size() > MAX_PUBKEYS_PER_MULTISIG) {
+        ctx.error = "timelocked_multisig has " + std::to_string(ms_pubkeys.size()) +
+                    " pubkeys, max " + std::to_string(MAX_PUBKEYS_PER_MULTISIG);
+        return false;
+    }
+    if (threshold == 0 || threshold > ms_pubkeys.size()) {
+        ctx.error = "timelocked_multisig threshold K out of range [1, N]";
+        return false;
+    }
+
     block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(csv_val)});
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
+
+    uint256 pubkey_root = BuildPubkeyMerkleRoot(ms_pubkeys);
+    block.fields.push_back({RungDataType::HASH256,
+        std::vector<uint8_t>(pubkey_root.begin(), pubkey_root.end())});
+
+    // Same side-channel handoff as ParseMultisig — see comment there.
+    rung_pks.resize(rung_pks.size() - ms_pubkeys.size());
+    block.merkle_pubkeys = std::move(ms_pubkeys);
+
     return Expect(ctx, ')');
 }
 
@@ -1332,10 +1393,14 @@ std::string FormatDescriptor(const RungConditions& conditions,
                     threshold |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
             }
             result += "multisig(" + std::to_string(threshold);
-            // Count pubkeys from pubkeys array
-            size_t n_pks = PubkeyCountForBlock(block.type, block);
-            for (size_t i = 0; i < n_pks; ++i) {
-                result += ", " + get_alias(rung_idx);
+            // v2: pubkeys live in block.merkle_pubkeys (side hint), not in the
+            // outer positional rung_pks list (consensus skips them via
+            // PubkeyCountForBlock=0). Use the hint for alias resolution.
+            for (const auto& pk : block.merkle_pubkeys) {
+                std::string hex = HexStr(pk);
+                auto it = aliases.find(hex);
+                result += ", " + (it != aliases.end() ? "@" + it->second
+                                                      : "@" + hex.substr(0, 8));
             }
             result += ")";
             return result;
@@ -1553,8 +1618,13 @@ std::string FormatDescriptor(const RungConditions& conditions,
                 for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
                     threshold |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
             result += "timelocked_multisig(" + std::to_string(threshold);
-            size_t n = PubkeyCountForBlock(block.type, block);
-            for (size_t i = 0; i < n; ++i) result += ", " + get_alias(rung_idx);
+            // v2: pubkeys via inner Merkle root, surfaced through merkle_pubkeys.
+            for (const auto& pk : block.merkle_pubkeys) {
+                std::string hex = HexStr(pk);
+                auto it = aliases.find(hex);
+                result += ", " + (it != aliases.end() ? "@" + it->second
+                                                      : "@" + hex.substr(0, 8));
+            }
             for (const auto& f : block.fields) {
                 if (f.type == RungDataType::NUMERIC && &f != &block.fields[0]) {
                     uint32_t val = 0;

@@ -62,6 +62,24 @@ EvalResult VerifySigWithScheme(const RungField& pubkey_field,
                                const api::LadderSigChecker& sig_checker,
                                const RungEvalContext& ctx);
 
+/** MULTISIG v2 inner-Merkle evaluator core, shared by EvalMultisigBlock and
+ *  EvalTimelockedMultisigBlock. After MergeConditionsAndWitness the merged
+ *  block carries the conditions fields (NUMERIC(K), [NUMERIC(CSV) for
+ *  TIMELOCKED_MULTISIG], SCHEME, HASH256(pubkey_root)) followed by exactly K
+ *  triplets of (PUBKEY, MERKLE_PROOF, SIGNATURE).
+ *
+ *  Validates: K in range [1, MAX_PUBKEYS_PER_MULTISIG]; witness has exactly
+ *  3K triplet fields; each pubkey is committed to by pubkey_root via its
+ *  MERKLE_PROOF; each signature verifies under that pubkey + scheme; no two
+ *  triplets reveal the same pubkey (prevents single-signer-counted-K-times). */
+EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
+                                      uint32_t threshold,
+                                      const std::vector<uint8_t>& pubkey_root_bytes,
+                                      const RungField* scheme_field,
+                                      size_t conditions_field_count,
+                                      const api::LadderSigChecker& sig_checker,
+                                      const RungEvalContext& ctx);
+
 // Note: VerifySigFromFields + EvalInnerConditions + MAX_LEGACY_INNER_DEPTH
 // are file-local to `src/rung/blocks/legacy.cpp`. They only bridge legacy
 // wrappers to Core's sighash machinery — no other block family uses them.

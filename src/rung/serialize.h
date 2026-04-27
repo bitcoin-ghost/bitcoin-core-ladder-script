@@ -52,6 +52,22 @@ static constexpr size_t MAX_RELAYS = 8;
 static constexpr size_t MAX_REQUIRES = 8;
 /** Maximum transitive relay chain depth (relay requiring relay requiring relay...). */
 static constexpr size_t MAX_RELAY_DEPTH = 4;
+/** MULTISIG v2: maximum number of pubkeys committed to via the inner Merkle root.
+ *  Matches MAX_FIELDS_PER_BLOCK = 16 by design — the cap exists primarily to
+ *  bound the inner-tree depth and the per-signer MERKLE_PROOF size. Real K-of-N
+ *  use cases top out around 11-of-15; 16 is the project's standard small-power-
+ *  of-two ceiling. */
+static constexpr size_t MAX_PUBKEYS_PER_MULTISIG = 16;
+/** MULTISIG v2: maximum depth of the inner pubkey-Merkle tree.
+ *  Equals ⌈log₂(MAX_PUBKEYS_PER_MULTISIG)⌉ = 4. Each MERKLE_PROOF field
+ *  therefore holds at most 4 × 32 = 128 bytes of sibling hashes. */
+static constexpr size_t MAX_MULTISIG_TREE_DEPTH = 4;
+/** MULTISIG v2: maximum field count on the witness side of a MULTISIG (or
+ *  TIMELOCKED_MULTISIG) block. The witness carries K × (PUBKEY + MERKLE_PROOF +
+ *  SIGNATURE) triplets and K is bounded by MAX_PUBKEYS_PER_MULTISIG, so the
+ *  witness-side cap is 3 × MAX_PUBKEYS_PER_MULTISIG = 48. This special-cases
+ *  the global MAX_FIELDS_PER_BLOCK = 16 cap which is too tight for K=16. */
+static constexpr size_t MAX_MULTISIG_WITNESS_FIELDS = 3 * MAX_PUBKEYS_PER_MULTISIG;
 /** Compact coil sentinel: 0x00 + output_index(1) = 2 bytes total.
  *  Expands to default coil: UNLOCK + INLINE + SCHNORR + no address + no rung_destinations. */
 static constexpr uint8_t COMPACT_COIL_SENTINEL = 0x00;

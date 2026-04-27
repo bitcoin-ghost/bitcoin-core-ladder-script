@@ -226,53 +226,28 @@ EvalResult EvalTimelockedMultisigBlock(const RungBlock& block,
                         const api::LadderSigChecker& sig_checker,
                         const RungEvalContext& ctx)
 {
-    // TIMELOCKED_MULTISIG = MULTISIG + CSV in one block
-    // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
-    // Fields: NUMERIC[0] (threshold M), N x PUBKEY (witness),
-    //         M x SIGNATURE (witness), NUMERIC[1] (CSV timelock)
-
-    // 1. Verify multisig (same logic as EvalMultisigBlock)
-    auto numerics = FindAllFields(block, RungDataType::NUMERIC);
-    if (numerics.size() < 2) return EvalResult::ERROR;
-
-    auto threshold_opt = ReadNumeric(*numerics[0]);
-    if (!threshold_opt || *threshold_opt <= 0) return EvalResult::ERROR;
-    int64_t threshold_val = *threshold_opt;
-    uint32_t threshold = static_cast<uint32_t>(threshold_val);
-
-    auto pubkeys = ResolvePubkeyCommitments(block);
-    auto sigs = FindAllFields(block, RungDataType::SIGNATURE);
-
-    if (pubkeys.empty() || threshold > pubkeys.size()) return EvalResult::ERROR;
-    if (sigs.size() < threshold) return EvalResult::UNSATISFIED;
-
-    // Multisig verification (VerifySigWithScheme handles SCHNORR / ECDSA /
-    // PQ routing via the optional SCHEME field).
-    const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    {
-        std::vector<bool> pubkey_used(pubkeys.size(), false);
-        uint32_t valid_count = 0;
-
-        for (const auto* sig_f : sigs) {
-            for (size_t k = 0; k < pubkeys.size(); ++k) {
-                if (pubkey_used[k]) continue;
-                RungField pk_field = *pubkeys[k];
-                RungField sig_copy = *sig_f;
-                EvalResult r = VerifySigWithScheme(pk_field, sig_copy, scheme_field, sig_checker, ctx);
-                if (r == EvalResult::SATISFIED) {
-                    pubkey_used[k] = true;
-                    valid_count++;
-                    break;
-                }
-                if (r == EvalResult::ERROR) return EvalResult::ERROR;
-            }
-        }
-
-        if (valid_count < threshold) return EvalResult::UNSATISFIED;
+    // TIMELOCKED_MULTISIG v2 layout (after MergeConditionsAndWitness):
+    //   conditions: [NUMERIC(K), NUMERIC(CSV), SCHEME, HASH256(pubkey_root)]  (4 fields)
+    //   witness:    K × (PUBKEY, MERKLE_PROOF, SIGNATURE)                     (3K fields)
+    constexpr size_t kCondCount = 4;
+    if (block.fields.size() < kCondCount) return EvalResult::ERROR;
+    if (block.fields[0].type != RungDataType::NUMERIC ||
+        block.fields[1].type != RungDataType::NUMERIC ||
+        block.fields[2].type != RungDataType::SCHEME ||
+        block.fields[3].type != RungDataType::HASH256) {
+        return EvalResult::ERROR;
     }
+    auto threshold_opt = ReadNumeric(block.fields[0]);
+    if (!threshold_opt || *threshold_opt <= 0) return EvalResult::ERROR;
+    uint32_t threshold = static_cast<uint32_t>(*threshold_opt);
 
-    // 2. Check CSV timelock (second NUMERIC field)
-    auto seq_opt = ReadNumeric(*numerics[1]);
+    EvalResult sig_r = VerifyMultisigInnerMerkle(block, threshold, block.fields[3].data,
+                                                  &block.fields[2], kCondCount,
+                                                  sig_checker, ctx);
+    if (sig_r != EvalResult::SATISFIED) return sig_r;
+
+    // CSV timelock (second NUMERIC field)
+    auto seq_opt = ReadNumeric(block.fields[1]);
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;
     if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) return EvalResult::SATISFIED;

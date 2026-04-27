@@ -766,9 +766,12 @@ void register_qabi_blocks()
     });
 }
 
+#ifndef ENABLE_QABIO
 // Stub: QABIO types still parse on the wire but evaluate to UNSATISFIED on
 // nodes that didn't compile in the extension (soft-fork forward compat).
-static void register_qabi_stub()
+// Only built when the extension is disabled — otherwise register_qabi_blocks
+// (above) covers the same block types and the stub would be dead code.
+void register_qabi_stub()
 {
     RegisterBlock(RungBlockType::QABI_PRIME, [](const RungBlock&, const BlockDispatchContext&) {
         return EvalResult::UNSATISFIED;
@@ -780,5 +783,6 @@ static void register_qabi_stub()
         return EvalResult::UNSATISFIED;
     });
 }
+#endif
 
 } // namespace rung

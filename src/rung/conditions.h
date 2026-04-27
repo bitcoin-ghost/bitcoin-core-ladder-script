@@ -189,6 +189,38 @@ bool VerifyMerklePath(const uint256& leaf,
                       const uint256& expected_root,
                       std::string& error);
 
+/** MULTISIG v2 inner-pubkey Merkle helpers (BIP-XXXX §MULTISIG).
+ *
+ *  The inner tree commits to an ordered list of pubkeys at fund time so that
+ *  signers can later reveal only the K pubkeys whose signatures are required,
+ *  preventing the K<N data-embedding bypass. Unrevealed slots cost nothing
+ *  on-chain; revealed slots carry one MERKLE_PROOF (≤128 B) each.
+ *
+ *  Hash domains (separated from the outer MLSC tree to prevent any cross-tree
+ *  collision attack):
+ *    leaf:     TaggedHash("LadderMultisigPubkey/v1",   pubkey_bytes)
+ *    interior: TaggedHash("LadderMultisigInternal/v1", min(a,b) || max(a,b))
+ *
+ *  Padding leaf is the empty-input tagged hash of the leaf domain. */
+
+/** Build the inner pubkey-Merkle root over a positional pubkey list.
+ *  Pads to the next power of 2 with the multisig-specific empty-leaf hash. */
+uint256 BuildPubkeyMerkleRoot(const std::vector<std::vector<uint8_t>>& pubkeys);
+
+/** Build the Merkle path (sibling hashes from leaf to root) for the pubkey
+ *  at the given index within the positional list. */
+std::vector<uint256> BuildPubkeyMerkleProof(const std::vector<std::vector<uint8_t>>& pubkeys,
+                                             size_t target_index);
+
+/** Verify that `pubkey` is committed to by `expected_root` via `proof`.
+ *  Proof length encodes tree depth (0 ≤ depth ≤ MAX_MULTISIG_TREE_DEPTH).
+ *  An empty proof indicates a single-leaf tree (leaf must equal root).
+ *  Errors set `error` and return false. */
+bool VerifyPubkeyMerkleProof(const std::vector<uint8_t>& pubkey,
+                              const std::vector<uint256>& proof,
+                              const uint256& expected_root,
+                              std::string& error);
+
 /** Compute a Ladder Script tweaked conditions root for key-path spending.
  *  tweaked_key = internal_pubkey + H_LadderTweak(internal_pubkey || merkle_root) * G
  *  @return (tweaked x-only key as uint256, parity) or nullopt on failure. */

@@ -569,6 +569,43 @@ time).
 Folding closes this. The PUBKEY is revealed at spend time in the
 witness; the conditions tree itself contains no PUBKEY bytes.
 
+### MULTISIG inner-Merkle commitment
+
+Plain `SIG` reveals exactly one curve-validated pubkey at spend
+time, so the data-embedding surface is bounded to one PUBKEY.
+A naive `MULTISIG(K, pk_1 .. pk_N)` instead exposes `(N − K)`
+unused pubkey slots that are never curve-validated (the threshold
+`K` is satisfied as soon as `K` valid signatures are seen — the
+remaining `(N − K)` "pubkeys" can be any 32-byte payload). At
+`N = 16`, `K = 1`, that is up to `15 × 32 = 480 bytes` of
+arbitrary data per block on the spend witness, multiplied by
+input count.
+
+Closing this requires the same discipline as `SIG`: never put a
+spender-controlled, untyped blob on the conditions wire. The N
+pubkeys are committed via an *inner Merkle root* —
+`HASH256(pubkey_root)` becomes a conditions field, and the
+witness reveals K triplets of `(PUBKEY, MERKLE_PROOF, SIGNATURE)`.
+Each revealed pubkey must verify both the signature *and* its
+inclusion proof against `pubkey_root`. Unrevealed slots cost
+nothing on-chain and cannot carry attacker-chosen bytes — there
+is no slot to abuse.
+
+Tagged-hash domain separation (`LadderMultisigPubkey/v1` for
+leaves, `LadderMultisigInternal/v1` for interior nodes) keeps the
+inner tree disjoint from the outer MLSC tree. The tree depth is
+bounded by `MAX_MULTISIG_TREE_DEPTH = 4` (`N ≤ 16`), so each
+`MERKLE_PROOF` field carries at most `4 × 32 = 128` bytes of
+sibling hashes. The wire format is
+`[NUMERIC(K), SCHEME, HASH256(pubkey_root)]` on the conditions
+side and `K × (PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets on the
+witness side. `TIMELOCKED_MULTISIG` adds a `NUMERIC(CSV)` field
+between K and SCHEME but uses the identical inner-Merkle
+construction.
+
+Realistic K-of-N use cases (3-of-5, 11-of-15) top out around
+`N = 16`; the inner-tree cap is sized to that ceiling.
+
 ### QABIO
 
 The QABIO extension defines `QABI_PRIME` and `QABI_SPEND` block

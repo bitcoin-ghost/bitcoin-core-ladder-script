@@ -2397,9 +2397,9 @@ const BLOCK_FAMILIES = [
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Public Key', placeholder: '02abcdef...' },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
-      { type: 'MULTISIG', label: 'MULTISIG', desc: 'M-of-N threshold signature verification', fields: [
-        { name: 'threshold', dataType: 'NUMERIC', label: 'Threshold (M)', placeholder: '2' },
-        { name: 'pubkeys', dataType: 'PUBKEY', label: 'Public Keys', placeholder: '02ab..., 03cd...', multi: true },
+      { type: 'MULTISIG', label: 'MULTISIG', desc: 'K-of-N threshold (v2): N pubkeys committed via inner Merkle root, K revealed at spend with MERKLE_PROOFs', fields: [
+        { name: 'threshold', dataType: 'NUMERIC', label: 'Threshold (K)', placeholder: '2' },
+        { name: 'pubkeys', dataType: 'PUBKEY', label: 'Public Keys (N)', placeholder: '02ab..., 03cd... (max 16)', multi: true },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
       { type: 'ADAPTOR_SIG', label: 'ADAPTOR_SIG', desc: 'Adaptor signature for atomic swaps and payment channels', fields: [
@@ -2638,9 +2638,9 @@ const BLOCK_FAMILIES = [
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true },
         { name: 'height', dataType: 'NUMERIC', label: 'Lock Height', placeholder: '850000' },
       ]},
-      { type: 'TIMELOCKED_MULTISIG', label: 'TL_MULTI', desc: 'MULTISIG + CSV combined --M-of-N with relative timelock', fields: [
-        { name: 'threshold', dataType: 'NUMERIC', label: 'Threshold (M)', placeholder: '2' },
-        { name: 'pubkeys', dataType: 'PUBKEY', label: 'Public Keys', placeholder: '02ab..., 03cd...', multi: true },
+      { type: 'TIMELOCKED_MULTISIG', label: 'TL_MULTI', desc: 'MULTISIG v2 + CSV: K-of-N threshold (inner Merkle commit) plus relative timelock', fields: [
+        { name: 'threshold', dataType: 'NUMERIC', label: 'Threshold (K)', placeholder: '2' },
+        { name: 'pubkeys', dataType: 'PUBKEY', label: 'Public Keys (N)', placeholder: '02ab..., 03cd... (max 16)', multi: true },
         { name: 'blocks', dataType: 'NUMERIC', label: 'Timelock (blocks)', placeholder: '144' },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
@@ -2774,7 +2774,7 @@ const DATA_TYPE_SIZES = {
 
 const BLOCK_RULES = {
   SIG: 'Verifies a single signature against the public key. Schnorr (64-65B) or ECDSA (8-72B) detected by size. Pubkey folded into Merkle leaf (merkle_pub_key). With SCHEME field, routes to PQ verification.',
-  MULTISIG: 'M-of-N threshold: first NUMERIC is M, followed by N public keys and signatures. Exactly M valid signatures from distinct keys required.',
+  MULTISIG: 'K-of-N threshold (v2): N pubkeys committed via inner Merkle root in conditions, K signers reveal (PUBKEY, MERKLE_PROOF, SIGNATURE) triplets at spend. Distinct pubkeys required; unrevealed slots cost no on-chain bytes.',
   ADAPTOR_SIG: 'Adaptor signature verification for atomic swaps. Second PUBKEY is the adaptor point T. Signature verified under combined challenge H(R+T || P || m).',
   MUSIG_THRESHOLD: 'MuSig2/FROST aggregate threshold signature. M-of-N signers produce a single Schnorr signature off-chain. On-chain footprint identical to single-sig. Schnorr-only (no PQ path).',
   KEY_REF_SIG: 'Signature using a key from a relay block. References the pubkey folded into the relay Merkle leaf. Saves ~30 bytes per rung vs duplicating the key. The rung must declare relay_refs including the referenced relay.',
@@ -2816,7 +2816,7 @@ const BLOCK_RULES = {
   COSIGN: 'Satisfied when another input in the same tx has conditions matching the hash.',
   PTLC: 'Point Time Locked Contract. ADAPTOR_SIG + CSV combined. Adaptor signature reveals secret scalar; CSV enforces timeout. Used for scriptless payment channels.',
   CLTV_SIG: 'SIG + CLTV combined. Signature verification with absolute block-height timelock. Saves 8 bytes vs separate blocks.',
-  TIMELOCKED_MULTISIG: 'MULTISIG + CSV combined. M-of-N threshold signatures with relative timelock. Used for penalty branches and vault recovery.',
+  TIMELOCKED_MULTISIG: 'MULTISIG v2 + CSV combined. K-of-N inner-Merkle threshold with relative timelock. Used for penalty branches and vault recovery.',
   OUTPUT_REF: 'References a named output coil from another rung.',
   P2PK_LEGACY: 'Legacy P2PK wrapped as a Ladder Script block. Same evaluation as SIG. Pubkey folded into Merkle leaf, then Schnorr/ECDSA/PQ signature check. Closes arbitrary data surfaces by requiring typed fields.',
   P2PKH_LEGACY: 'Legacy P2PKH wrapped. Computes HASH160(pubkey) and compares to the committed hash. If match, verifies signature. Bridges legacy pay-to-pubkey-hash semantics into typed fields.',

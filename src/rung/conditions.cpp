@@ -91,6 +91,7 @@ bool IsConditionDataType(RungDataType type)
     case RungDataType::SIGNATURE:
     case RungDataType::PREIMAGE:
     case RungDataType::SCRIPT_BODY:
+    case RungDataType::MERKLE_PROOF:
         return false;
     }
     return false;
@@ -232,6 +233,44 @@ static uint256 ComputeEmptyLeaf()
 }
 
 const uint256 MLSC_EMPTY_LEAF = ComputeEmptyLeaf();
+
+// MULTISIG v2 inner-pubkey-Merkle domain separation.
+// Distinct tags ensure no cross-tree leaf collision: a 32-byte uint256 from the
+// outer MLSC tree can never be misread as a 33-byte compressed pubkey under the
+// inner-leaf hash, but explicit domain tags make this independent of byte-length.
+static const CSHA256 MULTISIG_PUBKEY_HASHER  = InitTaggedHasher("LadderMultisigPubkey/v1");
+static const CSHA256 MULTISIG_INTERNAL_HASHER = InitTaggedHasher("LadderMultisigInternal/v1");
+
+/** Padding leaf for the inner pubkey tree (empty-input tagged hash). */
+static const uint256 MULTISIG_EMPTY_LEAF = TaggedHash("LadderMultisigPubkey/v1", nullptr, 0);
+
+/** Hash a single pubkey as an inner-tree leaf. */
+static uint256 MultisigPubkeyLeaf(const std::vector<uint8_t>& pubkey)
+{
+    CSHA256 hasher = MULTISIG_PUBKEY_HASHER;
+    hasher.Write(pubkey.data(), pubkey.size());
+    uint256 result;
+    hasher.Finalize(result.data());
+    return result;
+}
+
+/** Sorted interior hash for the inner pubkey tree. */
+static uint256 MultisigInterior(const uint256& a, const uint256& b)
+{
+    unsigned char children[32 + 32];
+    if (memcmp(a.data(), b.data(), 32) <= 0) {
+        memcpy(children, a.data(), 32);
+        memcpy(children + 32, b.data(), 32);
+    } else {
+        memcpy(children, b.data(), 32);
+        memcpy(children + 32, a.data(), 32);
+    }
+    CSHA256 hasher = MULTISIG_INTERNAL_HASHER;
+    hasher.Write(children, sizeof(children));
+    uint256 result;
+    hasher.Finalize(result.data());
+    return result;
+}
 
 namespace api {
 
@@ -475,6 +514,79 @@ uint256 ComputeMerkleRootFromPath(const uint256& leaf, const std::vector<uint256
         current = MerkleInterior(current, sibling);
     }
     return current;
+}
+
+uint256 BuildPubkeyMerkleRoot(const std::vector<std::vector<uint8_t>>& pubkeys)
+{
+    if (pubkeys.empty()) return MULTISIG_EMPTY_LEAF;
+
+    std::vector<uint256> leaves;
+    leaves.reserve(pubkeys.size());
+    for (const auto& pk : pubkeys) leaves.push_back(MultisigPubkeyLeaf(pk));
+
+    if (leaves.size() == 1) return leaves[0];
+
+    size_t padded = NextPowerOf2(leaves.size());
+    while (leaves.size() < padded) leaves.push_back(MULTISIG_EMPTY_LEAF);
+
+    while (leaves.size() > 1) {
+        std::vector<uint256> parents;
+        parents.reserve(leaves.size() / 2);
+        for (size_t i = 0; i < leaves.size(); i += 2) {
+            parents.push_back(MultisigInterior(leaves[i], leaves[i + 1]));
+        }
+        leaves = std::move(parents);
+    }
+    return leaves[0];
+}
+
+std::vector<uint256> BuildPubkeyMerkleProof(const std::vector<std::vector<uint8_t>>& pubkeys,
+                                             size_t target_index)
+{
+    if (pubkeys.size() <= 1) return {};
+
+    std::vector<uint256> leaves;
+    leaves.reserve(pubkeys.size());
+    for (const auto& pk : pubkeys) leaves.push_back(MultisigPubkeyLeaf(pk));
+
+    size_t padded = NextPowerOf2(leaves.size());
+    while (leaves.size() < padded) leaves.push_back(MULTISIG_EMPTY_LEAF);
+
+    std::vector<uint256> path;
+    size_t idx = target_index;
+    while (leaves.size() > 1) {
+        size_t sibling = (idx % 2 == 0) ? idx + 1 : idx - 1;
+        path.push_back(sibling < leaves.size() ? leaves[sibling] : MULTISIG_EMPTY_LEAF);
+
+        std::vector<uint256> parents;
+        parents.reserve(leaves.size() / 2);
+        for (size_t i = 0; i < leaves.size(); i += 2) {
+            parents.push_back(MultisigInterior(leaves[i], leaves[i + 1]));
+        }
+        leaves = std::move(parents);
+        idx /= 2;
+    }
+    return path;
+}
+
+bool VerifyPubkeyMerkleProof(const std::vector<uint8_t>& pubkey,
+                              const std::vector<uint256>& proof,
+                              const uint256& expected_root,
+                              std::string& error)
+{
+    if (proof.size() > MAX_MULTISIG_TREE_DEPTH) {
+        error = "pubkey proof too deep: " + std::to_string(proof.size()) +
+                " > MAX_MULTISIG_TREE_DEPTH (" +
+                std::to_string(MAX_MULTISIG_TREE_DEPTH) + ")";
+        return false;
+    }
+    uint256 current = MultisigPubkeyLeaf(pubkey);
+    for (const auto& sibling : proof) current = MultisigInterior(current, sibling);
+    if (current != expected_root) {
+        error = "pubkey proof does not reach expected root";
+        return false;
+    }
+    return true;
 }
 
 std::optional<std::pair<uint256, bool>> ComputeTweakedConditionsRoot(
@@ -1055,7 +1167,6 @@ uint256 ComputeValueCommitment(const Rung& rung,
     for (const auto& block : rung.blocks) {
         for (const auto& field : block.fields) {
             if (field.type == RungDataType::NUMERIC && field.data.size() < 4) {
-                // Normalize to 4-byte LE
                 uint8_t padded[4] = {0, 0, 0, 0};
                 memcpy(padded, field.data.data(), field.data.size());
                 hasher.Write(padded, 4);

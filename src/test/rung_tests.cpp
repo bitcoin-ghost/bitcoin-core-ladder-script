@@ -102,6 +102,50 @@ static std::vector<rung::api::LadderOutputView> MakeOutputViews(const std::vecto
     return v;
 }
 
+/** Build a list of N distinct fake compressed pubkeys for MULTISIG v2 tests. */
+static std::vector<std::vector<uint8_t>> MakePubkeyList(size_t n, uint8_t seed = 0xA0)
+{
+    std::vector<std::vector<uint8_t>> out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        std::vector<uint8_t> pk(33, static_cast<uint8_t>(seed + i));
+        pk[0] = 0x02;
+        out.push_back(std::move(pk));
+    }
+    return out;
+}
+
+/** Build a MULTISIG v2 / TIMELOCKED_MULTISIG v2 RungBlock representing the
+ *  merged conditions+witness shape that the evaluator consumes:
+ *    [NUMERIC(K), (NUMERIC(CSV)?), SCHEME, HASH256(pubkey_root),
+ *     K × (PUBKEY, MERKLE_PROOF, SIGNATURE)] */
+static RungBlock MakeMultisigBlockV2(uint32_t k,
+                                      const std::vector<std::vector<uint8_t>>& pubkeys,
+                                      const std::vector<size_t>& signer_indices,
+                                      uint8_t scheme = 0x01,
+                                      std::optional<uint32_t> csv = std::nullopt,
+                                      size_t sig_size = 64)
+{
+    RungBlock block;
+    block.type = csv ? RungBlockType::TIMELOCKED_MULTISIG : RungBlockType::MULTISIG;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(k)});
+    if (csv) block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(*csv)});
+    block.fields.push_back({RungDataType::SCHEME, {scheme}});
+    uint256 root = rung::BuildPubkeyMerkleRoot(pubkeys);
+    block.fields.push_back({RungDataType::HASH256,
+        std::vector<uint8_t>(root.begin(), root.end())});
+    for (size_t idx : signer_indices) {
+        block.fields.push_back({RungDataType::PUBKEY, pubkeys[idx]});
+        std::vector<uint256> proof = rung::BuildPubkeyMerkleProof(pubkeys, idx);
+        std::vector<uint8_t> proof_bytes;
+        proof_bytes.reserve(proof.size() * 32);
+        for (const auto& sib : proof) proof_bytes.insert(proof_bytes.end(), sib.begin(), sib.end());
+        block.fields.push_back({RungDataType::MERKLE_PROOF, std::move(proof_bytes)});
+        block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(sig_size)});
+    }
+    return block;
+}
+
 /** Compute SHA-256 of a pubkey to produce a PUBKEY_COMMIT value. */
 static std::vector<uint8_t> MakePubkeyCommit(const std::vector<uint8_t>& pubkey)
 {
@@ -339,8 +383,9 @@ BOOST_AUTO_TEST_CASE(known_type_checks)
     BOOST_CHECK(IsKnownDataType(0x09)); // SCHEME
     BOOST_CHECK(IsKnownDataType(0x0A)); // SCRIPT_BODY
     BOOST_CHECK(IsKnownDataType(0x0B)); // DATA
+    BOOST_CHECK(IsKnownDataType(0x0C)); // MERKLE_PROOF
     BOOST_CHECK(!IsKnownDataType(0x00));
-    BOOST_CHECK(!IsKnownDataType(0x0C));
+    BOOST_CHECK(!IsKnownDataType(0x0D));
 
     // Scheme checks
     BOOST_CHECK(IsKnownScheme(0x01)); // SCHNORR
@@ -705,17 +750,8 @@ BOOST_AUTO_TEST_CASE(eval_multisig_2_of_3_satisfied)
 {
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    ScriptExecutionData execdata;
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1});
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
@@ -723,16 +759,9 @@ BOOST_AUTO_TEST_CASE(eval_multisig_insufficient_sigs)
 {
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    ScriptExecutionData execdata;
+    auto pks = MakePubkeyList(3);
+    // Threshold K=2 but only one triplet provided.
+    auto block = MakeMultisigBlockV2(2, pks, {0});
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -995,12 +1024,8 @@ BOOST_AUTO_TEST_CASE(inversion_multisig)
 {
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    auto pks = MakePubkeyList(1);
+    auto block = MakeMultisigBlockV2(1, pks, {0});
 
     ScriptExecutionData execdata;
     block.inverted = false;
@@ -1897,12 +1922,16 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         std::vector<RungField> fields;
     };
 
+    // MULTISIG v2: 1 triplet on the witness side (PUBKEY, MERKLE_PROOF, SIGNATURE).
+    // K=N=1 so MERKLE_PROOF is empty (single-leaf tree).
+    auto empty_proof = std::vector<uint8_t>{};
+
     std::vector<TestEntry> entries = {
         // === Signature family ===
         // SIG witness: [PUBKEY, SIGNATURE]
         {RungBlockType::SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
-        // MULTISIG witness: explicit (no implicit) — use NUMERIC + PUBKEY + SIG
-        {RungBlockType::MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
+        // MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
+        {RungBlockType::MULTISIG, {{RungDataType::PUBKEY, pk}, {RungDataType::MERKLE_PROOF, empty_proof}, {RungDataType::SIGNATURE, sig}}},
         // ADAPTOR_SIG witness: explicit — PUBKEY + SIGNATURE
         {RungBlockType::ADAPTOR_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // MUSIG_THRESHOLD witness: [PUBKEY, SIGNATURE] (= SIG_WITNESS)
@@ -1977,8 +2006,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::PTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num10}}},
         // CLTV_SIG witness: [PUBKEY, SIGNATURE, NUMERIC]
         {RungBlockType::CLTV_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num100}}},
-        // TIMELOCKED_MULTISIG witness: explicit — NUMERIC + PUBKEY + SIG + NUMERIC
-        {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num10}}},
+        // TIMELOCKED_MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
+        {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::PUBKEY, pk}, {RungDataType::MERKLE_PROOF, empty_proof}, {RungDataType::SIGNATURE, sig}}},
 
         // === Governance family ===
         // EPOCH_GATE: explicit — NUMERIC, NUMERIC
@@ -2088,7 +2117,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_conditions)
         // SIG conditions: [SCHEME(1)]
         {RungBlockType::SIG, {{RungDataType::SCHEME, scheme_schnorr}}},
         // MULTISIG conditions: [NUMERIC(M), SCHEME]
-        {RungBlockType::MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::SCHEME, scheme_schnorr}}},
+        // MULTISIG v2 conditions: [NUMERIC(K), SCHEME, HASH256(pubkey_root)]
+        {RungBlockType::MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::SCHEME, scheme_schnorr}, {RungDataType::HASH256, h256}}},
         // ADAPTOR_SIG: no condition fields (pubkeys in Merkle leaf)
         {RungBlockType::ADAPTOR_SIG, {}},
         // MUSIG_THRESHOLD conditions: [NUMERIC(M), NUMERIC(N)]
@@ -2176,8 +2206,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_conditions)
         {RungBlockType::PTLC, {{RungDataType::NUMERIC, num10}}},
         // CLTV_SIG conditions: [SCHEME, NUMERIC]
         {RungBlockType::CLTV_SIG, {{RungDataType::SCHEME, scheme_schnorr}, {RungDataType::NUMERIC, num100}}},
-        // TIMELOCKED_MULTISIG conditions: [NUMERIC(M), NUMERIC(CSV), SCHEME]
-        {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::NUMERIC, num10}, {RungDataType::SCHEME, scheme_schnorr}}},
+        // TIMELOCKED_MULTISIG v2 conditions: [NUMERIC(K), NUMERIC(CSV), SCHEME, HASH256(pubkey_root)]
+        {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::NUMERIC, num2}, {RungDataType::NUMERIC, num10}, {RungDataType::SCHEME, scheme_schnorr}, {RungDataType::HASH256, h256}}},
 
         // === Governance family ===
         // EPOCH_GATE conditions: [NUMERIC, NUMERIC] (= AMOUNT_LOCK_CONDITIONS)
@@ -4093,18 +4123,9 @@ BOOST_AUTO_TEST_CASE(boundary_all_limits_at_max)
 BOOST_AUTO_TEST_CASE(eval_multisig_below_threshold)
 {
     MockSignatureChecker checker;
-    checker.schnorr_result = false;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    ScriptExecutionData execdata;
+    checker.schnorr_result = false; // signatures fail
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1});
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -4213,15 +4234,12 @@ BOOST_AUTO_TEST_CASE(eval_sig_schnorr_scheme_field_fallthrough)
 BOOST_AUTO_TEST_CASE(eval_multisig_pq_no_ladder_checker)
 {
     MockSignatureChecker checker;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, {0x01}}); // threshold = 1
-    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::FALCON512)}});
-    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0xAA)});
-    block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(690, 0xBB)});
-
-    ScriptExecutionData execdata;
+    // Single FALCON512 pubkey (897 B), threshold K=1.
+    std::vector<std::vector<uint8_t>> pks = {std::vector<uint8_t>(897, 0xAA)};
+    auto block = MakeMultisigBlockV2(1, pks, {0},
+        static_cast<uint8_t>(RungScheme::FALCON512),
+        std::nullopt,
+        /*sig_size=*/690);
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -5652,52 +5670,24 @@ BOOST_AUTO_TEST_CASE(eval_sig_ignores_pubkey_commit)
     BOOST_CHECK(EvalSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(eval_multisig_pubkey_commit_resolution)
+BOOST_AUTO_TEST_CASE(eval_multisig_2_of_3_via_inner_merkle)
 {
-    // MULTISIG 2-of-3 with PUBKEY_COMMITs in conditions + PUBKEYs in witness
+    // 2-of-3 MULTISIG v2: K=2, N=3, signers reveal pubkeys + Merkle proofs.
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-    ScriptExecutionData execdata;
-
-    auto pk1 = MakePubkey();
-    auto pk2 = std::vector<uint8_t>(33, 0x02);  // different fake key
-    auto pk3 = std::vector<uint8_t>(33, 0x03);
-    pk3[0] = 0x03;  // valid prefix
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});       // threshold
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk1)});  // conditions
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk2)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk3)});
-    block.fields.push_back({RungDataType::PUBKEY, pk1});                   // witness
-    block.fields.push_back({RungDataType::PUBKEY, pk2});
-    block.fields.push_back({RungDataType::PUBKEY, pk3});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // 2 sigs
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    EvalResult result = EvalMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 2});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(eval_multisig_ignores_pubkey_commit)
+BOOST_AUTO_TEST_CASE(eval_multisig_1_of_1_no_proof_path)
 {
-    // merkle_pub_key: evaluator ignores PUBKEY_COMMIT, uses PUBKEY directly.
-    // With valid sig → SATISFIED regardless of any PUBKEY_COMMIT fields.
+    // K=N=1: single-leaf tree, MERKLE_PROOF is empty (depth 0).
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-    ScriptExecutionData execdata;
-
-    auto pk1 = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
-    block.fields.push_back({RungDataType::PUBKEY, pk1});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    EvalResult result = EvalMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    auto pks = MakePubkeyList(1);
+    auto block = MakeMultisigBlockV2(1, pks, {0});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(policy_preimage_block_limit)
@@ -6499,68 +6489,43 @@ BOOST_AUTO_TEST_CASE(cltv_sig_sig_fails)
 
 BOOST_AUTO_TEST_CASE(timelocked_multisig_satisfied)
 {
-    // 2-of-3 multisig + CSV, both pass
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});   // threshold M=2
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});      // pubkey 1
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});      // pubkey 2
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});      // pubkey 3
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // sig 1
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // sig 2
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)}); // CSV timelock
-
+    // 2-of-3 multisig + CSV, both pass.
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1},
+        /*scheme=*/0x01, /*csv=*/144);
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(timelocked_multisig_csv_fails)
 {
-    // Multisig passes but CSV fails
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
-
+    // Multisig passes but CSV fails.
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1},
+        /*scheme=*/0x01, /*csv=*/144);
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = false;
-    ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(timelocked_multisig_insufficient_sigs)
 {
-    // Only 1 sig for threshold=2 → UNSATISFIED
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // only 1 sig
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
-
+    // K=2 but only 1 triplet supplied → UNSATISFIED.
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(2, pks, {0},
+        /*scheme=*/0x01, /*csv=*/144);
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(timelocked_multisig_missing_csv_numeric)
 {
-    // Only one NUMERIC (threshold) without CSV → ERROR
+    // Only the K NUMERIC (no CSV NUMERIC) → ERROR — conditions field count too small.
     RungBlock block;
     block.type = RungBlockType::TIMELOCKED_MULTISIG;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
@@ -6570,9 +6535,7 @@ BOOST_AUTO_TEST_CASE(timelocked_multisig_missing_csv_numeric)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalTimelockedMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::ERROR);
+    BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -7103,22 +7066,8 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_satisfied)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-
-    auto pk1 = MakePubkey();
-    auto pk2 = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});  // threshold
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk1)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk2)});
-    block.fields.push_back({RungDataType::PUBKEY, pk1});
-    block.fields.push_back({RungDataType::PUBKEY, pk2});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});  // CSV
-
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1}, /*scheme=*/0x01, /*csv=*/10);
     BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
@@ -7127,21 +7076,8 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_too_few_sigs)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-
-    auto pk1 = MakePubkey();
-    auto pk2 = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});  // threshold = 2
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk1)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk2)});
-    block.fields.push_back({RungDataType::PUBKEY, pk1});
-    block.fields.push_back({RungDataType::PUBKEY, pk2});              // both keys revealed
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});  // only 1 sig (need 2)
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(2, pks, {0}, /*scheme=*/0x01, /*csv=*/10);
     BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -7150,22 +7086,8 @@ BOOST_AUTO_TEST_CASE(eval_timelocked_multisig_csv_fails)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = false;
-    ScriptExecutionData execdata;
-
-    auto pk1 = MakePubkey();
-    auto pk2 = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk1)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk2)});
-    block.fields.push_back({RungDataType::PUBKEY, pk1});
-    block.fields.push_back({RungDataType::PUBKEY, pk2});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1}, /*scheme=*/0x01, /*csv=*/10);
     BOOST_CHECK(EvalTimelockedMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -7223,17 +7145,19 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     rung2.blocks.push_back(std::move(cltv_sig_block));
     ladder.rungs.push_back(std::move(rung2));
 
-    // TIMELOCKED_MULTISIG rung
+    // TIMELOCKED_MULTISIG v2 rung — WITNESS side carries K triplets only:
+    //   K × (PUBKEY, MERKLE_PROOF, SIGNATURE). Conditions arrive separately
+    //   via the MLSC proof, so they are NOT round-tripped through the
+    //   per-input witness stream.
     Rung rung3;
     RungBlock tms_block;
     tms_block.type = RungBlockType::TIMELOCKED_MULTISIG;
-    tms_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});      // threshold
     tms_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    tms_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    tms_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    tms_block.fields.push_back({RungDataType::MERKLE_PROOF, std::vector<uint8_t>{}});
     tms_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    tms_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    tms_block.fields.push_back({RungDataType::MERKLE_PROOF, std::vector<uint8_t>{}});
     tms_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    tms_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});    // CSV
     rung3.blocks.push_back(std::move(tms_block));
     ladder.rungs.push_back(std::move(rung3));
 
@@ -7247,7 +7171,7 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     BOOST_CHECK(decoded.rungs[1].blocks[0].type == RungBlockType::CLTV_SIG);
     BOOST_CHECK_EQUAL(decoded.rungs[1].blocks[0].fields.size(), 3u);
     BOOST_CHECK(decoded.rungs[2].blocks[0].type == RungBlockType::TIMELOCKED_MULTISIG);
-    BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 7u);
+    BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 6u);
 }
 
 // ============================================================================
@@ -9147,21 +9071,9 @@ BOOST_AUTO_TEST_CASE(eval_multisig_wrong_sig_unsatisfied)
 {
     MockSignatureChecker checker;
     checker.schnorr_result = false; // sig verification fails
-
-    auto pk1 = MakePubkey();
-    auto pk2 = std::vector<uint8_t>(33, 0xBB); pk2[0] = 0x03;
-
-    RungBlock block;
-    block.type = RungBlockType::MULTISIG;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)}); // threshold = 2
-    block.fields.push_back({RungDataType::PUBKEY, pk1});
-    block.fields.push_back({RungDataType::PUBKEY, pk2});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    ScriptExecutionData execdata;
-    auto result = EvalMultisigBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 // Gap 2: DoS — RECURSE_SAME with very large max_depth still returns SATISFIED
@@ -12556,6 +12468,219 @@ BOOST_AUTO_TEST_CASE(verify_rung_tx_rejects_non_mlsc_spent_output)
     // but the ladder evaluator must NOT have parsed the witness as a valid
     // spend. Anything other than SCRIPT_ERR_OK demonstrates the safety net.
     BOOST_CHECK(serror != SCRIPT_ERR_OK);
+}
+
+// ============================================================================
+// MULTISIG v2 inner-pubkey-Merkle helpers
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_root_single_pubkey_is_leaf_hash)
+{
+    auto pks = MakePubkeyList(1);
+    uint256 root = BuildPubkeyMerkleRoot(pks);
+    auto proof = BuildPubkeyMerkleProof(pks, 0);
+    BOOST_CHECK(proof.empty());
+    std::string err;
+    BOOST_CHECK(VerifyPubkeyMerkleProof(pks[0], proof, root, err));
+    BOOST_CHECK(err.empty());
+}
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_root_two_keys)
+{
+    auto pks = MakePubkeyList(2);
+    uint256 root = BuildPubkeyMerkleRoot(pks);
+    for (size_t i = 0; i < 2; ++i) {
+        auto proof = BuildPubkeyMerkleProof(pks, i);
+        BOOST_CHECK_EQUAL(proof.size(), 1u);
+        std::string err;
+        BOOST_CHECK_MESSAGE(VerifyPubkeyMerkleProof(pks[i], proof, root, err),
+            "verify failed for index " + std::to_string(i) + ": " + err);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_root_max_size_tree)
+{
+    auto pks = MakePubkeyList(rung::MAX_PUBKEYS_PER_MULTISIG);
+    uint256 root = BuildPubkeyMerkleRoot(pks);
+    for (size_t i = 0; i < rung::MAX_PUBKEYS_PER_MULTISIG; ++i) {
+        auto proof = BuildPubkeyMerkleProof(pks, i);
+        BOOST_CHECK_EQUAL(proof.size(), rung::MAX_MULTISIG_TREE_DEPTH);
+        std::string err;
+        BOOST_CHECK_MESSAGE(VerifyPubkeyMerkleProof(pks[i], proof, root, err),
+            "verify failed for index " + std::to_string(i) + ": " + err);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_proof_rejects_wrong_pubkey)
+{
+    auto pks = MakePubkeyList(4);
+    uint256 root = BuildPubkeyMerkleRoot(pks);
+    auto proof = BuildPubkeyMerkleProof(pks, 0);
+    auto bogus_pk = MakePubkeyList(1, /*seed=*/0xF0)[0];
+    std::string err;
+    BOOST_CHECK(!VerifyPubkeyMerkleProof(bogus_pk, proof, root, err));
+    BOOST_CHECK(!err.empty());
+}
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_proof_rejects_wrong_root)
+{
+    auto pks = MakePubkeyList(3);
+    auto proof = BuildPubkeyMerkleProof(pks, 0);
+    uint256 wrong_root;
+    std::memset(wrong_root.data(), 0xAB, 32);
+    std::string err;
+    BOOST_CHECK(!VerifyPubkeyMerkleProof(pks[0], proof, wrong_root, err));
+}
+
+BOOST_AUTO_TEST_CASE(pubkey_merkle_proof_rejects_oversized)
+{
+    auto pks = MakePubkeyList(2);
+    uint256 root = BuildPubkeyMerkleRoot(pks);
+    std::vector<uint256> oversized(rung::MAX_MULTISIG_TREE_DEPTH + 1);
+    std::string err;
+    BOOST_CHECK(!VerifyPubkeyMerkleProof(pks[0], oversized, root, err));
+    BOOST_CHECK(err.find("too deep") != std::string::npos);
+}
+
+// ============================================================================
+// MULTISIG v2 evaluator: K-of-N coverage + anti-embed regression
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(eval_multisig_K_equals_N_satisfied)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(4);
+    auto block = MakeMultisigBlockV2(4, pks, {0, 1, 2, 3});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_multisig_extra_triplets_rejected)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 1, 2});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_multisig_duplicate_pubkey_rejected)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 0});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_multisig_pubkey_not_in_set_rejected)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(3);
+    auto block = MakeMultisigBlockV2(1, pks, {0});
+    auto outsider = MakePubkeyList(1, /*seed=*/0xF0)[0];
+    block.fields[3].data = outsider;
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_multisig_tampered_merkle_proof_rejected)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(4);
+    auto block = MakeMultisigBlockV2(2, pks, {0, 2});
+    BOOST_REQUIRE(block.fields[4].type == RungDataType::MERKLE_PROOF);
+    BOOST_REQUIRE(!block.fields[4].data.empty());
+    block.fields[4].data[0] ^= 0xFF;
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_multisig_threshold_zero_is_error)
+{
+    MockSignatureChecker checker;
+    auto pks = MakePubkeyList(2);
+    auto block = MakeMultisigBlockV2(0, pks, {});
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_legacy_multisig_pubkeys_in_conditions)
+{
+    // Anti-embed regression: the old conditions shape carried N×PUBKEY raw on
+    // the wire. With the v2 layout = [NUMERIC, SCHEME, HASH256], that wire
+    // shape is rejected at deserialise time.
+    DataStream ss;
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x02} << uint8_t{0x00};
+    WriteCompactSize(ss, 5);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::NUMERIC)};
+    WriteCompactSize(ss, 2);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::PUBKEY)};
+    WriteCompactSize(ss, 33);
+    ss.write(MakeByteSpan(MakePubkey()));
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::PUBKEY)};
+    WriteCompactSize(ss, 33);
+    ss.write(MakeByteSpan(MakePubkey()));
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::PUBKEY)};
+    WriteCompactSize(ss, 33);
+    ss.write(MakeByteSpan(MakePubkey()));
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::SCHEME)};
+    WriteCompactSize(ss, 1);
+    ss << uint8_t{0x01};
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::CONDITIONS), err));
+    BOOST_CHECK(!err.empty());
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_multisig_witness_non_triplet_count)
+{
+    DataStream ss;
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x02} << uint8_t{0x00};
+    WriteCompactSize(ss, 4);
+    for (int i = 0; i < 4; ++i) {
+        ss << uint8_t{static_cast<uint8_t>(RungDataType::PUBKEY)};
+        WriteCompactSize(ss, 33);
+        ss.write(MakeByteSpan(MakePubkey()));
+    }
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::WITNESS), err));
+    BOOST_CHECK(err.find("triplet") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_multisig_witness_wrong_field_order)
+{
+    DataStream ss;
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x02} << uint8_t{0x00};
+    WriteCompactSize(ss, 3);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::SIGNATURE)};
+    WriteCompactSize(ss, 64);
+    ss.write(MakeByteSpan(MakeSignature(64)));
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::MERKLE_PROOF)};
+    WriteCompactSize(ss, 0);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::PUBKEY)};
+    WriteCompactSize(ss, 33);
+    ss.write(MakeByteSpan(MakePubkey()));
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::WITNESS), err));
+    BOOST_CHECK(err.find("type mismatch") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(deserialize_rejects_merkle_proof_outside_multisig)
+{
+    DataStream ss;
+    ss << uint8_t{MICRO_HEADER_ESCAPE} << uint8_t{0x01} << uint8_t{0x00};
+    WriteCompactSize(ss, 1);
+    ss << uint8_t{static_cast<uint8_t>(RungDataType::MERKLE_PROOF)};
+    WriteCompactSize(ss, 0);
+    RungBlock block;
+    std::string err;
+    BOOST_CHECK(!DeserializeBlock(ss, block,
+        static_cast<uint8_t>(SerializationContext::WITNESS), err));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
