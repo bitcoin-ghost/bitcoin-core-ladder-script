@@ -225,6 +225,10 @@ static CSHA256 InitTaggedHasher(const char* tag)
 
 static const CSHA256 LEAF_HASHER = InitTaggedHasher("LadderLeaf/v1");
 static const CSHA256 INTERNAL_HASHER = InitTaggedHasher("LadderInternal/v1");
+// v0.7: relay leaves are folded into the conditions_root tree. Distinct
+// tagged-hash domain so a relay leaf can never alias a rung leaf even at
+// matching block layouts.
+static const CSHA256 RELAY_LEAF_HASHER = InitTaggedHasher("LadderRelayLeaf/v1");
 
 /** Compute MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "") at startup. */
 static uint256 ComputeEmptyLeaf()
@@ -341,13 +345,19 @@ std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root, const std:
 
 }  // namespace api
 
+// v0.7: ComputeRungLeaf / ComputeCoilLeaf / ComputeRelayLeaf are retained as
+// test-only helpers. The live consensus path uses TX_MLSC leaves (TaggedHash
+// over structural template + value commitment) — see ComputeTxMLSCLeaf and
+// ComputeTxMLSCRelayLeaf at the bottom of this file. These legacy helpers use
+// the wire-format serialiser and produce DIFFERENT leaf hashes than consensus.
+// New code must NOT call these.
+
 uint256 ComputeRungLeaf(const Rung& rung,
                          const std::vector<std::vector<uint8_t>>& pubkeys)
 {
     auto bytes = SerializeRungBlocks(rung, SerializationContext::CONDITIONS);
-    CSHA256 hasher = LEAF_HASHER; // copy pre-computed prefix
+    CSHA256 hasher = LEAF_HASHER;
     hasher.Write(bytes.data(), bytes.size());
-    // merkle_pub_key: append pubkeys in positional order
     for (const auto& pk : pubkeys) {
         hasher.Write(pk.data(), pk.size());
     }
@@ -372,7 +382,6 @@ uint256 ComputeRelayLeaf(const Relay& relay,
     auto bytes = SerializeRelayBlocks(relay, SerializationContext::CONDITIONS);
     CSHA256 hasher = LEAF_HASHER;
     hasher.Write(bytes.data(), bytes.size());
-    // merkle_pub_key: append pubkeys in positional order
     for (const auto& pk : pubkeys) {
         hasher.Write(pk.data(), pk.size());
     }
@@ -682,21 +691,44 @@ uint256 ComputeConditionsRoot(const RungConditions& conditions,
                                const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys,
                                const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys)
 {
-    // Leaf order: [rung_leaf[0..N-1], relay_leaf[0..M-1], coil_leaf]
-    std::vector<uint256> leaves;
-    leaves.reserve(conditions.rungs.size() + conditions.relays.size() + 1);
-
+    // v0.7: thin wrapper around the canonical TX_MLSC root computation.
+    // Builds CreationProofRung + CreationProofRelay structs, delegates to
+    // `ComputeTxMLSCRoot(rungs, relays)`. Coil is structurally bound via
+    // each rung leaf's template (no separate coil leaf in the tree).
+    std::vector<CreationProofRung> cp_rungs;
+    cp_rungs.reserve(conditions.rungs.size());
     for (size_t i = 0; i < conditions.rungs.size(); ++i) {
-        const auto& pks = (i < rung_pubkeys.size()) ? rung_pubkeys[i] : std::vector<std::vector<uint8_t>>{};
-        leaves.push_back(ComputeRungLeaf(conditions.rungs[i], pks));
+        const auto& pks = (i < rung_pubkeys.size()) ? rung_pubkeys[i]
+                                                    : std::vector<std::vector<uint8_t>>{};
+        CreationProofRung cp;
+        for (const auto& blk : conditions.rungs[i].blocks) {
+            cp.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                  static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+        }
+        cp.coil = conditions.coil;
+        cp.value_commitment = ComputeValueCommitment(conditions.rungs[i], pks);
+        cp_rungs.push_back(std::move(cp));
     }
+    std::vector<CreationProofRelay> cp_relays;
+    cp_relays.reserve(conditions.relays.size());
     for (size_t i = 0; i < conditions.relays.size(); ++i) {
-        const auto& pks = (i < relay_pubkeys.size()) ? relay_pubkeys[i] : std::vector<std::vector<uint8_t>>{};
-        leaves.push_back(ComputeRelayLeaf(conditions.relays[i], pks));
+        const auto& pks = (i < relay_pubkeys.size()) ? relay_pubkeys[i]
+                                                     : std::vector<std::vector<uint8_t>>{};
+        CreationProofRelay cp;
+        for (const auto& blk : conditions.relays[i].blocks) {
+            cp.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                  static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+        }
+        cp.relay_refs = conditions.relays[i].relay_refs;
+        // Relay value_commitment shape mirrors the rung: SHA256 of field values + pubkeys.
+        // Reuse ComputeValueCommitment by constructing a temporary Rung wrapper —
+        // both Rung and Relay carry `blocks`, and the helper only walks fields.
+        Rung tmp;
+        tmp.blocks = conditions.relays[i].blocks;
+        cp.value_commitment = ComputeValueCommitment(tmp, pks);
+        cp_relays.push_back(std::move(cp));
     }
-    leaves.push_back(ComputeCoilLeaf(conditions.coil));
-
-    return BuildMerkleTree(leaves);
+    return ComputeTxMLSCRoot(cp_rungs, cp_relays);
 }
 
 bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, std::string& error)
@@ -1056,6 +1088,10 @@ std::vector<uint8_t> SerializeMLSCProof(const MLSCProof& proof)
     return result;
 }
 
+// v0.7: VerifyMLSCProof retained as a test-only helper that exercises the
+// legacy full-MLSC leaf scheme + tree. Consensus does NOT call this — the
+// live verifier (evaluator.cpp:1019-1049) inlines merkle-path/full-leaves
+// verification using ComputeTxMLSCLeaf + ComputeTxMLSCRelayLeaf directly.
 bool VerifyMLSCProof(const MLSCProof& proof,
                      const RungCoil& coil,
                      const uint256& expected_root,
@@ -1064,13 +1100,10 @@ bool VerifyMLSCProof(const MLSCProof& proof,
                      std::string& error,
                      MLSCVerifiedLeaves* verified_out)
 {
-    // SHARED mode must be handled by the caller (evaluator) — not this function
     if (proof.proof_mode == MLSCProofMode::SHARED) {
         error = "SHARED proof mode must be resolved by the caller";
         return false;
     }
-
-    // MERKLE_PATH mode: O(log N) sibling hashes from leaf to root
     if (proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
         size_t total_leaves = proof.total_rungs + proof.total_relays + 1;
         uint256 rung_leaf = ComputeRungLeaf(proof.revealed_rung, rung_pubkeys);
@@ -1089,39 +1122,25 @@ bool VerifyMLSCProof(const MLSCProof& proof,
         }
         return true;
     }
-
-    // FULL_LEAVES mode: all unrevealed leaf hashes provided
-    // Total leaves: total_rungs + total_relays + 1 (coil)
     size_t total_leaves = proof.total_rungs + proof.total_relays + 1;
-
-    // Build the leaf array
     std::vector<uint256> leaves(total_leaves);
-
-    // Track which leaves are revealed vs proof
     std::vector<bool> revealed(total_leaves, false);
-
-    // Rung leaf: the revealed rung goes at rung_index (with merkle_pub_key pubkeys)
     leaves[proof.rung_index] = ComputeRungLeaf(proof.revealed_rung, rung_pubkeys);
     revealed[proof.rung_index] = true;
-
-    // Revealed relay leaves: relays start at index total_rungs
     for (size_t rl = 0; rl < proof.revealed_relays.size(); ++rl) {
         const auto& [relay_idx, relay] = proof.revealed_relays[rl];
         size_t leaf_idx = proof.total_rungs + relay_idx;
-        if (leaf_idx >= total_leaves - 1) { // -1 because last leaf is coil
+        if (leaf_idx >= total_leaves - 1) {
             error = "revealed relay index out of range";
             return false;
         }
-        const auto& rpks = (rl < relay_pubkeys.size()) ? relay_pubkeys[rl] : std::vector<std::vector<uint8_t>>{};
+        const auto& rpks = (rl < relay_pubkeys.size()) ? relay_pubkeys[rl]
+                                                      : std::vector<std::vector<uint8_t>>{};
         leaves[leaf_idx] = ComputeRelayLeaf(relay, rpks);
         revealed[leaf_idx] = true;
     }
-
-    // Coil leaf: always last
     leaves[total_leaves - 1] = ComputeCoilLeaf(coil);
     revealed[total_leaves - 1] = true;
-
-    // Fill unrevealed leaves with proof hashes (in order)
     size_t proof_idx = 0;
     for (size_t i = 0; i < total_leaves; ++i) {
         if (!revealed[i]) {
@@ -1132,16 +1151,11 @@ bool VerifyMLSCProof(const MLSCProof& proof,
             leaves[i] = proof.proof_hashes[proof_idx++];
         }
     }
-
     if (proof_idx != proof.proof_hashes.size()) {
         error = "excess proof hashes: used " + std::to_string(proof_idx) +
                 " of " + std::to_string(proof.proof_hashes.size());
         return false;
     }
-
-    // Verify mutation target leaves: for each revealed mutation target,
-    // compute its leaf (using the inline pubkey list) and check it
-    // matches the leaf at that rung index.
     for (const auto& target : proof.revealed_mutation_targets) {
         if (target.idx >= proof.total_rungs) {
             error = "mutation target rung_index out of range: " + std::to_string(target.idx);
@@ -1157,23 +1171,18 @@ bool VerifyMLSCProof(const MLSCProof& proof,
             return false;
         }
     }
-
-    // Populate verified_out before moving leaves
     if (verified_out) {
-        verified_out->leaves = leaves; // copy before move
+        verified_out->leaves = leaves;
         verified_out->root = expected_root;
         verified_out->rung_index = proof.rung_index;
         verified_out->total_rungs = proof.total_rungs;
         verified_out->total_relays = proof.total_relays;
     }
-
-    // Build Merkle tree and compare
     uint256 computed_root = BuildMerkleTree(std::move(leaves));
     if (computed_root != expected_root) {
         error = "MLSC Merkle root mismatch";
         return false;
     }
-
     return true;
 }
 
@@ -1217,12 +1226,50 @@ uint256 ComputeTxMLSCLeaf(const CreationProofRung& rung)
     return result;
 }
 
-uint256 ComputeTxMLSCRoot(const std::vector<CreationProofRung>& rungs)
+std::vector<uint8_t> SerializeRelayStructuralTemplate(const CreationProofRelay& relay)
 {
+    std::vector<uint8_t> out;
+    // n_blocks
+    uint8_t n_blocks = static_cast<uint8_t>(relay.blocks.size());
+    out.push_back(n_blocks);
+    // Per block: block_type(2) + inverted(1)
+    for (const auto& [block_type, inverted] : relay.blocks) {
+        out.push_back(static_cast<uint8_t>(block_type & 0xFF));
+        out.push_back(static_cast<uint8_t>((block_type >> 8) & 0xFF));
+        out.push_back(inverted);
+    }
+    // n_relay_refs (1 byte; bounded by MAX_REQUIRES = 8)
+    out.push_back(static_cast<uint8_t>(relay.relay_refs.size()));
+    for (uint16_t r : relay.relay_refs) {
+        out.push_back(static_cast<uint8_t>(r & 0xFF));
+        out.push_back(static_cast<uint8_t>((r >> 8) & 0xFF));
+    }
+    return out;
+}
+
+uint256 ComputeTxMLSCRelayLeaf(const CreationProofRelay& relay)
+{
+    auto tmpl = SerializeRelayStructuralTemplate(relay);
+    CSHA256 hasher = RELAY_LEAF_HASHER; // distinct domain from rung leaves
+    hasher.Write(tmpl.data(), tmpl.size());
+    hasher.Write(relay.value_commitment.data(), 32);
+    uint256 result;
+    hasher.Finalize(result.data());
+    return result;
+}
+
+uint256 ComputeTxMLSCRoot(const std::vector<CreationProofRung>& rungs,
+                          const std::vector<CreationProofRelay>& relays)
+{
+    // Tree leaves: rung_leaf[0..N-1] then relay_leaf[0..M-1]. Coil structural
+    // fields are bound via each rung leaf's template (no separate coil leaf).
     std::vector<uint256> leaves;
-    leaves.reserve(rungs.size());
+    leaves.reserve(rungs.size() + relays.size());
     for (const auto& rung : rungs) {
         leaves.push_back(ComputeTxMLSCLeaf(rung));
+    }
+    for (const auto& relay : relays) {
+        leaves.push_back(ComputeTxMLSCRelayLeaf(relay));
     }
     return BuildMerkleTree(std::move(leaves));
 }

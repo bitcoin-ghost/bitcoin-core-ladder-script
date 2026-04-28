@@ -369,16 +369,34 @@ CreationProofRung BuildCPRung(const Rung& rung,
     return cp;
 }
 
-/** Compute TX_MLSC root from a RungConditions + per-rung pubkeys (fallback path). */
+/** Compute TX_MLSC root from a RungConditions + per-rung pubkeys (fallback path).
+ *  v0.7: includes relay leaves so the recomputed root matches what createrungtx
+ *  produced — required for RECURSE_ family / QABI covenant checks against
+ *  relay-bearing inputs to verify correctly. */
 uint256 ComputeConditionsRootMLSC(const RungConditions& conditions,
-                                          const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys)
+                                          const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys,
+                                          const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys)
 {
     std::vector<CreationProofRung> cp_rungs;
     for (size_t r = 0; r < conditions.rungs.size(); ++r) {
         const auto& pks = (r < rung_pubkeys.size()) ? rung_pubkeys[r] : std::vector<std::vector<uint8_t>>{};
         cp_rungs.push_back(BuildCPRung(conditions.rungs[r], pks, conditions.coil));
     }
-    return ComputeTxMLSCRoot(cp_rungs);
+    std::vector<CreationProofRelay> cp_relays;
+    for (size_t i = 0; i < conditions.relays.size(); ++i) {
+        const auto& pks = (i < relay_pubkeys.size()) ? relay_pubkeys[i]
+                                                     : std::vector<std::vector<uint8_t>>{};
+        CreationProofRelay cp;
+        for (const auto& blk : conditions.relays[i].blocks) {
+            cp.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                  static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+        }
+        cp.relay_refs = conditions.relays[i].relay_refs;
+        Rung tmp; tmp.blocks = conditions.relays[i].blocks;
+        cp.value_commitment = ComputeValueCommitment(tmp, pks);
+        cp_relays.push_back(std::move(cp));
+    }
+    return ComputeTxMLSCRoot(cp_rungs, cp_relays);
 }
 
 EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,

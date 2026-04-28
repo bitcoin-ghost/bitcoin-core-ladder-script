@@ -597,6 +597,39 @@ static size_t CountTxPreimageFields(const LadderTxView& tx)
     return total;
 }
 
+/** Count SCRIPT_BODY-only fields across ALL inputs in a transaction (v0.7).
+ *  Tighter sub-cap inside the combined PREIMAGE+SCRIPT_BODY limit — closes the
+ *  E-003 channel from audit #3 where 2 × SCRIPT_BODY (~160 B) doubled the
+ *  documented 112 B/tx ceiling. */
+static size_t CountTxScriptBodyFields(const LadderTxView& tx)
+{
+    size_t total = 0;
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
+        LadderWitness lw;
+        std::string err;
+        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
+        for (const auto& rung : lw.rungs) {
+            for (const auto& block : rung.blocks) {
+                for (const auto& field : block.fields) {
+                    if (field.type == RungDataType::SCRIPT_BODY) ++total;
+                }
+            }
+        }
+        for (const auto& relay : lw.relays) {
+            for (const auto& block : relay.blocks) {
+                for (const auto& field : block.fields) {
+                    if (field.type == RungDataType::SCRIPT_BODY) ++total;
+                }
+            }
+        }
+    }
+    return total;
+}
+
 /** Count ACCUMULATOR blocks across ALL inputs in a transaction (v0.6).
  *  Mirrors CountTxPreimageFields. Per-rung cap is enforced at deserialise; this
  *  per-tx cap closes the cross-input accumulation channel found in audit #2. */
@@ -638,6 +671,13 @@ bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
     // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
     if (CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx preimage field count exceeds limit";
+        return false;
+    }
+
+    // Consensus (v0.7): SCRIPT_BODY-only sub-cap inside the combined limit.
+    // Closes E-003 from audit #3 (2 × 80 B SCRIPT_BODY > 112 B/tx claim).
+    if (CountTxScriptBodyFields(tx) > MAX_SCRIPT_BODY_FIELDS_PER_TX) {
+        error = "TX_MLSC: per-tx SCRIPT_BODY field count exceeds limit";
         return false;
     }
 
@@ -941,16 +981,42 @@ bool VerifyRungTx(
             if (mlsc_proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
                 computed_merkle_root = ComputeMerkleRootFromPath(my_leaf, mlsc_proof.proof_hashes);
             } else {
-                size_t total_leaves = mlsc_proof.total_rungs;
-                if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
+                // v0.7: tree includes relay leaves at positions [N..N+M-1].
+                size_t total_leaves = mlsc_proof.total_rungs + mlsc_proof.total_relays;
+                if (total_leaves > MAX_RUNGS + MAX_RELAYS) {
                     LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
                     return fail(LadderScriptError::UNKNOWN_ERROR);
                 }
                 std::vector<uint256> leaves(total_leaves);
+                std::vector<bool> revealed(total_leaves, false);
                 leaves[mlsc_proof.rung_index] = my_leaf;
+                revealed[mlsc_proof.rung_index] = true;
+                // Recompute revealed relay leaves at their committed positions.
+                for (size_t rl = 0; rl < mlsc_proof.revealed_relays.size(); ++rl) {
+                    const auto& [relay_idx, relay] = mlsc_proof.revealed_relays[rl];
+                    size_t leaf_idx = static_cast<size_t>(mlsc_proof.total_rungs) + relay_idx;
+                    if (leaf_idx >= total_leaves) {
+                        LogPrintf("MLSC proof: revealed_relay index out of range\n");
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                    }
+                    CreationProofRelay cp_relay;
+                    for (const auto& blk : relay.blocks) {
+                        cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                                    static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+                    }
+                    cp_relay.relay_refs = relay.relay_refs;
+                    std::vector<std::vector<uint8_t>> rpks =
+                        (relay_idx < witness_ladder.relays.size())
+                            ? ExtractBlockPubkeys(witness_ladder.relays[relay_idx].blocks)
+                            : std::vector<std::vector<uint8_t>>{};
+                    Rung tmp; tmp.blocks = relay.blocks;
+                    cp_relay.value_commitment = ComputeValueCommitment(tmp, rpks);
+                    leaves[leaf_idx] = ComputeTxMLSCRelayLeaf(cp_relay);
+                    revealed[leaf_idx] = true;
+                }
                 size_t ph_idx = 0;
                 for (size_t i = 0; i < total_leaves; ++i) {
-                    if (i == mlsc_proof.rung_index) continue;
+                    if (revealed[i]) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
                         return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
@@ -976,24 +1042,50 @@ bool VerifyRungTx(
         } else {
             // 2-element witness: verify the Merkle proof directly against conditions_root
             // (no tweak — the output was created without an internal_pubkey).
+            // v0.7: tree includes relay leaves at positions [N..N+M-1].
+            size_t total_leaves = mlsc_proof.total_rungs + mlsc_proof.total_relays;
+            if (total_leaves > MAX_RUNGS + MAX_RELAYS) {
+                LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
+                return fail(LadderScriptError::UNKNOWN_ERROR);
+            }
             if (mlsc_proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
                 std::string path_error;
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
-                                      mlsc_proof.total_rungs, conditions_root, path_error)) {
+                                      total_leaves, conditions_root, path_error)) {
                     LogPrintf("MLSC Merkle path verification failed: %s\n", path_error.c_str());
                     return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
                 }
             } else {
-                size_t total_leaves = mlsc_proof.total_rungs;
-                if (total_leaves > MAX_RUNGS + MAX_RELAYS + 1) {
-                    LogPrintf("MLSC proof: total_leaves %zu exceeds maximum\n", total_leaves);
-                    return fail(LadderScriptError::UNKNOWN_ERROR);
-                }
                 std::vector<uint256> leaves(total_leaves);
+                std::vector<bool> revealed(total_leaves, false);
                 leaves[mlsc_proof.rung_index] = my_leaf;
+                revealed[mlsc_proof.rung_index] = true;
+                // Recompute revealed relay leaves at their committed positions.
+                for (size_t rl = 0; rl < mlsc_proof.revealed_relays.size(); ++rl) {
+                    const auto& [relay_idx, relay] = mlsc_proof.revealed_relays[rl];
+                    size_t leaf_idx = static_cast<size_t>(mlsc_proof.total_rungs) + relay_idx;
+                    if (leaf_idx >= total_leaves) {
+                        LogPrintf("MLSC proof: revealed_relay index out of range\n");
+                        return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                    }
+                    CreationProofRelay cp_relay;
+                    for (const auto& blk : relay.blocks) {
+                        cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                                    static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+                    }
+                    cp_relay.relay_refs = relay.relay_refs;
+                    std::vector<std::vector<uint8_t>> rpks =
+                        (relay_idx < witness_ladder.relays.size())
+                            ? ExtractBlockPubkeys(witness_ladder.relays[relay_idx].blocks)
+                            : std::vector<std::vector<uint8_t>>{};
+                    Rung tmp; tmp.blocks = relay.blocks;
+                    cp_relay.value_commitment = ComputeValueCommitment(tmp, rpks);
+                    leaves[leaf_idx] = ComputeTxMLSCRelayLeaf(cp_relay);
+                    revealed[leaf_idx] = true;
+                }
                 size_t ph_idx = 0;
                 for (size_t i = 0; i < total_leaves; ++i) {
-                    if (i == mlsc_proof.rung_index) continue;
+                    if (revealed[i]) continue;
                     if (ph_idx >= mlsc_proof.proof_hashes.size()) {
                         LogPrintf("MLSC proof failed: not enough proof hashes\n");
                         return fail(LadderScriptError::MERKLE_PATH_MISMATCH);

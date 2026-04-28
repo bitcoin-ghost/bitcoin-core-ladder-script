@@ -82,42 +82,68 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
                         const api::LadderSigChecker& sig_checker,
                         const RungEvalContext& ctx)
 {
-    // HTLC = hash preimage + CSV + SIG in one block
-    // merkle_pub_key: PUBKEY in witness, bound by Merkle proof.
-    // Fields: HASH256 (conditions), PREIMAGE (witness), NUMERIC (timelock),
-    //         PUBKEY (witness), SIGNATURE (witness)
-
-    // 1. Verify hash preimage
-    const RungField* hash_field = FindField(block, RungDataType::HASH256);
-    const RungField* preimage_field = FindField(block, RungDataType::PREIMAGE);
-    if (!hash_field || !preimage_field) return EvalResult::ERROR;
-    if (hash_field->data.size() != 32) return EvalResult::ERROR;
-
-    unsigned char computed_hash[CSHA256::OUTPUT_SIZE];
-    CSHA256().Write(preimage_field->data.data(), preimage_field->data.size()).Finalize(computed_hash);
-    if (memcmp(computed_hash, hash_field->data.data(), 32) != 0) {
-        return EvalResult::UNSATISFIED;
+    // HTLC v0.7 (true two-path):
+    //   conditions: [HASH256(preimage_hash), NUMERIC(csv), SCHEME]   (3 fields)
+    //   witness:    [PUBKEY(receiver), PUBKEY(sender), SIGNATURE,
+    //                PREIMAGE, NUMERIC(path)]                         (5 fields)
+    // path = 0 (receiver/early): SIG verifies pubkeys[0]; SHA256(PREIMAGE) ==
+    //   conditions HASH256; CSV is NOT enforced.
+    // path = 1 (sender/refund):  SIG verifies pubkeys[1]; PREIMAGE empty;
+    //   CSV must be elapsed.
+    // Both pubkeys are consumed across the two paths — closes E-002.
+    constexpr size_t kCondCount = 3;
+    if (block.fields.size() != kCondCount + 5) return EvalResult::ERROR;
+    if (block.fields[0].type != RungDataType::HASH256 ||
+        block.fields[1].type != RungDataType::NUMERIC ||
+        block.fields[2].type != RungDataType::SCHEME ||
+        block.fields[3].type != RungDataType::PUBKEY ||
+        block.fields[4].type != RungDataType::PUBKEY ||
+        block.fields[5].type != RungDataType::SIGNATURE ||
+        block.fields[6].type != RungDataType::PREIMAGE ||
+        block.fields[7].type != RungDataType::NUMERIC) {
+        return EvalResult::ERROR;
     }
 
-    // 2. Verify CSV timelock
-    const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
-    if (!numeric_field) return EvalResult::ERROR;
-    auto seq_opt = ReadNumeric(*numeric_field);
-    if (!seq_opt) return EvalResult::ERROR;
-    int64_t sequence_val = *seq_opt;
-    if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) == 0) {
+    const RungField& hash_field     = block.fields[0];
+    const RungField& csv_field      = block.fields[1];
+    const RungField& scheme_field   = block.fields[2];
+    const RungField& receiver_pk    = block.fields[3];
+    const RungField& sender_pk      = block.fields[4];
+    const RungField& sig_field      = block.fields[5];
+    const RungField& preimage_field = block.fields[6];
+    const RungField& path_field     = block.fields[7];
+
+    if (hash_field.data.size() != 32) return EvalResult::ERROR;
+
+    auto path_opt = ReadNumeric(path_field);
+    if (!path_opt) return EvalResult::ERROR;
+    int64_t path = *path_opt;
+
+    if (path == 0) {
+        // Receiver path: hash check, no CSV.
+        if (preimage_field.data.empty()) return EvalResult::UNSATISFIED;
+        unsigned char computed_hash[CSHA256::OUTPUT_SIZE];
+        CSHA256().Write(preimage_field.data.data(), preimage_field.data.size()).Finalize(computed_hash);
+        if (memcmp(computed_hash, hash_field.data.data(), 32) != 0) {
+            return EvalResult::UNSATISFIED;
+        }
+        return VerifySigWithScheme(receiver_pk, sig_field, &scheme_field, sig_checker, ctx);
+    }
+    if (path == 1) {
+        // Refund path: PREIMAGE must be empty (anti-data-embedding), CSV must be elapsed.
+        if (!preimage_field.data.empty()) return EvalResult::ERROR;
+        auto seq_opt = ReadNumeric(csv_field);
+        if (!seq_opt) return EvalResult::ERROR;
+        int64_t sequence_val = *seq_opt;
+        if ((sequence_val & CTxIn::SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) {
+            // Disable flag set means timelock is unenforced — defeats the refund path.
+            return EvalResult::ERROR;
+        }
         if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
         if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
+        return VerifySigWithScheme(sender_pk, sig_field, &scheme_field, sig_checker, ctx);
     }
-
-    // 3. Verify signature
-    const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
-    const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
-
-    if (!pubkey_field || !sig_field) return EvalResult::ERROR;
-
-    const RungField* scheme_field = FindField(block, RungDataType::SCHEME);
-    return VerifySigWithScheme(*pubkey_field, *sig_field, scheme_field, sig_checker, ctx);
+    return EvalResult::ERROR;
 }
 
 EvalResult EvalHashSigBlock(const RungBlock& block,
@@ -155,33 +181,31 @@ EvalResult EvalPTLCBlock(const RungBlock& block,
                         const api::LadderSigChecker& sig_checker,
                         const RungEvalContext& ctx)
 {
-    // PTLC = ADAPTOR_SIG + CSV in one block
-    // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
-    // Fields: PUBKEY(signing_key), SIGNATURE(adapted), NUMERIC(CSV)
-    // Adaptor secret applied off-chain.
-
-    // 1. Verify adaptor signature (same logic as EvalAdaptorSigBlock)
+    // PTLC v0.7 = ADAPTOR_SIG + CSV. One signing key (the second "adaptor
+    // point" slot from v0.6 was never consumed and is removed; the adaptor
+    // mechanics are entirely off-chain — the adapted signature verifies as
+    // a normal Schnorr against the signing key).
+    //   conditions: [NUMERIC(CSV)]
+    //   witness:    [PUBKEY, SIGNATURE]   (explicit, no implicit layout)
     auto pubkeys = ResolvePubkeyCommitments(block);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
     const RungField* numeric_field = FindField(block, RungDataType::NUMERIC);
 
-    if (pubkeys.empty() || !sig_field || !numeric_field) {
+    if (pubkeys.size() != 1 || !sig_field || !numeric_field) {
         return EvalResult::ERROR;
     }
-
-    const RungField* signing_key = pubkeys[0];
 
     if (sig_field->data.size() < 64 || sig_field->data.size() > 65) {
         return EvalResult::ERROR;
     }
     {
-        RungField pk_field = *signing_key;
+        RungField pk_field = *pubkeys[0];
         EvalResult r = VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
         if (r == EvalResult::ERROR) return EvalResult::ERROR;
         if (r != EvalResult::SATISFIED) return EvalResult::UNSATISFIED;
     }
 
-    // 2. Check CSV timelock
+    // CSV timelock
     auto seq_opt = ReadNumeric(*numeric_field);
     if (!seq_opt) return EvalResult::ERROR;
     int64_t sequence_val = *seq_opt;

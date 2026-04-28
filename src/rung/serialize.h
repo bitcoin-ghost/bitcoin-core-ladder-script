@@ -39,6 +39,13 @@ static constexpr size_t MAX_PREIMAGE_FIELDS_PER_WITNESS = 2;
  *  an attacker creates N inputs each carrying preimage data. Legitimate use cases
  *  (HTLC, atomic swap, HASH_SIG) never need >2 preimages per transaction. */
 static constexpr size_t MAX_PREIMAGE_FIELDS_PER_TX = 2;
+/** Maximum number of SCRIPT_BODY fields per transaction (consensus, v0.7).
+ *  Tighter sub-cap inside the combined PREIMAGE+SCRIPT_BODY limit. SCRIPT_BODY
+ *  fields are 1–80 bytes of attacker-chosen script bytes (legacy P2SH/P2WSH/
+ *  P2TR bridges); without an independent cap a transaction could carry
+ *  2 × 80 = 160 B of script-body data, doubling the BIP's 112 B/tx claim.
+ *  Capping to 1 brings worst-case back to 1 × 80 + 1 × 32 = 112 B/tx. */
+static constexpr size_t MAX_SCRIPT_BODY_FIELDS_PER_TX = 1;
 /** Minimum output value for non-DATA_RETURN MLSC outputs (consensus).
  *  Prevents UTXO set bloat and cheap output-layer spam.
  *  Matches current Bitcoin dust threshold for witness outputs. */

@@ -446,7 +446,8 @@ bool ParseOutputCheck(ParseContext& ctx, RungBlock& block)
 
 bool ParseAdaptorSig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // adaptor_sig(@signer, @adaptor_point) or adaptor_sig(@signer, @adaptor_point, scheme)
+    // adaptor_sig(@signer) or adaptor_sig(@signer, scheme)
+    // v0.7: dropped the v0.6 @adaptor_point arg (T = t·G is off-chain only).
     if (!Expect(ctx, '(')) return false;
     std::string alias1 = ReadAlias(ctx);
     if (alias1.empty()) return false;
@@ -454,21 +455,13 @@ bool ParseAdaptorSig(ParseContext& ctx, RungBlock& block, std::vector<std::vecto
     if (!LookupKey(ctx, alias1, pk1)) return false;
     rung_pks.push_back(pk1);
 
-    if (!Expect(ctx, ',')) return false;
-    std::string alias2 = ReadAlias(ctx);
-    if (alias2.empty()) return false;
-    std::vector<uint8_t> pk2;
-    if (!LookupKey(ctx, alias2, pk2)) return false;
-    rung_pks.push_back(pk2);
-
     block.type = RungBlockType::ADAPTOR_SIG;
     // ADAPTOR_SIG has nullptr conditions layout — no fields in conditions.
-    // Optional scheme argument is accepted but not stored in conditions
-    // (it's metadata for the signing path, not a wire field).
+    // Optional scheme argument is accepted but not stored in conditions.
     SkipWhitespace(ctx);
     if (ctx.pos < ctx.desc.size() && ctx.desc[ctx.pos] == ',') {
         ++ctx.pos;
-        ReadIdentifier(ctx); // consume scheme name but don't store
+        ReadIdentifier(ctx);
     }
     return Expect(ctx, ')');
 }
@@ -825,7 +818,8 @@ bool ParseCltvSig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<u
 
 bool ParseHtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // htlc(@sender, @receiver, preimage_hex, csv_blocks)
+    // htlc(@receiver, @sender, preimage_hex, csv_blocks)
+    // v0.7: receiver is pubkeys[0] (path=0, preimage spend); sender is pubkeys[1] (path=1, refund).
     if (!Expect(ctx, '(')) return false;
     std::string a1 = ReadAlias(ctx);
     if (a1.empty()) return false;
@@ -884,20 +878,14 @@ bool ParseHashSig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<u
 
 bool ParsePtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // ptlc(@pk, @adaptor_point, csv_blocks)
+    // ptlc(@pk, csv_blocks)
+    // v0.7: dropped the v0.6 @adaptor_point arg (T = t·G is off-chain only).
     if (!Expect(ctx, '(')) return false;
     std::string a1 = ReadAlias(ctx);
     if (a1.empty()) return false;
     std::vector<uint8_t> pk1;
     if (!LookupKey(ctx, a1, pk1)) return false;
     rung_pks.push_back(pk1);
-
-    if (!Expect(ctx, ',')) return false;
-    std::string a2 = ReadAlias(ctx);
-    if (a2.empty()) return false;
-    std::vector<uint8_t> pk2;
-    if (!LookupKey(ctx, a2, pk2)) return false;
-    rung_pks.push_back(pk2);
 
     if (!Expect(ctx, ',')) return false;
     uint32_t csv_val;

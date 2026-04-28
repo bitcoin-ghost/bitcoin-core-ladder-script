@@ -203,6 +203,7 @@ static bool ParseBlockType(const std::string& name, RungBlockType& out)
     if (name == "PTLC")             { out = RungBlockType::PTLC; return true; }
     if (name == "CLTV_SIG")         { out = RungBlockType::CLTV_SIG; return true; }
     if (name == "TIMELOCKED_MULTISIG") { out = RungBlockType::TIMELOCKED_MULTISIG; return true; }
+    if (name == "ANCHOR_FEE")       { out = RungBlockType::ANCHOR_FEE; return true; }
     // Covenant family
     if (name == "CTV")              { out = RungBlockType::CTV; return true; }
     if (name == "VAULT_LOCK")       { out = RungBlockType::VAULT_LOCK; return true; }
@@ -1396,18 +1397,46 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
                 block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
             }
         }
-        // merkle_pub_key: add remaining pubkeys (e.g., adaptor_point) after signing key.
-        if (block_spec.exists("pubkeys")) {
-            const UniValue& pk_arr = block_spec["pubkeys"].get_array();
-            for (size_t i = 0; i < pk_arr.size(); ++i) {
-                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
-            }
-        }
+        // v0.7: dropped the v0.6 trailing PUBKEY loop (adaptor_point slot is gone).
         break;
     }
     case RungBlockType::MUSIG_THRESHOLD: {
         // MuSig2/FROST aggregate threshold: Schnorr-only (no PQ path).
         SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "MUSIG_THRESHOLD");
+        break;
+    }
+    case RungBlockType::ANCHOR_FEE: {
+        // ANCHOR_FEE witness: 2 PUBKEYs + 2 SIGNATUREs (2-of-2 sig check by eval).
+        // Spec: { "privkeys": [wif1, wif2], "pubkeys": [pk1_hex, pk2_hex] }.
+        if (!block_spec.exists("privkeys") || !block_spec.exists("pubkeys")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "ANCHOR_FEE requires 'privkeys' and 'pubkeys' arrays");
+        }
+        const UniValue& pk_arr = block_spec["pubkeys"].get_array();
+        const UniValue& sk_arr = block_spec["privkeys"].get_array();
+        if (pk_arr.size() != 2 || sk_arr.size() != 2) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "ANCHOR_FEE 'pubkeys' and 'privkeys' must each have exactly 2 entries");
+        }
+        for (size_t i = 0; i < 2; ++i) {
+            PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
+        }
+        uint256 sighash;
+        if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "ANCHOR_FEE: failed to compute sighash");
+        }
+        for (size_t i = 0; i < 2; ++i) {
+            CKey key = DecodeSecret(sk_arr[i].get_str());
+            if (!key.IsValid()) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "ANCHOR_FEE: invalid privkey");
+            }
+            unsigned char sig_buf[64];
+            uint256 aux_rand = GetRandHash();
+            if (!key.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
+                throw JSONRPCError(RPC_INTERNAL_ERROR, "ANCHOR_FEE: Schnorr signing failed");
+            }
+            block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
+        }
         break;
     }
     case RungBlockType::VAULT_LOCK: {
@@ -1574,36 +1603,69 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::HTLC: {
-        // Witness layout: [PUBKEY, SIGNATURE, PREIMAGE, NUMERIC]
-        // SignSingleKey adds signing PUBKEY + SIGNATURE
-        SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "HTLC");
-        // Add additional pubkeys (receiver key) for merkle_pub_key
-        if (block_spec.exists("pubkeys")) {
-            const UniValue& pk_arr = block_spec["pubkeys"].get_array();
-            for (size_t i = 0; i < pk_arr.size(); ++i) {
-                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
-            }
+        // HTLC v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
+        // Spec: { "path": 0|1, "privkey": <wif of the path's signer>,
+        //         "pubkeys": [receiver_pk_hex, sender_pk_hex],
+        //         "preimage": <hex>  (required when path=0, must be empty/absent when path=1) }
+        if (!block_spec.exists("path")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC requires 'path' (0=receiver, 1=sender/refund)");
         }
-        std::string preimage_hex = block_spec["preimage"].get_str();
-        auto preimage_data = ParseHex(preimage_hex);
-        if (preimage_data.empty()) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC requires non-empty preimage hex");
+        int64_t path = block_spec["path"].getInt<int64_t>();
+        if (path != 0 && path != 1) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC 'path' must be 0 or 1");
+        }
+        if (!block_spec.exists("pubkeys")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC requires 'pubkeys': [receiver, sender]");
+        }
+        const UniValue& pk_arr = block_spec["pubkeys"].get_array();
+        if (pk_arr.size() != 2) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC 'pubkeys' array must have exactly 2 entries");
+        }
+        // PUBKEY(receiver), PUBKEY(sender)
+        for (size_t i = 0; i < 2; ++i) {
+            PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
+        }
+        // SIGNATURE — sign with the privkey for the chosen path.
+        if (!block_spec.exists("privkey")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC requires 'privkey'");
+        }
+        CKey privkey = DecodeSecret(block_spec["privkey"].get_str());
+        if (!privkey.IsValid()) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
+        }
+        uint256 sighash;
+        if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Failed to compute sighash");
+        }
+        unsigned char sig_buf[64];
+        uint256 aux_rand = GetRandHash();
+        if (!privkey.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "HTLC Schnorr signing failed");
+        }
+        block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
+        // PREIMAGE — non-empty for receiver path, empty for refund.
+        std::vector<uint8_t> preimage_data;
+        if (path == 0) {
+            if (!block_spec.exists("preimage")) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC receiver path requires 'preimage'");
+            }
+            preimage_data = ParseHex(block_spec["preimage"].get_str());
+            if (preimage_data.empty()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC 'preimage' must be non-empty for receiver path");
+            }
         }
         block.fields.push_back({RungDataType::PREIMAGE, preimage_data});
-        // Add CSV NUMERIC from conditions
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::HTLC) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::NUMERIC) {
-                            block.fields.push_back(f);
-                            goto htlc_done;
-                        }
-                    }
-                }
-            }
+        // NUMERIC(path) — 4-byte little-endian
+        {
+            uint32_t p = static_cast<uint32_t>(path);
+            std::vector<uint8_t> path_bytes = {
+                static_cast<uint8_t>(p & 0xFF),
+                static_cast<uint8_t>((p >> 8) & 0xFF),
+                static_cast<uint8_t>((p >> 16) & 0xFF),
+                static_cast<uint8_t>((p >> 24) & 0xFF),
+            };
+            block.fields.push_back({RungDataType::NUMERIC, path_bytes});
         }
-        htlc_done:
         break;
     }
     case RungBlockType::PTLC: {
@@ -1647,13 +1709,7 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
                 block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
             }
         }
-        // merkle_pub_key: add additional pubkeys (e.g., adaptor_point) after signing key
-        if (block_spec.exists("pubkeys")) {
-            const UniValue& pk_arr = block_spec["pubkeys"].get_array();
-            for (size_t i = 0; i < pk_arr.size(); ++i) {
-                PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
-            }
-        }
+        // v0.7: dropped the v0.6 trailing PUBKEY loop (adaptor_point slot is gone).
         break;
     }
     case RungBlockType::CLTV_SIG: {
@@ -2539,7 +2595,7 @@ static RPCHelpMan signrungtx()
 #endif // ENABLE_QABIO
 
             // TX_MLSC: build all leaves and compute O(log N) Merkle path.
-            // Leaf order: [rung_leaf[0..N-1]] (no separate relay/coil leaves in TX_MLSC)
+            // v0.7: leaf order = [rung_leaf[0..N-1], relay_leaf[0..M-1]].
             // Each rung's coil.output_index must match what was committed at fund time.
             // For multi-output trees, sibling leaves are bound to other outputs and
             // must use their original output_index, not the spent vout.
@@ -2563,6 +2619,22 @@ static RPCHelpMan signrungtx()
                     if (r < rung_pubkeys2.size()) rpks = rung_pubkeys2[r];
                     cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
                     all_leaves.push_back(rung::ComputeTxMLSCLeaf(cp_rung));
+                }
+                // v0.7: append relay leaves so the tree size matches what the
+                // verifier reconstructs (total_rungs + total_relays).
+                for (size_t rl = 0; rl < conditions.relays.size(); ++rl) {
+                    rung::CreationProofRelay cp_relay;
+                    for (const auto& blk : conditions.relays[rl].blocks) {
+                        cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                                    static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+                    }
+                    cp_relay.relay_refs = conditions.relays[rl].relay_refs;
+                    std::vector<std::vector<uint8_t>> rpks =
+                        (rl < relay_pubkeys2.size()) ? relay_pubkeys2[rl]
+                                                     : std::vector<std::vector<uint8_t>>{};
+                    rung::Rung tmp; tmp.blocks = conditions.relays[rl].blocks;
+                    cp_relay.value_commitment = rung::ComputeValueCommitment(tmp, rpks);
+                    all_leaves.push_back(rung::ComputeTxMLSCRelayLeaf(cp_relay));
                 }
                 mlsc_proof.proof_mode = rung::MLSCProofMode::MERKLE_PATH;
                 mlsc_proof.proof_hashes = rung::BuildMerklePath(all_leaves, target_rung);
@@ -3492,13 +3564,11 @@ static RPCHelpMan signladder()
                 }
 
                 // Add pubkeys for blocks with pubkey_count > 1.
-                // Most blocks: pass ALL pubkeys (handler adds them from the array).
-                // HTLC: skip index 0 since SignSingleKey already adds the signing
-                //   key — including all would duplicate it, breaking ExtractBlockPubkeys.
+                // All blocks (incl. HTLC v0.7): pass ALL pubkeys; the per-block
+                // handler reads them positionally.
                 if (n_pks >= 2) {
-                    size_t pk_start = (cond_block.type == RungBlockType::HTLC) ? 1 : 0;
                     UniValue pk_arr(UniValue::VARR);
-                    for (size_t p = pk_start; p < n_pks && (pk_cursor + p) < rung_pks.size(); ++p) {
+                    for (size_t p = 0; p < n_pks && (pk_cursor + p) < rung_pks.size(); ++p) {
                         pk_arr.push_back(HexStr(rung_pks[pk_cursor + p]));
                     }
                     block_spec.pushKV("pubkeys", pk_arr);
@@ -3626,6 +3696,7 @@ static RPCHelpMan signladder()
 
             // Build all rung leaves from the descriptor for Merkle path computation.
             // Each rung's coil.output_index must match what was used at creation time.
+            // v0.7: also append relay leaves so the tree size = total_rungs + total_relays.
             uint32_t spent_vout = mtx.vin[input_idx].prevout.n;
             std::vector<uint256> all_leaves;
             for (uint16_t r = 0; r < conditions.rungs.size(); ++r) {
@@ -3642,6 +3713,21 @@ static RPCHelpMan signladder()
                 if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
                 cp_rung.value_commitment = rung::ComputeValueCommitment(conditions.rungs[r], rpks);
                 all_leaves.push_back(rung::ComputeTxMLSCLeaf(cp_rung));
+            }
+            // signladder (descriptor-based) doesn't currently emit relays, so
+            // conditions.relays is empty here and the relay-leaf loop is a no-op.
+            // If/when descriptors gain relay syntax, populate relay pubkeys
+            // alongside ParseDescriptor and append CreationProofRelay leaves.
+            for (size_t rl = 0; rl < conditions.relays.size(); ++rl) {
+                rung::CreationProofRelay cp_relay;
+                for (const auto& blk : conditions.relays[rl].blocks) {
+                    cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                                static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+                }
+                cp_relay.relay_refs = conditions.relays[rl].relay_refs;
+                rung::Rung tmp; tmp.blocks = conditions.relays[rl].blocks;
+                cp_relay.value_commitment = rung::ComputeValueCommitment(tmp, {});
+                all_leaves.push_back(rung::ComputeTxMLSCRelayLeaf(cp_relay));
             }
 
             // Build O(log N) Merkle path
@@ -3729,6 +3815,41 @@ static RPCHelpMan createrungtx()
                 "Optional serialised QABIBlock bytes (hex). Present iff this is a QABIO batch tx. "
                 "When non-empty, tx.qabi_block is populated, which marks the tx as a QABIO carrier. "
                 "Use qabi_buildblock to construct the serialised bytes."},
+            {"relays", RPCArg::Type::ARR, RPCArg::Optional::OMITTED,
+                "Shared relay blocks (v0.7). Each relay carries a list of blocks (typically a SIG block "
+                "whose pubkey is referenced by KEY_REF_SIG in one or more rungs). Relays are folded into "
+                "the conditions_root tree at positions [N..N+M-1].",
+                {
+                    {"relay", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "A relay",
+                        {
+                            {"blocks", RPCArg::Type::ARR, RPCArg::Optional::NO, "Relay block specs",
+                                {
+                                    {"block", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A block",
+                                        {
+                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Block type"},
+                                            {"fields", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Fields",
+                                                {
+                                                    {"field", RPCArg::Type::OBJ, RPCArg::Optional::NO, "A field",
+                                                        {
+                                                            {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "Data type"},
+                                                            {"hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Field data hex"},
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            {"relay_refs", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Relay indices this relay depends on",
+                                {
+                                    {"i", RPCArg::Type::NUM, RPCArg::Optional::NO, ""},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         },
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::STR_HEX, "hex", "The unsigned TX_MLSC transaction hex"},
@@ -3851,8 +3972,50 @@ static RPCHelpMan createrungtx()
         cp_rungs.push_back(std::move(cp_rung));
     }
 
-    // Compute raw Merkle root from rung leaves
-    uint256 merkle_root = rung::ComputeTxMLSCRoot(cp_rungs);
+    // v0.7: parse optional relays (params[6]) and build relay leaves.
+    // Relays are folded into the same shared conditions_root tree as rungs,
+    // closing the KEY_REF_SIG relay-pubkey-swap bug (E-008).
+    std::vector<rung::CreationProofRelay> cp_relays;
+    std::vector<rung::Relay> all_relays;
+    std::vector<std::vector<std::vector<uint8_t>>> all_relay_pubkeys;
+    if (request.params.size() > 6 && !request.params[6].isNull()) {
+        const UniValue& relays_arr = request.params[6].get_array();
+        if (relays_arr.size() > rung::MAX_RELAYS) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "createrungtx: relays count " + std::to_string(relays_arr.size()) +
+                " exceeds MAX_RELAYS = " + std::to_string(rung::MAX_RELAYS));
+        }
+        for (size_t r = 0; r < relays_arr.size(); ++r) {
+            const UniValue& relay_obj = relays_arr[r];
+            const UniValue& blocks_arr = relay_obj["blocks"].get_array();
+            rung::Relay relay;
+            std::vector<std::vector<uint8_t>> relay_pks;
+            for (size_t b = 0; b < blocks_arr.size(); ++b) {
+                relay.blocks.push_back(ParseBlockSpec(blocks_arr[b], /*conditions_only=*/true, &relay_pks));
+            }
+            if (relay_obj.exists("relay_refs")) {
+                const UniValue& refs = relay_obj["relay_refs"].get_array();
+                for (size_t i = 0; i < refs.size(); ++i) {
+                    relay.relay_refs.push_back(refs[i].getInt<uint16_t>());
+                }
+            }
+            all_relays.push_back(relay);
+            all_relay_pubkeys.push_back(relay_pks);
+            // Build CreationProofRelay
+            rung::CreationProofRelay cp_relay;
+            for (const auto& blk : relay.blocks) {
+                cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                            static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+            }
+            cp_relay.relay_refs = relay.relay_refs;
+            rung::Rung tmp; tmp.blocks = relay.blocks;
+            cp_relay.value_commitment = rung::ComputeValueCommitment(tmp, relay_pks);
+            cp_relays.push_back(std::move(cp_relay));
+        }
+    }
+
+    // Compute raw Merkle root from rung leaves + relay leaves
+    uint256 merkle_root = rung::ComputeTxMLSCRoot(cp_rungs, cp_relays);
 
     // Key-path tweak: auto-detect or use explicit internal_pubkey.
     // If all rungs are single-SIG with the same pubkey, auto-tweak for key-path spending.

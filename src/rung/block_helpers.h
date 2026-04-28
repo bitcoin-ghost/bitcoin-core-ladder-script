@@ -101,7 +101,8 @@ bool OutputRootMatchesInput(const api::LadderOutputView& output,
                             const MLSCVerifiedLeaves& verified_leaves);
 
 uint256 ComputeConditionsRootMLSC(const RungConditions& conditions,
-                                   const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys);
+                                   const std::vector<std::vector<std::vector<uint8_t>>>& rung_pubkeys,
+                                   const std::vector<std::vector<std::vector<uint8_t>>>& relay_pubkeys = {});
 
 uint256 ComputeExpectedRoot(const MLSCVerifiedLeaves& verified_leaves,
                              size_t rung_index,

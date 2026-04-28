@@ -177,26 +177,24 @@ EvalResult EvalAdaptorSigBlock(const RungBlock& block,
                         const api::LadderSigChecker& sig_checker,
                         const RungEvalContext& ctx)
 {
-    // Adaptor signature verification:
-    // merkle_pub_key: PUBKEYs in witness, bound by Merkle proof.
-    // Fields: PUBKEY(signing_key), SIGNATURE(adapted)
-    // The adaptor secret is applied off-chain to produce the full adapted signature.
+    // ADAPTOR_SIG v0.7: one signing key. The v0.6 second "adaptor point"
+    // slot was never consumed (T = t·G is needed only for off-chain witness
+    // extraction, not for on-chain consensus — the adapted sig verifies as
+    // a normal Schnorr against the signing key) and is removed.
+    //   conditions: (none)
+    //   witness:    [PUBKEY, SIGNATURE]   (explicit, no implicit layout)
     auto pubkeys = ResolvePubkeyCommitments(block);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
 
-    if (pubkeys.empty() || !sig_field) {
+    if (pubkeys.size() != 1 || !sig_field) {
         return EvalResult::ERROR;
     }
-
-    // The signing key is the resolved PUBKEY
-    const RungField* signing_key = pubkeys[0];
 
     if (sig_field->data.size() < 64 || sig_field->data.size() > 65) {
         return EvalResult::ERROR;
     }
 
-    // The adapted signature verifies against the signing key directly
-    RungField pk_field = *signing_key;
+    RungField pk_field = *pubkeys[0];
     return VerifySigWithScheme(pk_field, *sig_field, nullptr, sig_checker, ctx);
 }
 

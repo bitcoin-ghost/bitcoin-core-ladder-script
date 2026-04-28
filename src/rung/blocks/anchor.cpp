@@ -60,10 +60,12 @@ EvalResult EvalAnchorBlock(const RungBlock& block)
 
 EvalResult EvalAnchorChannelBlock(const RungBlock& block)
 {
-    // Verify local_key and remote_key are valid pubkeys, commitment_number > 0
-    if (!HasRequiredPubkeys(block, 2)) {
-        return EvalResult::ERROR;
-    }
+    // ANCHOR_CHANNEL v0.7: pure commitment_number marker. The v0.6 design
+    // carried local_key + remote_key as positional PUBKEYs but no consumer
+    // ever validated them — they were a 66 B/spend data channel (E-002).
+    // Removed in v0.7. Future Lightning consumers needing channel keys
+    // should use SIG/MULTISIG blocks (which consume their pubkeys) or a
+    // new ANCHOR_CHANNEL_KEYED variant where keys are sig-validated.
     const RungField* commitment = FindField(block, RungDataType::NUMERIC);
     if (commitment) {
         auto val = ReadNumeric(*commitment);

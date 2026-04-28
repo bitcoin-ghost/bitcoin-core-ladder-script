@@ -314,7 +314,7 @@ inline size_t FieldMinSize(RungDataType type)
     case RungDataType::PUBKEY_COMMIT: return 32;
     case RungDataType::HASH256:       return 32;
     case RungDataType::HASH160:       return 20;
-    case RungDataType::PREIMAGE:      return 1;  // P2SH/P2WSH inner conditions can be < 32 bytes
+    case RungDataType::PREIMAGE:      return 0;  // v0.7: 0 allowed (HTLC refund path uses empty PREIMAGE as the "no preimage revealed" sentinel; empty PREIMAGE carries no data so it's not an embedding channel)
     case RungDataType::SCRIPT_BODY:   return 1;
     case RungDataType::SIGNATURE:     return 1;
     case RungDataType::SPEND_INDEX:   return 4;
@@ -468,7 +468,6 @@ inline bool IsKeyConsumingBlockType(RungBlockType type)
     case RungBlockType::P2WPKH_LEGACY:
     case RungBlockType::P2TR_LEGACY:
     case RungBlockType::P2TR_SCRIPT_LEGACY:
-    case RungBlockType::ANCHOR_CHANNEL:
     case RungBlockType::ANCHOR_ORACLE:
     case RungBlockType::VAULT_LOCK:
     case RungBlockType::LATCH_SET:
@@ -685,14 +684,18 @@ inline size_t PubkeyCountForBlock(RungBlockType type, const RungBlock& block)
     case RungBlockType::P2PKH_LEGACY:
     case RungBlockType::P2WPKH_LEGACY:
         return 0;
-    // Two pubkey blocks
-    case RungBlockType::HTLC:
-    case RungBlockType::ANCHOR_CHANNEL:
-    case RungBlockType::ANCHOR_FEE:
-    case RungBlockType::VAULT_LOCK:
+    // Two pubkey blocks (both committed AND consumed at spend time)
+    case RungBlockType::HTLC:           // v0.7: receiver(pubkeys[0]) + sender(pubkeys[1]), both consumed by two-path eval
+    case RungBlockType::ANCHOR_FEE:     // 2-of-2 sig check
+    case RungBlockType::VAULT_LOCK:     // try-each loop, both consumed
+        return 2;
+    // Single pubkey blocks (v0.7: dropped dead second slot from PTLC/ADAPTOR_SIG)
     case RungBlockType::ADAPTOR_SIG:
     case RungBlockType::PTLC:
-        return 2;
+        return 1;
+    // ANCHOR_CHANNEL v0.7: pure commitment_number marker, no pubkeys
+    case RungBlockType::ANCHOR_CHANNEL:
+        return 0;
     // Single pubkey blocks (PLC/anchor family)
     case RungBlockType::ANCHOR_ORACLE:
     case RungBlockType::LATCH_SET:
@@ -1028,7 +1031,11 @@ inline constexpr ImplicitFieldLayout RECURSE_SPLIT_CONDITIONS = {2, {
     {RungDataType::NUMERIC, 0},
 }};
 
-/** ANCHOR_CHANNEL conditions: [NUMERIC(commitment_number)] — pubkeys in Merkle leaf */
+/** ANCHOR_CHANNEL v0.7 conditions: [NUMERIC(commitment_number)] only.
+ *  Pure marker block — no pubkeys (was 2 in v0.6, but neither was ever
+ *  consumed; closed E-002 channel of 66 B/spend). If a future Lightning
+ *  consumer needs channel keys, add a new ANCHOR_CHANNEL_KEYED variant
+ *  whose keys are consumed by sigs at spend time. */
 inline constexpr ImplicitFieldLayout ANCHOR_CHANNEL_CONDITIONS = {1, {
     {RungDataType::NUMERIC, 0},
 }};
@@ -1208,11 +1215,19 @@ inline constexpr ImplicitFieldLayout TIMELOCKED_SIG_WITNESS = {3, {
     {RungDataType::NUMERIC, 0},
 }};
 
-/** HTLC witness: [PUBKEY(var), SIGNATURE(var), PUBKEY(var), PREIMAGE(var), NUMERIC(varint)] */
+/** HTLC v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE,
+ *                      PREIMAGE, NUMERIC(path_indicator)].
+ *  Both pubkeys are revealed so the rung leaf can be reconstructed (committed
+ *  by PubkeyCountForBlock = 2 at fund time). path_indicator selects:
+ *    0 = receiver path: SIGNATURE verifies pubkeys[0]; PREIMAGE non-empty &
+ *        SHA256(PREIMAGE) == conditions HASH256; CSV not enforced.
+ *    1 = refund path:   SIGNATURE verifies pubkeys[1]; PREIMAGE empty;
+ *        CSV must be elapsed.
+ *  Closes E-002: both pubkeys consumed by sig check across the two paths. */
 inline constexpr ImplicitFieldLayout HTLC_WITNESS = {5, {
     {RungDataType::PUBKEY, 0},
-    {RungDataType::SIGNATURE, 0},
     {RungDataType::PUBKEY, 0},
+    {RungDataType::SIGNATURE, 0},
     {RungDataType::PREIMAGE, 0},
     {RungDataType::NUMERIC, 0},
 }};
@@ -1447,7 +1462,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         // Signature family
         {RungBlockType::SIG, "SIG", true, false, true, 1, &SIG_CONDITIONS, &SIG_WITNESS, false},
         {RungBlockType::MULTISIG, "MULTISIG", true, false, true, 0, &MULTISIG_CONDITIONS, nullptr, true},
-        {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 2, nullptr, nullptr, false},
+        {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 1, nullptr, nullptr, false},
         {RungBlockType::MUSIG_THRESHOLD, "MUSIG_THRESHOLD", true, false, true, 1, &MUSIG_THRESHOLD_CONDITIONS, &MUSIG_THRESHOLD_WITNESS, false},
         {RungBlockType::KEY_REF_SIG, "KEY_REF_SIG", true, false, true, 0, &KEY_REF_SIG_CONDITIONS, nullptr, true},
         // Timelock family
@@ -1471,7 +1486,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::RECURSE_DECAY, "RECURSE_DECAY", true, true, false, 0, nullptr, nullptr, false},
         // Anchor family
         {RungBlockType::ANCHOR, "ANCHOR", true, true, false, 0, &ANCHOR_CONDITIONS, nullptr, true},
-        {RungBlockType::ANCHOR_CHANNEL, "ANCHOR_CHANNEL", true, false, true, 2, &ANCHOR_CHANNEL_CONDITIONS, nullptr, true},
+        {RungBlockType::ANCHOR_CHANNEL, "ANCHOR_CHANNEL", true, false, false, 0, &ANCHOR_CHANNEL_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_POOL, "ANCHOR_POOL", true, true, false, 0, &ANCHOR_POOL_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_RESERVE, "ANCHOR_RESERVE", true, true, false, 0, &ANCHOR_RESERVE_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_SEAL, "ANCHOR_SEAL", true, true, false, 0, &ANCHOR_SEAL_CONDITIONS, nullptr, true},
@@ -1496,7 +1511,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::TIMELOCKED_SIG, "TIMELOCKED_SIG", true, false, true, 1, &TIMELOCKED_SIG_CONDITIONS, &TIMELOCKED_SIG_WITNESS, false},
         {RungBlockType::HTLC, "HTLC", true, false, true, 2, &HTLC_CONDITIONS, &HTLC_WITNESS, false},
         {RungBlockType::HASH_SIG, "HASH_SIG", true, false, true, 1, &HASH_SIG_CONDITIONS, &HASH_SIG_WITNESS, false},
-        {RungBlockType::PTLC, "PTLC", true, false, true, 2, &PTLC_CONDITIONS, nullptr, true},
+        {RungBlockType::PTLC, "PTLC", true, false, true, 1, &PTLC_CONDITIONS, nullptr, true},
         {RungBlockType::CLTV_SIG, "CLTV_SIG", true, false, true, 1, &CLTV_SIG_CONDITIONS, &CLTV_SIG_WITNESS, false},
         {RungBlockType::TIMELOCKED_MULTISIG, "TIMELOCKED_MULTISIG", true, false, true, 0, &TIMELOCKED_MULTISIG_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_FEE, "ANCHOR_FEE", true, false, true, 2, &ANCHOR_FEE_CONDITIONS, nullptr, true},

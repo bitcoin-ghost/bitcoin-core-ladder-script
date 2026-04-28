@@ -304,18 +304,20 @@ BOOST_AUTO_TEST_CASE(field_validation_numeric_valid)
 
 BOOST_AUTO_TEST_CASE(field_validation_preimage_valid_range)
 {
-    // 32 bytes valid (within 1..32 range)
+    // 32 bytes valid (within 0..32 range)
     RungField valid{RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0x42)};
     std::string reason;
     BOOST_CHECK(valid.IsValid(reason));
 
-    // 1 byte valid (FieldMinSize = 1 for P2SH inner conditions)
+    // 1 byte valid (P2SH inner conditions can be < 32 bytes)
     RungField one_byte{RungDataType::PREIMAGE, std::vector<uint8_t>(1, 0x42)};
     BOOST_CHECK(one_byte.IsValid(reason));
 
-    // 0 bytes rejected (too small)
-    RungField too_small{RungDataType::PREIMAGE, std::vector<uint8_t>()};
-    BOOST_CHECK(!too_small.IsValid(reason));
+    // v0.7: 0 bytes is now VALID — HTLC refund path uses an empty PREIMAGE as
+    // the "no-preimage-revealed" sentinel. Empty PREIMAGE carries no data so
+    // it's not a data-embedding channel.
+    RungField empty{RungDataType::PREIMAGE, std::vector<uint8_t>()};
+    BOOST_CHECK(empty.IsValid(reason));
 
     // 33 bytes rejected (too large)
     RungField too_large{RungDataType::PREIMAGE, std::vector<uint8_t>(33, 0x42)};
@@ -1135,11 +1137,9 @@ BOOST_AUTO_TEST_CASE(eval_anchor_types_structural)
     anchor_empty.type = RungBlockType::ANCHOR;
     BOOST_CHECK(EvalBlock(anchor_empty, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
-    // ANCHOR_CHANNEL: needs 2 pubkeys
+    // ANCHOR_CHANNEL v0.7: pure commitment_number marker, no pubkeys.
     RungBlock channel;
     channel.type = RungBlockType::ANCHOR_CHANNEL;
-    channel.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    channel.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     channel.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
     BOOST_CHECK(EvalBlock(channel, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
@@ -1861,13 +1861,11 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_satisfied)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
 
-    // adaptor_point must be 32 bytes (x-only)
-    std::vector<uint8_t> adaptor_point(32, 0xAA);
-
+    // ADAPTOR_SIG v0.7: one signing key only (the v0.6 second "adaptor_point"
+    // slot was removed — see types.h ADAPTOR_SIG descriptor).
     RungBlock block;
     block.type = RungBlockType::ADAPTOR_SIG;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});      // signing_key (33B)
-    block.fields.push_back({RungDataType::PUBKEY, adaptor_point});     // adaptor_point (32B x-only)
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
@@ -1879,12 +1877,9 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_unsatisfied)
     MockSignatureChecker checker;
     checker.schnorr_result = false;
 
-    std::vector<uint8_t> adaptor_point(32, 0xAA);
-
     RungBlock block;
     block.type = RungBlockType::ADAPTOR_SIG;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, adaptor_point});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
 
     ScriptExecutionData execdata;
@@ -1998,8 +1993,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         // === Compound family ===
         // TIMELOCKED_SIG witness: [PUBKEY, SIGNATURE, NUMERIC]
         {RungBlockType::TIMELOCKED_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num10}}},
-        // HTLC witness: [PUBKEY, SIGNATURE, PUBKEY, PREIMAGE, NUMERIC]
-        {RungBlockType::HTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PUBKEY, pk}, {RungDataType::PREIMAGE, preimage}, {RungDataType::NUMERIC, num10}}},
+        // HTLC v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
+        {RungBlockType::HTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}, {RungDataType::NUMERIC, num10}}},
         // HASH_SIG witness: [PUBKEY, SIGNATURE, PREIMAGE]
         {RungBlockType::HASH_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}}},
         // PTLC witness: explicit — PUBKEY + SIGNATURE + NUMERIC
@@ -2307,12 +2302,13 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multifield_multirung)
         Rung rung;
         RungBlock htlc_block;
         htlc_block.type = RungBlockType::HTLC;
+        // v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
         htlc_block.fields = {
             {RungDataType::PUBKEY, pk},
-            {RungDataType::SIGNATURE, sig},
             {RungDataType::PUBKEY, pk},
+            {RungDataType::SIGNATURE, sig},
             {RungDataType::PREIMAGE, preimage},
-            {RungDataType::NUMERIC, MakeNumeric(10)},
+            {RungDataType::NUMERIC, MakeNumeric(0)},
         };
         rung.blocks.push_back(htlc_block);
         ladder.rungs.push_back(rung);
@@ -3180,16 +3176,17 @@ BOOST_AUTO_TEST_CASE(eval_anchor_empty_rejected)
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 }
 
-BOOST_AUTO_TEST_CASE(eval_anchor_channel_missing_pubkey)
+BOOST_AUTO_TEST_CASE(eval_anchor_channel_marker_only)
 {
+    // ANCHOR_CHANNEL v0.7: pure commitment_number marker, no pubkeys.
+    // commitment_number > 0 → SATISFIED.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
-    // Only 1 pubkey (needs 2) → ERROR
     RungBlock block;
     block.type = RungBlockType::ANCHOR_CHANNEL;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(42)});
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_channel_zero_commitment)
@@ -3199,22 +3196,18 @@ BOOST_AUTO_TEST_CASE(eval_anchor_channel_zero_commitment)
 
     RungBlock block;
     block.type = RungBlockType::ANCHOR_CHANNEL;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // commitment = 0 → UNSATISFIED
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_anchor_channel_no_commitment_ok)
 {
+    // No commitment_number field at all → SATISFIED (commitment is optional).
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
-    // 2 pubkeys, no numeric → SATISFIED (commitment is optional)
     RungBlock block;
     block.type = RungBlockType::ANCHOR_CHANNEL;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 }
 
@@ -3593,10 +3586,10 @@ BOOST_AUTO_TEST_CASE(eval_one_shot_missing_numeric)
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
-BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_second_pubkey)
+BOOST_AUTO_TEST_CASE(eval_adaptor_sig_canonical_one_pubkey)
 {
-    // Only 1 pubkey is needed (signing key). Adaptor point committed in conditions
-    // but not required in witness. Sig verification fails → UNSATISFIED.
+    // ADAPTOR_SIG v0.7 canonical witness: 1 PUBKEY + 1 SIGNATURE.
+    // checker.schnorr_result defaults to false → sig verify fails → UNSATISFIED.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
@@ -3607,6 +3600,20 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_second_pubkey)
     BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
+BOOST_AUTO_TEST_CASE(eval_adaptor_sig_two_pubkeys_rejected)
+{
+    // v0.7: exactly one PUBKEY required. Two PUBKEYs (legacy v0.6 shape) → ERROR.
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::ADAPTOR_SIG;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::ERROR);
+}
+
 BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_signature)
 {
     MockSignatureChecker checker;
@@ -3614,7 +3621,6 @@ BOOST_AUTO_TEST_CASE(eval_adaptor_sig_missing_signature)
 
     RungBlock block;
     block.type = RungBlockType::ADAPTOR_SIG;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     // No signature → ERROR
     BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::ERROR);
@@ -5558,36 +5564,29 @@ BOOST_AUTO_TEST_CASE(eval_hysteresis_fee_with_tx_context)
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(eval_adaptor_sig_invalid_adaptor_point_size)
+BOOST_AUTO_TEST_CASE(eval_adaptor_sig_extra_pubkey_rejected)
 {
-    // Adaptor point format no longer validated by evaluator (committed in conditions,
-    // not revealed in witness). Sig verification fails (mock default) → UNSATISFIED.
+    // v0.7: any second PUBKEY (legacy v0.6 adaptor_point slot) → ERROR.
     MockSignatureChecker checker;
-    ScriptExecutionData execdata;
 
     RungBlock block;
     block.type = RungBlockType::ADAPTOR_SIG;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});               // signing key (33 bytes)
-    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(33, 0x02)}); // extra pubkey (ignored)
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(33, 0x02)});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::ERROR);
 }
 
-BOOST_AUTO_TEST_CASE(eval_adaptor_sig_valid_adaptor_point)
+BOOST_AUTO_TEST_CASE(eval_adaptor_sig_v07_satisfied)
 {
-    // ADAPTOR_SIG with valid 32-byte adaptor point — should proceed to sig verification
+    // v0.7 canonical: one PUBKEY + one SIGNATURE.
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-    ScriptExecutionData execdata;
 
     RungBlock block;
     block.type = RungBlockType::ADAPTOR_SIG;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});                    // signing key (33 bytes)
-    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(32, 0xAA)});  // adaptor point (32 bytes)
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    // With mock checker returning true for schnorr, should be SATISFIED
     BOOST_CHECK(EvalAdaptorSigBlock(block, checker) == EvalResult::SATISFIED);
 }
 
@@ -6260,53 +6259,113 @@ BOOST_AUTO_TEST_CASE(timelocked_sig_sig_fails)
     BOOST_CHECK(result == EvalResult::UNSATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(htlc_satisfied)
+// HTLC v0.7 helper: build a merged-conditions+witness block.
+//   conditions: [HASH256, NUMERIC(csv), SCHEME]
+//   witness:    [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
+static RungBlock MakeHtlcV7(const std::vector<uint8_t>& hash,
+                             int64_t csv,
+                             const std::vector<uint8_t>& receiver_pk,
+                             const std::vector<uint8_t>& sender_pk,
+                             const std::vector<uint8_t>& sig,
+                             const std::vector<uint8_t>& preimage,
+                             int64_t path)
 {
-    // HTLC with correct preimage, passing sig and CSV
-    // Build hash from known preimage
-    std::vector<uint8_t> preimage(32, 0x42);
-    std::vector<uint8_t> hash(32);
-    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
-
     RungBlock block;
     block.type = RungBlockType::HTLC;
-    block.fields.push_back({RungDataType::HASH256, hash});
-    block.fields.push_back({RungDataType::PREIMAGE, preimage});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
-    MockSignatureChecker checker;
-    checker.schnorr_result = true;
-    checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalHTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    block.fields = {
+        {RungDataType::HASH256, hash},
+        {RungDataType::NUMERIC, MakeNumeric(csv)},
+        {RungDataType::SCHEME, {0x01}},
+        {RungDataType::PUBKEY, receiver_pk},
+        {RungDataType::PUBKEY, sender_pk},
+        {RungDataType::SIGNATURE, sig},
+        {RungDataType::PREIMAGE, preimage},
+        {RungDataType::NUMERIC, MakeNumeric(path)},
+    };
+    return block;
 }
 
-BOOST_AUTO_TEST_CASE(htlc_wrong_preimage)
+BOOST_AUTO_TEST_CASE(htlc_receiver_path_satisfied)
 {
-    // Wrong preimage → unsatisfied
+    // v0.7 receiver path (path=0): preimage hash matches, sig from pubkeys[0].
     std::vector<uint8_t> preimage(32, 0x42);
     std::vector<uint8_t> hash(32);
     CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
 
-    std::vector<uint8_t> wrong_preimage(32, 0x99); // different preimage
+    auto block = MakeHtlcV7(hash, /*csv=*/144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), preimage, /*path=*/0);
 
-    RungBlock block;
-    block.type = RungBlockType::HTLC;
-    block.fields.push_back({RungDataType::HASH256, hash});
-    block.fields.push_back({RungDataType::PREIMAGE, wrong_preimage});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(htlc_receiver_wrong_preimage)
+{
+    std::vector<uint8_t> preimage(32, 0x42);
+    std::vector<uint8_t> hash(32);
+    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
+
+    std::vector<uint8_t> wrong(32, 0x99);
+    auto block = MakeHtlcV7(hash, 144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), wrong, 0);
+
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(htlc_refund_path_satisfied)
+{
+    // v0.7 refund path (path=1): empty preimage, CSV elapsed, sig from pubkeys[1].
+    std::vector<uint8_t> hash(32, 0x77);
+    auto block = MakeHtlcV7(hash, /*csv=*/144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), /*preimage=*/{}, /*path=*/1);
 
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalHTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(htlc_refund_path_csv_not_elapsed)
+{
+    std::vector<uint8_t> hash(32, 0x77);
+    auto block = MakeHtlcV7(hash, /*csv=*/144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), /*preimage=*/{}, /*path=*/1);
+
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    checker.sequence_result = false;
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(htlc_refund_path_with_preimage_rejected)
+{
+    // Refund path with non-empty preimage → ERROR (anti-data-embedding).
+    std::vector<uint8_t> hash(32, 0x77);
+    std::vector<uint8_t> preimage(32, 0x42);
+    auto block = MakeHtlcV7(hash, 144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), preimage, /*path=*/1);
+
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    checker.sequence_result = true;
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::ERROR);
+}
+
+BOOST_AUTO_TEST_CASE(htlc_invalid_path_indicator)
+{
+    std::vector<uint8_t> preimage(32, 0x42);
+    std::vector<uint8_t> hash(32);
+    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
+
+    auto block = MakeHtlcV7(hash, 144, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), preimage, /*path=*/2);
+
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(hash_sig_satisfied)
@@ -6354,78 +6413,60 @@ BOOST_AUTO_TEST_CASE(hash_sig_bad_hash)
 
 BOOST_AUTO_TEST_CASE(ptlc_satisfied)
 {
-    // PTLC with passing adaptor sig and CSV
+    // PTLC v0.7: one signing key (the v0.6 second adaptor_point slot was removed).
     RungBlock block;
     block.type = RungBlockType::PTLC;
-    // Two pubkeys: signing key + adaptor point (32 bytes x-only)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    std::vector<uint8_t> adaptor_point(32, 0xDD);
-    block.fields.push_back({RungDataType::PUBKEY, adaptor_point});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
 
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::SATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(ptlc_sig_fails)
 {
-    // PTLC: adaptor sig verification fails
     RungBlock block;
     block.type = RungBlockType::PTLC;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    std::vector<uint8_t> adaptor_point(32, 0xDD);
-    block.fields.push_back({RungDataType::PUBKEY, adaptor_point});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
 
     MockSignatureChecker checker;
     checker.schnorr_result = false;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(ptlc_csv_fails)
 {
-    // PTLC: sig passes but CSV fails
     RungBlock block;
     block.type = RungBlockType::PTLC;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    std::vector<uint8_t> adaptor_point(32, 0xDD);
-    block.fields.push_back({RungDataType::PUBKEY, adaptor_point});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
 
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = false;
-    ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::UNSATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(ptlc_missing_adaptor_point)
+BOOST_AUTO_TEST_CASE(ptlc_two_pubkeys_rejected)
 {
-    // PTLC with only one pubkey — adaptor point not needed by evaluator.
-    // With passing sig + sequence checks → SATISFIED.
+    // v0.7: exactly one PUBKEY required. Two PUBKEYs (legacy v0.6 shape) → ERROR.
     RungBlock block;
     block.type = RungBlockType::PTLC;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
 
     MockSignatureChecker checker;
     checker.schnorr_result = true;
-    checker.sequence_result = true;
-    ScriptExecutionData execdata;
-    auto result = EvalPTLCBlock(block, checker);
-    BOOST_CHECK(result == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalPTLCBlock(block, checker) == EvalResult::ERROR);
 }
 
 // ============================================================================
@@ -6876,24 +6917,14 @@ BOOST_AUTO_TEST_CASE(eval_htlc_satisfied)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
 
-    // Compute valid hash/preimage pair
     std::vector<uint8_t> preimage{0x01, 0x02, 0x03, 0x04};
-    unsigned char hash[CSHA256::OUTPUT_SIZE];
-    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash);
+    std::vector<uint8_t> hash(32);
+    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
 
-    auto pk = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::HTLC;
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(hash, hash + 32)});
-    block.fields.push_back({RungDataType::PREIMAGE, preimage});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk)});
-    block.fields.push_back({RungDataType::PUBKEY, pk});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
+    // v0.7 receiver path (path=0).
+    auto block = MakeHtlcV7(hash, /*csv=*/10, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), preimage, /*path=*/0);
     BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::SATISFIED);
 }
 
@@ -6902,25 +6933,15 @@ BOOST_AUTO_TEST_CASE(eval_htlc_wrong_preimage)
     MockSignatureChecker checker;
     checker.schnorr_result = true;
     checker.sequence_result = true;
-    ScriptExecutionData execdata;
 
     std::vector<uint8_t> preimage{0x01, 0x02, 0x03, 0x04};
-    unsigned char hash[CSHA256::OUTPUT_SIZE];
-    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash);
+    std::vector<uint8_t> hash(32);
+    CSHA256().Write(preimage.data(), preimage.size()).Finalize(hash.data());
 
     std::vector<uint8_t> wrong_preimage{0x05, 0x06, 0x07, 0x08};
 
-    auto pk = MakePubkey();
-
-    RungBlock block;
-    block.type = RungBlockType::HTLC;
-    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(hash, hash + 32)});
-    block.fields.push_back({RungDataType::PREIMAGE, wrong_preimage});
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk)});
-    block.fields.push_back({RungDataType::PUBKEY, pk});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-
+    auto block = MakeHtlcV7(hash, /*csv=*/10, MakePubkey(), MakePubkey(),
+                             MakeSignature(64), wrong_preimage, /*path=*/0);
     BOOST_CHECK(EvalHTLCBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
@@ -6979,12 +7000,11 @@ BOOST_AUTO_TEST_CASE(eval_ptlc_satisfied)
     ScriptExecutionData execdata;
 
     auto pk = MakePubkey();
-    auto adaptor_pk = MakePubkey(); // second pubkey commitment for adaptor point
 
+    // PTLC v0.7: one signing key only.
     RungBlock block;
     block.type = RungBlockType::PTLC;
     block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(adaptor_pk)});
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
@@ -7000,12 +7020,10 @@ BOOST_AUTO_TEST_CASE(eval_ptlc_bad_sig)
     ScriptExecutionData execdata;
 
     auto pk = MakePubkey();
-    auto adaptor_pk = MakePubkey();
 
     RungBlock block;
     block.type = RungBlockType::PTLC;
     block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(pk)});
-    block.fields.push_back({RungDataType::PUBKEY_COMMIT, MakePubkeyCommit(adaptor_pk)});
     block.fields.push_back({RungDataType::PUBKEY, pk});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
@@ -7091,12 +7109,12 @@ BOOST_AUTO_TEST_CASE(compound_serialize_roundtrip)
 
     RungBlock htlc_block;
     htlc_block.type = RungBlockType::HTLC;
-    // HTLC witness implicit layout: [PUBKEY, SIGNATURE, PUBKEY, PREIMAGE, NUMERIC]
+    // HTLC v0.7 witness layout: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
+    htlc_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     htlc_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     htlc_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    htlc_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     htlc_block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0x42)});
-    htlc_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
+    htlc_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
     rung.blocks.push_back(std::move(htlc_block));
 
     ladder.rungs.push_back(std::move(rung));
@@ -12196,13 +12214,12 @@ BOOST_AUTO_TEST_CASE(eval_key_ref_sig_oversized_index)
 // Cross-boundary: Merkle root at creation matches VerifyRungTx at spend
 // ============================================================================
 
-BOOST_AUTO_TEST_CASE(root_computation_divergence)
+BOOST_AUTO_TEST_CASE(root_computation_unified)
 {
-    // ComputeConditionsRoot and ComputeTxMLSCRoot produce DIFFERENT roots
-    // for the same conditions. VerifyRungTx expects ComputeTxMLSCRoot.
-    // This test documents the intentional divergence.
-
-    // Build a simple SIG rung with SCHEME + PUBKEY
+    // v0.7: ComputeConditionsRoot is now a thin wrapper around ComputeTxMLSCRoot,
+    // so the same conditions produce identical roots through either entry point.
+    // (Previously they diverged because the dead full-MLSC path used a different
+    // leaf scheme — that path was deleted in v0.7.)
     Rung rung;
     RungBlock block;
     block.type = RungBlockType::SIG;
@@ -12212,23 +12229,18 @@ BOOST_AUTO_TEST_CASE(root_computation_divergence)
     std::vector<uint8_t> pk = MakePubkey();
     std::vector<std::vector<uint8_t>> rung_pks = {pk};
 
-    // Old root: ComputeConditionsRoot uses ComputeRungLeaf (serialized blocks + pubkeys)
     RungConditions conditions;
     conditions.rungs.push_back(rung);
-    uint256 old_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
+    uint256 wrapper_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
 
-    // New root: ComputeTxMLSCRoot uses ComputeTxMLSCLeaf (structural template + value_commitment)
     CreationProofRung cp_rung;
     cp_rung.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
     cp_rung.coil.output_index = 0;
     cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
-    uint256 new_root = ComputeTxMLSCRoot({cp_rung});
+    uint256 direct_root = ComputeTxMLSCRoot({cp_rung});
 
-    // They MUST be different — if they were the same, the divergence wouldn't matter
-    BOOST_CHECK(old_root != new_root);
-    // Both must be non-null
-    BOOST_CHECK(!old_root.IsNull());
-    BOOST_CHECK(!new_root.IsNull());
+    BOOST_CHECK(wrapper_root == direct_root);
+    BOOST_CHECK(!wrapper_root.IsNull());
 }
 
 BOOST_AUTO_TEST_CASE(txmlsc_leaf_matches_verify_path)
@@ -12353,11 +12365,11 @@ BOOST_AUTO_TEST_CASE(createrungtx_root_matches_signrungtx_leaf)
     BOOST_CHECK(VerifyMerklePath(spend_leaf, path, leaves.size(), creation_root, verify_error));
 }
 
-BOOST_AUTO_TEST_CASE(old_root_does_not_verify)
+BOOST_AUTO_TEST_CASE(wrapper_root_verifies_via_tx_mlsc_path)
 {
-    // The old ComputeConditionsRoot produces a root that does NOT match
-    // what VerifyRungTx expects. This test ensures the bug stays fixed.
-
+    // v0.7: ComputeConditionsRoot now delegates to ComputeTxMLSCRoot, so the
+    // wrapper-produced root MUST verify with the same TX_MLSC leaf the live
+    // evaluator computes. This regression test pins the unification.
     Rung rung;
     RungBlock block;
     block.type = RungBlockType::SIG;
@@ -12367,24 +12379,21 @@ BOOST_AUTO_TEST_CASE(old_root_does_not_verify)
     std::vector<uint8_t> pk = MakePubkey();
     std::vector<std::vector<uint8_t>> rung_pks = {pk};
 
-    // Old root (ComputeConditionsRoot → ComputeRungLeaf)
     RungConditions conditions;
     conditions.rungs.push_back(rung);
-    uint256 old_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
+    uint256 wrapper_root = ComputeConditionsRoot(conditions, {rung_pks}, {});
 
-    // Correct leaf (ComputeTxMLSCLeaf — what VerifyRungTx computes)
     CreationProofRung cp_rung;
     cp_rung.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
     cp_rung.coil.output_index = 0;
     cp_rung.value_commitment = ComputeValueCommitment(rung, rung_pks);
     uint256 correct_leaf = ComputeTxMLSCLeaf(cp_rung);
 
-    // The correct leaf should NOT verify against the old root
     std::vector<uint256> leaves = {correct_leaf};
     auto path = BuildMerklePath(leaves, 0);
     std::string verify_error;
-    BOOST_CHECK_MESSAGE(!VerifyMerklePath(correct_leaf, path, leaves.size(), old_root, verify_error),
-        "TX_MLSC leaf must NOT verify against ComputeConditionsRoot — this is the bug that was fixed");
+    BOOST_CHECK_MESSAGE(VerifyMerklePath(correct_leaf, path, leaves.size(), wrapper_root, verify_error),
+        "ComputeConditionsRoot must produce a root that verifies the TX_MLSC leaf");
 }
 
 BOOST_AUTO_TEST_CASE(value_commitment_pubkey_binding)
@@ -14070,9 +14079,10 @@ BOOST_AUTO_TEST_CASE(rbd_extracts_from_non_priming_fails)
 
 BOOST_AUTO_TEST_CASE(rbd_accepts_deeper_replacement)
 {
+    // Depth jump must clear MIN_RBD_DEPTH_GAP (= 5) — see policy.cpp.
     auto outpoint = MakeTestOutpoint(0xB0, 0);
     auto old_tx = MakePrimingTx(outpoint, 5);
-    auto new_tx = MakePrimingTx(outpoint, 7);
+    auto new_tx = MakePrimingTx(outpoint, 10);
 
     std::string reason;
     BOOST_CHECK(IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
@@ -14087,7 +14097,7 @@ BOOST_AUTO_TEST_CASE(rbd_rejects_same_depth)
 
     std::string reason;
     BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
-    BOOST_CHECK_EQUAL(reason, "rbd-depth-not-deeper");
+    BOOST_CHECK_EQUAL(reason, "rbd-depth-gap-too-small");
 }
 
 BOOST_AUTO_TEST_CASE(rbd_rejects_shallower_replacement)
@@ -14098,7 +14108,7 @@ BOOST_AUTO_TEST_CASE(rbd_rejects_shallower_replacement)
 
     std::string reason;
     BOOST_CHECK(!IsValidRBDReplacement(CTransaction(new_tx), CTransaction(old_tx), reason));
-    BOOST_CHECK_EQUAL(reason, "rbd-depth-not-deeper");
+    BOOST_CHECK_EQUAL(reason, "rbd-depth-gap-too-small");
 }
 
 BOOST_AUTO_TEST_CASE(rbd_rejects_different_prevouts)
@@ -14226,9 +14236,10 @@ static std::string SimulateMempoolRBDDecision(const CTransaction& new_tx,
 
 BOOST_AUTO_TEST_CASE(mempool_rbd_contract_single_conflict_accept)
 {
+    // Depth jump must clear MIN_RBD_DEPTH_GAP (= 5).
     auto op = MakeTestOutpoint(0xD0, 0);
     auto old_tx = MakePrimingTx(op, 5);
-    auto new_tx = MakePrimingTx(op, 9);
+    auto new_tx = MakePrimingTx(op, 10);
 
     std::vector<CTransactionRef> conflicts{MakeTransactionRef(old_tx)};
     BOOST_CHECK_EQUAL(SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts), "rbd-accept");
@@ -14281,7 +14292,7 @@ BOOST_AUTO_TEST_CASE(mempool_rbd_contract_multi_conflict_partial_reject)
     std::vector<CTransactionRef> conflicts{
         MakeTransactionRef(old_a), MakeTransactionRef(old_b)};
     auto result = SimulateMempoolRBDDecision(CTransaction(new_tx), conflicts);
-    BOOST_CHECK_EQUAL(result, "rbd-reject:rbd-depth-not-deeper");
+    BOOST_CHECK_EQUAL(result, "rbd-reject:rbd-depth-gap-too-small");
 }
 
 BOOST_AUTO_TEST_CASE(mempool_rbd_contract_new_tx_non_priming_falls_through)

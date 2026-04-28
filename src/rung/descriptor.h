@@ -64,9 +64,9 @@ namespace rung {
  *
  *  Compound family:
  *    timelocked_sig(@pk, csv_blocks) | cltv_sig(@pk, height)
- *    htlc(@sender, @receiver, preimage_hex, csv_blocks)
+ *    htlc(@receiver, @sender, preimage_hex, csv_blocks)   // v0.7: receiver=path 0, sender=path 1 (refund)
  *    hash_sig(@pk, preimage_hex)
- *    ptlc(@pk, @adaptor_point, csv_blocks)
+ *    ptlc(@pk, csv_blocks)                                  // v0.7: dropped @adaptor_point arg
  *    timelocked_multisig(M, @pk1, @pk2, ..., csv_blocks)
  *
  *  Governance family:

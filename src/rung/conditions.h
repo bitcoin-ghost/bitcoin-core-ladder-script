@@ -149,16 +149,15 @@ std::vector<uint8_t> CreateMLSCScript(const uint256& conditions_root, const std:
 
 }  // namespace api
 
-/** Compute the SHA256 leaf hash for a single rung (blocks + relay_refs + pubkeys).
- *  merkle_pub_key: pubkeys are appended to the leaf in positional order,
- *  walked left-to-right across key-consuming blocks using PubkeyCountForBlock(). */
+// v0.7: ComputeRungLeaf / ComputeCoilLeaf / ComputeRelayLeaf are retained as
+// test-only helpers. They use the legacy serialised-blocks leaf scheme and do
+// NOT participate in consensus — the live verifier uses ComputeTxMLSCLeaf and
+// ComputeTxMLSCRelayLeaf (TaggedHash over structural template + value
+// commitment). Consensus paths must NOT call these. Tests in rung_tests.cpp
+// pin the legacy helpers' determinism + tree behaviour.
 uint256 ComputeRungLeaf(const Rung& rung,
                          const std::vector<std::vector<uint8_t>>& pubkeys = {});
-
-/** Compute the SHA256 leaf hash for coil metadata. */
 uint256 ComputeCoilLeaf(const RungCoil& coil);
-
-/** Compute the SHA256 leaf hash for a relay (blocks + relay_refs + pubkeys). */
 uint256 ComputeRelayLeaf(const Relay& relay,
                           const std::vector<std::vector<uint8_t>>& pubkeys = {});
 
@@ -262,7 +261,10 @@ std::optional<std::pair<uint256, bool>> ComputeTweakedConditionsRoot(
 uint256 ComputeMerkleRootFromPath(const uint256& leaf, const std::vector<uint256>& path);
 
 /** Compute the MLSC conditions root for a complete set of conditions.
- *  Leaf order: [rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1], coil_leaf].
+ *  Convenience wrapper around `ComputeTxMLSCRoot`: builds CreationProofRung +
+ *  CreationProofRelay structs from the supplied conditions and delegates.
+ *  Leaf order: [rung[0..N-1], relay[0..M-1]] (coil is structurally bound via
+ *  rung leaf templates — does not appear separately).
  *  @param rung_pubkeys   Per-rung pubkey lists (outer index = rung index)
  *  @param relay_pubkeys  Per-relay pubkey lists (outer index = relay index) */
 uint256 ComputeConditionsRoot(const RungConditions& conditions,
@@ -326,17 +328,11 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
 /** Serialize an MLSC proof to bytes (for witness stack element). */
 std::vector<uint8_t> SerializeMLSCProof(const MLSCProof& proof);
 
-/** Verify an MLSC Merkle proof against a conditions root.
- *  Reconstructs the full leaf array from revealed data + proof hashes, builds the tree,
- *  and checks the computed root matches the expected root.
- *  @param[in]  proof           The deserialized MLSC proof
- *  @param[in]  coil            The coil from the spending witness (always revealed)
- *  @param[in]  expected_root   The conditions_root from the UTXO
- *  @param[in]  rung_pubkeys    Pubkeys for the revealed rung (from witness, bound by Merkle proof)
- *  @param[in]  relay_pubkeys   Per-relay pubkey lists for revealed relays
- *  @param[out] error           Error message on failure
- *  @param[out] verified_out    If non-null, receives the verified leaf array for covenant checks
- *  @return true if the Merkle proof verifies correctly. */
+// v0.7: VerifyMLSCProof retained as a test-only helper that exercises the
+// legacy full-MLSC leaf scheme + tree (ComputeRungLeaf / ComputeRelayLeaf /
+// ComputeCoilLeaf). Consensus does NOT call this — the live verifier inlines
+// MERKLE_PATH/FULL_LEAVES against ComputeTxMLSCLeaf + ComputeTxMLSCRelayLeaf
+// (see evaluator.cpp:1019-1049).
 bool VerifyMLSCProof(const MLSCProof& proof,
                      const RungCoil& coil,
                      const uint256& expected_root,
@@ -361,18 +357,37 @@ struct CreationProofRung {
     uint256 value_commitment;                           //!< SHA256(field_values || pubkeys)
 };
 
+/** A single relay in the creation proof — symmetric to CreationProofRung but without coil.
+ *  Leaf: TaggedHash("LadderRelayLeaf/v1", template || value_commitment).
+ *  v0.7: relay leaves are now folded into the conditions_root alongside rung leaves,
+ *  closing E-008 (KEY_REF_SIG could previously dereference any spender-supplied relay). */
+struct CreationProofRelay {
+    std::vector<std::pair<uint16_t, uint8_t>> blocks;       //!< Per-block: (block_type, inverted)
+    std::vector<uint16_t> relay_refs;                       //!< Bound transitive relay deps
+    uint256 value_commitment;                               //!< SHA256(field_values || pubkeys)
+};
+
 /** Serialize a structural template (block types + inverted flags + coil) for leaf hashing.
  *  Used at spend time to reconstruct rung leaves from witness data. */
 std::vector<uint8_t> SerializeStructuralTemplate(const CreationProofRung& rung);
+
+/** Serialize a relay's structural template (block types + inverted flags + relay_refs). */
+std::vector<uint8_t> SerializeRelayStructuralTemplate(const CreationProofRelay& relay);
 
 /** Compute a TX_MLSC leaf from a rung's structural template + value commitment.
  *  leaf = TaggedHash("LadderLeaf/v1", structural_template || value_commitment)
  *  Used at both creation (by RPC) and spend time (by evaluator). */
 uint256 ComputeTxMLSCLeaf(const CreationProofRung& rung);
 
-/** Compute the TX_MLSC conditions root from a set of rung leaves.
- *  Builds a Merkle tree using sorted interior nodes. */
-uint256 ComputeTxMLSCRoot(const std::vector<CreationProofRung>& rungs);
+/** Compute a TX_MLSC relay leaf.
+ *  leaf = TaggedHash("LadderRelayLeaf/v1", relay_template || value_commitment) */
+uint256 ComputeTxMLSCRelayLeaf(const CreationProofRelay& relay);
+
+/** Compute the TX_MLSC conditions root from rung leaves and (optionally) relay leaves.
+ *  v0.7: relay leaves participate in the tree to close the KEY_REF_SIG relay-swap bug.
+ *  Tree leaf order: [rung[0..N-1], relay[0..M-1]]. */
+uint256 ComputeTxMLSCRoot(const std::vector<CreationProofRung>& rungs,
+                          const std::vector<CreationProofRelay>& relays = {});
 
 /** Compute a value_commitment for a rung: SHA256(field_values || pubkeys).
  *  Used by RPC commands when building conditions and by the evaluator
