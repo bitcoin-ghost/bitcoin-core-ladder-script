@@ -617,6 +617,38 @@ bytes. This closes a `log2(K!)`-bit per-spend permutation channel
 does not address. Equal pubkeys violate the strict-ascending rule and
 replace the prior duplicate-pubkey check.
 
+### Rung leaf binding (v0.9, audit #5 R-1)
+
+The rung's structural template includes its `relay_refs` —
+`n_relay_refs(uint8)` followed by each `relay_index(uint16 LE)` — so the
+leaf hash commits to the rung's relay dependencies. Without this binding
+the leaf hash was independent of `relay_refs` and a spender could drop
+the field at spend time, skipping the relay enforcement that the funder
+intended (the `EvalRung` step only checks the relays the rung *claims* it
+needs). The relay side of the same template binds `relay.relay_refs`
+since v0.7; v0.9 closes the asymmetry.
+
+### Per-tx QABI fields gating (v0.9, audit #5 T-1 / T-2)
+
+The `tx.qabi_block` (≤64 KB relay / ≤256 KB consensus) and
+`tx.aggregated_sig` (≤666 B) fields exist for QABIO batched-PQ
+transactions. v0.9 rejects any non-empty value of either field when no
+input in the transaction carries a `QABI_SPEND`, `QABI_PRIME`, or
+`PQ_BATCH` block. Without this gate, both fields are spender-controlled
+bytes that ride along with any v4 transaction unmodified — a single
+non-QABIO transaction could carry up to ~64 KB of arbitrary data through
+`tx.qabi_block` alone.
+
+### Diff witness uniqueness (v0.9, audit #5 D-1)
+
+When `n_rungs == 0`, the witness is a `WitnessReference` to another
+input's witness with field-level diffs. v0.9 requires every diff entry
+to target a unique `(rung_index, block_index, field_index)` triple —
+duplicate targets are rejected at deserialise. Without uniqueness, a
+spender could pad with N copies of the same diff (~6 B each) for ~12 KB
+of per-input witness inflation; last-write-wins semantics made the
+duplicates silent.
+
 ### QABIO
 
 The QABIO extension defines `QABI_PRIME` and `QABI_SPEND` block

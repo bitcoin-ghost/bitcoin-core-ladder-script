@@ -5,6 +5,20 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
+> **v0.9 (2026-04-29)** — audit #5 follow-up:
+> - **R-1**: `rung.relay_refs` is now folded into the rung's structural
+>   template (the leaf hash). Before v0.9 this field was unbound, so a
+>   spender could drop relay dependencies at spend time and skip relay
+>   enforcement. Affects every rung that uses a relay — the funder must
+>   declare `relay_refs` at fund time, and the spender cannot mutate them.
+> - **T-1 / T-2**: `tx.qabi_block` and `tx.aggregated_sig` are now rejected
+>   when no input carries a QABI block type (`QABI_SPEND` / `QABI_PRIME` /
+>   `PQ_BATCH`). Closes a 64 KB / 666 B per-tx embedding channel for
+>   non-QABIO transactions.
+> - **D-1**: diff-witness deserialise now rejects duplicate
+>   `(rung_index, block_index, field_index)` targets. Closes ~12 KB of
+>   per-input witness inflation via no-op repeat diffs.
+>
 > **v0.8 (2026-04-29)** — six blocks gained strict implicit witness layouts
 > (E-018a): `ADAPTOR_SIG`, `PTLC`, `KEY_REF_SIG`, `VAULT_LOCK`, `ANCHOR_FEE`,
 > `ANCHOR_ORACLE`. `MULTISIG` / `TIMELOCKED_MULTISIG` triplets must now be in

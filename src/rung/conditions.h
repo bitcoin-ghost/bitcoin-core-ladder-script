@@ -353,6 +353,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
  *  Together they form the leaf: TaggedHash("LadderLeaf/v1", template || value_commitment). */
 struct CreationProofRung {
     std::vector<std::pair<uint16_t, uint8_t>> blocks;  //!< Per-block: (block_type, inverted)
+    std::vector<uint16_t> relay_refs;                   //!< Required relays (v0.9: bound by leaf, R-1)
     RungCoil coil;                                      //!< Coil including output_index
     uint256 value_commitment;                           //!< SHA256(field_values || pubkeys)
 };

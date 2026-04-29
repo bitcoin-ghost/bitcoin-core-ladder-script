@@ -7923,6 +7923,37 @@ BOOST_AUTO_TEST_CASE(diff_witness_fresh_coil)
                       static_cast<uint8_t>(RungScheme::FALCON512));
 }
 
+// E-D-1 regression (audit #5): two diffs targeting the same
+// (rung_index, block_index, field_index) triple must be rejected at
+// deserialise. Without this, a spender can pad the witness with N copies of
+// the same diff (~6 B each) for ~12 KB of witness inflation per input
+// (last-write-wins makes the duplicates silent).
+BOOST_AUTO_TEST_CASE(diff_witness_rejects_duplicate_target)
+{
+    auto sig = MakeSignature(64);
+
+    WitnessDiff diff_a;
+    diff_a.rung_index = 0;
+    diff_a.block_index = 0;
+    diff_a.field_index = 1;
+    diff_a.new_field = {RungDataType::SIGNATURE, sig};
+
+    WitnessDiff diff_b = diff_a;        // identical target
+    diff_b.new_field.data[0] = 0xCC;    // different bytes — still rejected
+
+    LadderWitness dw;
+    dw.witness_ref = WitnessReference{0, {diff_a, diff_b}};
+    dw.coil.coil_type = RungCoilType::UNLOCK;
+    dw.coil.attestation = RungAttestationMode::INLINE;
+    dw.coil.scheme = RungScheme::SCHNORR;
+
+    auto bytes = SerializeLadderWitness(dw);
+    LadderWitness decoded;
+    std::string error;
+    BOOST_CHECK(!DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(error.find("duplicate") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(diff_witness_rejects_condition_only_type)
 {
     // Diff field types must be witness-side: PUBKEY, SIGNATURE, PREIMAGE, SCHEME
@@ -12145,6 +12176,24 @@ BOOST_AUTO_TEST_CASE(wrapper_root_verifies_via_tx_mlsc_path)
         "ComputeConditionsRoot must produce a root that verifies the TX_MLSC leaf");
 }
 
+// E-R-1 regression (audit #5): a rung's relay_refs MUST be folded into the
+// structural template, so a spender cannot drop relay dependencies at spend
+// time and skip the relay enforcement check. v0.8 omitted this — pre-v0.9
+// the same leaf hash would fall out for both [0] and [] relay_refs.
+BOOST_AUTO_TEST_CASE(rung_leaf_binds_relay_refs)
+{
+    CreationProofRung cp_with_ref;
+    cp_with_ref.blocks.push_back({static_cast<uint16_t>(RungBlockType::SIG), 0});
+    cp_with_ref.relay_refs = {0};
+    cp_with_ref.coil.output_index = 0;
+    cp_with_ref.value_commitment = uint256::ZERO;
+
+    CreationProofRung cp_without_ref = cp_with_ref;
+    cp_without_ref.relay_refs.clear();
+
+    BOOST_CHECK(ComputeTxMLSCLeaf(cp_with_ref) != ComputeTxMLSCLeaf(cp_without_ref));
+}
+
 BOOST_AUTO_TEST_CASE(value_commitment_pubkey_binding)
 {
     // Changing the pubkey must change the value_commitment (and thus the leaf).
@@ -12702,9 +12751,10 @@ BOOST_AUTO_TEST_CASE(tx_mlsc_structural_template_serde)
     auto rung = MakeCreationRung(RungBlockType::CSV, 3);
     auto tmpl = SerializeStructuralTemplate(rung);
     BOOST_CHECK(!tmpl.empty());
-    // v0.8: n_blocks(1) + block_type(2) + inverted(1) + coil(4 — type/att/scheme/output_index) = 8 bytes
-    // (coil.has_address byte dropped alongside coil.address_hash; see E-009.)
-    BOOST_CHECK_EQUAL(tmpl.size(), 8u);
+    // v0.9: n_blocks(1) + block_type(2) + inverted(1) + n_relay_refs(1) +
+    //       coil(4 — type/att/scheme/output_index) = 9 bytes for a single-block,
+    // no-relay rung. Adds n_relay_refs byte vs v0.8 (R-1 binding).
+    BOOST_CHECK_EQUAL(tmpl.size(), 9u);
 }
 
 // 9. TX_MLSC descriptor parse round-trip

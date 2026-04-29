@@ -705,6 +705,7 @@ uint256 ComputeConditionsRoot(const RungConditions& conditions,
             cp.blocks.push_back({static_cast<uint16_t>(blk.type),
                                   static_cast<uint8_t>(blk.inverted ? 1 : 0)});
         }
+        cp.relay_refs = conditions.rungs[i].relay_refs;
         cp.coil = conditions.coil;
         cp.value_commitment = ComputeValueCommitment(conditions.rungs[i], pks);
         cp_rungs.push_back(std::move(cp));
@@ -1204,6 +1205,17 @@ std::vector<uint8_t> SerializeStructuralTemplate(const CreationProofRung& rung)
         out.push_back(static_cast<uint8_t>(block_type & 0xFF));
         out.push_back(static_cast<uint8_t>((block_type >> 8) & 0xFF));
         out.push_back(inverted);
+    }
+
+    // v0.9 (R-1): n_relay_refs(1) + each ref(2 LE).
+    // The rung leaf MUST commit to its relay dependencies; without this binding
+    // a spender can drop relay_refs at spend time and skip relay enforcement.
+    // Symmetric to SerializeRelayStructuralTemplate which already bound
+    // relay.relay_refs since v0.7 (E-008).
+    out.push_back(static_cast<uint8_t>(rung.relay_refs.size()));
+    for (uint16_t r : rung.relay_refs) {
+        out.push_back(static_cast<uint8_t>(r & 0xFF));
+        out.push_back(static_cast<uint8_t>((r >> 8) & 0xFF));
     }
 
     // v0.8: Coil: type(1) + attestation(1) + scheme(1) + output_index(1)

@@ -64,6 +64,7 @@
 
 #include <ios>
 #include <set>
+#include <tuple>
 
 namespace rung {
 
@@ -523,6 +524,12 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
             ref.input_index = static_cast<uint32_t>(input_index);
             ref.diffs.resize(n_diffs);
 
+            // v0.9 (D-1): track (rung_index, block_index, field_index) triples
+            // to reject duplicates. Without this, a spender can pad with N
+            // no-op diffs targeting the same field (~6 B each) for ~12 KB of
+            // witness inflation. Last-write-wins makes the duplicates silent.
+            std::set<std::tuple<uint16_t, uint16_t, uint16_t>> seen_targets;
+
             for (uint64_t d = 0; d < n_diffs; ++d) {
                 uint64_t ri = ReadCompactSize(ss);
                 uint64_t bi = ReadCompactSize(ss);
@@ -534,6 +541,14 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                 ref.diffs[d].rung_index = static_cast<uint16_t>(ri);
                 ref.diffs[d].block_index = static_cast<uint16_t>(bi);
                 ref.diffs[d].field_index = static_cast<uint16_t>(fi);
+
+                auto target = std::make_tuple(ref.diffs[d].rung_index,
+                                              ref.diffs[d].block_index,
+                                              ref.diffs[d].field_index);
+                if (!seen_targets.insert(target).second) {
+                    error = "diff witness duplicate target at diff " + std::to_string(d);
+                    return false;
+                }
 
                 // Read diff field: type byte + data
                 uint8_t type_byte;

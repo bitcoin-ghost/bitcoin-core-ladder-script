@@ -2623,6 +2623,7 @@ static RPCHelpMan signrungtx()
                             static_cast<uint8_t>(block.inverted ? 1 : 0)
                         });
                     }
+                    cp_rung.relay_refs = conditions.rungs[r].relay_refs;
                     cp_rung.coil = conditions.coil;
                     uint8_t oi = (r < rung_output_indices2.size() && rung_output_indices2[r] != 0xFF)
                                      ? rung_output_indices2[r]
@@ -2674,6 +2675,7 @@ static RPCHelpMan signrungtx()
                                 static_cast<uint8_t>(block.inverted ? 1 : 0)
                             });
                         }
+                        cp_rung.relay_refs = conditions.rungs[r].relay_refs;
                         cp_rung.coil = conditions.coil;
                         uint8_t oi = (r < rung_output_indices2.size() && rung_output_indices2[r] != 0xFF)
                                          ? rung_output_indices2[r]
@@ -3016,6 +3018,7 @@ static RPCHelpMan parseladder()
                     static_cast<uint8_t>(block.inverted ? 1 : 0)
                 });
             }
+            cp_rung.relay_refs = conditions.rungs[r].relay_refs;
             cp_rung.coil = conditions.coil;
             std::vector<std::vector<uint8_t>> rpks;
             if (r < pubkeys.size()) rpks = pubkeys[r];
@@ -3181,6 +3184,7 @@ static RPCHelpMan computemutation()
                     static_cast<uint8_t>(block.inverted ? 1 : 0)
                 });
             }
+            cp_rung.relay_refs = conditions.rungs[r].relay_refs;
             cp_rung.coil = conditions.coil;
             std::vector<std::vector<uint8_t>> rpks;
             if (r < rung_pubkeys.size()) rpks = rung_pubkeys[r];
@@ -3433,6 +3437,7 @@ static RPCHelpMan signladder()
                         static_cast<uint8_t>(block.inverted ? 1 : 0)
                     });
                 }
+                cp_rung.relay_refs = conditions.rungs[0].relay_refs;
                 cp_rung.coil = conditions.coil;
                 cp_rung.coil.output_index = mtx.vin[input_idx].prevout.n;
                 cp_rung.value_commitment = rung::ComputeValueCommitment(
@@ -3720,6 +3725,7 @@ static RPCHelpMan signladder()
                         static_cast<uint8_t>(block.inverted ? 1 : 0)
                     });
                 }
+                cp_rung.relay_refs = conditions.rungs[r].relay_refs;
                 cp_rung.coil = conditions.coil;
                 cp_rung.coil.output_index = spent_vout;
                 std::vector<std::vector<uint8_t>> rpks;
@@ -3957,6 +3963,12 @@ static RPCHelpMan createrungtx()
             }
         }
 
+        // v0.9 (R-1): per-rung relay_refs bind into the leaf so a spender
+        // cannot drop relay dependencies at spend time.
+        if (rung_obj.exists("relay_refs")) {
+            rung.relay_refs = ParseRelayRefs(rung_obj["relay_refs"].get_array());
+        }
+
         all_rungs.push_back(rung);
         all_rung_pubkeys.push_back(rung_pks);
 
@@ -3968,6 +3980,7 @@ static RPCHelpMan createrungtx()
                 static_cast<uint8_t>(block.inverted ? 1 : 0)
             });
         }
+        cp_rung.relay_refs = rung.relay_refs;
 
         // Coil: full parse so scheme/attestation/address bind into the leaf
         // at fund time. Previously only coil.type was read here, which meant

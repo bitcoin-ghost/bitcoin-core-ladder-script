@@ -630,6 +630,44 @@ static size_t CountTxScriptBodyFields(const LadderTxView& tx)
     return total;
 }
 
+/** v0.9 (T-1/T-2): does any input carry a QABI block type?
+ *  QABI_SPEND / QABI_PRIME consume `tx.qabi_block`; QABI_SPEND additionally
+ *  expects a `tx.aggregated_sig`. PQ_BATCH does not use either, but we
+ *  include it for forward-compat with the QABIO family. Used to gate the
+ *  tx-level qabi_block / aggregated_sig fields so non-QABIO transactions
+ *  cannot smuggle attacker-chosen bytes through them. */
+static bool HasTxQABIInputs(const LadderTxView& tx)
+{
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
+        LadderWitness lw;
+        std::string err;
+        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
+        for (const auto& rung : lw.rungs) {
+            for (const auto& block : rung.blocks) {
+                if (block.type == RungBlockType::QABI_SPEND ||
+                    block.type == RungBlockType::QABI_PRIME ||
+                    block.type == RungBlockType::PQ_BATCH) {
+                    return true;
+                }
+            }
+        }
+        for (const auto& relay : lw.relays) {
+            for (const auto& block : relay.blocks) {
+                if (block.type == RungBlockType::QABI_SPEND ||
+                    block.type == RungBlockType::QABI_PRIME ||
+                    block.type == RungBlockType::PQ_BATCH) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /** Count ACCUMULATOR blocks across ALL inputs in a transaction (v0.6).
  *  Mirrors CountTxPreimageFields. Per-rung cap is enforced at deserialise; this
  *  per-tx cap closes the cross-input accumulation channel found in audit #2. */
@@ -685,6 +723,21 @@ bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
     if (CountTxAccumulatorBlocks(tx) > MAX_ACCUMULATOR_BLOCKS_PER_TX) {
         error = "TX_MLSC: per-tx ACCUMULATOR block count exceeds limit";
         return false;
+    }
+
+    // Consensus (v0.9, T-1/T-2): qabi_block (≤64 KB / 256 KB) and
+    // aggregated_sig (≤666 B) MUST be empty when no input carries a QABI
+    // block type. Without this gate, both fields are spender-controlled
+    // bytes that ride along with any v4 transaction unmodified.
+    if (!HasTxQABIInputs(tx)) {
+        if (tx.qabi_block_size > 0) {
+            error = "TX_MLSC: tx.qabi_block must be empty when no QABI input is present";
+            return false;
+        }
+        if (tx.aggregated_sig_size > 0) {
+            error = "TX_MLSC: tx.aggregated_sig must be empty when no QABI input is present";
+            return false;
+        }
     }
 
     return true;
@@ -941,7 +994,9 @@ bool VerifyRungTx(
         // Verify Merkle proof: TX_MLSC leaf = TaggedHash(template || value_commitment)
         std::string verify_error;
 
-        // Build CreationProofRung from the revealed rung + witness data
+        // Build CreationProofRung from the revealed rung + witness data.
+        // v0.9 (R-1): relay_refs flow into the structural template so a
+        // spender cannot drop relay dependencies at spend time.
         CreationProofRung cp_rung;
         for (const auto& block : mlsc_proof.revealed_rung.blocks) {
             cp_rung.blocks.push_back({
@@ -949,6 +1004,7 @@ bool VerifyRungTx(
                 static_cast<uint8_t>(block.inverted ? 1 : 0)
             });
         }
+        cp_rung.relay_refs = mlsc_proof.revealed_rung.relay_refs;
         cp_rung.coil = witness_ladder.coil;
         cp_rung.value_commitment = ComputeValueCommitment(
             mlsc_proof.revealed_rung, rung_pks);
