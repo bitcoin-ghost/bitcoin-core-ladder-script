@@ -2403,7 +2403,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         // rules (output format, per-tx preimage count) because VerifyRungTx
         // is only invoked when the spent input is MLSC.
         std::string rung_error;
-        if (!rung::CheckRungTxLevel(tx, rung_error)) {
+        if (!rung::CheckRungTxLevel(tx, txdata.m_spent_outputs, rung_error)) {
             LogPrintf("TX_MLSC tx-level rejection: %s\n", rung_error);
             if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
                 return state.Invalid(TxValidationResult::TX_NOT_STANDARD,

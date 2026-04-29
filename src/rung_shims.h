@@ -181,10 +181,20 @@ inline bool IsStandardRungTx(const CTransaction& tx, std::string& reason)
 
 // --- Consensus-level shims (CTransaction -> LadderTxView) -----------------
 
-inline bool CheckRungTxLevel(const CTransaction& tx, std::string& error)
+inline bool CheckRungTxLevel(const CTransaction& tx,
+                              const std::vector<CTxOut>& spent_outputs,
+                              std::string& error)
 {
     LadderTxViewBuilder b(tx);
-    return rung::api::CheckRungTxLevel(b.view, error);
+    std::vector<rung::api::LadderOutputView> sov;
+    sov.reserve(spent_outputs.size());
+    for (const auto& out : spent_outputs) {
+        rung::api::LadderOutputView ov;
+        ov.value = out.nValue;
+        ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+        sov.push_back(ov);
+    }
+    return rung::api::CheckRungTxLevel(b.view, sov.data(), sov.size(), error);
 }
 
 inline bool ValidateRungOutputs(const CTransaction& tx, std::string& error)

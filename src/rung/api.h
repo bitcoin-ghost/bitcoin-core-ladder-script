@@ -477,6 +477,8 @@ bool VerifyRungTx(
 // v4 txs whose inputs are all standard P2WPKH/P2TR (wallet-funded bootstrap).
 bool CheckRungTxLevel(
     const LadderTxView& tx,
+    const LadderOutputView* spent_outputs,
+    size_t spent_output_count,
     std::string& error_out);
 
 // Per-output format check: every vout must be MLSC, at most one

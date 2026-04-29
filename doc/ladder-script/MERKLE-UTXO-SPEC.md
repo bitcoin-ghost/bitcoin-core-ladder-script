@@ -217,6 +217,12 @@ from the witness block using `FindAllFields(block, RungDataType::PUBKEY)`.
 
 ### `SerializeRungBlocks(rung, ctx)` / `SerializeRelayBlocks(relay, ctx)`
 
+Legacy/test serialiser used by the full-MLSC leaf-computation path. The
+live consensus path uses `SerializeStructuralTemplate(CreationProofRung)`
+(see [TX_MLSC_SPEC.md](TX_MLSC_SPEC.md)) — that path encodes
+`n_relay_refs` and `relay_index` as `uint8` / `uint16 LE` instead of
+`CompactSize`, and produces a different leaf hash.
+
 Wire format for Merkle leaf input:
 
 ```
@@ -229,8 +235,9 @@ for each relay_ref:
     CompactSize(relay_index)
 ```
 
-Relay refs are included in the leaf data so they are committed via the Merkle
-tree.
+Relay refs are included in the leaf data so they are committed via the
+Merkle tree (binding identical to TX_MLSC at the field-level — only the
+encoding width differs).
 
 **Source**: `serialize.cpp:867-942`.
 

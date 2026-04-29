@@ -319,10 +319,27 @@ static bool MergeConditionsAndWitness(const RungConditions& conditions,
                 return false;
             }
 
-            // Merge: all condition fields first, then all witness fields
+            // Merge: all condition fields first, then all witness fields.
+            // v0.10 (F-8): cap post-merge field count. Per-side fields are
+            // already capped at MAX_FIELDS_PER_BLOCK = 16 by deserialise,
+            // but the merge step combines them and order-sensitive
+            // evaluators see the combined array. MULTISIG / TIMELOCKED_MULTISIG
+            // legitimately produce up to 3K + conds = 48 + 4 = 52 fields, so
+            // honour the wider cap from `MAX_MULTISIG_WITNESS_FIELDS`.
             auto& merged_block = merged.rungs[r].blocks[b];
             merged_block.type = cond_block.type;
             merged_block.inverted = cond_block.inverted; // inverted comes from conditions
+            const size_t merged_count = cond_block.fields.size() + wit_block.fields.size();
+            const bool is_multisig = (cond_block.type == RungBlockType::MULTISIG ||
+                                       cond_block.type == RungBlockType::TIMELOCKED_MULTISIG);
+            const size_t cap = is_multisig
+                ? (MAX_FIELDS_PER_BLOCK + MAX_MULTISIG_WITNESS_FIELDS)
+                : (2 * MAX_FIELDS_PER_BLOCK);
+            if (merged_count > cap) {
+                error = "merged field count exceeds cap in rung " +
+                        std::to_string(r) + " block " + std::to_string(b);
+                return false;
+            }
             merged_block.fields.insert(merged_block.fields.end(),
                                        cond_block.fields.begin(), cond_block.fields.end());
             merged_block.fields.insert(merged_block.fields.end(),
@@ -576,12 +593,54 @@ static size_t CountWitnessPreimageFields(const LadderWitness& lw)
     return total;
 }
 
-/** Count PREIMAGE/SCRIPT_BODY fields across ALL inputs in a transaction.
- *  Deserializes each input's witness once. O(N) in total inputs. */
-static size_t CountTxPreimageFields(const LadderTxView& tx)
+/** v0.10 (F-2): is input `i` an MLSC-spending input?
+ *  The per-tx counters and gates only inspect element[0] of inputs whose
+ *  spent output is an MLSC scriptPubKey (`0xDF || 32-byte root [|| data]`).
+ *  Bootstrap inputs (P2WPKH/P2WSH/P2TR/etc) can carry any bytes in their
+ *  witness stack and must not contribute to v4 consensus checks — otherwise
+ *  a P2WSH `OP_DROP OP_TRUE` script with a crafted first stack element
+ *  bypasses every per-tx cap (T-1, T-2, E-003, ACCUMULATOR cap, etc).
+ *  spent_outputs may be nullptr (e.g. legacy/test paths) — fail-closed:
+ *  treat all inputs as non-MLSC, so the per-tx caps reject any non-empty
+ *  qabi_block / aggregated_sig and any preimage / script_body / accumulator
+ *  bytes. Production callers (validation.cpp) always pass the real
+ *  spent_outputs vector. */
+static bool IsMLSCSpendingInput(const LadderOutputView* spent_outputs,
+                                 size_t spent_output_count,
+                                 size_t i)
+{
+    if (!spent_outputs || i >= spent_output_count) return false;
+    return rung::api::IsMLSCScript(spent_outputs[i].script_pub_key.as_span());
+}
+
+/** Count PREIMAGE/SCRIPT_BODY fields in a witness, including any diff entries
+ *  carried by a diff witness (`witness_ref`). v0.10 (F-3): pre-fix, diffs were
+ *  not counted, allowing each diff input to overlay 2 PREIMAGE/SCRIPT_BODY
+ *  source positions with fresh attacker bytes that contributed 0 to the
+ *  per-tx cap — multi-input embedding multiplier. */
+static size_t CountWitnessPreimageFieldsWithDiffs(const LadderWitness& lw)
+{
+    size_t total = CountWitnessPreimageFields(lw);
+    if (lw.witness_ref) {
+        for (const auto& diff : lw.witness_ref->diffs) {
+            if (diff.new_field.type == RungDataType::PREIMAGE ||
+                diff.new_field.type == RungDataType::SCRIPT_BODY) {
+                ++total;
+            }
+        }
+    }
+    return total;
+}
+
+/** Count PREIMAGE/SCRIPT_BODY fields across MLSC inputs in a transaction.
+ *  v0.10 (F-2/F-3): filter to MLSC-spending inputs, also walk diff entries. */
+static size_t CountTxPreimageFields(const LadderTxView& tx,
+                                     const LadderOutputView* spent_outputs,
+                                     size_t spent_output_count)
 {
     size_t total = 0;
     for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!IsMLSCSpendingInput(spent_outputs, spent_output_count, i)) continue;
         const auto& witness = tx.inputs[i].witness;
         if (witness.count < 2 || witness.count > 3) continue;
 
@@ -592,19 +651,20 @@ static size_t CountTxPreimageFields(const LadderTxView& tx)
         std::string err;
         if (!DeserializeLadderWitness(bytes, lw, err)) continue;
 
-        total += CountWitnessPreimageFields(lw);
+        total += CountWitnessPreimageFieldsWithDiffs(lw);
     }
     return total;
 }
 
-/** Count SCRIPT_BODY-only fields across ALL inputs in a transaction (v0.7).
- *  Tighter sub-cap inside the combined PREIMAGE+SCRIPT_BODY limit — closes the
- *  E-003 channel from audit #3 where 2 × SCRIPT_BODY (~160 B) doubled the
- *  documented 112 B/tx ceiling. */
-static size_t CountTxScriptBodyFields(const LadderTxView& tx)
+/** Count SCRIPT_BODY-only fields across MLSC inputs in a transaction (v0.7).
+ *  v0.10 (F-2/F-3): filter to MLSC-spending inputs, also count diff entries. */
+static size_t CountTxScriptBodyFields(const LadderTxView& tx,
+                                       const LadderOutputView* spent_outputs,
+                                       size_t spent_output_count)
 {
     size_t total = 0;
     for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!IsMLSCSpendingInput(spent_outputs, spent_output_count, i)) continue;
         const auto& witness = tx.inputs[i].witness;
         if (witness.count < 2 || witness.count > 3) continue;
         const auto& stack0 = witness.elements[0];
@@ -626,19 +686,42 @@ static size_t CountTxScriptBodyFields(const LadderTxView& tx)
                 }
             }
         }
+        if (lw.witness_ref) {
+            for (const auto& diff : lw.witness_ref->diffs) {
+                if (diff.new_field.type == RungDataType::SCRIPT_BODY) ++total;
+            }
+        }
     }
     return total;
 }
 
-/** v0.9 (T-1/T-2): does any input carry a QABI block type?
+/** v0.9 (T-1/T-2) + v0.10 (F-2): do any MLSC inputs carry QABI block types?
  *  QABI_SPEND / QABI_PRIME consume `tx.qabi_block`; QABI_SPEND additionally
  *  expects a `tx.aggregated_sig`. PQ_BATCH does not use either, but we
- *  include it for forward-compat with the QABIO family. Used to gate the
- *  tx-level qabi_block / aggregated_sig fields so non-QABIO transactions
- *  cannot smuggle attacker-chosen bytes through them. */
-static bool HasTxQABIInputs(const LadderTxView& tx)
+ *  include it for forward-compat with the QABIO family. v0.10 filters to
+ *  MLSC-spending inputs — pre-v0.10, a crafted bootstrap input could fake
+ *  the appearance of a QABI input and re-open the T-1 / T-2 channels. */
+struct TxQABIShape {
+    bool has_any{false};
+    bool has_qabi_spend{false};
+};
+
+static TxQABIShape ScanTxQABIInputs(const LadderTxView& tx,
+                                     const LadderOutputView* spent_outputs,
+                                     size_t spent_output_count)
 {
+    TxQABIShape shape;
+    auto note = [&](RungBlockType t) {
+        if (t == RungBlockType::QABI_SPEND) {
+            shape.has_qabi_spend = true;
+            shape.has_any = true;
+        } else if (t == RungBlockType::QABI_PRIME ||
+                   t == RungBlockType::PQ_BATCH) {
+            shape.has_any = true;
+        }
+    };
     for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!IsMLSCSpendingInput(spent_outputs, spent_output_count, i)) continue;
         const auto& witness = tx.inputs[i].witness;
         if (witness.count < 2 || witness.count > 3) continue;
         const auto& stack0 = witness.elements[0];
@@ -647,34 +730,24 @@ static bool HasTxQABIInputs(const LadderTxView& tx)
         std::string err;
         if (!DeserializeLadderWitness(bytes, lw, err)) continue;
         for (const auto& rung : lw.rungs) {
-            for (const auto& block : rung.blocks) {
-                if (block.type == RungBlockType::QABI_SPEND ||
-                    block.type == RungBlockType::QABI_PRIME ||
-                    block.type == RungBlockType::PQ_BATCH) {
-                    return true;
-                }
-            }
+            for (const auto& block : rung.blocks) note(block.type);
         }
         for (const auto& relay : lw.relays) {
-            for (const auto& block : relay.blocks) {
-                if (block.type == RungBlockType::QABI_SPEND ||
-                    block.type == RungBlockType::QABI_PRIME ||
-                    block.type == RungBlockType::PQ_BATCH) {
-                    return true;
-                }
-            }
+            for (const auto& block : relay.blocks) note(block.type);
         }
     }
-    return false;
+    return shape;
 }
 
-/** Count ACCUMULATOR blocks across ALL inputs in a transaction (v0.6).
- *  Mirrors CountTxPreimageFields. Per-rung cap is enforced at deserialise; this
- *  per-tx cap closes the cross-input accumulation channel found in audit #2. */
-static size_t CountTxAccumulatorBlocks(const LadderTxView& tx)
+/** Count ACCUMULATOR blocks across MLSC inputs in a transaction (v0.6).
+ *  v0.10 (F-2): filter to MLSC-spending inputs. */
+static size_t CountTxAccumulatorBlocks(const LadderTxView& tx,
+                                        const LadderOutputView* spent_outputs,
+                                        size_t spent_output_count)
 {
     size_t total = 0;
     for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!IsMLSCSpendingInput(spent_outputs, spent_output_count, i)) continue;
         const auto& witness = tx.inputs[i].witness;
         if (witness.count < 2 || witness.count > 3) continue;
         const auto& stack0 = witness.elements[0];
@@ -698,7 +771,10 @@ static size_t CountTxAccumulatorBlocks(const LadderTxView& tx)
 
 namespace api {
 
-bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
+bool CheckRungTxLevel(const LadderTxView& tx,
+                      const LadderOutputView* spent_outputs,
+                      size_t spent_output_count,
+                      std::string& error)
 {
     // Consensus: validate all outputs are valid Ladder Script format.
     // Ensures only MLSC (0xDF) outputs, max 1 DATA_RETURN, dust threshold.
@@ -706,36 +782,55 @@ bool CheckRungTxLevel(const LadderTxView& tx, std::string& error)
         return false;
     }
 
-    // Consensus: PREIMAGE/SCRIPT_BODY field count across ALL inputs.
-    if (CountTxPreimageFields(tx) > MAX_PREIMAGE_FIELDS_PER_TX) {
+    // Consensus: PREIMAGE/SCRIPT_BODY field count across MLSC inputs.
+    if (CountTxPreimageFields(tx, spent_outputs, spent_output_count) > MAX_PREIMAGE_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx preimage field count exceeds limit";
         return false;
     }
 
     // Consensus (v0.7): SCRIPT_BODY-only sub-cap inside the combined limit.
     // Closes E-003 from audit #3 (2 × 80 B SCRIPT_BODY > 112 B/tx claim).
-    if (CountTxScriptBodyFields(tx) > MAX_SCRIPT_BODY_FIELDS_PER_TX) {
+    if (CountTxScriptBodyFields(tx, spent_outputs, spent_output_count) > MAX_SCRIPT_BODY_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx SCRIPT_BODY field count exceeds limit";
         return false;
     }
 
-    // Consensus (v0.6): ACCUMULATOR block count across ALL inputs.
-    if (CountTxAccumulatorBlocks(tx) > MAX_ACCUMULATOR_BLOCKS_PER_TX) {
+    // Consensus (v0.6): ACCUMULATOR block count across MLSC inputs.
+    if (CountTxAccumulatorBlocks(tx, spent_outputs, spent_output_count) > MAX_ACCUMULATOR_BLOCKS_PER_TX) {
         error = "TX_MLSC: per-tx ACCUMULATOR block count exceeds limit";
         return false;
     }
 
-    // Consensus (v0.9, T-1/T-2): qabi_block (≤64 KB / 256 KB) and
-    // aggregated_sig (≤666 B) MUST be empty when no input carries a QABI
-    // block type. Without this gate, both fields are spender-controlled
-    // bytes that ride along with any v4 transaction unmodified.
-    if (!HasTxQABIInputs(tx)) {
+    // Consensus (v0.9, T-1/T-2; v0.10 F-2/F-5): tx-level QABI fields gating.
+    //   - When no MLSC input carries QABI_SPEND/QABI_PRIME/PQ_BATCH:
+    //       qabi_block MUST be empty.
+    //       aggregated_sig MUST be empty.
+    //   - When at least one MLSC input is QABI_SPEND:
+    //       aggregated_sig MUST be exactly 666 bytes (the FALCON-512
+    //       coordinator signature size). Pre-v0.10 the deserialiser
+    //       allowed any 1..665 of attacker bytes here; the QABI_SPEND
+    //       evaluator only checks the field size after dispatch.
+    //   - When QABI is present but no QABI_SPEND input (only QABI_PRIME /
+    //     PQ_BATCH):
+    //       aggregated_sig MUST be empty (no consumer).
+    auto qabi = ScanTxQABIInputs(tx, spent_outputs, spent_output_count);
+    if (!qabi.has_any) {
         if (tx.qabi_block_size > 0) {
             error = "TX_MLSC: tx.qabi_block must be empty when no QABI input is present";
             return false;
         }
         if (tx.aggregated_sig_size > 0) {
             error = "TX_MLSC: tx.aggregated_sig must be empty when no QABI input is present";
+            return false;
+        }
+    } else if (qabi.has_qabi_spend) {
+        if (tx.aggregated_sig_size != 0 && tx.aggregated_sig_size != 666) {
+            error = "TX_MLSC: tx.aggregated_sig must be exactly 666 bytes when QABI_SPEND is present";
+            return false;
+        }
+    } else {
+        if (tx.aggregated_sig_size > 0) {
+            error = "TX_MLSC: tx.aggregated_sig must be empty when no QABI_SPEND input is present";
             return false;
         }
     }
@@ -772,7 +867,15 @@ bool VerifyRungTx(
     // CheckRungTxLevel has already run).
     if (input_index == 0) {
         std::string tx_error;
-        if (!CheckRungTxLevel(tx, tx_error)) {
+        // VerifyRungTx is only called for MLSC inputs, so spent_outputs from
+        // ctx.precomputed is the correct source of truth for IsMLSCScript
+        // filtering inside CheckRungTxLevel. May be nullptr if the host
+        // didn't pre-populate; CheckRungTxLevel fails-closed in that case.
+        const LadderOutputView* spent_outs = ctx.precomputed
+            ? ctx.precomputed->spent_outputs : nullptr;
+        const size_t spent_count = ctx.precomputed
+            ? ctx.precomputed->spent_output_count : 0;
+        if (!CheckRungTxLevel(tx, spent_outs, spent_count, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
             return fail(LadderScriptError::UNKNOWN_ERROR);
         }
@@ -1232,16 +1335,18 @@ bool VerifyRungTx(
     eval_ctx.input_index = static_cast<uint32_t>(input_index);
     eval_ctx.input_amount = spent_output.value;
     eval_ctx.block_height = ctx.block_height;
-    // Use the output matching coil.output_index for covenant amount checks.
+    // v0.10 (F-7): coil.output_index must address a real output. Pre-v0.10
+    // an out-of-range index silently fell back to outputs[0], which masked
+    // creator errors and could feed a covenant evaluator the wrong output.
+    // The leaf binds output_index (audit #5 O-1) so honest creators commit
+    // to a valid value at fund time; tampered/oversized values fail-closed.
     {
         uint32_t coil_out_idx = witness_ladder.coil.output_index;
-        if (coil_out_idx < tx.output_count) {
-            eval_ctx.output_amount = tx.outputs[coil_out_idx].value;
-            eval_ctx.spending_output = &tx.outputs[coil_out_idx];
-        } else if (tx.output_count > 0) {
-            eval_ctx.output_amount = tx.outputs[0].value;
-            eval_ctx.spending_output = &tx.outputs[0];
+        if (coil_out_idx >= tx.output_count) {
+            return fail(LadderScriptError::UNKNOWN_ERROR);
         }
+        eval_ctx.output_amount = tx.outputs[coil_out_idx].value;
+        eval_ctx.spending_output = &tx.outputs[coil_out_idx];
     }
     if (has_conditions) {
         eval_ctx.input_conditions = &conditions;

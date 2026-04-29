@@ -359,7 +359,14 @@ void WriteNumericField(RungField& f, int64_t val)
     }
 }
 
-/** Build a CreationProofRung from a Rung + pubkeys, suitable for ComputeTxMLSCLeaf. */
+/** Build a CreationProofRung from a Rung + pubkeys, suitable for ComputeTxMLSCLeaf.
+ *  v0.10 (F-1): propagate `rung.relay_refs` into the structural template so
+ *  every leaf produced by this helper binds the rung's relay dependencies.
+ *  Without this the v0.9 R-1 fix is bypassed at every recursive-covenant
+ *  transition (RECURSE_DECAY / RECURSE_SPLIT / RECURSE_MODIFIED) — the
+ *  spend-input verifier hashes `relay_refs`, but the output-side
+ *  recomputation here strips them and accepts an output rung that committed
+ *  to no relay dependencies. */
 CreationProofRung BuildCPRung(const Rung& rung,
                                       const std::vector<std::vector<uint8_t>>& pks,
                                       const RungCoil& coil)
@@ -371,6 +378,7 @@ CreationProofRung BuildCPRung(const Rung& rung,
             static_cast<uint8_t>(block.inverted ? 1 : 0)
         });
     }
+    cp.relay_refs = rung.relay_refs;
     cp.coil = coil;
     cp.value_commitment = ComputeValueCommitment(rung, pks);
     return cp;

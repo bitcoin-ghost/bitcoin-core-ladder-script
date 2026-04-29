@@ -3,6 +3,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+#include <rung/block_helpers.h>
 #include <rung/conditions.h>
 #include <rung_shims.h>
 #include <rung/descriptor.h>
@@ -12192,6 +12193,33 @@ BOOST_AUTO_TEST_CASE(rung_leaf_binds_relay_refs)
     cp_without_ref.relay_refs.clear();
 
     BOOST_CHECK(ComputeTxMLSCLeaf(cp_with_ref) != ComputeTxMLSCLeaf(cp_without_ref));
+}
+
+// F-1 regression (audit #6): BuildCPRung — used by every recursive-covenant
+// transition (RECURSE_DECAY/RECURSE_SPLIT/RECURSE_MODIFIED) — must propagate
+// rung.relay_refs into the leaf. v0.9 missed this build site, re-opening R-1
+// across covenant transitions: the spend-input verifier hashed relay_refs
+// correctly, but the output-side leaf recomputation stripped them.
+BOOST_AUTO_TEST_CASE(buildcprung_propagates_relay_refs)
+{
+    Rung rung_with_ref;
+    RungBlock blk;
+    blk.type = RungBlockType::SIG;
+    rung_with_ref.blocks.push_back(blk);
+    rung_with_ref.relay_refs = {0};
+
+    Rung rung_without_ref = rung_with_ref;
+    rung_without_ref.relay_refs.clear();
+
+    RungCoil coil;
+    coil.coil_type = RungCoilType::UNLOCK;
+    coil.attestation = RungAttestationMode::INLINE;
+    coil.scheme = RungScheme::SCHNORR;
+    coil.output_index = 0;
+
+    auto cp_with    = BuildCPRung(rung_with_ref,    /*pks=*/{}, coil);
+    auto cp_without = BuildCPRung(rung_without_ref, /*pks=*/{}, coil);
+    BOOST_CHECK(ComputeTxMLSCLeaf(cp_with) != ComputeTxMLSCLeaf(cp_without));
 }
 
 BOOST_AUTO_TEST_CASE(value_commitment_pubkey_binding)

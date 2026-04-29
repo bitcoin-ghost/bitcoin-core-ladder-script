@@ -743,13 +743,24 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                     error = "relay " + std::to_string(rl) + " has too many relay_refs";
                     return false;
                 }
+                // v0.10 (F-4): require strict ascending order, no duplicates.
+                // Without this, [0,0] / [1,0] / [0,1,0] all eval-equivalent
+                // (set semantics) but produce different leaf hashes — funder
+                // gets a free embedding channel via the chosen encoding.
                 ladder_out.relays[rl].relay_refs.resize(n_relay_reqs);
+                int64_t prev = -1;
                 for (uint64_t rr = 0; rr < n_relay_reqs; ++rr) {
                     uint64_t req_idx = ReadCompactSize(ss);
                     if (req_idx >= rl) {
                         error = "relay " + std::to_string(rl) + " requires forward/self reference: " + std::to_string(req_idx);
                         return false;
                     }
+                    if (static_cast<int64_t>(req_idx) <= prev) {
+                        error = "relay " + std::to_string(rl) +
+                                " relay_refs not strict ascending at index " + std::to_string(rr);
+                        return false;
+                    }
+                    prev = static_cast<int64_t>(req_idx);
                     ladder_out.relays[rl].relay_refs[rr] = static_cast<uint16_t>(req_idx);
                 }
             }
@@ -768,13 +779,24 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                         error = "rung " + std::to_string(rq) + " has too many relay_refs";
                         return false;
                     }
+                    // v0.10 (F-4): strict ascending unique. The leaf binds
+                    // relay_refs positionally (R-1, v0.9), so without a
+                    // canonical encoding the funder picks among multiple
+                    // distinct on-chain commitments for the same set.
                     ladder_out.rungs[rq].relay_refs.resize(n_reqs);
+                    int64_t prev = -1;
                     for (uint64_t ri = 0; ri < n_reqs; ++ri) {
                         uint64_t req_idx = ReadCompactSize(ss);
                         if (req_idx >= ladder_out.relays.size()) {
                             error = "rung " + std::to_string(rq) + " relay_refs invalid relay index: " + std::to_string(req_idx);
                             return false;
                         }
+                        if (static_cast<int64_t>(req_idx) <= prev) {
+                            error = "rung " + std::to_string(rq) +
+                                    " relay_refs not strict ascending at index " + std::to_string(ri);
+                            return false;
+                        }
+                        prev = static_cast<int64_t>(req_idx);
                         ladder_out.rungs[rq].relay_refs[ri] = static_cast<uint16_t>(req_idx);
                     }
                 }

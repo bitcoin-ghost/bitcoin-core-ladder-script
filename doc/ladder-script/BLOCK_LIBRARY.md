@@ -5,6 +5,39 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
+> **v0.10 (2026-04-29)** — audit #6 follow-up:
+> - **F-1**: `BuildCPRung` (used by every recursive-covenant transition —
+>   `RECURSE_DECAY` / `RECURSE_SPLIT` / `RECURSE_MODIFIED`) now propagates
+>   `rung.relay_refs` into the leaf. v0.9 R-1 closed the spend-input bypass
+>   but missed this output-side build site, re-opening relay enforcement
+>   skip across covenant transitions.
+> - **F-2**: `HasTxQABIInputs` / `CountTxPreimageFields` /
+>   `CountTxScriptBodyFields` / `CountTxAccumulatorBlocks` now filter to
+>   MLSC-spending inputs by checking each spent output against
+>   `IsMLSCScript`. Without the filter, a crafted bootstrap input
+>   (e.g. P2WSH `OP_DROP OP_TRUE`) with a fake QABI ladder in element[0]
+>   bypassed every per-tx cap.
+> - **F-3**: per-tx PREIMAGE / SCRIPT_BODY counters now also walk diff
+>   witness entries (`witness_ref->diffs`). Pre-v0.10 a diff witness's
+>   PREIMAGE/SCRIPT_BODY overlays contributed 0 to the count, allowing N
+>   diff inputs to overlay 2 source positions with fresh attacker bytes
+>   while passing the cap.
+> - **F-4**: `relay_refs` must now be in strict ascending unique order at
+>   deserialise. Closes the canonicalisation channel where `[0]`, `[0,0]`,
+>   `[0,1,0]`, `[1,0]` were eval-equivalent (set semantics) but produced
+>   different leaf hashes — funder-side embedding via the chosen encoding.
+> - **F-5**: `tx.aggregated_sig` must be exactly 0 (no `QABI_SPEND`) or
+>   666 bytes (when `QABI_SPEND` is present). Pre-v0.10 the deserialiser
+>   accepted any 1..665 bytes for QABI_PRIME / PQ_BATCH-only txs.
+> - **F-6** (defence-in-depth): `tx.qabi_block` and `tx.aggregated_sig`
+>   are now folded into the sighash via a 32-byte SHA256 commitment.
+> - **F-7**: `coil.output_index >= tx.output_count` now rejects at the
+>   evaluator. Pre-v0.10 it silently fell back to `outputs[0]`.
+> - **F-8**: `MergeConditionsAndWitness` now caps the post-merge field
+>   count per block (`2 × MAX_FIELDS_PER_BLOCK`, with the wider
+>   `MAX_FIELDS_PER_BLOCK + MAX_MULTISIG_WITNESS_FIELDS` cap for
+>   `MULTISIG` / `TIMELOCKED_MULTISIG`).
+>
 > **v0.9 (2026-04-29)** — audit #5 follow-up:
 > - **R-1**: `rung.relay_refs` is now folded into the rung's structural
 >   template (the leaf hash). Before v0.9 this field was unbound, so a

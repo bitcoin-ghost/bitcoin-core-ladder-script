@@ -85,6 +85,25 @@ static uint256 HashRungConditions(const RungConditions& conditions)
     return ss.GetSHA256();
 }
 
+/** v0.10 (F-6): bind tx.qabi_block and tx.aggregated_sig into the sighash so
+ *  signatures lock them down as defence-in-depth. Pre-v0.10, those fields
+ *  were not in the sighash; their authenticity relied on the QABI input's
+ *  internal SHA256 commitment plus the v0.9 T-1/T-2 gate. Pinning them here
+ *  removes any future cache-shape change from re-opening a malleation
+ *  window. Empty fields hash to a sentinel zero so a tx that legitimately
+ *  carries no QABI fields produces a stable sighash. */
+static uint256 HashQABISection(const rung::api::LadderTxView& tx)
+{
+    HashWriter qss{};
+    if (tx.qabi_block_size > 0 && tx.qabi_block) {
+        WriteBytes(qss, tx.qabi_block, tx.qabi_block_size);
+    }
+    if (tx.aggregated_sig_size > 0 && tx.aggregated_sig) {
+        WriteBytes(qss, tx.aggregated_sig, tx.aggregated_sig_size);
+    }
+    return qss.GetSHA256();
+}
+
 namespace api {
 
 bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
@@ -158,6 +177,9 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
         WriteU256(ss, conditions_hash);
     }
 
+    // v0.10 (F-6): bind QABI tx-level fields.
+    WriteU256(ss, HashQABISection(tx));
+
     hash_out = ss.GetSHA256();
     return true;
 }
@@ -214,6 +236,9 @@ bool SignatureHashLadderKeyPath(const LadderPrecomputedTxData& cache,
     }
 
     // NO conditions hash for key-path — conditions are not revealed
+
+    // v0.10 (F-6): bind QABI tx-level fields here too.
+    WriteU256(ss, HashQABISection(tx));
 
     hash_out = ss.GetSHA256();
     return true;
