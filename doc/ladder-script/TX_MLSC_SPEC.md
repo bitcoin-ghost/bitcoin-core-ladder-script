@@ -96,19 +96,26 @@ creation proof and standard transaction weight limits.
 ### Leaf computation
 
 ```
-rung_leaf = TaggedHash("LadderLeaf", structural_template || value_commitment)
+rung_leaf  = TaggedHash("LadderLeaf/v1",      structural_template || value_commitment)
+relay_leaf = TaggedHash("LadderRelayLeaf/v1", relay_template      || value_commitment)
 ```
 
 Where:
-- structural_template: block types, inverted flags, coil (incl output_index)
-- value_commitment: SHA256(field_values || pubkeys) — 32 bytes, opaque
+- structural_template: block types, inverted flags, coil (4 B: type/att/scheme/output_index)
+- relay_template:      block types, inverted flags, relay_refs
+- value_commitment:    SHA256(field_values || pubkeys) — 32 bytes, opaque
+
+v0.7 introduced the distinct `LadderRelayLeaf/v1` domain so relay leaves
+fold into the conditions_root tree (E-008).
+v0.8 dropped the trailing `has_address` byte from the coil section of the
+structural_template (E-009 — `coil.address_hash` was an unbound channel).
 
 ### Tree construction
 
-Sorted interior nodes (same algorithm as current MLSC):
+Sorted interior nodes (no direction bits):
 
 ```
-interior_node = TaggedHash("LadderBranch", min(left, right) || max(left, right))
+interior_node = TaggedHash("LadderInternal/v1", min(left, right) || max(left, right))
 ```
 
 ### Output-to-rung binding
@@ -145,16 +152,15 @@ per rung:
     per block:
       block_type:  uint16  (must be known — one of 61 types)
       inverted:    uint8   (0x00 or 0x01, validated per block type)
-    coil:
+    coil (v0.8 — 4 bytes total, no trailing has_address byte):
       coil_type:     uint8 (UNLOCK=0x01, UNLOCK_TO=0x02)
       attestation:   uint8 (INLINE=0x01; AGGREGATE/DEFERRED reserved)
       scheme:        uint8
       output_index:  uint8 (which output this rung governs — must be < vout_count)
-      has_address:   uint8 (0 or 1)
   value_commitment:  32 bytes (SHA256 of field values + pubkeys for this rung)
 ```
 
-Typical size per rung: ~42 bytes (10 template + 32 commitment).
+Typical size per rung: ~41 bytes (9 template + 32 commitment) for a single-block rung.
 Witness weight: 1 WU per byte.
 
 ### Validation (block acceptance)

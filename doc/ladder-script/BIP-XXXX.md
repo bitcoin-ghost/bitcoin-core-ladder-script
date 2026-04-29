@@ -401,10 +401,14 @@ Spending an MLSC output evaluates as follows:
    `ERROR`, that rung fails; try the next rung. If a block returns
    `SATISFIED`, continue; if all blocks satisfy, the rung satisfies
    and the spend authorises.
-5. **Apply the coil** if present: post-spend mutation directives that
-   constrain output structure (e.g. `unlock_to(address_hash)` requires
-   `tx.vout[coil.output_index].scriptPubKey` to hash to the committed
-   address).
+5. **Apply the coil** (v0.8 — fixed 4-byte tail): the coil is an
+   informational marker (`coil_type`, `attestation`, `scheme`,
+   `output_index`). It binds the rung to a specific output index, but
+   does not carry any spender-controlled data. v0.7 carried address
+   metadata (`address_hash`, `rung_destinations`) on the coil, both
+   removed in v0.8 (E-009/E-010 — they were unbound spender data
+   channels). On-chain output binding is expressed via rung-level
+   `OUTPUT_CHECK` or `CTV` blocks instead.
 
 Each block's evaluator is a function `(Block, RungEvalContext) →
 {SATISFIED, UNSATISFIED, ERROR, UNKNOWN_BLOCK_TYPE}`. The
@@ -605,6 +609,13 @@ construction.
 
 Realistic K-of-N use cases (3-of-5, 11-of-15) top out around
 `N = 16`; the inner-tree cap is sized to that ceiling.
+
+v0.8 (E-018b) further constrains the witness to canonical order: the
+K triplets must be in strict ascending lexicographic order by `PUBKEY`
+bytes. This closes a `log2(K!)`-bit per-spend permutation channel
+(~25 bits / 3 B at `K = 11`) that the inner-Merkle commitment alone
+does not address. Equal pubkeys violate the strict-ascending rule and
+replace the prior duplicate-pubkey check.
 
 ### QABIO
 

@@ -234,24 +234,23 @@ tree.
 
 **Source**: `serialize.cpp:867-942`.
 
-### `SerializeCoilData(coil)`
+### `SerializeCoilData(coil)` — v0.8
 
-Wire format:
+Wire format (4 bytes total):
 
 ```
 coil_type       (1 byte)
 attestation     (1 byte)
 scheme          (1 byte)
-address_len     (CompactSize)    — 0 or 32
-address_hash    (address_len bytes)
-n_conditions    (CompactSize)    — must be 0 (MAX_COIL_CONDITION_RUNGS = 0)
-n_rung_destinations (CompactSize)
-for each rung_destination:
-    rung_index  (uint16 LE)
-    addr_hash   (32 bytes)
+output_index    (1 byte)
 ```
 
-**Source**: `serialize.cpp:889-921`.
+v0.8 dropped `address_len`/`address_hash` (E-009) and
+`n_conditions`/`n_rung_destinations`/per-destination entries (E-010).
+The compact-coil sentinel (`0x00 + output_index` = 2 bytes) still expands to
+the default `UNLOCK + INLINE + SCHNORR` shape.
+
+**Source**: `serialize.cpp` (`SerializeCoilData`).
 
 ---
 
@@ -491,41 +490,25 @@ within a rung).
 
 ---
 
-## 9. Coil Leaf
+## 9. Coil (v0.8 — no separate leaf)
 
-The coil leaf commits the output's metadata. `SerializeCoilData()` serializes:
+v0.8 dropped the separate coil leaf — coil structural fields are folded into
+each rung leaf's structural template. `SerializeCoilData()` serializes a
+fixed 4-byte tail:
 
 | Field | Type | Size | Description |
 |-------|------|------|-------------|
 | `coil_type` | `RungCoilType` | 1 byte | `UNLOCK` (0x01), `UNLOCK_TO` (0x02) |
-| `attestation` | `RungAttestationMode` | 1 byte | Attestation mode |
+| `attestation` | `RungAttestationMode` | 1 byte | `INLINE` (0x01) — only defined value |
 | `scheme` | `RungScheme` | 1 byte | Signature scheme (e.g., `SCHNORR`) |
-| `address_hash` | bytes | 0 or 32 bytes | `SHA256(destination_address)` — raw address never on-chain |
-| `conditions` | rungs | variable | Reserved, must be empty (`MAX_COIL_CONDITION_RUNGS = 0`) |
-| `rung_destinations` | pairs | variable | Per-rung destination overrides |
+| `output_index` | `uint8` | 1 byte | Position of the bound output in the spending tx |
 
-### `rung_destinations`
+`address_hash` (E-009) and `rung_destinations` (E-010) were removed in v0.8 —
+they were unbound spender data channels. Wallets that need destination
+metadata must track it locally; on-chain output binding belongs in
+rung-level `OUTPUT_CHECK` or `CTV` blocks.
 
-Per-rung destination address overrides. Each entry is a pair:
-
-```
-(rung_index: uint16 LE, address_hash: 32 bytes)
-```
-
-This allows different rungs within the same MLSC tree to route funds to
-different destinations. Bounded by `MAX_RUNGS`. Duplicate `rung_index`
-values are rejected at deserialization.
-
-Wire format within `SerializeCoilData`:
-
-```
-n_rung_destinations (CompactSize)
-for each:
-    rung_index      (uint16 LE, 2 bytes)
-    addr_hash       (32 bytes)
-```
-
-**Source**: `serialize.cpp:910-916`, `types.h:557`.
+**Source**: `serialize.cpp` (`SerializeCoilData`), `types.h` (`RungCoil`).
 
 ---
 
@@ -633,10 +616,11 @@ deserialization. Blocks without implicit layouts reject data-embedding types
 | `MAX_REQUIRES` | 8 | `serialize.h:46` | Maximum relay refs per rung or relay |
 | `MAX_RELAY_DEPTH` | 4 | `serialize.h:48` | Maximum transitive relay chain depth |
 | `MAX_LADDER_WITNESS_SIZE` | 100,000 | `serialize.h:29` | Maximum witness size in bytes |
-| `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | `serialize.h:35` | Per-input PREIMAGE + SCRIPT\_BODY fast reject |
-| `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | `serialize.h:39` | Per-transaction PREIMAGE + SCRIPT\_BODY cap |
-| `MAX_COIL_CONDITION_RUNGS` | 0 | `serialize.h:42` | Coil conditions reserved (never evaluated) |
-| `COIL_ADDRESS_HASH_SIZE` | 32 | `serialize.h:38` | SHA256(address) fixed size |
+| `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | `serialize.h` | Per-input PREIMAGE + SCRIPT\_BODY fast reject |
+| `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | `serialize.h` | Per-transaction PREIMAGE + SCRIPT\_BODY cap |
+| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | `serialize.h` | v0.7 (E-003): tighter sub-cap inside the combined preimage budget |
+| `MAX_PUBKEYS_PER_MULTISIG` | 16 | `serialize.h` | Inner-Merkle pubkey count bound (MULTISIG / TIMELOCKED_MULTISIG) |
+| `MAX_ACCUMULATOR_BLOCKS_PER_TX` | 2 | `serialize.h` | Per-tx ACCUMULATOR cap |
 
 ---
 

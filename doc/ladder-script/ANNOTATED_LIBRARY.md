@@ -1074,10 +1074,10 @@ Signature-bearing blocks. The most-used block in the library.
 | `RungBlockType` | Function                       | Purpose |
 |-----------------|--------------------------------|---------|
 | `SIG`           | `EvalSigBlock`                 | One pubkey + one signature. Schnorr (default), ECDSA, or any registered PQ scheme. |
-| `MULTISIG`      | `EvalMultisigBlock`            | K-of-N (v2). N pubkeys committed via inner Merkle root in conditions; spend reveals K `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets. Closes the K<N data-embedding bypass. |
+| `MULTISIG`      | `EvalMultisigBlock`            | K-of-N (v2). N pubkeys committed via inner Merkle root in conditions; spend reveals K `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets. Closes the K<N data-embedding bypass. v0.8 (E-018b): triplets must be in strict ascending pubkey-lex order. |
 | `MUSIG_THRESHOLD` | `EvalMusigThresholdBlock`    | M-of-N with MuSig2 aggregation (single Schnorr sig in witness). |
-| `ADAPTOR_SIG`   | `EvalAdaptorSigBlock`          | A SIG block whose signature was produced via the adaptor scheme — verified as a normal Schnorr sig. |
-| `KEY_REF_SIG`   | `EvalKeyRefSigBlock`           | SIG that references a relay (reusable pubkey table) instead of carrying the pubkey inline. Saves bytes when the same key signs many rungs. |
+| `ADAPTOR_SIG`   | `EvalAdaptorSigBlock`          | A SIG block whose signature was produced via the adaptor scheme — verified as a normal Schnorr sig. v0.8 (E-018a): implicit witness layout `[PUBKEY, SIGNATURE]`. |
+| `KEY_REF_SIG`   | `EvalKeyRefSigBlock`           | SIG that references a relay (reusable pubkey table) instead of carrying the pubkey inline. v0.7 folded relay leaves into conditions_root (E-008). v0.8 witness reduced to `[SIGNATURE]` only — pubkey is resolved from the relay block, never on the witness wire (E-018a). |
 
 Two extra helpers stay in this TU:
 - `EvalHashPreimageBlock` — used by HASH_SIG and HTLC.

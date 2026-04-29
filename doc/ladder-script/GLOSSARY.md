@@ -83,9 +83,11 @@ Block type 0x0104 (Timelock family). Absolute timelock checking nLockTime agains
 median-time-past threshold. Invertible. Conditions: NUMERIC(time).
 
 ### COIL_MAP
-See RungCoil. The coil metadata attached to each output/witness, defining unlock semantics
-(coil_type), attestation mode, signature scheme, address hash, and per-rung destination
-overrides (rung_destinations).
+See RungCoil. The coil metadata attached to each output/witness, defining unlock
+semantics (`coil_type`), attestation mode (`attestation`), signature scheme
+(`scheme`), and which output the rung binds to (`output_index`). v0.8 dropped
+`address_hash` (E-009) and `rung_destinations` (E-010) — the coil is now a
+fixed 4-byte tail.
 
 ### COMPARE
 Block type 0x0641 (PLC family). Comparator for amount vs thresholds. Conditions:
@@ -490,11 +492,12 @@ Struct in `types.h`. A function block within a rung. Contains a `RungBlockType`,
 of `RungField` typed fields, and an `inverted` flag.
 
 ### RungCoil
-Struct in `types.h`. Coil metadata attached to each output. Fields: `coil_type` (UNLOCK,
-UNLOCK_TO), `attestation` (INLINE only), `scheme` (SCHNORR, ECDSA, FALCON512,
-FALCON1024, DILITHIUM3, SPHINCS_SHA), `address_hash` (SHA256 of raw address, 0 or 32
-bytes), `conditions` (reserved, must be empty), `rung_destinations` (per-rung
-destination overrides as pairs of rung_index + address_hash).
+Struct in `types.h`. Coil metadata attached to each output. v0.8 fields:
+`coil_type` (UNLOCK, UNLOCK_TO), `attestation` (INLINE only),
+`scheme` (SCHNORR, ECDSA, FALCON512, FALCON1024, DILITHIUM3, SPHINCS_SHA),
+`output_index` (uint8 — which output the rung binds to). Total 4 bytes.
+`address_hash` and `rung_destinations` were removed in v0.8 (E-009/E-010 —
+they were unbound spender data channels).
 
 ### RungConditions
 Struct in `conditions.h`. The locking side of a v4 output. Fields: rungs, coil, relays,
@@ -662,11 +665,15 @@ NUMERIC(max_weight). Invertible.
 ### Wire Format
 The binary serialization of `LadderWitness`, defined in `serialize.h/cpp`. Structure:
 `[n_rungs]` then per-rung `[n_blocks]` with blocks encoded as micro-header or escape +
-type, followed by implicit or explicit fields. After rungs: coil (type + attestation +
-scheme + address + conditions + rung_destinations), then relays and per-rung relay_refs.
+type, followed by implicit or explicit fields. After rungs: optional relays section
+and per-rung relay_refs, then a fixed 4-byte coil
+(`coil_type + attestation + scheme + output_index`).
 Key constants: `MAX_RUNGS = 16`, `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`,
 `MAX_LADDER_WITNESS_SIZE = 100000`, `MAX_PREIMAGE_FIELDS_PER_WITNESS = 2` (per-input),
-`MAX_PREIMAGE_FIELDS_PER_TX = 2` (per-transaction), `MAX_RELAYS = 8`, `MAX_RELAY_DEPTH = 4`.
+`MAX_PREIMAGE_FIELDS_PER_TX = 2` (per-transaction),
+`MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` (v0.7, E-003), `MAX_RELAYS = 8`,
+`MAX_RELAY_DEPTH = 4`. v0.8 dropped `coil.address_hash` and
+`coil.rung_destinations` (E-009/E-010).
 
 ### Witness Reference
 Struct `WitnessReference` in `types.h`. When `n_rungs == 0` on the wire, rungs and relays

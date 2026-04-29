@@ -5,6 +5,14 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
+> **v0.8 (2026-04-29)** — six blocks gained strict implicit witness layouts
+> (E-018a): `ADAPTOR_SIG`, `PTLC`, `KEY_REF_SIG`, `VAULT_LOCK`, `ANCHOR_FEE`,
+> `ANCHOR_ORACLE`. `MULTISIG` / `TIMELOCKED_MULTISIG` triplets must now be in
+> strict ascending pubkey-lex order (E-018b). The witness side of
+> `KEY_REF_SIG` reduced to `[SIGNATURE]` only — the prior `PUBKEY` was unbound
+> spender bytes since the evaluator pulls the key out of the referenced
+> relay block.
+
 ## Legend
 
 | Column | Meaning |
@@ -20,10 +28,10 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0001 | SIG | no | yes | 1 | SCHEME(1) | Single Schnorr/ECDSA/PQ signature |
-| 0x0002 | MULTISIG | no | yes | 0 | NUMERIC(K), SCHEME(1), HASH256(pubkey_root) | K-of-N threshold; N pubkeys committed via inner Merkle root, K revealed at spend with MERKLE_PROOFs |
-| 0x0003 | ADAPTOR_SIG | no | yes | 1 | (none) | Adaptor signature verification (v0.7: dropped dead second pubkey slot) |
+| 0x0002 | MULTISIG | no | yes | 0 | NUMERIC(K), SCHEME(1), HASH256(pubkey_root) | K-of-N threshold; N pubkeys committed via inner Merkle root, K revealed at spend with MERKLE_PROOFs. v0.8: K triplets must be in strict ascending pubkey-lex order (E-018b). |
+| 0x0003 | ADAPTOR_SIG | no | yes | 1 | (none) | Adaptor signature verification (v0.7: dropped dead second pubkey slot; v0.8: strict implicit witness `[PUBKEY, SIGNATURE]`). |
 | 0x0004 | MUSIG_THRESHOLD | no | yes | 1 | NUMERIC(M), NUMERIC(N) | MuSig2/FROST aggregate threshold |
-| 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using key from a relay block. v0.7: relay leaves are now folded into conditions_root, so a spender cannot swap in a different relay pubkey at spend time (closes E-008). |
+| 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using key from a relay block. v0.7 folds relay leaves into conditions_root so a spender cannot swap in a different relay pubkey at spend time (closes E-008). v0.8 witness reduces to `[SIGNATURE]` only — pubkey is resolved from the referenced relay block, never on the witness wire (E-018a). |
 
 ## Timelock Family (0x0100 - 0x01FF)
 
@@ -46,7 +54,7 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0301 | CTV | yes | no | 0 | HASH256(32) | OP_CHECKTEMPLATEVERIFY covenant |
-| 0x0302 | VAULT_LOCK | no | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys |
+| 0x0302 | VAULT_LOCK | no | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys. v0.8 witness: implicit `[PUBKEY(recovery), PUBKEY(hot), SIGNATURE]` (E-018a — `NUMERIC(hot_delay)` is conditions-side, arrives via merge). |
 | 0x0303 | AMOUNT_LOCK | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Output amount range constraint |
 
 ## Recursion Family (0x0400 - 0x04FF)
@@ -69,7 +77,7 @@ little-endian on the wire.
 | 0x0503 | ANCHOR_POOL | yes | no | 0 | HASH256(vtxo_root), NUMERIC(count) | Pool anchor |
 | 0x0504 | ANCHOR_RESERVE | yes | no | 0 | NUMERIC(n), NUMERIC(m), HASH256(guardian) | Reserve anchor (guardian set) |
 | 0x0505 | ANCHOR_SEAL | yes | no | 0 | HASH256(32), HASH256(32) | Seal anchor |
-| 0x0506 | ANCHOR_ORACLE | yes | yes | 1 | NUMERIC(outcome_count) | Oracle anchor |
+| 0x0506 | ANCHOR_ORACLE | yes | yes | 1 | NUMERIC(outcome_count) | Oracle anchor. v0.8 witness: implicit `[PUBKEY(oracle)]` (E-018a). |
 | 0x0507 | DATA_RETURN | yes | no | 0 | DATA(var, max 40) | Unspendable data commitment (replaces OP_RETURN) |
 
 ## PLC Family (0x0600 - 0x06FF)
@@ -98,10 +106,10 @@ little-endian on the wire.
 | 0x0701 | TIMELOCKED_SIG | no | yes | 1 | SCHEME(1), NUMERIC(csv) | SIG + CSV in one block |
 | 0x0702 | HTLC | no | yes | 2 | HASH256(32), NUMERIC(csv), SCHEME(1) | v0.7 true two-path: receiver(pubkeys[0])+preimage spend OR sender(pubkeys[1])+CSV refund. Witness adds NUMERIC(path) discriminator. |
 | 0x0703 | HASH_SIG | no | yes | 1 | HASH256(32), SCHEME(1) | Hash preimage + signature |
-| 0x0704 | PTLC | no | yes | 1 | NUMERIC(csv) | Adaptor sig + CSV (v0.7: dropped dead adaptor-point pubkey slot; T = t·G is off-chain only) |
+| 0x0704 | PTLC | no | yes | 1 | NUMERIC(csv) | Adaptor sig + CSV (v0.7: dropped dead adaptor-point pubkey slot; T = t·G is off-chain only). v0.8 witness: implicit `[PUBKEY, SIGNATURE]` — `NUMERIC(csv)` is conditions-side (E-018a). |
 | 0x0705 | CLTV_SIG | no | yes | 1 | SCHEME(1), NUMERIC(cltv) | SIG + CLTV in one block |
-| 0x0706 | TIMELOCKED_MULTISIG | no | yes | 0 | NUMERIC(K), NUMERIC(csv), SCHEME(1), HASH256(pubkey_root) | MULTISIG v2 + CSV in one block |
-| 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning) |
+| 0x0706 | TIMELOCKED_MULTISIG | no | yes | 0 | NUMERIC(K), NUMERIC(csv), SCHEME(1), HASH256(pubkey_root) | MULTISIG v2 + CSV in one block. v0.8: K triplets must be in strict ascending pubkey-lex order (E-018b). |
+| 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning). v0.8 witness: implicit `[PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]` (E-018a). |
 
 ## Governance Family (0x0800 - 0x08FF)
 

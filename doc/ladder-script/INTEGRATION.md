@@ -91,8 +91,10 @@ The witness stack has 1, 2, or 3 elements depending on the spending path:
 
 The `LadderWitness` contains:
 - Rungs with blocks and typed fields (PUBKEY, SIGNATURE, NUMERIC, etc.)
-- Coil metadata (coil_type, attestation, scheme, address_hash, rung_destinations)
 - Relays (shared condition blocks) and per-rung relay_refs
+- Coil metadata — fixed 4 bytes: `coil_type + attestation + scheme + output_index`
+  (v0.8 dropped the unbound `address_hash` and `rung_destinations` fields,
+  E-009/E-010)
 
 The `MLSCProof` contains:
 - `total_rungs`, `total_relays`, `rung_index` (which rung to reveal)
@@ -210,17 +212,18 @@ Scheme names: `schnorr`, `ecdsa`, `falcon512`, `falcon1024`, `dilithium3`, `sphi
 - `parseladder "descriptor" '{"alias": "pubkey_hex", ...}'` — parse descriptor to conditions
 - `formatladder <conditions_hex>` — format conditions hex as descriptor string
 
-## Coil Types
+## Coil Types (v0.8)
 
 The coil determines what happens when a rung is satisfied:
 
 | Type | Code | Behaviour |
 |------|------|----------|
-| UNLOCK | 0x01 | Standard spend. No destination constraint. |
-| UNLOCK_TO | 0x02 | Spend to the address in `address_hash`. The hash is `SHA256(raw_address)`; raw address never goes on-chain. |
+| UNLOCK | 0x01 | Standard spend. The spender must satisfy at least one rung. |
+| UNLOCK_TO | 0x02 | Reserved for a future wire format that binds output structure on-chain (e.g. via a CTV-style template hash). |
 
-Coil conditions (the `conditions` field in RungCoil) are reserved and must be empty
-(`MAX_COIL_CONDITION_RUNGS = 0`). Covenant semantics are handled by rung-level block types.
+The 4-byte coil tail (`coil_type + attestation + scheme + output_index`) is
+the entire on-chain coil — covenant semantics are handled by rung-level block
+types (CTV, RECURSE_*, VAULT_LOCK, AMOUNT_LOCK, OUTPUT_CHECK).
 
 ## Attestation Modes
 
@@ -233,16 +236,13 @@ other than `0x01` reject at deserialisation. For tx-level FALCON-512 aggregation
 QABIO ([`QABIO.md`](QABIO.md)) — the coordinator's signature is carried in the tx-level
 `aggregated_sig` field, not via this attestation byte.
 
-## Per-Rung Destinations (rung_destinations)
+## Per-Rung Destinations (off-chain in v0.8)
 
-The coil's `rung_destinations` field allows different rungs to specify different destination
-addresses. Each entry is a `(rung_index, address_hash)` pair. This enables patterns like:
-
-- Rung 0 (hot key): sends to the user's address
-- Rung 1 (cold key + timelock): sends to a recovery address
-
-Entries are bounded by `MAX_RUNGS` and must have unique rung indices (duplicates rejected
-at deserialization).
+`coil.rung_destinations` was removed in v0.8 (E-010 — it was an unbound spender
+data channel). Wallets that need per-rung destination tracking must keep that
+metadata locally. If on-chain enforcement is required, use rung-level
+`OUTPUT_CHECK` blocks (which bind specific outputs by index, value range, and
+script hash) or `CTV` covenants.
 
 ## Relays
 

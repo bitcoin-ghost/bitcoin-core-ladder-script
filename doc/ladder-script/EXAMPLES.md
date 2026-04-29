@@ -775,13 +775,15 @@ conditions are inherited from another input with optional field-level diffs.
 then applies diffs (which must match field types). Template references cannot
 chain (source must not itself be a template reference).
 
-### Coil type semantics
+### Coil type semantics (v0.8)
 
-- **UNLOCK**: Standard spend. The output value goes to the address in the
-  spending transaction.
-- **UNLOCK_TO**: Directed spend. The output value goes to the address specified
-  in the coil's `address_hash` field. Per-rung destinations
-  (`rung_destinations`) can override this per rung.
+- **UNLOCK**: Standard spend. The spender must satisfy at least one rung;
+  output destinations are unconstrained at the coil level.
+- **UNLOCK_TO**: Reserved for a future wire format that binds output structure
+  on-chain (e.g. via a CTV-style template hash). v0.8 removed the
+  `coil.address_hash` and `coil.rung_destinations` fields (E-009/E-010 — they
+  were unbound spender data channels). For on-chain output binding today,
+  use rung-level `OUTPUT_CHECK` or `CTV` blocks.
 
 ### Evaluation result semantics
 

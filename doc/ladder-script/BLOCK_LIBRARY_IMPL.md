@@ -676,7 +676,7 @@ The coil declares what happens when all contacts on a rung are satisfied. It is 
 | Coil | Enum | Semantics | Use Case |
 |---|---|---|---|
 | `UNLOCK` | `0x01` | Standard UTXO unlock. Output spendable freely by satisfying witness. | Simple payment, channel cooperative close |
-| `UNLOCK_TO` | `0x02` | Unlock with output address constraint. The coil stores `address_hash` (SHA256 of destination scriptPubKey). Raw address never on-chain. | Forced routing, payment forwarding, sequential stages |
+| `UNLOCK_TO` | `0x02` | Reserved for a future wire format that binds output structure on-chain (e.g. via a CTV-style template hash). v0.8 dropped the `address_hash` / `rung_destinations` fields (E-009/E-010 — unbound spender data channels). | Forced routing patterns today should use rung-level `OUTPUT_CHECK` or `CTV` blocks. |
 
 ### Attestation Modes
 

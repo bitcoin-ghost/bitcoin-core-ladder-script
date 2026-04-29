@@ -48,20 +48,32 @@ Identified by `nValue == 0`. Maximum 1 per transaction. Payload up to 40 bytes.
 
 ```
 [ rung_leaf[0], ..., rung_leaf[N-1],
-  relay_leaf[0], ..., relay_leaf[M-1],
-  coil_leaf ]
+  relay_leaf[0], ..., relay_leaf[M-1] ]
 ```
 
-Total leaves = `total_rungs + total_relays + 1`.
+Total leaves = `total_rungs + total_relays`.
+
+v0.8 dropped the separate coil leaf — coil structural fields (type / attestation /
+scheme / output_index) are folded into each rung leaf's structural template.
+
+v0.7 folded the relay leaves into the conditions_root tree (E-008): a spender
+can no longer swap in a different relay pubkey at spend time.
 
 ### Leaf Computation
 
-**Rung leaf**: `TaggedHash("LadderLeaf", structural_template || value_commitment)`
+**Rung leaf**: `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`
 
-The structural template encodes block types and inversion flags. The value commitment
-binds the output value and pubkeys (`merkle_pub_key`) to the leaf.
+The structural template encodes block types and inversion flags plus the 4-byte
+coil. The value commitment binds the output value and pubkeys
+(`merkle_pub_key`) to the leaf.
 
-**Functions**: `ComputeTxMLSCLeaf()`, `ComputeValueCommitment()` in `conditions.cpp`.
+**Relay leaf**: `TaggedHash("LadderRelayLeaf/v1", relay_template || value_commitment)`
+
+Distinct tagged-hash domain so a relay leaf can never alias a rung leaf at the
+same block layout.
+
+**Functions**: `ComputeTxMLSCLeaf()`, `ComputeTxMLSCRelayLeaf()`,
+`ComputeValueCommitment()` in `conditions.cpp`.
 
 **Relay leaf**: `TaggedHash("LadderLeaf", SerializeRelayBlocks(relay, CONDITIONS) || pubkeys)`
 
@@ -287,17 +299,25 @@ The `conditions_root` is protocol-derived (not attacker-chosen).
 
 ---
 
-## 10. Coil
+## 10. Coil (v0.8)
 
-The coil commits output metadata in the Merkle tree:
+Fixed 4-byte tail. Each MLSC output ends with the coil; nothing else after.
 
 | Field | Size | Values |
 |-------|------|--------|
 | coil_type | 1 B | UNLOCK (0x01), UNLOCK_TO (0x02) |
-| attestation | 1 B | INLINE (0x01), AGGREGATE (0x02) |
+| attestation | 1 B | INLINE (0x01) |
 | scheme | 1 B | SCHNORR, ECDSA, FALCON512, FALCON1024, DILITHIUM3, SPHINCS_SHA |
-| address_hash | 0 or 32 B | SHA256(destination) for UNLOCK_TO |
-| rung_destinations | variable | Per-rung destination overrides |
+| output_index | 1 B | Position of this output in the spending tx (0…255) |
+
+`coil.address_hash` and `coil.rung_destinations` were removed in v0.8 (E-009/E-010).
+They were advertised as wallet-routing metadata but never bound to any consensus
+check — pure spender data channels. Wallets that need destination metadata must
+track it locally. `UNLOCK_TO` is reserved for a future wire format that binds
+output structure on-chain (e.g. via a CTV-style template hash).
+
+The compact-coil sentinel (`0x00 + output_index`) still expands to the default
+`UNLOCK + INLINE + SCHNORR` shape.
 
 ---
 
@@ -335,6 +355,14 @@ PREIMAGE, SCRIPT_BODY, SCHEME. The coil is never inherited.
 | `MAX_LADDER_WITNESS_SIZE` | 100,000 B | `serialize.h` |
 | `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | `serialize.h` |
 | `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | `serialize.h` |
-| `MAX_COIL_CONDITION_RUNGS` | 0 | `serialize.h` |
+| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | `serialize.h` (v0.7, E-003) |
+| `MAX_PUBKEYS_PER_MULTISIG` | 16 | `serialize.h` |
+| `MAX_MULTISIG_TREE_DEPTH` | 4 | `serialize.h` |
+| `MAX_MULTISIG_WITNESS_FIELDS` | 48 | `serialize.h` |
+| `MAX_ACCUMULATOR_PROOF_DEPTH` | 4 | `serialize.h` |
+| `MAX_ACCUMULATOR_BLOCKS_PER_RUNG` | 1 | `serialize.h` |
+| `MAX_ACCUMULATOR_BLOCKS_PER_TX` | 2 | `serialize.h` |
+| `MAX_ACCUMULATOR_ELEMENT_ID` | 0xFFFF | `serialize.h` |
+| `COMPACT_COIL_SENTINEL` | 0x00 | `serialize.h` |
 | `MIN_RUNG_OUTPUT_VALUE` | 546 sats | `serialize.h` |
 | `MLSC_ROOT_VOUT` | 0xFFFFFFFF | `coins.h` |

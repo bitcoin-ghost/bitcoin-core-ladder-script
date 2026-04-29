@@ -290,11 +290,16 @@ for each rung:
   for each block:
     [micro_header or escape + type]
     [implicit fields] or [n_fields: varint, explicit fields]
-[coil: coil_type(1) + attestation(1) + scheme(1) + addr_len(varint) + addr + n_coil_conditions(varint)]
-[rung_destinations: n(varint) + entries]
 [relays section (optional)]
 [per-rung relay_refs (optional)]
+[coil: coil_type(1) + attestation(1) + scheme(1) + output_index(1)]
 ```
+
+v0.8 (2026-04-29) trimmed the coil tail to a fixed 4 bytes by removing
+`address_hash` / `address_len` (E-009) and `n_coil_conditions` /
+`rung_destinations` (E-010). The compact-coil sentinel
+(`0x00 + output_index` = 2 bytes) still expands to the default
+`UNLOCK + INLINE + SCHNORR` shape.
 
 **Diff witness mode**: When `n_rungs == 0`, the witness is a reference to
 another input's witness with field-level diffs (see Q18).
@@ -346,10 +351,11 @@ Ladder Script enforces multiple layers of anti-spam protection:
    - `MAX_RELAYS = 8`
    - `MAX_REQUIRES = 8` (relay_refs per rung or relay)
    - `MAX_RELAY_DEPTH = 4` (transitive chain depth)
-   - `MAX_COIL_CONDITION_RUNGS = 0` (coil conditions reserved)
    - `MAX_PREIMAGE_FIELDS_PER_WITNESS = 2` (per-input fast reject)
    - `MAX_PREIMAGE_FIELDS_PER_TX = 2` (per-transaction binding constraint)
-   - `COIL_ADDRESS_HASH_SIZE = 32` (SHA256 of raw address)
+   - `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` (v0.7, E-003)
+   - `MAX_PUBKEYS_PER_MULTISIG = 16` (inner Merkle bound)
+   - `MAX_ACCUMULATOR_BLOCKS_PER_TX = 2` (v0.6, E-013)
 
 10. **Blanket HASH256 rejection**: In blocks without implicit layouts, HASH256
     fields are rejected by the `IsDataEmbeddingType` check, closing the gap
@@ -357,32 +363,21 @@ Ladder Script enforces multiple layers of anti-spam protection:
 
 ---
 
-## Q11: What coil types exist? What are rung_destinations?
+## Q11: What coil types exist?
 
-### Coil types
-
-Every Ladder Script output carries a **coil** with three metadata bytes:
+Every Ladder Script output carries a **coil** with four fixed bytes (v0.8):
 
 | Field | Type | Values |
 |-------|------|--------|
+| `coil_type` | `RungCoilType` | `UNLOCK (0x01)` — the spender must satisfy at least one rung. `UNLOCK_TO (0x02)` is reserved for a future wire format that binds output structure on-chain (e.g. via a CTV-style template hash). |
 | `attestation` | `RungAttestationMode` | Only `INLINE (0x01)` is defined — signatures sit inline in the witness. Earlier draft modes (`AGGREGATE`, `DEFERRED`) were removed from the enum entirely; values other than `0x01` reject at deserialisation. |
 | `scheme` | `RungScheme` | `SCHNORR (0x01)`, `ECDSA (0x02)`, `FALCON512 (0x10)`, `FALCON1024 (0x11)`, `DILITHIUM3 (0x12)`, `SPHINCS_SHA (0x13)` |
+| `output_index` | `uint8` | Position of the bound output in the spending tx (0…255). |
 
-The coil also carries:
-- **address_hash**: 0 or 32 bytes. When present, it is `SHA256(raw_address)`.
-  The raw address never goes on-chain.
-- **conditions**: Reserved (must be 0 rungs; `MAX_COIL_CONDITION_RUNGS = 0`).
-
-### Rung destinations
-
-`rung_destinations` is a per-rung extension of the coil. Each entry is a pair
-of `(rung_index: uint16_t, address_hash: 32 bytes)`. This allows different
-rungs to route funds to different destinations.
-
-Constraints:
-- Maximum entries: `MAX_RUNGS` (16)
-- Rung indices must be unique (duplicate indices rejected at deserialization)
-- Coil leaf computation includes rung_destinations (Merkle-committed)
+v0.8 dropped `coil.address_hash` (E-009) and `coil.rung_destinations`
+(E-010). Both were advertised as wallet-routing metadata but never bound
+to any consensus check — pure spender data channels. Wallets that need
+per-rung destination metadata must track it locally.
 
 ---
 
@@ -732,8 +727,9 @@ transaction. The maximum data payload is 40 bytes (`FieldMaxSize(DATA)`).
 | Max relay chain depth | 4 | `MAX_RELAY_DEPTH` |
 | Max PREIMAGE/SCRIPT_BODY per witness | 2 | `MAX_PREIMAGE_FIELDS_PER_WITNESS` |
 | Max PREIMAGE/SCRIPT_BODY per tx | 2 | `MAX_PREIMAGE_FIELDS_PER_TX` |
-| Coil condition rungs | 0 (reserved) | `MAX_COIL_CONDITION_RUNGS` |
-| Coil address hash size | 32 bytes | `COIL_ADDRESS_HASH_SIZE` |
+| Max SCRIPT_BODY per tx (v0.7, E-003) | 1 | `MAX_SCRIPT_BODY_FIELDS_PER_TX` |
+| Max pubkeys per MULTISIG | 16 | `MAX_PUBKEYS_PER_MULTISIG` |
+| Max ACCUMULATOR blocks per tx | 2 | `MAX_ACCUMULATOR_BLOCKS_PER_TX` |
 | Max PUBKEY size | 2,048 bytes | `FieldMaxSize(PUBKEY)` |
 | Max SIGNATURE size | 50,000 bytes | `FieldMaxSize(SIGNATURE)` |
 | Max SCRIPT_BODY size | 80 bytes | `FieldMaxSize(SCRIPT_BODY)` |
