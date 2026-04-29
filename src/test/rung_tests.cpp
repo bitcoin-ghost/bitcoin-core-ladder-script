@@ -8802,6 +8802,43 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_roundtrip)
     BOOST_CHECK(bytes == bytes2);
 }
 
+// Audit #7 #1 regression: MLSCProof.revealed_rung.relay_refs must be in
+// strict ascending order (canonical encoding). v0.10's F-4 fix only
+// enforced this on the wire-format witness; the proof-side path was
+// missed. Pre-v0.11, a permuted proof bypassed F-4 because
+// MergeConditionsAndWitness takes relay_refs from the proof, not the wire.
+BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_relay_refs)
+{
+    // Build a minimal FULL_LEAVES proof with non-ascending rung relay_refs.
+    // Legacy proof format: CompactSize(total_rungs) + CompactSize(total_relays)
+    //                    + CompactSize(rung_index) + revealed_rung_blocks
+    //                    + relay_refs ...
+    // Revealed rung: 1 SIG block (n_blocks=0 is rejected as "compact rungs
+    // deprecated", so we use a concrete one-block rung).
+    DataStream ss;
+    WriteCompactSize(ss, 1);  // total_rungs
+    WriteCompactSize(ss, 2);  // total_relays
+    WriteCompactSize(ss, 0);  // rung_index
+    // Revealed rung: 1 SIG block via micro-header (escape + SIG type bytes)
+    WriteCompactSize(ss, 1);  // n_blocks
+    ss << uint8_t{0x00};                   // micro-header slot 0x00 = SIG
+    // SIG conditions implicit layout = [SCHEME(1)] — emit just the SCHEME byte
+    ss << uint8_t{0x01};                   // SCHEME = SCHNORR
+    // rung relay_refs: [1, 0] — descending, must reject
+    WriteCompactSize(ss, 2);
+    WriteCompactSize(ss, 1);
+    WriteCompactSize(ss, 0);
+
+    std::vector<uint8_t> bytes(ss.size());
+    ss.read(MakeWritableByteSpan(bytes));
+
+    MLSCProof proof;
+    std::string error;
+    BOOST_CHECK(!DeserializeMLSCProof(bytes, proof, error));
+    BOOST_CHECK_MESSAGE(error.find("strict ascending") != std::string::npos,
+                        "expected 'strict ascending' in error, got: " + error);
+}
+
 // v0.7+: mlsc_proof_verify_single_sig / mlsc_proof_verify_two_rungs /
 // mlsc_proof_with_relays were removed. They compared `ComputeConditionsRoot`
 // (which delegates to ComputeTxMLSCRoot — TaggedHash leaves) against

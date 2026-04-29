@@ -792,9 +792,21 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC shared proof too many relay_refs";
                     return false;
                 }
+                // v0.11 (audit #7 #1): strict ascending unique. Same canonical
+                // encoding requirement as the wire-format witness (v0.10 F-4).
+                // Without this check the proof side re-opens the relay_refs
+                // permutation channel since the merge step takes relay_refs
+                // from the proof, not the wire form.
                 proof.revealed_rung.relay_refs.resize(n_rung_refs);
+                int64_t prev = -1;
                 for (uint64_t ri = 0; ri < n_rung_refs; ++ri) {
-                    proof.revealed_rung.relay_refs[ri] = static_cast<uint16_t>(ReadCompactSize(ss));
+                    uint64_t v = ReadCompactSize(ss);
+                    if (static_cast<int64_t>(v) <= prev) {
+                        error = "MLSC shared proof relay_refs not strict ascending";
+                        return false;
+                    }
+                    prev = static_cast<int64_t>(v);
+                    proof.revealed_rung.relay_refs[ri] = static_cast<uint16_t>(v);
                 }
                 return true;
             }
@@ -852,9 +864,22 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             error = "MLSC proof too many rung relay_refs";
             return false;
         }
+        // v0.11 (audit #7 #1): strict ascending unique on the proof-side
+        // relay_refs. Wire format already enforces this (v0.10 F-4), but the
+        // merge step takes relay_refs from the proof, not the wire — so a
+        // permuted proof re-opens the F-4 channel without this check.
         proof.revealed_rung.relay_refs.resize(n_rung_refs);
-        for (uint64_t ri = 0; ri < n_rung_refs; ++ri) {
-            proof.revealed_rung.relay_refs[ri] = static_cast<uint16_t>(ReadCompactSize(ss));
+        {
+            int64_t prev = -1;
+            for (uint64_t ri = 0; ri < n_rung_refs; ++ri) {
+                uint64_t v = ReadCompactSize(ss);
+                if (static_cast<int64_t>(v) <= prev) {
+                    error = "MLSC proof rung relay_refs not strict ascending";
+                    return false;
+                }
+                prev = static_cast<int64_t>(v);
+                proof.revealed_rung.relay_refs[ri] = static_cast<uint16_t>(v);
+            }
         }
 
         // Read revealed relays
@@ -893,9 +918,20 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                 error = "MLSC proof relay too many relay_refs";
                 return false;
             }
+            // v0.11 (audit #7 #1): strict ascending unique — same canonical
+            // encoding requirement as the wire-format relay deserialise.
             relay.relay_refs.resize(n_rrefs);
-            for (uint64_t rri = 0; rri < n_rrefs; ++rri) {
-                relay.relay_refs[rri] = static_cast<uint16_t>(ReadCompactSize(ss));
+            {
+                int64_t prev = -1;
+                for (uint64_t rri = 0; rri < n_rrefs; ++rri) {
+                    uint64_t v = ReadCompactSize(ss);
+                    if (static_cast<int64_t>(v) <= prev) {
+                        error = "MLSC proof relay relay_refs not strict ascending";
+                        return false;
+                    }
+                    prev = static_cast<int64_t>(v);
+                    relay.relay_refs[rri] = static_cast<uint16_t>(v);
+                }
             }
         }
 
@@ -966,9 +1002,21 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC proof mutation target too many relay_refs";
                     return false;
                 }
+                // v0.11 (audit #7 #1): strict ascending unique — mutation
+                // targets feed into BuildCPRung at evaluator.cpp via
+                // VerifyMutatedLeaves; same canonical encoding required.
                 target.rung.relay_refs.resize(mt_refs);
-                for (uint64_t mr = 0; mr < mt_refs; ++mr) {
-                    target.rung.relay_refs[mr] = static_cast<uint16_t>(ReadCompactSize(ss));
+                {
+                    int64_t prev = -1;
+                    for (uint64_t mr = 0; mr < mt_refs; ++mr) {
+                        uint64_t v = ReadCompactSize(ss);
+                        if (static_cast<int64_t>(v) <= prev) {
+                            error = "MLSC proof mutation target relay_refs not strict ascending";
+                            return false;
+                        }
+                        prev = static_cast<int64_t>(v);
+                        target.rung.relay_refs[mr] = static_cast<uint16_t>(v);
+                    }
                 }
 
                 // Per-rung pubkey list. Matches the pubkey set folded

@@ -85,19 +85,23 @@ static uint256 HashRungConditions(const RungConditions& conditions)
     return ss.GetSHA256();
 }
 
-/** v0.10 (F-6): bind tx.qabi_block and tx.aggregated_sig into the sighash so
- *  signatures lock them down as defence-in-depth. Pre-v0.10, those fields
- *  were not in the sighash; their authenticity relied on the QABI input's
- *  internal SHA256 commitment plus the v0.9 T-1/T-2 gate. Pinning them here
- *  removes any future cache-shape change from re-opening a malleation
- *  window. Empty fields hash to a sentinel zero so a tx that legitimately
- *  carries no QABI fields produces a stable sighash. */
+/** v0.10 (F-6) + v0.11 (audit #7 #2): bind tx.qabi_block and tx.aggregated_sig
+ *  into the sighash so signatures lock them down as defence-in-depth.
+ *
+ *  v0.11 fix: each field is length-prefixed via CompactSize, so two
+ *  distinct (qabi_block, aggregated_sig) pairs cannot hash identically
+ *  even if their byte concatenations would. The v0.10 form raw-concatenated,
+ *  which was collision-free under the F-5 length enumeration but became
+ *  fragile if F-5 ever loosened. Length prefixes make the binding
+ *  structurally collision-resistant regardless of the per-field length policy. */
 static uint256 HashQABISection(const rung::api::LadderTxView& tx)
 {
     HashWriter qss{};
+    WriteCompactSize(qss, tx.qabi_block_size);
     if (tx.qabi_block_size > 0 && tx.qabi_block) {
         WriteBytes(qss, tx.qabi_block, tx.qabi_block_size);
     }
+    WriteCompactSize(qss, tx.aggregated_sig_size);
     if (tx.aggregated_sig_size > 0 && tx.aggregated_sig) {
         WriteBytes(qss, tx.aggregated_sig, tx.aggregated_sig_size);
     }

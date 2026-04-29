@@ -188,7 +188,7 @@ transaction. Leaf membership verified against cached leaf set via `SharedTreeCac
    dust threshold (546 sats)
 2. Creation proof: required for 3+ spendable outputs. Validates leaf hashes build
    to conditions_root. Optional for 1-2 outputs (validated if present)
-3. PREIMAGE/SCRIPT_BODY count across ALL inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2)
+3. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). v0.10 (audit #6 F-2) tightened this to MLSC-spending inputs only — bootstrap inputs (P2WPKH/P2WSH/P2TR etc) are excluded by the cap, since their witness bytes are not Ladder Script.
 
 ### Per-input
 

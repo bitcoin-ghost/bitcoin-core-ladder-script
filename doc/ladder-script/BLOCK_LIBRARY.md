@@ -5,6 +5,25 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
+> **v0.11 (2026-04-29)** — audit #7 follow-up:
+> - **#1**: `MLSCProof` deserialise now enforces strict ascending unique
+>   on the proof-side `relay_refs` (revealed_rung, revealed_relays,
+>   mutation_target). v0.10's F-4 fix landed only on the wire-format
+>   witness; the proof side bypassed canonical encoding because
+>   `MergeConditionsAndWitness` takes `relay_refs` from the proof.
+> - **#2**: `HashQABISection` length-prefixes both `qabi_block` and
+>   `aggregated_sig` (CompactSize each). Defence-in-depth: makes the
+>   binding structurally collision-resistant regardless of any future
+>   change to the F-5 length enumeration.
+> - **#4**: `CheckRungTxLevel` now rejects when `spent_outputs` is
+>   missing or doesn't match input count. Prior nullptr branch was
+>   silent fail-OPEN for preimage / script_body / accumulator caps;
+>   production callers always populate, but the assumption is now
+>   load-bearing.
+> - **#14**: doc sweep — `MAX_PREIMAGE_FIELDS_PER_TX` etc. rewritten as
+>   "across all MLSC-spending inputs" since v0.10 F-2 excluded bootstrap
+>   inputs.
+>
 > **v0.10 (2026-04-29)** — audit #6 follow-up:
 > - **F-1**: `BuildCPRung` (used by every recursive-covenant transition —
 >   `RECURSE_DECAY` / `RECURSE_SPLIT` / `RECURSE_MODIFIED`) now propagates

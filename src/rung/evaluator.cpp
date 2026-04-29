@@ -557,9 +557,11 @@ static std::vector<std::vector<uint8_t>> ExtractBlockPubkeys(const std::vector<R
     return pubkeys;
 }
 
-/** Count PREIMAGE/SCRIPT_BODY fields across ALL inputs in a transaction.
- *  Deserializes each MLSC input's ladder witness to count preimage-bearing fields.
- *  Non-MLSC inputs (e.g. standard P2WPKH bootstrap) are skipped.
+/** Count PREIMAGE/SCRIPT_BODY fields across MLSC-spending inputs in a tx.
+ *  Deserialises each MLSC input's ladder witness to count preimage-bearing
+ *  fields. Bootstrap inputs (P2WPKH/P2WSH/P2TR etc) are excluded —
+ *  v0.10 (audit #6 F-2) tightened from "all inputs" so a crafted bootstrap
+ *  witness can't fake-deserialise as a fake QABI ladder and bypass caps.
  *  Returns total count; callers reject if > MAX_PREIMAGE_FIELDS_PER_TX. */
 /** Count PREIMAGE/SCRIPT_BODY fields in a single deserialized witness. */
 static size_t CountWitnessPreimageFields(const LadderWitness& lw)
@@ -600,11 +602,15 @@ static size_t CountWitnessPreimageFields(const LadderWitness& lw)
  *  witness stack and must not contribute to v4 consensus checks — otherwise
  *  a P2WSH `OP_DROP OP_TRUE` script with a crafted first stack element
  *  bypasses every per-tx cap (T-1, T-2, E-003, ACCUMULATOR cap, etc).
- *  spent_outputs may be nullptr (e.g. legacy/test paths) — fail-closed:
- *  treat all inputs as non-MLSC, so the per-tx caps reject any non-empty
- *  qabi_block / aggregated_sig and any preimage / script_body / accumulator
- *  bytes. Production callers (validation.cpp) always pass the real
- *  spent_outputs vector. */
+ *
+ *  Caller MUST pass a non-null spent_outputs of length tx.input_count.
+ *  The validator layer (validation.cpp) and per-input verifier (VerifyRungTx)
+ *  both repopulate spent_outputs unconditionally before invoking
+ *  CheckRungTxLevel — but if a future code path forgets, this helper
+ *  returning false would silently zero out preimage / script_body /
+ *  accumulator caps (the loops over zero items would be cap-non-enforcing).
+ *  CheckRungTxLevel guards against that with an explicit nullptr check;
+ *  this helper preserves the same behaviour as a defence-in-depth. */
 static bool IsMLSCSpendingInput(const LadderOutputView* spent_outputs,
                                  size_t spent_output_count,
                                  size_t i)
@@ -776,6 +782,18 @@ bool CheckRungTxLevel(const LadderTxView& tx,
                       size_t spent_output_count,
                       std::string& error)
 {
+    // v0.11 (audit #7 #4): require spent_outputs to be present whenever the
+    // tx has any inputs. The per-tx counters silently treat inputs as
+    // non-MLSC when spent_outputs is null, which would skip every per-tx
+    // cap. Production callers (validation.cpp:2406, evaluator's input-0
+    // safety net) always pass the populated vector — so the only way to
+    // hit this branch is a future code path that forgets to wire it up,
+    // and we want that to fail loud instead of silently zeroing the caps.
+    if (tx.input_count > 0 && (spent_outputs == nullptr || spent_output_count != tx.input_count)) {
+        error = "TX_MLSC: tx-level check requires spent_outputs of equal length to inputs";
+        return false;
+    }
+
     // Consensus: validate all outputs are valid Ladder Script format.
     // Ensures only MLSC (0xDF) outputs, max 1 DATA_RETURN, dust threshold.
     if (!ValidateRungOutputs(tx, error)) {

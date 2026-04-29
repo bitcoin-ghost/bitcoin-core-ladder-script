@@ -268,7 +268,7 @@ The full validation pipeline for a v4 RUNG_TX:
 
 1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN,
    non-DATA_RETURN outputs ≥ `MIN_RUNG_OUTPUT_VALUE` (546 sats).
-2. PREIMAGE/SCRIPT_BODY count across all inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2).
+2. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). v0.10 (audit #6 F-2) excluded bootstrap inputs from the cap — only MLSC-bearing witnesses count.
 3. Cross-input invariants when applicable: PQ_BATCH cache consistency, QABIO output-set
    binding.
 

@@ -605,8 +605,11 @@ Blocks with implicit layouts have their field count and types enforced at
 deserialization. Blocks without implicit layouts reject data-embedding types
 (`IsDataEmbeddingType`). `PREIMAGE` and `SCRIPT_BODY` fields are capped at
 `MAX_PREIMAGE_FIELDS_PER_WITNESS = 2` per input (fast reject) and
-`MAX_PREIMAGE_FIELDS_PER_TX = 2` across all inputs in the transaction
-(binding constraint). This prevents multi-input data embedding.
+`MAX_PREIMAGE_FIELDS_PER_TX = 2` across all MLSC-spending inputs in the
+transaction (binding constraint, v0.10 audit #6 F-2). Bootstrap inputs
+(P2WPKH/P2WSH/P2TR etc) are excluded — their witness bytes are not Ladder
+Script and cannot contribute to the cap. This prevents multi-input data
+embedding via cooperating MLSC inputs.
 
 ---
 

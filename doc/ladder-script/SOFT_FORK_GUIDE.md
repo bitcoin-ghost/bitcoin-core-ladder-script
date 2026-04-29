@@ -126,8 +126,10 @@ scriptPubKey types are rejected on v4.
 1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1
    DATA_RETURN, non-DATA_RETURN outputs ≥ `MIN_RUNG_OUTPUT_VALUE`
    (546 sats).
-2. PREIMAGE/SCRIPT_BODY count across all inputs ≤
-   `MAX_PREIMAGE_FIELDS_PER_TX` (2).
+2. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤
+   `MAX_PREIMAGE_FIELDS_PER_TX` (2). Bootstrap inputs (P2WPKH/P2WSH/P2TR
+   etc) are excluded since their witnesses are not Ladder Script
+   (v0.10 audit #6 F-2).
 3. Cross-input invariants: PQ_BATCH cache consistency, QABIO output-set
    binding (when applicable).
 

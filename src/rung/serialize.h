@@ -35,9 +35,12 @@ static constexpr size_t MAX_LADDER_WITNESS_SIZE = 100000;
  *  Per-witness check is a fast reject; the binding constraint is per-transaction. */
 static constexpr size_t MAX_PREIMAGE_FIELDS_PER_WITNESS = 2;
 /** Maximum number of PREIMAGE/SCRIPT_BODY fields per transaction (consensus).
- *  Summed across ALL inputs. Prevents multi-input data embedding attacks where
- *  an attacker creates N inputs each carrying preimage data. Legitimate use cases
- *  (HTLC, atomic swap, HASH_SIG) never need >2 preimages per transaction. */
+ *  Summed across MLSC-spending inputs (v0.10 audit #6 F-2 — bootstrap inputs
+ *  excluded since their witnesses are not Ladder Script). Prevents multi-input
+ *  data embedding attacks where an attacker creates N MLSC inputs each carrying
+ *  preimage data. Legitimate use cases (HTLC, atomic swap, HASH_SIG) never need
+ *  >2 preimages per transaction. v0.10 audit #6 F-3 also folds diff-witness
+ *  PREIMAGE/SCRIPT_BODY overlays into the count. */
 static constexpr size_t MAX_PREIMAGE_FIELDS_PER_TX = 2;
 /** Maximum number of SCRIPT_BODY fields per transaction (consensus, v0.7).
  *  Tighter sub-cap inside the combined PREIMAGE+SCRIPT_BODY limit. SCRIPT_BODY
@@ -86,7 +89,7 @@ static constexpr size_t MAX_ACCUMULATOR_PROOF_DEPTH = 4;
  *  ~2 KB of attacker-controlled bytes per spend. v2 limits real set-membership
  *  use to one proof per rung. */
 static constexpr size_t MAX_ACCUMULATOR_BLOCKS_PER_RUNG = 1;
-/** ACCUMULATOR v2: maximum number of ACCUMULATOR blocks across ALL inputs of
+/** ACCUMULATOR v2: maximum number of ACCUMULATOR blocks across MLSC-spending inputs of
  *  a single transaction. Mirrors the MAX_PREIMAGE_FIELDS_PER_TX = 2 pattern. */
 static constexpr size_t MAX_ACCUMULATOR_BLOCKS_PER_TX = 2;
 /** ACCUMULATOR v2: maximum element id (positional index of the proven element

@@ -318,8 +318,13 @@ Ladder Script enforces multiple layers of anti-spam protection:
 2. **PREIMAGE/SCRIPT_BODY field cap**: Maximum 2 PREIMAGE or SCRIPT_BODY
    fields per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`, fast reject).
    The binding constraint is per-transaction: `MAX_PREIMAGE_FIELDS_PER_TX = 2`
-   sums across ALL inputs, preventing multi-input data embedding. Total
-   user-chosen preimage data: 64 bytes per transaction regardless of input count.
+   sums across all MLSC-spending inputs, preventing multi-input data
+   embedding via cooperating MLSC inputs. v0.10 (audit #6 F-2) tightened
+   the cap to MLSC-spending inputs only — bootstrap inputs (P2WPKH/P2WSH/
+   P2TR etc) are excluded since their witness bytes are not Ladder Script.
+   The same scoping applies to v0.10's diff-witness count addition (F-3).
+   Total user-chosen preimage data: 64 bytes per transaction regardless of
+   MLSC input count.
 
 3. **Data-embedding type rejection**: For blocks without an implicit layout,
    high-bandwidth data types (PUBKEY_COMMIT, HASH256, HASH160, DATA) are

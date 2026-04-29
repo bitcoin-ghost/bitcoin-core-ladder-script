@@ -650,7 +650,7 @@ The leaf hash for member i is `TaggedHash("LadderAccumulatorLeaf/v1", i_LE)`
    for each 32-byte sibling in MERKLE_PROOF (max depth = 4), and SATISFIED
    iff the final `current` equals `set_root`.
 
-Caps: 1 ACCUMULATOR per rung; 2 ACCUMULATOR blocks per tx (across all inputs).
+Caps: 1 ACCUMULATOR per rung; 2 ACCUMULATOR blocks per tx (across all MLSC-spending inputs; bootstrap inputs excluded — see audit #6 F-2).
 
 ### Inverted accumulator (blocklist)
 
