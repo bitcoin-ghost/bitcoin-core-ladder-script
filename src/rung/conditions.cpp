@@ -1104,8 +1104,10 @@ bool VerifyMLSCProof(const MLSCProof& proof,
         error = "SHARED proof mode must be resolved by the caller";
         return false;
     }
+    // v0.8: tree = rung_leaves + relay_leaves (no coil leaf — coil structural
+    // fields are bound via each rung leaf's template in the live TX_MLSC scheme).
     if (proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
-        size_t total_leaves = proof.total_rungs + proof.total_relays + 1;
+        size_t total_leaves = proof.total_rungs + proof.total_relays;
         uint256 rung_leaf = ComputeRungLeaf(proof.revealed_rung, rung_pubkeys);
         std::string path_error;
         if (!VerifyMerklePath(rung_leaf, proof.proof_hashes, total_leaves, expected_root, path_error)) {
@@ -1122,7 +1124,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
         }
         return true;
     }
-    size_t total_leaves = proof.total_rungs + proof.total_relays + 1;
+    size_t total_leaves = proof.total_rungs + proof.total_relays;
     std::vector<uint256> leaves(total_leaves);
     std::vector<bool> revealed(total_leaves, false);
     leaves[proof.rung_index] = ComputeRungLeaf(proof.revealed_rung, rung_pubkeys);
@@ -1130,7 +1132,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
     for (size_t rl = 0; rl < proof.revealed_relays.size(); ++rl) {
         const auto& [relay_idx, relay] = proof.revealed_relays[rl];
         size_t leaf_idx = proof.total_rungs + relay_idx;
-        if (leaf_idx >= total_leaves - 1) {
+        if (leaf_idx >= total_leaves) {
             error = "revealed relay index out of range";
             return false;
         }
@@ -1139,8 +1141,7 @@ bool VerifyMLSCProof(const MLSCProof& proof,
         leaves[leaf_idx] = ComputeRelayLeaf(relay, rpks);
         revealed[leaf_idx] = true;
     }
-    leaves[total_leaves - 1] = ComputeCoilLeaf(coil);
-    revealed[total_leaves - 1] = true;
+    (void)coil; // v0.8: coil is structurally bound via rung leaf; no separate leaf.
     size_t proof_idx = 0;
     for (size_t i = 0; i < total_leaves; ++i) {
         if (!revealed[i]) {
@@ -1205,12 +1206,12 @@ std::vector<uint8_t> SerializeStructuralTemplate(const CreationProofRung& rung)
         out.push_back(inverted);
     }
 
-    // Coil: type(1) + attestation(1) + scheme(1) + output_index(1) + has_address(1)
+    // v0.8: Coil: type(1) + attestation(1) + scheme(1) + output_index(1)
+    // (has_address byte removed alongside coil.address_hash; see E-009.)
     out.push_back(static_cast<uint8_t>(rung.coil.coil_type));
     out.push_back(static_cast<uint8_t>(rung.coil.attestation));
     out.push_back(static_cast<uint8_t>(rung.coil.scheme));
     out.push_back(rung.coil.output_index);
-    out.push_back(rung.coil.address_hash.empty() ? 0x00 : 0x01);
 
     return out;
 }

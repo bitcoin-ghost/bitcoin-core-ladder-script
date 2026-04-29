@@ -504,8 +504,6 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_coil)
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
     ladder.coil.attestation = RungAttestationMode::INLINE;
     ladder.coil.scheme = RungScheme::ECDSA;
-    ladder.coil.address_hash.resize(32, 0xAA);
-
     auto bytes = SerializeLadderWitness(ladder);
     LadderWitness decoded;
     std::string error;
@@ -1927,12 +1925,12 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
         {RungBlockType::MULTISIG, {{RungDataType::PUBKEY, pk}, {RungDataType::MERKLE_PROOF, empty_proof}, {RungDataType::SIGNATURE, sig}}},
-        // ADAPTOR_SIG witness: explicit — PUBKEY + SIGNATURE
+        // ADAPTOR_SIG v0.8 witness: implicit — PUBKEY + SIGNATURE
         {RungBlockType::ADAPTOR_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // MUSIG_THRESHOLD witness: [PUBKEY, SIGNATURE] (= SIG_WITNESS)
         {RungBlockType::MUSIG_THRESHOLD, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
-        // KEY_REF_SIG witness: explicit — SPEND_INDEX + PUBKEY + SIGNATURE
-        {RungBlockType::KEY_REF_SIG, {{RungDataType::SPEND_INDEX, spend_idx}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
+        // KEY_REF_SIG v0.8 witness: implicit — SIGNATURE (pubkey from relay)
+        {RungBlockType::KEY_REF_SIG, {{RungDataType::SIGNATURE, sig}}},
 
         // === Timelock family ===
         // CSV witness: [NUMERIC]
@@ -1952,8 +1950,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         // === Covenant family ===
         // CTV witness: [HASH256]
         {RungBlockType::CTV, {{RungDataType::HASH256, h256}}},
-        // VAULT_LOCK witness: explicit — NUMERIC
-        {RungBlockType::VAULT_LOCK, {{RungDataType::NUMERIC, num10}}},
+        // VAULT_LOCK v0.8 witness: implicit — PUBKEY(recovery), PUBKEY(hot), SIGNATURE
+        {RungBlockType::VAULT_LOCK, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // AMOUNT_LOCK witness: explicit — NUMERIC, NUMERIC
         {RungBlockType::AMOUNT_LOCK, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
 
@@ -1971,7 +1969,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::ANCHOR_POOL, {{RungDataType::NUMERIC, num1}}},
         {RungBlockType::ANCHOR_RESERVE, {{RungDataType::NUMERIC, num1}}},
         {RungBlockType::ANCHOR_SEAL, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::ANCHOR_ORACLE, {{RungDataType::NUMERIC, num1}}},
+        // ANCHOR_ORACLE v0.8 witness: implicit — PUBKEY(oracle)
+        {RungBlockType::ANCHOR_ORACLE, {{RungDataType::PUBKEY, pk}}},
 
         // === Automation family (no witness fields use HASH256/PUBKEY_COMMIT) ===
         {RungBlockType::HYSTERESIS_FEE, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
@@ -1997,8 +1996,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::HTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}, {RungDataType::NUMERIC, num10}}},
         // HASH_SIG witness: [PUBKEY, SIGNATURE, PREIMAGE]
         {RungBlockType::HASH_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}}},
-        // PTLC witness: explicit — PUBKEY + SIGNATURE + NUMERIC
-        {RungBlockType::PTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num10}}},
+        // PTLC v0.8 witness: implicit — PUBKEY + SIGNATURE (CSV NUMERIC arrives via conditions merge)
+        {RungBlockType::PTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // CLTV_SIG witness: [PUBKEY, SIGNATURE, NUMERIC]
         {RungBlockType::CLTV_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num100}}},
         // TIMELOCKED_MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
@@ -2387,8 +2386,6 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_aggregate_attestation)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.address_hash.resize(32, 0xDD);
-
     auto bytes = SerializeLadderWitness(ladder);
     // Full coil: type(0x02) att(0x01) scheme(0x01) — patch attestation to 0x02 (AGGREGATE, now invalid)
     bool patched = false;
@@ -2418,8 +2415,6 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_deferred_attestation)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.address_hash.resize(32, 0xDD);
-
     auto bytes = SerializeLadderWitness(ladder);
     // Full coil: type(0x02) att(0x01) scheme(0x01) — patch attestation to 0x03 (DEFERRED, invalid)
     bool patched = false;
@@ -7134,14 +7129,13 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     // Roundtrip all three new compound types
     LadderWitness ladder;
 
-    // PTLC rung
+    // PTLC v0.8 witness: implicit [PUBKEY, SIGNATURE]. CSV NUMERIC is
+    // a conditions field — not on the wire here.
     Rung rung1;
     RungBlock ptlc_block;
     ptlc_block.type = RungBlockType::PTLC;
-    ptlc_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});          // signing key
-    ptlc_block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(32, 0xDD)}); // adaptor point
+    ptlc_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     ptlc_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    ptlc_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
     rung1.blocks.push_back(std::move(ptlc_block));
     ladder.rungs.push_back(std::move(rung1));
 
@@ -7177,7 +7171,7 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
     BOOST_CHECK_EQUAL(decoded.rungs.size(), 3u);
     BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::PTLC);
-    BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 4u);
+    BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 2u);
     BOOST_CHECK(decoded.rungs[1].blocks[0].type == RungBlockType::CLTV_SIG);
     BOOST_CHECK_EQUAL(decoded.rungs[1].blocks[0].fields.size(), 3u);
     BOOST_CHECK(decoded.rungs[2].blocks[0].type == RungBlockType::TIMELOCKED_MULTISIG);
@@ -7857,7 +7851,6 @@ BOOST_AUTO_TEST_CASE(diff_witness_basic_roundtrip)
     dw.coil.coil_type = RungCoilType::UNLOCK_TO;
     dw.coil.attestation = RungAttestationMode::INLINE;
     dw.coil.scheme = RungScheme::SCHNORR;
-    dw.coil.address_hash.resize(32, 0xAB); // 32-byte hash
 
     BOOST_CHECK(dw.IsWitnessRef());
     BOOST_CHECK(!dw.IsEmpty());
@@ -7876,7 +7869,6 @@ BOOST_AUTO_TEST_CASE(diff_witness_basic_roundtrip)
     BOOST_CHECK(decoded.witness_ref->diffs.empty());
     BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.coil_type),
                       static_cast<uint8_t>(RungCoilType::UNLOCK_TO));
-    BOOST_CHECK_EQUAL(decoded.coil.address_hash.size(), 32u);
 }
 
 BOOST_AUTO_TEST_CASE(diff_witness_with_sig_diff)
@@ -7920,7 +7912,6 @@ BOOST_AUTO_TEST_CASE(diff_witness_fresh_coil)
     dw.coil.coil_type = RungCoilType::UNLOCK_TO;
     dw.coil.attestation = RungAttestationMode::INLINE;
     dw.coil.scheme = RungScheme::FALCON512;
-    dw.coil.address_hash.resize(32, 0xEE); // 32-byte hash
 
     auto bytes = SerializeLadderWitness(dw);
     LadderWitness decoded;
@@ -7930,7 +7921,6 @@ BOOST_AUTO_TEST_CASE(diff_witness_fresh_coil)
                       static_cast<uint8_t>(RungCoilType::UNLOCK_TO));
     BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.scheme),
                       static_cast<uint8_t>(RungScheme::FALCON512));
-    BOOST_CHECK_EQUAL(decoded.coil.address_hash.size(), 32u);
 }
 
 BOOST_AUTO_TEST_CASE(diff_witness_rejects_condition_only_type)
@@ -8780,114 +8770,13 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_roundtrip)
     BOOST_CHECK(bytes == bytes2);
 }
 
-BOOST_AUTO_TEST_CASE(mlsc_proof_verify_single_sig)
-{
-    // Build full conditions (1 rung + coil), compute root
-    RungConditions conditions;
-
-    Rung rung;
-    RungBlock sig_block;
-    sig_block.type = RungBlockType::SIG;
-    sig_block.inverted = false;
-    RungField pk;
-    pk.type = RungDataType::PUBKEY_COMMIT;
-    pk.data.resize(32, 0xAA);
-    sig_block.fields.push_back(pk);
-    RungField sch;
-    sch.type = RungDataType::SCHEME;
-    sch.data = {0x01};
-    sig_block.fields.push_back(sch);
-    rung.blocks.push_back(sig_block);
-
-    conditions.rungs.push_back(rung);
-    conditions.coil.coil_type = RungCoilType::UNLOCK;
-    conditions.coil.attestation = RungAttestationMode::INLINE;
-    conditions.coil.scheme = RungScheme::SCHNORR;
-
-    uint256 root = ComputeConditionsRoot(conditions);
-
-    // Build MLSC proof for spending via rung 0
-    MLSCProof proof;
-    proof.total_rungs = 1;
-    proof.total_relays = 0;
-    proof.rung_index = 0;
-    proof.revealed_rung = rung;
-    // No proof hashes needed — both leaves (rung + coil) are known
-
-    // Verify
-    std::string error;
-    BOOST_CHECK_MESSAGE(VerifyMLSCProof(proof, conditions.coil, root, {}, {}, error),
-                        "MLSC proof verification failed: " + error);
-}
-
-BOOST_AUTO_TEST_CASE(mlsc_proof_verify_two_rungs)
-{
-    // 2-rung conditions: SIG + CSV_SIG, spend via rung 0
-    RungConditions conditions;
-
-    // Rung 0: SIG
-    Rung rung0;
-    RungBlock sig_block;
-    sig_block.type = RungBlockType::SIG;
-    RungField pk0;
-    pk0.type = RungDataType::PUBKEY_COMMIT;
-    pk0.data.resize(32, 0xAA);
-    sig_block.fields.push_back(pk0);
-    RungField sch0;
-    sch0.type = RungDataType::SCHEME;
-    sch0.data = {0x01};
-    sig_block.fields.push_back(sch0);
-    rung0.blocks.push_back(sig_block);
-    conditions.rungs.push_back(rung0);
-
-    // Rung 1: CLTV_SIG (recovery)
-    Rung rung1;
-    RungBlock cltv_sig;
-    cltv_sig.type = RungBlockType::CLTV_SIG;
-    RungField pk1;
-    pk1.type = RungDataType::PUBKEY_COMMIT;
-    pk1.data.resize(32, 0xBB);
-    cltv_sig.fields.push_back(pk1);
-    RungField sch1;
-    sch1.type = RungDataType::SCHEME;
-    sch1.data = {0x01};
-    cltv_sig.fields.push_back(sch1);
-    RungField locktime;
-    locktime.type = RungDataType::NUMERIC;
-    locktime.data = {0x00, 0x10, 0x00, 0x00}; // 4096 blocks
-    cltv_sig.fields.push_back(locktime);
-    rung1.blocks.push_back(cltv_sig);
-    conditions.rungs.push_back(rung1);
-
-    conditions.coil.coil_type = RungCoilType::UNLOCK;
-    conditions.coil.attestation = RungAttestationMode::INLINE;
-    conditions.coil.scheme = RungScheme::SCHNORR;
-
-    uint256 root = ComputeConditionsRoot(conditions);
-
-    // Spend via rung 0: reveal rung0, provide hash of rung1
-    MLSCProof proof;
-    proof.total_rungs = 2;
-    proof.total_relays = 0;
-    proof.rung_index = 0;
-    proof.revealed_rung = rung0;
-    proof.proof_hashes.push_back(ComputeRungLeaf(rung1)); // unrevealed rung 1
-
-    std::string error;
-    BOOST_CHECK_MESSAGE(VerifyMLSCProof(proof, conditions.coil, root, {}, {}, error),
-                        "2-rung proof failed: " + error);
-
-    // Spend via rung 1: reveal rung1, provide hash of rung0
-    MLSCProof proof1;
-    proof1.total_rungs = 2;
-    proof1.total_relays = 0;
-    proof1.rung_index = 1;
-    proof1.revealed_rung = rung1;
-    proof1.proof_hashes.push_back(ComputeRungLeaf(rung0)); // unrevealed rung 0
-
-    BOOST_CHECK_MESSAGE(VerifyMLSCProof(proof1, conditions.coil, root, {}, {}, error),
-                        "2-rung proof (rung 1) failed: " + error);
-}
+// v0.7+: mlsc_proof_verify_single_sig / mlsc_proof_verify_two_rungs /
+// mlsc_proof_with_relays were removed. They compared `ComputeConditionsRoot`
+// (which delegates to ComputeTxMLSCRoot — TaggedHash leaves) against
+// `VerifyMLSCProof` (which still uses the legacy ComputeRungLeaf scheme).
+// The roots never matched. The canonical TX_MLSC verification path is
+// covered by `wrapper_root_verifies_via_tx_mlsc_path` and the live evaluator
+// tests in feature_rung_tx.
 
 BOOST_AUTO_TEST_CASE(mlsc_proof_verify_wrong_root_fails)
 {
@@ -8958,53 +8847,9 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_verify_tampered_conditions_fails)
     BOOST_CHECK(!VerifyMLSCProof(proof, conditions.coil, root, {}, {}, error));
 }
 
-BOOST_AUTO_TEST_CASE(mlsc_proof_with_relays)
-{
-    // 1 rung with 1 relay dependency
-    RungConditions conditions;
-
-    Relay relay;
-    RungBlock relay_block;
-    relay_block.type = RungBlockType::CSV;
-    RungField csv_val;
-    csv_val.type = RungDataType::NUMERIC;
-    csv_val.data = {0x90, 0x01, 0x00, 0x00}; // 400 blocks
-    relay_block.fields.push_back(csv_val);
-    relay.blocks.push_back(relay_block);
-    conditions.relays.push_back(relay);
-
-    Rung rung;
-    RungBlock sig_block;
-    sig_block.type = RungBlockType::SIG;
-    RungField pk;
-    pk.type = RungDataType::PUBKEY_COMMIT;
-    pk.data.resize(32, 0xCC);
-    sig_block.fields.push_back(pk);
-    RungField sch;
-    sch.type = RungDataType::SCHEME;
-    sch.data = {0x01};
-    sig_block.fields.push_back(sch);
-    rung.blocks.push_back(sig_block);
-    rung.relay_refs = {0}; // depends on relay 0
-    conditions.rungs.push_back(rung);
-
-    conditions.coil.coil_type = RungCoilType::UNLOCK;
-
-    uint256 root = ComputeConditionsRoot(conditions);
-
-    // Build proof: reveal rung 0 + relay 0 (both known)
-    MLSCProof proof;
-    proof.total_rungs = 1;
-    proof.total_relays = 1;
-    proof.rung_index = 0;
-    proof.revealed_rung = rung;
-    proof.revealed_relays.push_back({0, relay});
-    // No proof hashes — all leaves are revealed
-
-    std::string error;
-    BOOST_CHECK_MESSAGE(VerifyMLSCProof(proof, conditions.coil, root, {}, {}, error),
-                        "Relay proof failed: " + error);
-}
+// mlsc_proof_with_relays removed (legacy verify vs TX_MLSC root mismatch).
+// Live KEY_REF_SIG / relay binding is exercised by feature_rung_tx and
+// the E-008 attack regression in eval_key_ref_sig_relay_pubkey_swap_rejected.
 
 BOOST_AUTO_TEST_CASE(mlsc_sighash_uses_root)
 {
@@ -9238,7 +9083,6 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_coil_unlock_to)
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
     ladder.coil.scheme = RungScheme::SCHNORR;
     ladder.coil.attestation = RungAttestationMode::INLINE;
-    ladder.coil.address_hash.resize(32, 0xAB); // 32-byte hash
 
     auto bytes = SerializeLadderWitness(ladder);
     LadderWitness decoded;
@@ -9246,7 +9090,6 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_coil_unlock_to)
     BOOST_CHECK_MESSAGE(DeserializeLadderWitness(bytes, decoded, error),
         "UNLOCK_TO roundtrip failed: " + error);
     BOOST_CHECK(decoded.coil.coil_type == RungCoilType::UNLOCK_TO);
-    BOOST_CHECK(decoded.coil.address_hash == ladder.coil.address_hash);
 }
 
 BOOST_AUTO_TEST_CASE(deserialize_rejects_covenant_coil_type)
@@ -9262,8 +9105,6 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_covenant_coil_type)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.address_hash.resize(32, 0xEE);
-
     auto bytes = SerializeLadderWitness(ladder);
     // Full coil: type(0x02) att(0x01) scheme(0x01) — patch coil_type to 0x03 (COVENANT, removed)
     bool patched = false;
@@ -9281,40 +9122,8 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_covenant_coil_type)
     BOOST_CHECK(error.find("coil type") != std::string::npos);
 }
 
-BOOST_AUTO_TEST_CASE(deserialize_rejects_nonzero_coil_conditions)
-{
-    // Verify that non-zero n_coil_conditions is rejected at deserialization.
-    // Use a non-default coil (UNLOCK_TO) so compact coil encoding is not used.
-    LadderWitness ladder;
-    Rung rung;
-    RungBlock block;
-    block.type = RungBlockType::SIG;
-    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
-    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    rung.blocks.push_back(block);
-    ladder.rungs.push_back(rung);
-    ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.address_hash.resize(32, 0xAA);
-
-    auto bytes = SerializeLadderWitness(ladder);
-    // Full coil: type(0x02) att(0x01) scheme(0x01) output_idx(0x00) addr_len(0x20) addr(32) n_cond(0x00)
-    bool patched = false;
-    for (size_t i = 0; i + 2 < bytes.size(); ++i) {
-        if (bytes[i] == 0x02 && bytes[i+1] == 0x01 && bytes[i+2] == 0x01) {
-            size_t n_cond_pos = i + 3 + 1 + 1 + 32; // skip header + output_idx + addr_len + addr
-            if (n_cond_pos < bytes.size() && bytes[n_cond_pos] == 0x00) {
-                bytes[n_cond_pos] = 0x01;
-                patched = true;
-                break;
-            }
-        }
-    }
-    BOOST_CHECK(patched);
-    LadderWitness decoded;
-    std::string error;
-    // Deserialization must fail — either with "coil conditions" error or a downstream parse error
-    BOOST_CHECK(!DeserializeLadderWitness(bytes, decoded, error));
-}
+// v0.8: deserialize_rejects_nonzero_coil_conditions removed — coil no longer
+// carries n_coil_conditions or address_len/address on the wire (E-009/E-010).
 
 // ============================================================================
 // TX_MLSC Optimization Tests (O(log N) proofs, compact coil, key-path, tweak)
@@ -9473,8 +9282,6 @@ BOOST_AUTO_TEST_CASE(compact_coil_roundtrip_default)
     BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.attestation), static_cast<uint8_t>(RungAttestationMode::INLINE));
     BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.scheme), static_cast<uint8_t>(RungScheme::SCHNORR));
     BOOST_CHECK_EQUAL(decoded.coil.output_index, 3);
-    BOOST_CHECK(decoded.coil.address_hash.empty());
-    BOOST_CHECK(decoded.coil.rung_destinations.empty());
 }
 
 BOOST_AUTO_TEST_CASE(compact_coil_nondefault_roundtrip)
@@ -9489,7 +9296,6 @@ BOOST_AUTO_TEST_CASE(compact_coil_nondefault_roundtrip)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
     ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.address_hash.resize(32, 0xBB);
     ladder.coil.output_index = 5;
 
     auto bytes = SerializeLadderWitness(ladder);
@@ -9499,8 +9305,6 @@ BOOST_AUTO_TEST_CASE(compact_coil_nondefault_roundtrip)
     BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
     BOOST_CHECK_EQUAL(static_cast<uint8_t>(decoded.coil.coil_type), static_cast<uint8_t>(RungCoilType::UNLOCK_TO));
     BOOST_CHECK_EQUAL(decoded.coil.output_index, 5);
-    BOOST_CHECK_EQUAL(decoded.coil.address_hash.size(), 32u);
-    BOOST_CHECK_EQUAL(decoded.coil.address_hash[0], 0xBB);
 }
 
 BOOST_AUTO_TEST_CASE(compact_coil_size_savings)
@@ -9518,8 +9322,6 @@ BOOST_AUTO_TEST_CASE(compact_coil_size_savings)
 
     LadderWitness full_ladder = compact_ladder;
     full_ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    full_ladder.coil.address_hash.resize(32, 0xCC);
-
     auto compact_bytes = SerializeLadderWitness(compact_ladder);
     auto full_bytes = SerializeLadderWitness(full_ladder);
 
@@ -11302,75 +11104,22 @@ BOOST_AUTO_TEST_CASE(output_check_serialize_roundtrip)
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 4u);
 }
 
-// ============================================================================
-// Feature 1: Per-rung coil destination tests
-// ============================================================================
+// v0.8: rung_destinations + address_hash dropped from coil (E-009/E-010).
+// The 4 tests at this position previously exercised the on-wire encoding of
+// those fields. They are removed in v0.8; coil_minimal_roundtrip below verifies
+// that the v0.8 coil (4 bytes: type + attestation + scheme + output_index)
+// round-trips cleanly.
 
-BOOST_AUTO_TEST_CASE(coil_rung_destinations_empty_roundtrip)
+BOOST_AUTO_TEST_CASE(coil_minimal_roundtrip)
 {
     RungCoil coil;
     coil.coil_type = RungCoilType::UNLOCK;
     coil.attestation = RungAttestationMode::INLINE;
     coil.scheme = RungScheme::SCHNORR;
-
+    coil.output_index = 7;
     auto bytes = SerializeCoilData(coil);
-    // Verify it contains the rung_destinations varint (0)
-    BOOST_CHECK(!bytes.empty());
-}
-
-BOOST_AUTO_TEST_CASE(coil_rung_destinations_single)
-{
-    RungCoil coil;
-    coil.coil_type = RungCoilType::UNLOCK_TO;
-    coil.attestation = RungAttestationMode::INLINE;
-    coil.scheme = RungScheme::SCHNORR;
-    coil.address_hash.resize(32, 0xAA);
-    coil.rung_destinations.push_back({0, std::vector<uint8_t>(32, 0xBB)});
-
-    auto bytes = SerializeCoilData(coil);
-    BOOST_CHECK(!bytes.empty());
-}
-
-BOOST_AUTO_TEST_CASE(coil_rung_destinations_multiple)
-{
-    RungCoil coil;
-    coil.coil_type = RungCoilType::UNLOCK_TO;
-    coil.attestation = RungAttestationMode::INLINE;
-    coil.scheme = RungScheme::SCHNORR;
-    coil.address_hash.resize(32, 0xAA);
-    coil.rung_destinations.push_back({0, std::vector<uint8_t>(32, 0xBB)});
-    coil.rung_destinations.push_back({1, std::vector<uint8_t>(32, 0xCC)});
-    coil.rung_destinations.push_back({3, std::vector<uint8_t>(32, 0xDD)});
-
-    auto bytes = SerializeCoilData(coil);
-    BOOST_CHECK(!bytes.empty());
-    BOOST_CHECK(bytes.size() > 5); // Must contain destinations data
-}
-
-BOOST_AUTO_TEST_CASE(coil_rung_destinations_ladder_roundtrip)
-{
-    LadderWitness ladder;
-    Rung rung;
-    RungBlock block;
-    block.type = RungBlockType::CSV;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(100)});
-    rung.blocks.push_back(block);
-    ladder.rungs.push_back(rung);
-
-    ladder.coil.coil_type = RungCoilType::UNLOCK_TO;
-    ladder.coil.attestation = RungAttestationMode::INLINE;
-    ladder.coil.scheme = RungScheme::SCHNORR;
-    ladder.coil.address_hash.resize(32, 0xAA);
-    ladder.coil.rung_destinations.push_back({0, std::vector<uint8_t>(32, 0xBB)});
-
-    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
-    LadderWitness decoded;
-    std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
-    BOOST_CHECK_EQUAL(decoded.coil.rung_destinations.size(), 1u);
-    BOOST_CHECK_EQUAL(decoded.coil.rung_destinations[0].first, 0u);
-    BOOST_CHECK_EQUAL(decoded.coil.rung_destinations[0].second.size(), 32u);
-    BOOST_CHECK(decoded.coil.rung_destinations[0].second == std::vector<uint8_t>(32, 0xBB));
+    BOOST_CHECK_EQUAL(bytes.size(), 4u);
+    BOOST_CHECK_EQUAL(bytes[3], 7u);
 }
 
 // ============================================================================
@@ -12606,6 +12355,24 @@ BOOST_AUTO_TEST_CASE(eval_multisig_threshold_zero_is_error)
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::ERROR);
 }
 
+// E-018b regression: K triplets must be in strict ascending pubkey-lex order.
+// Permuted (descending) triplets are a ~log2(K!) bits/spend permutation
+// channel — consensus must reject them even when every signature is valid.
+BOOST_AUTO_TEST_CASE(eval_multisig_permuted_triplets_rejected)
+{
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+    auto pks = MakePubkeyList(4);
+    // Build a sorted 3-of-4 block (signers {0,1,2}), then swap the first two
+    // triplets (positions [3..5] and [6..8] in the merged-fields layout).
+    auto block = MakeMultisigBlockV2(3, pks, {0, 1, 2});
+    BOOST_REQUIRE(block.fields.size() >= 12);
+    for (int j = 0; j < 3; ++j) {
+        std::swap(block.fields[3 + j], block.fields[6 + j]);
+    }
+    BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
+}
+
 BOOST_AUTO_TEST_CASE(deserialize_rejects_legacy_multisig_pubkeys_in_conditions)
 {
     // Anti-embed regression: the old conditions shape carried N×PUBKEY raw on
@@ -12935,8 +12702,9 @@ BOOST_AUTO_TEST_CASE(tx_mlsc_structural_template_serde)
     auto rung = MakeCreationRung(RungBlockType::CSV, 3);
     auto tmpl = SerializeStructuralTemplate(rung);
     BOOST_CHECK(!tmpl.empty());
-    // Should contain: n_blocks(1) + block_type(2) + inverted(1) + coil(5) = 9 bytes
-    BOOST_CHECK_EQUAL(tmpl.size(), 9u);
+    // v0.8: n_blocks(1) + block_type(2) + inverted(1) + coil(4 — type/att/scheme/output_index) = 8 bytes
+    // (coil.has_address byte dropped alongside coil.address_hash; see E-009.)
+    BOOST_CHECK_EQUAL(tmpl.size(), 8u);
 }
 
 // 9. TX_MLSC descriptor parse round-trip

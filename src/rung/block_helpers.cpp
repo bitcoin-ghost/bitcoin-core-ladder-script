@@ -249,8 +249,13 @@ EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
         return EvalResult::UNSATISFIED;
     }
 
-    std::vector<std::vector<uint8_t>> seen_pubkeys;
-    seen_pubkeys.reserve(threshold);
+    // v0.8 (E-018b): triplets MUST be in strict ascending lexicographic order
+    // by PUBKEY bytes. The verify check enforces both ordering and
+    // distinctness — a duplicate pubkey is an order violation (lex compare
+    // returns 0). Closes ~log2(K!) bits/spend of permutation channel
+    // (~25 bits/3 B for K=11). Signers (signrungtx, MULTISIG/TIMELOCKED_MULTISIG)
+    // produce sorted triplets; relayed witnesses fail this check at consensus.
+    std::vector<uint8_t> prev_pk;
     uint32_t valid_count = 0;
 
     for (uint32_t i = 0; i < threshold; ++i) {
@@ -264,10 +269,12 @@ EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
             return EvalResult::ERROR;
         }
 
-        // Reject duplicate pubkey reveals — each signer must be distinct.
-        for (const auto& seen : seen_pubkeys) {
-            if (seen.size() == pk.data.size() &&
-                std::memcmp(seen.data(), pk.data.data(), seen.size()) == 0) {
+        if (i > 0) {
+            const size_t cmp_len = std::min(prev_pk.size(), pk.data.size());
+            const int c = std::memcmp(prev_pk.data(), pk.data.data(), cmp_len);
+            // Reject ≤ — strict ascending. Equal pubkeys violate the same rule
+            // and replace the prior duplicate-pubkey check.
+            if (c > 0 || (c == 0 && prev_pk.size() >= pk.data.size())) {
                 return EvalResult::UNSATISFIED;
             }
         }
@@ -294,7 +301,7 @@ EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
         if (r == EvalResult::ERROR) return EvalResult::ERROR;
         if (r != EvalResult::SATISFIED) return EvalResult::UNSATISFIED;
 
-        seen_pubkeys.push_back(pk.data);
+        prev_pk = pk.data;
         ++valid_count;
     }
 

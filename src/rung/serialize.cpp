@@ -612,44 +612,8 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                 uint8_t output_index_byte;
                 ss >> output_index_byte;
                 ladder_out.coil.output_index = output_index_byte;
-
-                uint64_t addr_len = ReadCompactSize(ss);
-                if (addr_len != 0 && addr_len != 32) {
-                    error = "coil address_hash must be 0 or 32 bytes, got " + std::to_string(addr_len);
-                    return false;
-                }
-                if (addr_len > 0) {
-                    ladder_out.coil.address_hash.resize(addr_len);
-                    ss.read(MakeWritableByteSpan(ladder_out.coil.address_hash));
-                }
-
-                uint64_t n_coil_rungs = ReadCompactSize(ss);
-                if (n_coil_rungs != 0) {
-                    error = "coil conditions not supported: n_coil_conditions must be 0, got " + std::to_string(n_coil_rungs);
-                    return false;
-                }
-
-                if (!ss.empty()) {
-                    uint64_t n_rung_dests = ReadCompactSize(ss);
-                    if (n_rung_dests > MAX_RUNGS) {
-                        error = "too many rung_destinations: " + std::to_string(n_rung_dests);
-                        return false;
-                    }
-                    ladder_out.coil.rung_destinations.resize(n_rung_dests);
-                    std::set<uint16_t> seen_indices;
-                    for (uint64_t rd = 0; rd < n_rung_dests; ++rd) {
-                        uint8_t lo, hi;
-                    ss >> lo >> hi;
-                    uint16_t rung_idx = static_cast<uint16_t>(lo) | (static_cast<uint16_t>(hi) << 8);
-                    if (!seen_indices.insert(rung_idx).second) {
-                        error = "duplicate rung_destination index: " + std::to_string(rung_idx);
-                        return false;
-                    }
-                    ladder_out.coil.rung_destinations[rd].first = rung_idx;
-                        ladder_out.coil.rung_destinations[rd].second.resize(32);
-                        ss.read(MakeWritableByteSpan(ladder_out.coil.rung_destinations[rd].second));
-                    }
-                }
+                // v0.8: address_hash, n_coil_conditions, rung_destinations all
+                // dropped from the wire format (E-009/E-010). Coil now ends here.
             } // end else (full coil encoding)
 
             // No relays section — inherited from source
@@ -726,50 +690,8 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
             uint8_t output_index_byte2;
             ss >> output_index_byte2;
             ladder_out.coil.output_index = output_index_byte2;
-
-            // Read coil address hash (0 = no address, 32 = SHA256 of raw address)
-            uint64_t addr_len = ReadCompactSize(ss);
-            if (addr_len != 0 && addr_len != 32) {
-                error = "coil address_hash must be 0 or 32 bytes, got " + std::to_string(addr_len);
-                return false;
-            }
-            if (addr_len > 0) {
-                ladder_out.coil.address_hash.resize(addr_len);
-                ss.read(MakeWritableByteSpan(ladder_out.coil.address_hash));
-            }
-
-            // n_coil_rungs MUST be zero — coil conditions aren't a real
-            // field, the slot is preserved only to reject any value.
-            uint64_t n_coil_rungs = ReadCompactSize(ss);
-            if (n_coil_rungs != 0) {
-                error = "coil conditions not supported: n_coil_conditions must be 0, got " + std::to_string(n_coil_rungs);
-                return false;
-            }
-
-            // Per-rung destinations. Optional (0 = none).
-            if (!ss.empty()) {
-                uint64_t n_rung_dests = ReadCompactSize(ss);
-                if (n_rung_dests > MAX_RUNGS) {
-                    error = "too many rung_destinations: " + std::to_string(n_rung_dests);
-                    return false;
-                }
-                if (n_rung_dests > 0) {
-                    ladder_out.coil.rung_destinations.resize(n_rung_dests);
-                    std::set<uint16_t> seen_indices;
-                    for (uint64_t rd = 0; rd < n_rung_dests; ++rd) {
-                        uint8_t lo, hi;
-                        ss >> lo >> hi;
-                        uint16_t rung_idx = static_cast<uint16_t>(lo) | (static_cast<uint16_t>(hi) << 8);
-                        if (!seen_indices.insert(rung_idx).second) {
-                            error = "duplicate rung_destination index: " + std::to_string(rung_idx);
-                            return false;
-                        }
-                        ladder_out.coil.rung_destinations[rd].first = rung_idx;
-                        ladder_out.coil.rung_destinations[rd].second.resize(32);
-                        ss.read(MakeWritableByteSpan(ladder_out.coil.rung_destinations[rd].second));
-                    }
-                }
-            }
+            // v0.8: address_hash, n_coil_conditions, rung_destinations all
+            // dropped from the wire format (E-009/E-010). Coil now ends here.
         }
 
         // Read relays (optional — backward compatible, 0 relays if EOF)
@@ -937,12 +859,11 @@ std::vector<uint8_t> SerializeLadderWitness(const LadderWitness& ladder,
             SerializeField(ss, diff.new_field, true);
         }
 
-        // Write fresh coil (same as normal path, with compact encoding)
+        // v0.8: coil is just type + attestation + scheme + output_index
+        // (address_hash + rung_destinations dropped — E-009/E-010).
         bool is_ref_default_coil = (ladder.coil.coil_type == RungCoilType::UNLOCK &&
                                     ladder.coil.attestation == RungAttestationMode::INLINE &&
-                                    ladder.coil.scheme == RungScheme::SCHNORR &&
-                                    ladder.coil.address_hash.empty() &&
-                                    ladder.coil.rung_destinations.empty());
+                                    ladder.coil.scheme == RungScheme::SCHNORR);
         if (is_ref_default_coil) {
             ss << COMPACT_COIL_SENTINEL;
             ss << ladder.coil.output_index;
@@ -950,19 +871,7 @@ std::vector<uint8_t> SerializeLadderWitness(const LadderWitness& ladder,
             ss << static_cast<uint8_t>(ladder.coil.coil_type);
             ss << static_cast<uint8_t>(ladder.coil.attestation);
             ss << static_cast<uint8_t>(ladder.coil.scheme);
-            ss << ladder.coil.output_index; // TX_MLSC: which output this rung governs
-            WriteCompactSize(ss, ladder.coil.address_hash.size());
-            if (!ladder.coil.address_hash.empty()) {
-                ss.write(MakeByteSpan(ladder.coil.address_hash));
-            }
-            WriteCompactSize(ss, 0); // n_coil_conditions: always 0 (wire format compat)
-            // Write per-rung destinations
-            WriteCompactSize(ss, ladder.coil.rung_destinations.size());
-            for (const auto& [rung_idx, addr_hash] : ladder.coil.rung_destinations) {
-                ss << static_cast<uint8_t>(rung_idx & 0xFF);
-                ss << static_cast<uint8_t>((rung_idx >> 8) & 0xFF);
-                ss.write(MakeByteSpan(addr_hash));
-            }
+            ss << ladder.coil.output_index;
         }
 
         // No relays section — inherited from source
@@ -980,13 +889,12 @@ std::vector<uint8_t> SerializeLadderWitness(const LadderWitness& ladder,
         }
     }
 
-    // Write coil (per-ladder, after all rungs)
-    // Compact coil: default (UNLOCK, INLINE, SCHNORR, no address, no destinations) = 0x00 + output_index
+    // v0.8: coil is just type + attestation + scheme + output_index
+    // (address_hash + rung_destinations dropped — E-009/E-010).
+    // Compact coil sentinel = default (UNLOCK + INLINE + SCHNORR) + output_index = 2 bytes.
     bool is_default_coil = (ladder.coil.coil_type == RungCoilType::UNLOCK &&
                             ladder.coil.attestation == RungAttestationMode::INLINE &&
-                            ladder.coil.scheme == RungScheme::SCHNORR &&
-                            ladder.coil.address_hash.empty() &&
-                            ladder.coil.rung_destinations.empty());
+                            ladder.coil.scheme == RungScheme::SCHNORR);
     if (is_default_coil) {
         ss << COMPACT_COIL_SENTINEL;
         ss << ladder.coil.output_index;
@@ -994,24 +902,7 @@ std::vector<uint8_t> SerializeLadderWitness(const LadderWitness& ladder,
         ss << static_cast<uint8_t>(ladder.coil.coil_type);
         ss << static_cast<uint8_t>(ladder.coil.attestation);
         ss << static_cast<uint8_t>(ladder.coil.scheme);
-        ss << ladder.coil.output_index; // TX_MLSC: which output this rung governs
-
-        // Write coil address
-        WriteCompactSize(ss, ladder.coil.address_hash.size());
-        if (!ladder.coil.address_hash.empty()) {
-            ss.write(MakeByteSpan(ladder.coil.address_hash));
-        }
-
-        // Write coil condition count: always 0 (wire format compat)
-        WriteCompactSize(ss, 0);
-
-        // Write per-rung destinations
-        WriteCompactSize(ss, ladder.coil.rung_destinations.size());
-        for (const auto& [rung_idx, addr_hash] : ladder.coil.rung_destinations) {
-            ss << static_cast<uint8_t>(rung_idx & 0xFF);
-            ss << static_cast<uint8_t>((rung_idx >> 8) & 0xFF);
-            ss.write(MakeByteSpan(addr_hash));
-        }
+        ss << ladder.coil.output_index;
     }
 
     // Write relays (only if any relays or rung relay_refs exist)
@@ -1075,28 +966,13 @@ std::vector<uint8_t> SerializeRungBlocks(const Rung& rung, SerializationContext 
 
 std::vector<uint8_t> SerializeCoilData(const RungCoil& coil)
 {
+    // v0.8: 4 bytes — type + attestation + scheme + output_index.
+    // address_hash + rung_destinations dropped (E-009/E-010).
     DataStream ss{};
-
     ss << static_cast<uint8_t>(coil.coil_type);
     ss << static_cast<uint8_t>(coil.attestation);
     ss << static_cast<uint8_t>(coil.scheme);
-    ss << coil.output_index; // Committed in Merkle leaf — binds rung to output
-
-    WriteCompactSize(ss, coil.address_hash.size());
-    if (!coil.address_hash.empty()) {
-        ss.write(MakeByteSpan(coil.address_hash));
-    }
-
-    WriteCompactSize(ss, 0); // n_coil_conditions: always 0 (wire format compat)
-
-    // Per-rung destinations (0 = none, backward compatible)
-    WriteCompactSize(ss, coil.rung_destinations.size());
-    for (const auto& [rung_idx, addr_hash] : coil.rung_destinations) {
-        ss << static_cast<uint8_t>(rung_idx & 0xFF);
-        ss << static_cast<uint8_t>((rung_idx >> 8) & 0xFF);
-        ss.write(MakeByteSpan(addr_hash));
-    }
-
+    ss << coil.output_index;
     std::vector<uint8_t> result(ss.size());
     ss.read(MakeWritableByteSpan(result));
     return result;

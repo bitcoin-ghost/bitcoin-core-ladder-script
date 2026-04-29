@@ -600,13 +600,19 @@ inline bool IsPQScheme(RungScheme s)
 
 /** Coil metadata — attached to each output (LadderWitness), determines unlock semantics.
  *  UNLOCK:    Standard spend to an address.
- *  UNLOCK_TO: Send to an address (coil address field specifies destination). */
+ *  UNLOCK_TO: Send to an address. (Wallet routing of the destination is off-chain
+ *             since v0.8; consensus carries no address bytes. See E-009/E-010.)
+ *
+ *  v0.8: dropped `address_hash` and `rung_destinations` — pure wallet-routing hints
+ *  that no consensus rule consumed and that the witness deserialiser was unable to
+ *  bind, so a spender could swap them at spend time. Worst case before: ~576 B/input
+ *  attacker channel. Wallets that need "remember where this UTXO was meant to go"
+ *  must track it locally (same as Bitcoin wallets remember change addresses
+ *  without putting them in the witness). */
 struct RungCoil {
     RungCoilType coil_type{RungCoilType::UNLOCK};
     RungAttestationMode attestation{RungAttestationMode::INLINE};
     RungScheme scheme{RungScheme::SCHNORR};
-    std::vector<uint8_t> address_hash;         //!< SHA256(destination address) — raw address never on-chain. Empty if none.
-    std::vector<std::pair<uint16_t, std::vector<uint8_t>>> rung_destinations; //!< Per-rung destination overrides: (rung_index, address_hash). Bounded by MAX_RUNGS.
     uint8_t output_index{0};                   //!< TX_MLSC: which output this rung governs. Committed in Merkle leaf.
 };
 
@@ -1245,6 +1251,50 @@ inline constexpr ImplicitFieldLayout MUSIG_THRESHOLD_WITNESS = SIG_WITNESS;
 /** CLTV_SIG witness: [PUBKEY(var), SIGNATURE(var), NUMERIC(varint)] */
 inline constexpr ImplicitFieldLayout CLTV_SIG_WITNESS = TIMELOCKED_SIG_WITNESS;
 
+// -- v0.8 (E-018a) witness layouts --
+// Closing field-permutation channels on blocks that previously serialised
+// witness fields explicitly (per-field [type byte, len, data]).
+// Each block listed below has a fixed witness shape, so making the type
+// bytes implicit removes both the wire bytes and the ordering channel.
+
+/** ADAPTOR_SIG witness: [PUBKEY(var), SIGNATURE(var)] — same shape as SIG. */
+inline constexpr ImplicitFieldLayout ADAPTOR_SIG_WITNESS = SIG_WITNESS;
+
+/** PTLC witness: [PUBKEY(var), SIGNATURE(var)] — CSV NUMERIC arrives via
+ *  conditions merge; only PUBKEY+SIGNATURE travel on the witness side. */
+inline constexpr ImplicitFieldLayout PTLC_WITNESS = SIG_WITNESS;
+
+/** KEY_REF_SIG witness: [SIGNATURE(var)] — pubkey is dereferenced from the
+ *  declared relay block, NUMERIC(relay_index)/NUMERIC(block_index) are
+ *  conditions fields. Witness side carries only the SIGNATURE. */
+inline constexpr ImplicitFieldLayout KEY_REF_SIG_WITNESS = {1, {
+    {RungDataType::SIGNATURE, 0},
+}};
+
+/** VAULT_LOCK witness: [PUBKEY(recovery, var), PUBKEY(hot, var), SIGNATURE(var)].
+ *  Both pubkeys revealed (committed by PubkeyCountForBlock = 2) so the rung
+ *  leaf can be reconstructed; one signature attests the chosen path. */
+inline constexpr ImplicitFieldLayout VAULT_LOCK_WITNESS = {3, {
+    {RungDataType::PUBKEY, 0},
+    {RungDataType::PUBKEY, 0},
+    {RungDataType::SIGNATURE, 0},
+}};
+
+/** ANCHOR_FEE witness: [PUBKEY, PUBKEY, SIGNATURE, SIGNATURE] — 2-of-2 sig
+ *  check. Conditions hold the SCHEME + fee/weight/commitment NUMERICs. */
+inline constexpr ImplicitFieldLayout ANCHOR_FEE_WITNESS = {4, {
+    {RungDataType::PUBKEY, 0},
+    {RungDataType::PUBKEY, 0},
+    {RungDataType::SIGNATURE, 0},
+    {RungDataType::SIGNATURE, 0},
+}};
+
+/** ANCHOR_ORACLE witness: [PUBKEY(oracle, var)] — pure marker reveal of the
+ *  oracle pubkey committed via Merkle. Outcome NUMERIC is conditions-side. */
+inline constexpr ImplicitFieldLayout ANCHOR_ORACLE_WITNESS = {1, {
+    {RungDataType::PUBKEY, 0},
+}};
+
 // -- QABI family layouts --
 
 // QABIO implicit layouts (BIP-YYYY). Gated on ENABLE_QABIO so the base
@@ -1409,6 +1459,14 @@ inline const ImplicitFieldLayout& GetImplicitLayout(RungBlockType type, uint8_t 
         case RungBlockType::HTLC:             return HTLC_WITNESS;
         case RungBlockType::HASH_SIG:         return HASH_SIG_WITNESS;
         case RungBlockType::CLTV_SIG:         return CLTV_SIG_WITNESS;
+        // v0.8 (E-018a) — implicit witness layouts close field-permutation
+        // channels and trim per-field type bytes.
+        case RungBlockType::ADAPTOR_SIG:      return ADAPTOR_SIG_WITNESS;
+        case RungBlockType::PTLC:             return PTLC_WITNESS;
+        case RungBlockType::KEY_REF_SIG:      return KEY_REF_SIG_WITNESS;
+        case RungBlockType::VAULT_LOCK:       return VAULT_LOCK_WITNESS;
+        case RungBlockType::ANCHOR_FEE:       return ANCHOR_FEE_WITNESS;
+        case RungBlockType::ANCHOR_ORACLE:    return ANCHOR_ORACLE_WITNESS;
         // Legacy family
         case RungBlockType::P2PK_LEGACY:      return SIG_WITNESS;
         case RungBlockType::P2PKH_LEGACY:     return SIG_WITNESS;
@@ -1462,9 +1520,9 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         // Signature family
         {RungBlockType::SIG, "SIG", true, false, true, 1, &SIG_CONDITIONS, &SIG_WITNESS, false},
         {RungBlockType::MULTISIG, "MULTISIG", true, false, true, 0, &MULTISIG_CONDITIONS, nullptr, true},
-        {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 1, nullptr, nullptr, false},
+        {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 1, nullptr, &ADAPTOR_SIG_WITNESS, false},
         {RungBlockType::MUSIG_THRESHOLD, "MUSIG_THRESHOLD", true, false, true, 1, &MUSIG_THRESHOLD_CONDITIONS, &MUSIG_THRESHOLD_WITNESS, false},
-        {RungBlockType::KEY_REF_SIG, "KEY_REF_SIG", true, false, true, 0, &KEY_REF_SIG_CONDITIONS, nullptr, true},
+        {RungBlockType::KEY_REF_SIG, "KEY_REF_SIG", true, false, true, 0, &KEY_REF_SIG_CONDITIONS, &KEY_REF_SIG_WITNESS, false},
         // Timelock family
         {RungBlockType::CSV, "CSV", true, true, false, 0, &CSV_CONDITIONS, &CSV_WITNESS, false},
         {RungBlockType::CSV_TIME, "CSV_TIME", true, true, false, 0, &CSV_TIME_CONDITIONS, &CSV_WITNESS, false},
@@ -1475,7 +1533,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::HASH_GUARDED, "HASH_GUARDED", true, false, false, 0, &HASH_GUARDED_CONDITIONS, &HASH_GUARDED_WITNESS, false},
         // Covenant family
         {RungBlockType::CTV, "CTV", true, true, false, 0, &CTV_CONDITIONS, &CTV_WITNESS, true},
-        {RungBlockType::VAULT_LOCK, "VAULT_LOCK", true, false, true, 2, &VAULT_LOCK_CONDITIONS, nullptr, true},
+        {RungBlockType::VAULT_LOCK, "VAULT_LOCK", true, false, true, 2, &VAULT_LOCK_CONDITIONS, &VAULT_LOCK_WITNESS, false},
         {RungBlockType::AMOUNT_LOCK, "AMOUNT_LOCK", true, true, false, 0, &AMOUNT_LOCK_CONDITIONS, nullptr, true},
         // Recursion family
         {RungBlockType::RECURSE_SAME, "RECURSE_SAME", true, true, false, 0, &RECURSE_SAME_CONDITIONS, nullptr, true},
@@ -1490,7 +1548,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::ANCHOR_POOL, "ANCHOR_POOL", true, true, false, 0, &ANCHOR_POOL_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_RESERVE, "ANCHOR_RESERVE", true, true, false, 0, &ANCHOR_RESERVE_CONDITIONS, nullptr, true},
         {RungBlockType::ANCHOR_SEAL, "ANCHOR_SEAL", true, true, false, 0, &ANCHOR_SEAL_CONDITIONS, nullptr, true},
-        {RungBlockType::ANCHOR_ORACLE, "ANCHOR_ORACLE", true, false, true, 1, &ANCHOR_ORACLE_CONDITIONS, nullptr, true},
+        {RungBlockType::ANCHOR_ORACLE, "ANCHOR_ORACLE", true, false, true, 1, &ANCHOR_ORACLE_CONDITIONS, &ANCHOR_ORACLE_WITNESS, false},
         {RungBlockType::DATA_RETURN, "DATA_RETURN", true, true, false, 0, &DATA_RETURN_CONDITIONS, nullptr, true},
         // PLC family
         {RungBlockType::HYSTERESIS_FEE, "HYSTERESIS_FEE", true, true, false, 0, &HYSTERESIS_FEE_CONDITIONS, nullptr, true},
@@ -1511,10 +1569,10 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::TIMELOCKED_SIG, "TIMELOCKED_SIG", true, false, true, 1, &TIMELOCKED_SIG_CONDITIONS, &TIMELOCKED_SIG_WITNESS, false},
         {RungBlockType::HTLC, "HTLC", true, false, true, 2, &HTLC_CONDITIONS, &HTLC_WITNESS, false},
         {RungBlockType::HASH_SIG, "HASH_SIG", true, false, true, 1, &HASH_SIG_CONDITIONS, &HASH_SIG_WITNESS, false},
-        {RungBlockType::PTLC, "PTLC", true, false, true, 1, &PTLC_CONDITIONS, nullptr, true},
+        {RungBlockType::PTLC, "PTLC", true, false, true, 1, &PTLC_CONDITIONS, &PTLC_WITNESS, false},
         {RungBlockType::CLTV_SIG, "CLTV_SIG", true, false, true, 1, &CLTV_SIG_CONDITIONS, &CLTV_SIG_WITNESS, false},
         {RungBlockType::TIMELOCKED_MULTISIG, "TIMELOCKED_MULTISIG", true, false, true, 0, &TIMELOCKED_MULTISIG_CONDITIONS, nullptr, true},
-        {RungBlockType::ANCHOR_FEE, "ANCHOR_FEE", true, false, true, 2, &ANCHOR_FEE_CONDITIONS, nullptr, true},
+        {RungBlockType::ANCHOR_FEE, "ANCHOR_FEE", true, false, true, 2, &ANCHOR_FEE_CONDITIONS, &ANCHOR_FEE_WITNESS, false},
         // Governance family
         {RungBlockType::EPOCH_GATE, "EPOCH_GATE", true, false, false, 0, &EPOCH_GATE_CONDITIONS, nullptr, true},
         {RungBlockType::WEIGHT_LIMIT, "WEIGHT_LIMIT", true, true, false, 0, &WEIGHT_LIMIT_CONDITIONS, nullptr, true},
@@ -1567,19 +1625,20 @@ inline bool VerifyImplicitLayoutPairing()
         RungBlockType::EPOCH_GATE, RungBlockType::ANCHOR_SEAL,
         RungBlockType::AMOUNT_LOCK, RungBlockType::CTV,
         RungBlockType::DATA_RETURN,
-        RungBlockType::MULTISIG, RungBlockType::KEY_REF_SIG,
-        RungBlockType::VAULT_LOCK,
+        RungBlockType::MULTISIG,
+        // v0.8 (E-018a): KEY_REF_SIG, VAULT_LOCK, ANCHOR_ORACLE, PTLC, ANCHOR_FEE
+        // moved out of this whitelist — they now have implicit witness layouts.
         RungBlockType::RECURSE_SAME, RungBlockType::RECURSE_UNTIL,
         RungBlockType::RECURSE_COUNT, RungBlockType::RECURSE_SPLIT,
         RungBlockType::ANCHOR_CHANNEL, RungBlockType::ANCHOR_POOL,
-        RungBlockType::ANCHOR_RESERVE, RungBlockType::ANCHOR_ORACLE,
+        RungBlockType::ANCHOR_RESERVE,
         RungBlockType::HYSTERESIS_FEE, RungBlockType::HYSTERESIS_VALUE,
         RungBlockType::TIMER_CONTINUOUS, RungBlockType::TIMER_OFF_DELAY,
         RungBlockType::LATCH_SET, RungBlockType::LATCH_RESET,
         RungBlockType::COUNTER_DOWN, RungBlockType::COUNTER_PRESET,
         RungBlockType::COUNTER_UP, RungBlockType::SEQUENCER,
         RungBlockType::ONE_SHOT, RungBlockType::RATE_LIMIT,
-        RungBlockType::PTLC, RungBlockType::TIMELOCKED_MULTISIG,
+        RungBlockType::TIMELOCKED_MULTISIG,
         RungBlockType::WEIGHT_LIMIT, RungBlockType::INPUT_COUNT,
         RungBlockType::OUTPUT_COUNT, RungBlockType::RELATIVE_VALUE,
         RungBlockType::ACCUMULATOR,

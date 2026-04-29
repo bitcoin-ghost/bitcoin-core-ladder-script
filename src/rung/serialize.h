@@ -50,9 +50,10 @@ static constexpr size_t MAX_SCRIPT_BODY_FIELDS_PER_TX = 1;
  *  Prevents UTXO set bloat and cheap output-layer spam.
  *  Matches current Bitcoin dust threshold for witness outputs. */
 static constexpr int64_t MIN_RUNG_OUTPUT_VALUE = 546;
-/** Coil address is carried as SHA256(raw_address) — 32 bytes, fixed.
- *  Raw address never goes on-chain. Wire format: 0 (no address) or 32 (hash). */
-static constexpr size_t COIL_ADDRESS_HASH_SIZE = 32;
+// v0.8: COIL_ADDRESS_HASH_SIZE removed alongside coil.address_hash and
+// coil.rung_destinations (E-009/E-010). Coil no longer carries any
+// destination metadata on the wire.
+
 /** Maximum number of relays per ladder witness. */
 static constexpr size_t MAX_RELAYS = 8;
 /** Maximum number of relay requirements per rung or relay. */
@@ -94,7 +95,7 @@ static constexpr size_t MAX_ACCUMULATOR_BLOCKS_PER_TX = 2;
  *  meaningful bandwidth cost. */
 static constexpr size_t MAX_ACCUMULATOR_ELEMENT_ID = 0xFFFF;
 /** Compact coil sentinel: 0x00 + output_index(1) = 2 bytes total.
- *  Expands to default coil: UNLOCK + INLINE + SCHNORR + no address + no rung_destinations. */
+ *  Expands to default coil: UNLOCK + INLINE + SCHNORR. */
 static constexpr uint8_t COMPACT_COIL_SENTINEL = 0x00;
 
 /** Serialization context — determines which implicit field table to use. */
@@ -130,9 +131,8 @@ enum class SerializationContext : uint8_t {
  *    [coil_type: uint8_t]
  *    [attestation: uint8_t]
  *    [scheme: uint8_t]
- *    [address_len: varint]
- *    [address: bytes]              (raw scriptPubKey, 0 len = no address)
- *    [n_coil_conditions: varint]   (must be 0 — reserved slot)
+ *  v0.8: coil ends at output_index — address_len/address/n_coil_conditions/
+ *  rung_destinations all dropped (E-009/E-010, were unbound spender channels).
  */
 bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
                               LadderWitness& ladder_out,
@@ -157,8 +157,9 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
 std::vector<uint8_t> SerializeRungBlocks(const Rung& rung, SerializationContext ctx);
 
 /** Serialize coil metadata to bytes (for MLSC Merkle leaf computation).
- *  Format: coil_type(1) + attestation(1) + scheme(1) + address_len(varint) + address +
- *          n_conditions(varint, always 0) + rung_destinations. */
+ *  v0.8 format (4 bytes): coil_type(1) + attestation(1) + scheme(1) + output_index(1).
+ *  address_len/address and n_coil_conditions/rung_destinations were removed
+ *  in v0.8 (E-009/E-010 — they were unbound spender data channels). */
 std::vector<uint8_t> SerializeCoilData(const RungCoil& coil);
 
 /** Serialize a relay's blocks + relay_refs to bytes (for MLSC Merkle leaf computation).

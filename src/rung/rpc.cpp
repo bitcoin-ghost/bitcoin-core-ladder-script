@@ -35,6 +35,7 @@
 
 #include <univalue.h>
 
+#include <algorithm>
 #include <cstring>
 #include <set>
 
@@ -101,9 +102,8 @@ static UniValue CoilToJSON(const RungCoil& coil)
     case RungScheme::SPHINCS_SHA: obj.pushKV("scheme", "SPHINCS_SHA"); break;
     default: obj.pushKV("scheme", "UNKNOWN"); break;
     }
-    if (!coil.address_hash.empty()) {
-        obj.pushKV("address_hash", HexStr(coil.address_hash));
-    }
+    // v0.8: address_hash + rung_destinations dropped from on-wire coil
+    // (E-009/E-010). Wallet metadata lives off-chain.
     return obj;
 }
 
@@ -574,14 +574,16 @@ static RungCoil ParseCoil(const UniValue& obj)
         else if (s == "DILITHIUM3") coil.scheme = RungScheme::DILITHIUM3;
         else if (s == "SPHINCS_SHA") coil.scheme = RungScheme::SPHINCS_SHA;
     }
+    // v0.8: 'address' and 'rung_destinations' are no longer accepted. They were
+    // unbound spender data channels (E-009/E-010). Wallets that need destination
+    // metadata must track it locally.
     if (obj.exists("address")) {
-        // Hash the raw address — only the hash goes on-chain (anti-spam)
-        auto raw_address = ParseHex(obj["address"].get_str());
-        if (!raw_address.empty()) {
-            coil.address_hash.resize(CSHA256::OUTPUT_SIZE);
-            CSHA256().Write(raw_address.data(), raw_address.size())
-                     .Finalize(coil.address_hash.data());
-        }
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            "coil.address was removed in v0.8 (E-009). Track destination metadata off-chain.");
+    }
+    if (obj.exists("rung_destinations")) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            "coil.rung_destinations was removed in v0.8 (E-010). Track per-rung destinations off-chain.");
     }
     if (obj.exists("conditions") && !obj["conditions"].get_array().empty()) {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -644,19 +646,6 @@ static RPCHelpMan decoderung()
                     {RPCResult::Type::STR, "type", "Coil type"},
                     {RPCResult::Type::STR, "attestation", "Attestation mode"},
                     {RPCResult::Type::STR, "scheme", "Signature scheme"},
-                    {RPCResult::Type::STR_HEX, "address_hash", /*optional=*/ true, "SHA256 of destination address (raw address never on-chain)"},
-                    {RPCResult::Type::ARR, "conditions", /*optional=*/ true, "Coil condition rungs (same block format as input rungs)",
-                        {
-                            {RPCResult::Type::OBJ, "", "", {
-                                {RPCResult::Type::ARR, "blocks", "Function blocks",
-                                    {
-                                        {RPCResult::Type::OBJ, "", "", {
-                                            {RPCResult::Type::STR, "type", "Block type name"},
-                                            {RPCResult::Type::BOOL, "inverted", "Whether block is inverted"},
-                                        }},
-                                    }},
-                            }},
-                        }},
                 }},
         }},
         RPCExamples{
@@ -722,7 +711,6 @@ static RPCHelpMan createrung()
                 {
                     {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "UNLOCK or UNLOCK_TO"},
                     {"scheme", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "SCHNORR or ECDSA"},
-                    {"address", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Destination scriptPubKey hex"},
                 },
             },
         },
@@ -1213,6 +1201,24 @@ static void SignMultiKey(const UniValue& block_spec,
         return std::nullopt;
     };
 
+    // v0.8 (E-018b): collect (pubkey, proof, sig) triplets and emit them in
+    // strict ascending pubkey-lex order. Consensus rejects any other order
+    // — closes ~log2(K!) bits/spend of permutation channel.
+    struct Triplet {
+        std::vector<uint8_t> pubkey;
+        std::vector<uint256> proof;
+        std::vector<uint8_t> signature;
+    };
+    std::vector<Triplet> triplets;
+
+    auto flush_sorted = [&]() {
+        std::sort(triplets.begin(), triplets.end(),
+                  [](const Triplet& a, const Triplet& b) { return a.pubkey < b.pubkey; });
+        for (auto& t : triplets) {
+            PushMultisigTriplet(block, t.pubkey, t.proof, std::move(t.signature));
+        }
+    };
+
     // PQ scheme path
     if (block_spec.exists("scheme")) {
         std::string scheme_str = block_spec["scheme"].get_str();
@@ -1267,8 +1273,9 @@ static void SignMultiKey(const UniValue& block_spec,
                         block_name, s));
                 }
                 std::vector<uint256> proof = rung::BuildPubkeyMerkleProof(all_pubkeys, s);
-                PushMultisigTriplet(block, all_pubkeys[s], proof, std::move(pq_sig));
+                triplets.push_back({all_pubkeys[s], std::move(proof), std::move(pq_sig)});
             }
+            flush_sorted();
             return;
         }
     }
@@ -1325,8 +1332,9 @@ static void SignMultiKey(const UniValue& block_spec,
                 "%s: Schnorr signing failed for key %d", block_name, s));
         }
         std::vector<uint8_t> sig(sig_buf, sig_buf + 64);
-        PushMultisigTriplet(block, all_pubkeys[*idx_opt], proof, std::move(sig));
+        triplets.push_back({all_pubkeys[*idx_opt], std::move(proof), std::move(sig)});
     }
+    flush_sorted();
 }
 
 /** Build a witness block for a single signing spec entry. */
@@ -1440,29 +1448,15 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::VAULT_LOCK: {
-        // Vault lock: needs 2 PUBKEYs (recovery + hot) + NUMERIC(delay) + SIGNATURE.
-        // The evaluator tries both keys. User provides both pubkeys + privkey for signing.
-        // Auto-populate both pubkeys if user provides "pubkeys" array.
+        // VAULT_LOCK v0.8 witness: implicit [PUBKEY(recovery), PUBKEY(hot),
+        // SIGNATURE]. NUMERIC(delay) is a CONDITIONS field — arrives via
+        // the merge step, never on the witness wire (E-018a).
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
                 PushWitnessPubkey(block, ParseHex(pk_arr[i].get_str()));
             }
         }
-        // Copy NUMERIC(delay) from conditions
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::VAULT_LOCK) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::NUMERIC) {
-                            block.fields.push_back(f);
-                            goto vault_delay_done;
-                        }
-                    }
-                }
-            }
-        }
-        vault_delay_done:;
         // Sign with the provided key
         if (block_spec.exists("privkey")) {
             std::string wif = block_spec["privkey"].get_str();
@@ -1737,9 +1731,28 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::KEY_REF_SIG: {
-        // Sign using a key whose pubkey commitment lives in a relay block.
-        // PQ or Schnorr, depending on scheme. Relay resolves SCHEME at evaluation time.
-        SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "KEY_REF_SIG");
+        // KEY_REF_SIG v0.8 witness: implicit [SIGNATURE] only. The pubkey
+        // is resolved from the referenced relay block at evaluation time —
+        // any pubkey on the witness side would be unbound spender-controlled
+        // bytes (E-018a), so emit only the signature here.
+        if (!block_spec.exists("privkey")) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "KEY_REF_SIG: requires 'privkey' (WIF)");
+        }
+        std::string wif = block_spec["privkey"].get_str();
+        CKey privkey = DecodeSecret(wif);
+        if (!privkey.IsValid()) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "KEY_REF_SIG: Invalid private key");
+        }
+        uint256 sighash;
+        if (!rung::SignatureHashLadder(txdata, mtx, input_idx, SIGHASH_DEFAULT, conditions, sighash)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "KEY_REF_SIG: Failed to compute sighash");
+        }
+        unsigned char sig_buf[64];
+        uint256 aux_rand = GetRandHash();
+        if (!privkey.SignSchnorr(sighash, sig_buf, nullptr, aux_rand)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "KEY_REF_SIG: Schnorr signing failed");
+        }
+        block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(sig_buf, sig_buf + 64)});
         break;
     }
     case RungBlockType::ACCUMULATOR: {
