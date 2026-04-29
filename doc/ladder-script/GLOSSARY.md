@@ -649,10 +649,13 @@ fields concatenated with pubkeys from key-consuming blocks (folded via
 mutating either changes the root.
 
 ### ValidateRungOutputs
-Function in `evaluator.cpp`. Per-transaction consensus check run on the first input.
-Ensures every output uses MLSC format (`0xDF` prefix), enforces dust threshold
-(`MIN_RUNG_OUTPUT_VALUE = 546 sats`), and allows at most 1 DATA_RETURN output per
-transaction.
+Function in `evaluator.cpp`. Per-transaction consensus check called once per v4
+tx by `CheckRungTxLevel` (production path: `validation.cpp:2406`, regardless of
+input position). Ensures every output uses MLSC format (`0xDF` prefix), enforces
+dust threshold (`MIN_RUNG_OUTPUT_VALUE = 546 sats`), and allows at most 1
+DATA_RETURN output per transaction. The evaluator also re-runs the same check
+on `input_index == 0` as a redundant safety net for test paths that bypass
+`validation.cpp`.
 
 ### VAULT_LOCK
 Block type 0x0302 (Covenant family). Vault timelock covenant with hot/cold key pairs.

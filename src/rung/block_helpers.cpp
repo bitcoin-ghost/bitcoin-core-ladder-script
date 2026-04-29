@@ -486,11 +486,25 @@ EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
                 rung_pks = (*ctx.rung_pubkeys)[0];
             }
         } else {
-            // Cross-rung mutation: find in revealed_mutation_targets
+            // Cross-rung mutation: find in revealed_mutation_targets.
+            // v0.12 (audit 8b F1): the spender supplies target.rung at spend
+            // time; we MUST verify that ComputeTxMLSCLeaf(target.rung) matches
+            // the leaf the conditions_root committed to. Without this check
+            // a spender can substitute a fake rung at any non-revealed index
+            // and erase its constraints across the covenant transition — the
+            // post-mutation tree would commit to fake_rung_post_mutation and
+            // the spender chooses output_root to match.
             if (!ctx.mlsc_proof) return EvalResult::UNSATISFIED;
             bool found = false;
             for (const auto& target : ctx.mlsc_proof->revealed_mutation_targets) {
                 if (target.idx == static_cast<uint16_t>(m.rung_idx)) {
+                    // Verify target.rung's pre-mutation leaf matches the
+                    // committed leaf at this index in verified_leaves.
+                    RungCoil tgt_coil = ctx.input_conditions->coil;
+                    auto tgt_cp = BuildCPRung(target.rung, target.pubkeys, tgt_coil);
+                    if (ComputeTxMLSCLeaf(tgt_cp) != vl.leaves[m.rung_idx]) {
+                        return EvalResult::UNSATISFIED;
+                    }
                     mutated_rung = target.rung;
                     rung_pks = target.pubkeys;
                     found = true;

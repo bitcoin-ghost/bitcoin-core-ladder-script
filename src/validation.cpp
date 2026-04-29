@@ -2413,6 +2413,48 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     "block-script-verify-flag-failed (tx_mlsc_check)", rung_error);
             }
         }
+
+        // v0.12 (audit 8b F2): populate PQ_BATCH anchor cache sequentially
+        // BEFORE the parallel script-check loop dispatches. Per-input checks
+        // snapshot the cache and merge back; if anchor and non-anchor inputs
+        // run on different workers, a non-anchor's snapshot can miss the
+        // anchor's write → consensus split between -par settings. The
+        // pre-pass eliminates the race by populating the cache once,
+        // synchronously, before dispatch.
+#ifdef ENABLE_QABIO
+        if (pq_batch_cache) {
+            // Build a LadderTxView via the shim. Use a local LadderTxViewBuilder
+            // (same one CheckRungTxLevel uses internally via rung_shims) by
+            // calling the namespace-scoped helper.
+            rung::LadderTxViewBuilder pq_b(tx);
+            std::vector<rung::api::LadderOutputView> sov;
+            sov.reserve(txdata.m_spent_outputs.size());
+            for (const auto& out : txdata.m_spent_outputs) {
+                rung::api::LadderOutputView ov;
+                ov.value = out.nValue;
+                ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+                sov.push_back(ov);
+            }
+            rung::LadderPrecomputedBuilder pq_pcb(txdata);
+            rung::PQBatchCache prepass_cache;
+            if (!rung::PreparePQBatchAnchorCache(pq_b.view, sov.data(), sov.size(), pq_pcb.view, prepass_cache)) {
+                std::string err = "PQ_BATCH anchor pre-pass failed";
+                if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
+                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                        "mempool-script-verify-flag-failed (pq_batch_anchor)", err);
+                } else {
+                    return state.Invalid(TxValidationResult::TX_CONSENSUS,
+                        "block-script-verify-flag-failed (pq_batch_anchor)", err);
+                }
+            }
+            // Merge into the shared cache so per-input workers see the
+            // anchor entries on snapshot.
+            LOCK(pq_batch_cache->mutex);
+            for (const auto& [k, v] : prepass_cache) {
+                pq_batch_cache->cache.emplace(k, v);
+            }
+        }
+#endif
     }
 
     for (unsigned int i = 0; i < tx.vin.size(); i++) {

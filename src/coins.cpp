@@ -133,6 +133,15 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
     // compression; the root is recovered from this synthetic entry at spend
     // time. The synthetic-root marker is distinct from MLSC_MARKER so the
     // compressor does not strip the root.
+    //
+    // KNOWN DESIGN GAP (audit #7 #6, v0.12 deferred): the synthetic entry is
+    // only removed in DisconnectBlock — never on the forward path when the
+    // last real MLSC output of the tx is spent. UTXO bloat is ~33 B + Coin
+    // overhead per v4 tx, permanent past finality. ~9 MB/year at 100 v4 tx/
+    // block sustained. Fixing this requires a per-tx live-output count
+    // (ref-count) or migrating the conditions_root store out of the UTXO set
+    // entirely (separate index). Both are on-disk-format changes that need
+    // a dedicated release; tracked for v0.13+.
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
         CTxOut root_out;
         root_out.nValue = 0; // sentinel: not a real output, not spendable

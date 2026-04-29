@@ -182,7 +182,11 @@ transaction. Leaf membership verified against cached leaf set via `SharedTreeCac
 
 ## 6. Verification Flow: `VerifyRungTx`
 
-### Per-transaction (first input only)
+### Per-transaction (run once per v4 tx)
+
+Production validation runs `CheckRungTxLevel` unconditionally per v4 tx
+(`validation.cpp:2406`). The evaluator re-runs the same check on
+`input_index == 0` as a redundant safety net for test paths.
 
 1. `ValidateRungOutputs`: all outputs must be MLSC (`0xDF`), max 1 DATA_RETURN,
    dust threshold (546 sats)

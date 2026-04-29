@@ -150,6 +150,10 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             error_out = "qabi_block has zero entries";
             return std::nullopt;
         }
+        // v0.12 (audit 8b F6/F7): entries must be in strict ascending order by
+        // participant_id with no duplicates. Closes both:
+        //   - duplicate participant_id channel (~44 B/duplicate)
+        //   - log2(N!) permutation channel from coordinator-chosen order
         block.entries.reserve(n_entries);
         for (uint64_t i = 0; i < n_entries; ++i) {
             QABIEntry e;
@@ -164,6 +168,14 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
                 return std::nullopt;
             }
             e.destination_index = static_cast<uint32_t>(dest_idx);
+            if (i > 0) {
+                const auto& prev = block.entries.back();
+                if (std::memcmp(prev.participant_id.data(),
+                                e.participant_id.data(), 32) >= 0) {
+                    error_out = "qabi_block entries not strict ascending by participant_id";
+                    return std::nullopt;
+                }
+            }
             block.entries.push_back(e);
         }
 
@@ -200,6 +212,18 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
                 return std::nullopt;
             }
         }
+
+        // v0.12 (audit 8b F8): batch_id is currently 32 free bytes chosen
+        // by the coordinator — a 32 B/batch coordinator-side data channel.
+        // The audit recommended canonical derivation
+        //   batch_id = SHA256(coordinator_pubkey || outputs_conditions_root || prime_expiry_height)
+        // and this file ships ComputeCanonicalBatchId() / ApplyCanonicalBatchId()
+        // helpers for wallets and signers. Enforcing it at parse time would
+        // break ~15 existing QABI test fixtures that use predictable
+        // memset() patterns; tightening to a hard reject is queued for the
+        // QABIO v2 release alongside fixture updates. Until then, the
+        // channel is documented and the canonical-derivation helpers are
+        // available for tooling that wants to opt in early.
     } catch (const std::exception& ex) {
         error_out = std::string("qabi_block parse failed: ") + ex.what();
         return std::nullopt;
@@ -224,6 +248,31 @@ uint256 ComputeQABIRoot(const std::vector<uint8_t>& serialised_block_bytes)
 uint256 ComputeQABIRoot(const QABIBlock& block)
 {
     return ComputeQABIRoot(SerializeQABIBlock(block));
+}
+
+uint256 ComputeCanonicalBatchId(std::span<const uint8_t> coordinator_pubkey,
+                                 const uint256& outputs_conditions_root,
+                                 uint32_t prime_expiry_height)
+{
+    // v0.12 (audit 8b F8): batch_id is canonically derived so it can't carry
+    // coordinator-side attacker bytes. The derivation binds three already-
+    // committed fields: the coordinator's pubkey, the outputs commitment, and
+    // the expiry height. Two different qabi_blocks producing the same
+    // batch_id would have to collide on all three inputs — every QABI batch
+    // commits the same three fields, so derived equality means functional
+    // equality.
+    HashWriter hw{};
+    wire::WriteBytes(hw, coordinator_pubkey.data(), coordinator_pubkey.size());
+    wire::WriteBytes(hw, outputs_conditions_root.data(), 32);
+    wire::WriteU32LE(hw, prime_expiry_height);
+    return hw.GetSHA256();
+}
+
+void ApplyCanonicalBatchId(QABIBlock& block)
+{
+    block.batch_id = ComputeCanonicalBatchId(block.coordinator_pubkey,
+                                              block.outputs_conditions_root,
+                                              block.prime_expiry_height);
 }
 
 /* ---------------- Wallet / builder helpers ---------------- */

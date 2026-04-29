@@ -8839,6 +8839,41 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_relay_refs)
                         "expected 'strict ascending' in error, got: " + error);
 }
 
+// Audit 8b F4 regression: extend coverage of v0.11 #1 to all four fixed sites.
+// The prior test at line 8810 covers only the legacy revealed_rung path; the
+// SHARED-mode rung, revealed_relays, and mutation_target paths need their own
+// regressions so reverting any of the four fix sites would cause a failure.
+BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_revealed_relay_refs)
+{
+    // Legacy FULL_LEAVES proof with revealed_rung OK + revealed_relays
+    // carrying descending relay_refs at relay-side.
+    DataStream ss;
+    WriteCompactSize(ss, 1);                    // total_rungs
+    WriteCompactSize(ss, 3);                    // total_relays = 3 (so refs [1,0] are valid range)
+    WriteCompactSize(ss, 0);                    // rung_index
+    WriteCompactSize(ss, 1);                    // n_blocks
+    ss << uint8_t{0x00};                        // SIG
+    ss << uint8_t{0x01};                        // SCHEME
+    WriteCompactSize(ss, 0);                    // rung relay_refs: empty (OK)
+    WriteCompactSize(ss, 1);                    // n_revealed_relays
+    WriteCompactSize(ss, 0);                    // relay_index = 0
+    WriteCompactSize(ss, 1);                    // relay n_blocks
+    ss << uint8_t{0x00};                        // SIG
+    ss << uint8_t{0x01};                        // SCHEME
+    WriteCompactSize(ss, 2);                    // n_relay_refs
+    WriteCompactSize(ss, 1);                    // relay_refs[0] = 1
+    WriteCompactSize(ss, 0);                    // relay_refs[1] = 0  ← descending
+
+    std::vector<uint8_t> bytes(ss.size());
+    ss.read(MakeWritableByteSpan(bytes));
+
+    MLSCProof proof;
+    std::string error;
+    BOOST_CHECK(!DeserializeMLSCProof(bytes, proof, error));
+    BOOST_CHECK_MESSAGE(error.find("strict ascending") != std::string::npos,
+                        "expected 'strict ascending' in error, got: " + error);
+}
+
 // v0.7+: mlsc_proof_verify_single_sig / mlsc_proof_verify_two_rungs /
 // mlsc_proof_with_relays were removed. They compared `ComputeConditionsRoot`
 // (which delegates to ComputeTxMLSCRoot — TaggedHash leaves) against
@@ -14843,15 +14878,27 @@ static std::vector<ScaleParticipant> BuildScaleParticipants(
         sp.spend_preimage = sp.chain[chain_length - (prime_depth + 1)];
 
         // Placeholder owner pubkey (real code would use actual FALCON pk).
-        sp.owner_pubkey_bytes.assign(33, static_cast<uint8_t>(0x20 + p));
+        // v0.12 (audit 8b F6/F7): encode `p` across 4 bytes so owner_pubkey_bytes
+        // — and the SHA256-derived owner_id — stay unique past 256 participants.
+        // Pre-v0.12 the single-byte `0x20 + p` wrapped at p=224 and produced
+        // duplicate owner_ids, which now reject at QABI parse time.
+        sp.owner_pubkey_bytes.assign(33, 0);
+        sp.owner_pubkey_bytes[0] = static_cast<uint8_t>((p >> 24) & 0xFF);
+        sp.owner_pubkey_bytes[1] = static_cast<uint8_t>((p >> 16) & 0xFF);
+        sp.owner_pubkey_bytes[2] = static_cast<uint8_t>((p >> 8) & 0xFF);
+        sp.owner_pubkey_bytes[3] = static_cast<uint8_t>(p & 0xFF);
         CSHA256()
             .Write(sp.owner_pubkey_bytes.data(), sp.owner_pubkey_bytes.size())
             .Finalize(sp.owner_id.data());
 
         // Unique destination per participant.
         sp.destination.nValue = 1000 + static_cast<int64_t>(p) * 10;
-        sp.destination.scriptPubKey = CScript() << OP_0
-            << std::vector<uint8_t>(20, static_cast<uint8_t>(p));
+        std::vector<uint8_t> dst_id(20, 0);
+        dst_id[0] = static_cast<uint8_t>((p >> 24) & 0xFF);
+        dst_id[1] = static_cast<uint8_t>((p >> 16) & 0xFF);
+        dst_id[2] = static_cast<uint8_t>((p >> 8) & 0xFF);
+        dst_id[3] = static_cast<uint8_t>(p & 0xFF);
+        sp.destination.scriptPubKey = CScript() << OP_0 << dst_id;
         participants.push_back(std::move(sp));
     }
     return participants;
@@ -14878,6 +14925,12 @@ static QABIBlock BuildScaleQABIBlock(
         e.destination_index = static_cast<uint32_t>(p);
         block.entries.push_back(e);
     }
+    // v0.12 (audit 8b F6/F7): canonical strict-ascending order on entries.
+    std::sort(block.entries.begin(), block.entries.end(),
+              [](const QABIEntry& a, const QABIEntry& b) {
+                  return std::memcmp(a.participant_id.data(),
+                                     b.participant_id.data(), 32) < 0;
+              });
     for (const auto& sp : participants) {
         block.output_values.push_back(sp.destination.nValue);
     }
@@ -15266,10 +15319,12 @@ BOOST_AUTO_TEST_CASE(adversarial_duplicate_participant_id_rejected_by_parse)
     auto bytes = SerializeQABIBlock(block);
     std::string err;
     auto parsed = ParseQABIBlock(bytes, err);
-    // Duplicate participant_ids are not rejected by the parser —
-    // policy layer (wallet/coordinator) is responsible for catching this.
-    BOOST_CHECK_MESSAGE(parsed.has_value(),
-                        "duplicate participant_ids should parse (policy catches): " << err);
+    // v0.12 (audit 8b F6/F7): duplicate participant_ids are now rejected at
+    // parse time — they violate strict-ascending order. Pre-v0.12 the parser
+    // accepted duplicates and policy layer was expected to catch them.
+    BOOST_CHECK(!parsed.has_value());
+    BOOST_CHECK_MESSAGE(err.find("strict ascending") != std::string::npos,
+                        "expected 'strict ascending' in error, got: " << err);
 }
 
 BOOST_AUTO_TEST_CASE(adversarial_wrong_auth_tip_rejected)
@@ -15364,7 +15419,14 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
     size_t n = 0;
     while (running + 50 < TARGET_FILL) {  // ~50 B per participant after dedup
         QABIEntry e;
-        std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
+        // v0.12 (audit 8b F6/F7): participant_ids must be strict-ascending
+        // unique. Encode n as a 32-bit BE prefix in participant_id.data()[0..3]
+        // so monotonic n -> monotonic id with no wrap.
+        std::memset(e.participant_id.data(), 0, 32);
+        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 24) & 0xFF);
+        e.participant_id.data()[1] = static_cast<uint8_t>((n >> 16) & 0xFF);
+        e.participant_id.data()[2] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        e.participant_id.data()[3] = static_cast<uint8_t>(n & 0xFF);
         e.contribution = 1000;
         e.destination_index = static_cast<uint32_t>(n);
         block.entries.push_back(e);
@@ -15412,8 +15474,12 @@ BOOST_AUTO_TEST_CASE(qabi_block_over_soft_cap_rejected_by_policy)
     size_t n = 0;
     while (running + 54 < TARGET_FILL) {
         QABIEntry e;
-        std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
-        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        // v0.12 (audit 8b F6/F7): monotonic 32-bit BE prefix for canonical order.
+        std::memset(e.participant_id.data(), 0, 32);
+        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 24) & 0xFF);
+        e.participant_id.data()[1] = static_cast<uint8_t>((n >> 16) & 0xFF);
+        e.participant_id.data()[2] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        e.participant_id.data()[3] = static_cast<uint8_t>(n & 0xFF);
         e.contribution = 1000;
         e.destination_index = static_cast<uint32_t>(n);
         block.entries.push_back(e);
@@ -15480,10 +15546,12 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
     size_t n = 0;
     while (running + 54 < TARGET_FILL) {
         QABIEntry e;
-        std::memset(e.participant_id.data(), static_cast<uint8_t>(n & 0xFF), 32);
-        // Vary middle bytes so participant_ids don't collide in hot regions.
-        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        // v0.12 (audit 8b F6/F7): monotonic 32-bit BE prefix for canonical order.
+        std::memset(e.participant_id.data(), 0, 32);
+        e.participant_id.data()[0] = static_cast<uint8_t>((n >> 24) & 0xFF);
         e.participant_id.data()[1] = static_cast<uint8_t>((n >> 16) & 0xFF);
+        e.participant_id.data()[2] = static_cast<uint8_t>((n >> 8) & 0xFF);
+        e.participant_id.data()[3] = static_cast<uint8_t>(n & 0xFF);
         e.contribution = 1000;
         e.destination_index = static_cast<uint32_t>(n);
         block.entries.push_back(e);

@@ -149,19 +149,26 @@ EvalResult EvalMusigThresholdBlock(const RungBlock& block,
         return EvalResult::ERROR;
     }
 
-    // Validate M and N policy fields (if present)
+    // v0.12 (audit 8b F9): require M and N to be present and validated.
+    // Pre-v0.12 the check was conditional on numerics.size() >= 2 — if a
+    // block author omitted M/N, MUSIG_THRESHOLD degenerated to plain SIG
+    // and the policy fields became unenforced. The conditions implicit
+    // layout already requires 2 NUMERICs at deserialise, so this is
+    // defence-in-depth for any path that constructs the merged block
+    // without going through the deserialiser (test fixtures, RPC builders).
     auto numerics = FindAllFields(block, RungDataType::NUMERIC);
-    if (numerics.size() >= 2) {
-        auto m_opt = ReadNumeric(*numerics[0]);
-        auto n_opt = ReadNumeric(*numerics[1]);
-        if (!m_opt || !n_opt) {
-            return EvalResult::ERROR;
-        }
-        int64_t m = *m_opt;
-        int64_t n = *n_opt;
-        if (m <= 0 || n <= 0 || m > n) {
-            return EvalResult::ERROR;
-        }
+    if (numerics.size() < 2) {
+        return EvalResult::ERROR;
+    }
+    auto m_opt = ReadNumeric(*numerics[0]);
+    auto n_opt = ReadNumeric(*numerics[1]);
+    if (!m_opt || !n_opt) {
+        return EvalResult::ERROR;
+    }
+    int64_t m = *m_opt;
+    int64_t n = *n_opt;
+    if (m <= 0 || n <= 0 || m > n) {
+        return EvalResult::ERROR;
     }
 
     // Schnorr-only: aggregate signatures are always Schnorr

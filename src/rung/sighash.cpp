@@ -80,7 +80,13 @@ static uint256 HashRungConditions(const RungConditions& conditions)
     ladder.rungs = conditions.rungs;
     auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
 
-    HashWriter ss{};
+    // v0.12 (audit 8a addendum A1): tag the fallback path with the same
+    // sighash domain so test fixtures can't accidentally produce a digest
+    // that collides with a different production-path computation. In
+    // production this branch is unreachable because consensus rejects
+    // non-MLSC v4 outputs (so conditions_root is always set); the tag is
+    // defence-in-depth for unit tests that build RungConditions directly.
+    HashWriter ss{HASHER_LADDERSIGHASH};
     WriteBytes(ss, bytes.data(), bytes.size());
     return ss.GetSHA256();
 }
@@ -119,17 +125,21 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
 {
     if (nIn >= tx.input_count) return false;
 
-    // Valid: {0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}
-    // 0x80 (ANYONECANPAY + SIGHASH_DEFAULT) is excluded, matching BIP341.
+    // v0.12 (audit #7 #5): ANYPREVOUT (0x40..0x43) and ANYPREVOUTANYSCRIPT
+    // (0xC0..0xC3) hash types are rejected unconditionally. Both let a
+    // signer's signature be replayed against UTXOs the signer didn't intend
+    // to spend (BIP-118 mitigates with a dedicated pubkey prefix; Ladder
+    // Script has no equivalent today). Until a future release introduces
+    // proper opt-in via a dedicated block type or pubkey-prefix scheme, the
+    // safer default is to reject the entire 0x40 / 0xC0 family from
+    // SignatureHashLadder. eltoo / channel-replacement workflows that
+    // require these can build on top of a future opt-in mechanism.
+    //
+    // Valid (post-v0.12): {0x00..0x03, 0x81..0x83}.
     const bool valid_hash_type =
         (hash_type <= 0x03) ||
-        (hash_type >= 0x40 && hash_type <= 0x43) ||
-        (hash_type >= 0x81 && hash_type <= 0x83) ||
-        (hash_type >= 0xC0 && hash_type <= 0xC3);
+        (hash_type >= 0x81 && hash_type <= 0x83);
     if (!valid_hash_type) return false;
-
-    const bool anyprevout = (hash_type & LADDER_SIGHASH_ANYPREVOUT) != 0;
-    const bool anyprevoutanyscript = (hash_type & LADDER_SIGHASH_ANYPREVOUTANYSCRIPT) == LADDER_SIGHASH_ANYPREVOUTANYSCRIPT;
 
     if (!cache.ladder_ready) return false;
 
@@ -145,9 +155,7 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
     WriteU32LE(ss, tx.lock_time);                   // tx.locktime
 
     if (input_type != LADDER_SIGHASH_ANYONECANPAY) {
-        if (!anyprevout) {
-            WriteBytes(ss, cache.hash_prevouts_sha256, 32);
-        }
+        WriteBytes(ss, cache.hash_prevouts_sha256, 32);
         WriteBytes(ss, cache.hash_spent_amounts_sha256, 32);
         WriteBytes(ss, cache.hash_sequences_sha256, 32);
     }
@@ -159,9 +167,7 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
 
     if (input_type == LADDER_SIGHASH_ANYONECANPAY) {
         if (!cache.spent_outputs || nIn >= cache.spent_output_count) return false;
-        if (!anyprevout) {
-            WriteLadderOutPoint(ss, tx.inputs[nIn].prevout);
-        }
+        WriteLadderOutPoint(ss, tx.inputs[nIn].prevout);
         WriteLadderOutput(ss, cache.spent_outputs[nIn]);
         WriteU32LE(ss, tx.inputs[nIn].sequence);
     } else {
@@ -176,7 +182,7 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
         WriteU256(ss, single_hash);
     }
 
-    if (!anyprevoutanyscript) {
+    {
         uint256 conditions_hash = HashRungConditions(conditions);
         WriteU256(ss, conditions_hash);
     }

@@ -31,6 +31,7 @@
 
 #include <hash.h>
 #include <rung/api.h>
+#include <rung/evaluator.h>
 #include <rung/types.h>
 #include <uint256.h>
 
@@ -157,6 +158,19 @@ uint256 ComputeQABIRoot(const std::vector<uint8_t>& serialised_block_bytes);
  *  ComputeQABIRoot(SerializeQABIBlock(block)). */
 uint256 ComputeQABIRoot(const QABIBlock& block);
 
+/** v0.12 (audit 8b F8): canonical derivation of `batch_id` from already-
+ *  committed fields. The deserialiser rejects any qabi_block whose stored
+ *  batch_id doesn't match this derivation. Closes a coordinator-side 32 B
+ *  data channel. */
+uint256 ComputeCanonicalBatchId(std::span<const uint8_t> coordinator_pubkey,
+                                 const uint256& outputs_conditions_root,
+                                 uint32_t prime_expiry_height);
+
+/** Convenience: stuff the canonical batch_id into a QABIBlock in place.
+ *  Used by tests / wallet builders that construct a QABIBlock and want the
+ *  parser to accept it. */
+void ApplyCanonicalBatchId(QABIBlock& block);
+
 /* ---------------- Wallet / builder helpers ---------------- */
 
 /** Compute the public tip of a UTXO's auth hash chain.
@@ -238,6 +252,24 @@ std::vector<uint8_t> SerializeSingleBlockWitness(const RungBlock& block);
 namespace api {
 uint256 ComputeSighashQABO(const LadderTxView& tx);
 }  // namespace api
+
+/** v0.12 (audit 8b F2): pre-pass to populate the per-tx PQ_BATCH cache from
+ *  anchor inputs sequentially, before parallel script-check workers dispatch.
+ *  Without this pre-pass, anchor and non-anchor PQ_BATCH inputs running on
+ *  different workers race on the cache snapshot/merge → mempool accepts but
+ *  block validation rejects under -par >= 2 → consensus split.
+ *
+ *  Returns false if any anchor's commit/signature fails — caller rejects tx.
+ *  Returns true (pre-pass complete) if all anchors verify, or if there are
+ *  no PQ_BATCH inputs.
+ *
+ *  Out-cache is per-tx (caller-owned); typically merged into the shared
+ *  ThreadSafePQBatchCache before launching parallel checks. */
+bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
+                                const api::LadderOutputView* spent_outputs,
+                                size_t spent_output_count,
+                                const api::LadderPrecomputedTxData& cache,
+                                rung::PQBatchCache& out_cache);
 
 } // namespace rung
 

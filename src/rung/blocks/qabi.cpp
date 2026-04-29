@@ -213,10 +213,27 @@ static EvalResult EvalQABIPrimeBlock(const RungBlock& block,
     // indices. The pubkey list travels inside each MLSCMutationTarget
     // (required for rungs with SIG/key-consuming blocks so the
     // consensus-time leaf hash matches bit-exact).
+    //
+    // v0.12 (audit 8b F1): each target.rung MUST hash to the leaf the
+    // conditions_root committed to at target.idx. Without this check a
+    // spender substitutes a fake rung at non-revealed indices and then
+    // points QABI_PRIME at it — same equivocation pattern as the
+    // VerifyMutatedLeaves cross-rung path. The verified_leaves array is
+    // the source of truth for committed leaves; if it isn't populated
+    // (test paths), fail closed.
     std::vector<std::vector<std::vector<uint8_t>>> full_pks;
     full_pks.resize(ctx.mlsc_proof->total_rungs);
+    if (!ctx.verified_leaves) {
+        return EvalResult::ERROR;
+    }
     for (const auto& target : ctx.mlsc_proof->revealed_mutation_targets) {
         if (target.idx < full_tree.rungs.size()) {
+            RungCoil tgt_coil = ctx.input_conditions->coil;
+            auto tgt_cp = BuildCPRung(target.rung, target.pubkeys, tgt_coil);
+            if (target.idx >= ctx.verified_leaves->leaves.size() ||
+                ComputeTxMLSCLeaf(tgt_cp) != ctx.verified_leaves->leaves[target.idx]) {
+                return EvalResult::UNSATISFIED;
+            }
             full_tree.rungs[target.idx] = target.rung;
             full_pks[target.idx] = target.pubkeys;
         }
@@ -751,6 +768,107 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     }
 
     return verified ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
+}
+
+/** v0.12 (audit 8b F2): anchor pre-pass for PQ_BATCH cache.
+ *
+ *  Under parallel script-check workers (CCheckQueue), each worker takes a
+ *  snapshot of the per-tx PQ_BATCH cache before running VerifyRungTx and
+ *  merges new entries back after. If the anchor input (which writes the
+ *  cache entry) and a non-anchor input (which reads it) run on different
+ *  workers concurrently, the non-anchor's snapshot may not yet contain
+ *  the anchor's write → returns UNSATISFIED → block rejected.
+ *
+ *  This helper walks the tx's MLSC inputs in order, finds PQ_BATCH blocks
+ *  with a fully-revealed witness (PUBKEY + SIGNATURE = anchor), runs the
+ *  same anchor verification path EvalPQBatchBlock takes, and writes the
+ *  result into the shared cache before parallel dispatch begins. The
+ *  per-input checks then see the cache fully populated.
+ *
+ *  Returns true if all anchors verified successfully (or there were no
+ *  anchors). False on any signature/commit failure — the caller should
+ *  reject the tx.
+ *
+ *  Cache lifetime is per-tx; pre-pass runs once at the top of script
+ *  verification. */
+bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
+                                const api::LadderOutputView* spent_outputs,
+                                size_t spent_output_count,
+                                const api::LadderPrecomputedTxData& cache,
+                                rung::PQBatchCache& out_cache)
+{
+    auto is_mlsc = [&](size_t i) {
+        if (!spent_outputs || i >= spent_output_count) return false;
+        return rung::api::IsMLSCScript(spent_outputs[i].script_pub_key.as_span());
+    };
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!is_mlsc(i)) continue;
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
+        LadderWitness lw;
+        std::string err;
+        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
+
+        auto scan = [&](const std::vector<RungBlock>& blocks) -> bool {
+            for (const auto& blk : blocks) {
+                if (blk.type != RungBlockType::PQ_BATCH) continue;
+                const RungField* hf = nullptr;
+                const RungField* pkf = nullptr;
+                const RungField* sgf = nullptr;
+                for (const auto& f : blk.fields) {
+                    if (f.type == RungDataType::HASH256 && !hf) hf = &f;
+                    else if (f.type == RungDataType::PUBKEY && !pkf) pkf = &f;
+                    else if (f.type == RungDataType::SIGNATURE && !sgf) sgf = &f;
+                }
+                if (!hf || hf->data.size() != 32) continue;
+                if (!pkf || !sgf) continue; // not the anchor; skip
+
+                uint256 commit_key;
+                std::memcpy(commit_key.data(), hf->data.data(), 32);
+                if (out_cache.count(commit_key)) continue; // anchor already cached
+
+                unsigned char computed[CSHA256::OUTPUT_SIZE];
+                CSHA256().Write(pkf->data.data(), pkf->data.size()).Finalize(computed);
+                if (std::memcmp(computed, hf->data.data(), 32) != 0) {
+                    return false;
+                }
+                RungScheme scheme;
+                const size_t pk_len = pkf->data.size();
+                if (pk_len == 897) scheme = RungScheme::FALCON512;
+                else if (pk_len == 1793) scheme = RungScheme::FALCON1024;
+                else if (pk_len == 1952) scheme = RungScheme::DILITHIUM3;
+                else continue; // unknown — let per-input path reject
+
+                // Reuse the LadderTxView sighash. Construct a minimal eval
+                // context that PreparePQ needs only for FetchLadderSighash.
+                RungEvalContext sigctx;
+                sigctx.tx = &tx;
+                sigctx.precomputed = &cache;
+                sigctx.input_index = static_cast<uint32_t>(i);
+                uint8_t sighash[32];
+                if (!FetchLadderSighash(sigctx, SIGHASH_DEFAULT, sighash)) {
+                    return false;
+                }
+                std::span<const uint8_t> msg{sighash, 32};
+                std::span<const uint8_t> sig_span{sgf->data.data(), sgf->data.size()};
+                std::span<const uint8_t> pk_span{pkf->data.data(), pkf->data.size()};
+                if (!VerifyPQSignature(scheme, sig_span, msg, pk_span)) {
+                    return false;
+                }
+                out_cache[commit_key] = true;
+            }
+            return true;
+        };
+        for (const auto& rung : lw.rungs) {
+            if (!scan(rung.blocks)) return false;
+        }
+        for (const auto& relay : lw.relays) {
+            if (!scan(relay.blocks)) return false;
+        }
+    }
+    return true;
 }
 
 void register_qabi_blocks()

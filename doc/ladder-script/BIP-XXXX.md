@@ -391,11 +391,15 @@ Spending an MLSC output evaluates as follows:
    verify the Merkle path against the `conditions_root` from the
    spent output's scriptPubKey. (For SHARED proof mode, verify
    against the cached root from the source input.)
-3. **Apply per-tx checks** on the first input: every output is MLSC
-   (`0xDF`) or MLSC + DATA_RETURN; at most one DATA_RETURN per tx;
-   total preimage fields across all witnesses ≤
-   `MAX_PREIMAGE_FIELDS_PER_TX`; legacy multi-witness checks for
-   `LEGACY_*` blocks.
+3. **Apply per-tx checks** once per v4 transaction (regardless of
+   input position; production validation runs them unconditionally,
+   while a redundant safety net inside the evaluator fires on
+   `input_index == 0`). Checks: every output is MLSC (`0xDF`) or
+   MLSC + DATA_RETURN; at most one DATA_RETURN per tx; total
+   preimage / SCRIPT_BODY fields across all MLSC-spending inputs ≤
+   `MAX_PREIMAGE_FIELDS_PER_TX` / `MAX_SCRIPT_BODY_FIELDS_PER_TX`
+   (bootstrap inputs excluded since v0.10, audit #6 F-2); legacy
+   multi-witness checks for `LEGACY_*` blocks.
 4. **Evaluate** the rungs in order. For each rung, evaluate its blocks
    left-to-right (conjunctive). If any block returns `UNSATISFIED` or
    `ERROR`, that rung fails; try the next rung. If a block returns

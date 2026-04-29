@@ -338,7 +338,14 @@ inline size_t FieldMaxSize(RungDataType type)
     case RungDataType::SCRIPT_BODY:   return 80;
     case RungDataType::SIGNATURE:     return 50000;
     case RungDataType::SPEND_INDEX:   return 4;
-    case RungDataType::NUMERIC:       return 8;
+    // NUMERIC: in-memory data buffer is canonicalised to 4-byte LE at
+    // deserialise (caps at 0xFFFFFFFF); the wire format is a CompactSize
+    // varint up to 9 bytes for the value cell itself. FieldMaxSize bounds
+    // the *stored* `data.size()`, which is always 4 post-deserialise.
+    // (audit 8b F15: doc/code alignment — pre-v0.12 this returned 8 with
+    // no explanation.) See `serialize.cpp` ReadNumeric for the canonical
+    // 4-byte LE storage path.
+    case RungDataType::NUMERIC:       return 4;
     case RungDataType::SCHEME:        return 1;
     case RungDataType::DATA:          return 40;  // hash (32) + protocol metadata (8)
     case RungDataType::MERKLE_PROOF:  return 128; // 4 levels * 32 bytes — bounded by MAX_MULTISIG_TREE_DEPTH

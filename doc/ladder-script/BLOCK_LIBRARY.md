@@ -5,6 +5,36 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
+> **v0.12 (2026-04-29)** — audit 8a/8b follow-up:
+> - **F1 (HIGH)**: `VerifyMutatedLeaves` cross-rung path and `EvalQABIPrimeBlock`
+>   full-tree reconstruction now verify `ComputeTxMLSCLeaf(BuildCPRung(target.rung))`
+>   matches the leaf the conditions_root committed to before applying any
+>   mutation. Closes a covenant-escape vector where a spender substituted a
+>   fake rung at non-revealed indices.
+> - **F2 (HIGH)**: PQ_BATCH cross-input cache is now populated by a
+>   sequential anchor pre-pass (`PreparePQBatchAnchorCache` in
+>   `validation.cpp:2417`) before the parallel script-check loop dispatches.
+>   Closes a consensus split between nodes with different `-par` settings.
+> - **F3 (HIGH)**: `RELATIVE_VALUE` cross-multiply now uses `__int128`.
+>   Closes signed-overflow UB at `(numerator-1) * denominator` near the
+>   deserialiser cap (consensus split risk).
+> - **#5 (MED)**: `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT` (`0xC0..0xC3`) and
+>   `LADDER_SIGHASH_ANYPREVOUT` (`0x40..0x43`) are unconditionally rejected
+>   by `SignatureHashLadder`. Until a future release introduces opt-in via
+>   a dedicated block type (BIP-118 style), eltoo workflows are gated.
+> - **F4 (MED)**: extended regression coverage for v0.11 #1 — added
+>   `mlsc_proof_rejects_unsorted_revealed_relay_refs` to cover the
+>   revealed_relays site.
+> - **F6 / F7 (LOW)**: QABI parser enforces strict-ascending unique order
+>   on `entries[*].participant_id`. Closes coordinator-side duplicate +
+>   permutation channels.
+> - **F8 (LOW, helper-only)**: `ComputeCanonicalBatchId` /
+>   `ApplyCanonicalBatchId` helpers exposed; deserialiser enforcement
+>   queued for QABIO v2.
+> - **F9 (LOW)**: `MUSIG_THRESHOLD` evaluator now requires M and N
+>   NUMERIC fields (was conditional). Defence-in-depth — implicit layout
+>   already enforces 2 NUMERICs at deserialise.
+>
 > **v0.11 (2026-04-29)** — audit #7 follow-up:
 > - **#1**: `MLSCProof` deserialise now enforces strict ascending unique
 >   on the proof-side `relay_refs` (revealed_rung, revealed_relays,

@@ -252,7 +252,12 @@ static const CSHA256 ACCUMULATOR_LEAF_HASHER     = InitTaggedHasher("LadderAccum
 static const CSHA256 ACCUMULATOR_INTERIOR_HASHER = InitTaggedHasher("LadderAccumulatorInterior/v1");
 
 /** Padding leaf for the inner pubkey tree (empty-input tagged hash). */
-static const uint256 MULTISIG_EMPTY_LEAF = TaggedHash("LadderMultisigPubkey/v1", nullptr, 0);
+// v0.12 (audit 8b F13): empty-leaf padding uses a distinct tagged-hash
+// domain so it cannot alias a real pubkey leaf even if FieldMinSize were
+// ever loosened to permit 0-byte PUBKEYs. Today FieldMinSize(PUBKEY)=1
+// blocks this from being exploitable, but the distinct domain is
+// defence-in-depth.
+static const uint256 MULTISIG_EMPTY_LEAF = TaggedHash("LadderMultisigPadding/v1", nullptr, 0);
 
 /** Hash a single pubkey as an inner-tree leaf. */
 static uint256 MultisigPubkeyLeaf(const std::vector<uint8_t>& pubkey)

@@ -173,13 +173,9 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
     int64_t numerator = *numerator_opt;
     int64_t denominator = *denominator_opt;
     if (numerator < 0 || denominator <= 0) return EvalResult::ERROR;
-    // Reject numerator / denominator outside uint32. The cross-division
-    // below uses (a % n) * d and (c % d) * n — both expressions are
-    // bounded by n*d, which must fit in int64_t. n*d < 2^63 requires
-    // each of n and d to be < 2^32 (since 2^32 * 2^32 = 2^64 > int64
-    // max). Without this guard, an 8-byte NUMERIC NUMERIC paired with
-    // amounts near MAX_MONEY would overflow the remainder products and
-    // the comparison would silently take the wrong branch.
+    // Reject numerator / denominator outside uint32. NUMERIC fields are
+    // 4-byte LE on the wire; this guard is defence-in-depth in case a
+    // future encoding loosens that.
     if (numerator > 0xFFFFFFFFLL || denominator > 0xFFFFFFFFLL) {
         return EvalResult::ERROR;
     }
@@ -201,21 +197,19 @@ EvalResult EvalRelativeValueBlock(const RungBlock& block, const RungEvalContext&
         return EvalResult::SATISFIED;
     }
     // Both numerator > 0 and denominator > 0 at this point.
-    // Compare: output_amount * denominator >= input_amount * numerator
-    // Rearrange: output_amount / numerator >= input_amount / denominator
-    //   with careful remainder handling to avoid truncation errors.
-    int64_t lhs_quot = ctx.output_amount / numerator;
-    int64_t rhs_quot = ctx.input_amount / denominator;
-    if (lhs_quot > rhs_quot) return EvalResult::SATISFIED;
-    if (lhs_quot < rhs_quot) return EvalResult::UNSATISFIED;
-    // Quotients equal — compare remainders: (a%n)*d vs (c%d)*n
-    // These remainders are bounded: a%n < n, c%d < d.
-    // So (a%n)*d < n*d and (c%d)*n < d*n — both < n*d which fits in int64_t
-    // when n and d are each < 2^32 (NUMERIC fields are max 4 bytes = 2^32).
-    int64_t lhs_rem = (ctx.output_amount % numerator) * denominator;
-    int64_t rhs_rem = (ctx.input_amount % denominator) * numerator;
-    if (lhs_rem >= rhs_rem) return EvalResult::SATISFIED;
-    return EvalResult::UNSATISFIED;
+    // Compare output_amount * denominator >= input_amount * numerator without
+    // overflow. v0.12 (audit 8b F3): use __int128 for the cross-multiply.
+    // Pre-v0.12 the comparison used a quotient + remainder decomposition that
+    // claimed to "stay within 64 bits when n and d are each < 2^32" — that's
+    // wrong: max(remainder) = (n-1) and remainder * d can reach
+    // (2^32-2)(2^32-1) ≈ 1.84e19, exceeding int64_t::max ≈ 9.22e18. Signed
+    // overflow is UB in C++ → consensus split between compilers/optimisers.
+    // amounts are bounded by MAX_MONEY ≈ 2.1e15 (well within int64), and
+    // n / d are each ≤ 2^32 - 1, so the cross-products fit comfortably in
+    // 128 bits (max ≈ 2^32 * 2.1e15 ≈ 9e24, far below 2^127).
+    __int128 lhs = static_cast<__int128>(ctx.output_amount) * denominator;
+    __int128 rhs = static_cast<__int128>(ctx.input_amount) * numerator;
+    return (lhs >= rhs) ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
 }
 
 EvalResult EvalAccumulatorBlock(const RungBlock& block)
