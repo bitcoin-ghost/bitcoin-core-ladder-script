@@ -387,7 +387,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   PQBatchCache* pq_batch_cache = nullptr,
                   std::mutex* pq_batch_cache_mutex = nullptr,
                   std::mutex* shared_cache_mutex = nullptr,
-                  std::mutex* qabo_sig_cache_mutex = nullptr);
+                  std::mutex* qabo_sig_cache_mutex = nullptr,
+                  std::string* error_message_out = nullptr);
 
 } // namespace rung
 

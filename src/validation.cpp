@@ -2227,7 +2227,8 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             pq_batch_cache_ptr = &m_pq_batch_cache->cache;
             pq_batch_cache_mutex_ptr = &m_pq_batch_cache->mutex;
         }
-        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr, qabo_sig_cache_mutex_ptr);
+        std::string ladder_err_msg;
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr, qabo_sig_cache_mutex_ptr, &ladder_err_msg);
         // v0.14 (audit #10 F2): no merge-back for qabo_sig_cache — writes
         // go through the shared mutex inside EvalQABISpendBlock and are
         // already in place.
@@ -2237,7 +2238,27 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         if (ok) {
             return std::nullopt;
         } else {
-            auto debug_str = strprintf("input %i of %s (wtxid %s), spending %s:%i", nIn, ptxTo->GetHash().ToString(), ptxTo->GetWitnessHash().ToString(), ptxTo->vin[nIn].prevout.hash.ToString(), ptxTo->vin[nIn].prevout.n);
+            // ladder_err_msg (when populated) carries the specific check
+            // that fired inside script-verify — e.g. "MLSC proof: shared
+            // proof shared_source_input exceeds uint16 max", "merge
+            // conditions+witness: ...", or "TX_MLSC tx-level: ...".
+            // Append to debug_str so users see the reason in the mempool
+            // reject (reject_reason + ", " + debug_str via
+            // `ValidationState::ToString`). Same intent as the
+            // DecodeHexTx patch (b423a45e4f) but at the script-verify
+            // layer.
+            auto debug_str = ladder_err_msg.empty()
+                ? strprintf("input %i of %s (wtxid %s), spending %s:%i",
+                            nIn, ptxTo->GetHash().ToString(),
+                            ptxTo->GetWitnessHash().ToString(),
+                            ptxTo->vin[nIn].prevout.hash.ToString(),
+                            ptxTo->vin[nIn].prevout.n)
+                : strprintf("input %i of %s (wtxid %s), spending %s:%i [%s]",
+                            nIn, ptxTo->GetHash().ToString(),
+                            ptxTo->GetWitnessHash().ToString(),
+                            ptxTo->vin[nIn].prevout.hash.ToString(),
+                            ptxTo->vin[nIn].prevout.n,
+                            ladder_err_msg);
             return std::make_pair(error, std::move(debug_str));
         }
     }

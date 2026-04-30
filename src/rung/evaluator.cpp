@@ -887,10 +887,24 @@ bool VerifyRungTx(
     size_t input_index,
     const LadderOutputView& spent_output,
     const LadderEvalContext& ctx,
-    LadderScriptError* error_out)
+    LadderScriptError* error_out,
+    std::string* error_message_out)
 {
+    // `fail` (no-message) is the bulk path — most rejections are
+    // structural and the LadderScriptError code is enough. `fail_msg`
+    // captures a human-readable string for the rejections that have
+    // one (deserialiser parse_err strings, witness-merge failures,
+    // tx-level check messages). Operator-friendliness only — same
+    // intent as the DecodeHexTx patch but at the script-verify layer.
     auto fail = [&](LadderScriptError code) -> bool {
         if (error_out) *error_out = code;
+        return false;
+    };
+    auto fail_msg = [&](LadderScriptError code, std::string_view msg) -> bool {
+        if (error_out) *error_out = code;
+        if (error_message_out && !msg.empty()) {
+            *error_message_out = std::string(msg);
+        }
         return false;
     };
 
@@ -917,7 +931,8 @@ bool VerifyRungTx(
             ? ctx.precomputed->spent_output_count : 0;
         if (!CheckRungTxLevel(tx, spent_outs, spent_count, tx_error)) {
             LogPrintf("TX_MLSC tx-level check failed: %s\n", tx_error);
-            return fail(LadderScriptError::UNKNOWN_ERROR);
+            return fail_msg(LadderScriptError::UNKNOWN_ERROR,
+                            "TX_MLSC tx-level: " + tx_error);
         }
     }
 
@@ -1045,7 +1060,8 @@ bool VerifyRungTx(
     LadderWitness witness_ladder;
     std::string deser_error;
     if (!DeserializeLadderWitness(witness_bytes, witness_ladder, deser_error)) {
-        return fail(LadderScriptError::WITNESS_MALFORMED);
+        return fail_msg(LadderScriptError::WITNESS_MALFORMED,
+                        "ladder witness deserialise: " + deser_error);
     }
 
     // Resolve witness references if needed (diff witness mode)
@@ -1080,7 +1096,8 @@ bool VerifyRungTx(
         std::string proof_error;
         if (!DeserializeMLSCProof(proof_bytes, mlsc_proof, proof_error)) {
             LogPrintf("MLSC proof deserialization failed: %s\n", proof_error);
-            return fail(LadderScriptError::PROOF_DESERIALISE_FAILED);
+            return fail_msg(LadderScriptError::PROOF_DESERIALISE_FAILED,
+                            "MLSC proof: " + proof_error);
         }
 
         // SHARED proof mode: validate against a previously verified input from the same source tx
@@ -1461,7 +1478,8 @@ bool VerifyRungTx(
         // Merge conditions with witness.
         std::string merge_error;
         if (!MergeConditionsAndWitness(conditions, witness_ladder, eval_ladder, merge_error)) {
-            return fail(LadderScriptError::WITNESS_MALFORMED);
+            return fail_msg(LadderScriptError::WITNESS_MALFORMED,
+                            "merge conditions+witness: " + merge_error);
         }
 
         if (!EvalLadder(eval_ladder, *ctx.sig_checker, legacy_checker,
@@ -1499,7 +1517,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   PQBatchCache* pq_batch_cache,
                   std::mutex* pq_batch_cache_mutex,
                   std::mutex* shared_cache_mutex,
-                  std::mutex* qabo_sig_cache_mutex)
+                  std::mutex* qabo_sig_cache_mutex,
+                  std::string* error_message_out)
 {
     LadderTxViewBuilder tx_view_builder(tx);
     LadderPrecomputedBuilder precomputed_builder(txdata);
@@ -1526,7 +1545,7 @@ bool VerifyRungTx(const CTransaction& tx,
 
     api::LadderScriptError err = api::LadderScriptError::OK;
     if (!api::VerifyRungTx(tx_view_builder.view, static_cast<size_t>(nIn),
-                            spent_view, adapter_ctx, &err)) {
+                            spent_view, adapter_ctx, &err, error_message_out)) {
         if (serror) {
             switch (err) {
             case api::LadderScriptError::WITNESS_PROGRAM_WITNESS_EMPTY:

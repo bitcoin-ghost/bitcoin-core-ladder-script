@@ -479,12 +479,21 @@ void ladder_init();
 //
 // The host MUST only call this for inputs whose spent output is an MLSC
 // scriptPubKey. Calling it otherwise returns NON_MLSC_SCRIPT (safety net).
+//
+// `error_message_out` (optional, may be nullptr) captures a human-readable
+// description of the specific check that fired — e.g. the parse_err string
+// from DeserializeLadderWitness / DeserializeMLSCProof / ParseQABIBlock /
+// MergeConditionsAndWitness. Operator-friendliness only: surfaces the
+// reason in the mempool reject debug-message rather than collapsing every
+// failure to "unknown error". Same intent as the DecodeHexTx patch but at
+// the script-verify layer.
 bool VerifyRungTx(
     const LadderTxView& tx,
     size_t input_index,
     const LadderOutputView& spent_output,
     const LadderEvalContext& ctx,
-    LadderScriptError* error_out);
+    LadderScriptError* error_out,
+    std::string* error_message_out = nullptr);
 
 // Transaction-level consensus checks (output structure, creation-proof
 // sanity, TX_MLSC layout, QABIO priming rules). Run once per v4 tx,
