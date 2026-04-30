@@ -562,6 +562,16 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         }
 
         // Check 9: FALCON verify.
+        //
+        // KNOWN GAP (audit #9 Finding 4, deferred to v0.14): FALCON-512
+        // signatures are variable-length up to 666 B; aggregated_sig is fixed
+        // at 666 B. When the actual encoded sig is shorter than 666, the
+        // trailing padding bytes are coordinator-controlled (~0-66 B/tx
+        // channel for QABI_SPEND txs only). Closing requires either parsing
+        // the FALCON sig header to extract the actual encoded length and
+        // verifying trailing bytes are zero, OR a wire-format change to
+        // length-prefix aggregated_sig. Tracked for v0.14 alongside the
+        // QABIO v2 wire-format work.
         if (ctx.tx->aggregated_sig_size != rung::QABI_AGGREGATED_SIG_MAX) {
             cache_failure(fresh_root_hash, fresh_parsed, false, true);
             return EvalResult::UNSATISFIED;
@@ -700,8 +710,14 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     std::memcpy(commit_key.data(), hash_field->data.data(), 32);
 
     // Non-anchor path: no PUBKEY / SIGNATURE in witness → check cache.
+    // v0.13 (audit #9 F1-real): cache reads/writes are mutex-protected when
+    // the host (validation.cpp) provides a mutex. This eliminates the
+    // parallel-snapshot race v0.12's pre-pass tried and failed to fix —
+    // anchor writes are immediately visible to other workers.
     if (!pubkey_field || !sig_field) {
         if (ctx.pq_batch_cache != nullptr) {
+            std::optional<std::unique_lock<std::mutex>> cache_lock;
+            if (ctx.pq_batch_cache_mutex) cache_lock.emplace(*ctx.pq_batch_cache_mutex);
             auto it = ctx.pq_batch_cache->find(commit_key);
             if (it != ctx.pq_batch_cache->end() && it->second) {
                 return EvalResult::SATISFIED;
@@ -762,8 +778,11 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     // already have merkle_pub_key for hash-committed gating via SIG).
 
     if (verified && ctx.pq_batch_cache != nullptr) {
-        // Populate the tx-level cache so subsequent inputs with the same
-        // commit and an empty witness can short-circuit.
+        // v0.13 (audit #9 F1-real): mutex-protected write so the cache
+        // entry is visible to all other workers immediately, not after
+        // a snapshot/merge cycle.
+        std::optional<std::unique_lock<std::mutex>> cache_lock;
+        if (ctx.pq_batch_cache_mutex) cache_lock.emplace(*ctx.pq_batch_cache_mutex);
         (*ctx.pq_batch_cache)[commit_key] = true;
     }
 

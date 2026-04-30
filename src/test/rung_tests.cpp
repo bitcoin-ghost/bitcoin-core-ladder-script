@@ -7345,6 +7345,18 @@ BOOST_AUTO_TEST_CASE(varint_numeric_saves_bytes)
 // Phase 2: Micro-header + implicit fields tests
 // ============================================================================
 
+// Audit #9 addendum A1 regression: slot 0x00 is pinned to SIG forever.
+// The compact-coil sentinel COMPACT_COIL_SENTINEL = 0x00 is positionally
+// bound (only valid as first byte after rungs), but if a future block-
+// type allocation ever moved slot 0x00 to a different type, downstream
+// tooling that hardcodes the SIG-at-slot-0 assumption could mis-decode.
+// This test pins the assignment.
+BOOST_AUTO_TEST_CASE(micro_header_slot_zero_is_sig)
+{
+    BOOST_CHECK_EQUAL(MicroHeaderSlot(RungBlockType::SIG), 0);
+    BOOST_CHECK_EQUAL(MICRO_HEADER_TABLE[0], static_cast<uint16_t>(RungBlockType::SIG));
+}
+
 BOOST_AUTO_TEST_CASE(micro_header_lookup_all_known_types)
 {
     // Every known block type should have a micro-header slot
@@ -13026,10 +13038,12 @@ static QABIBlock MakeValidQABIBlock()
 {
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.begin(), 0xA1, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xB2);
     block.prime_expiry_height = 12345;
     std::memset(block.outputs_conditions_root.begin(), 0xD4, 32);
+    // v0.13 (audit #9 Finding 6): canonical batch_id derived from already-
+    // committed fields. Pre-v0.13 tests memset arbitrary bytes.
+    ApplyCanonicalBatchId(block);
 
     QABIEntry e;
     std::memset(e.participant_id.begin(), 0xC3, 32);
@@ -13142,9 +13156,11 @@ BOOST_AUTO_TEST_CASE(qabi_root_mutation_sensitivity)
     b2.prime_expiry_height += 1;
     BOOST_CHECK(ComputeQABIRoot(b2) != r_orig);
 
-    QABIBlock b3 = b1;
-    std::memset(b3.batch_id.begin(), 0xFF, 32);
-    BOOST_CHECK(ComputeQABIRoot(b3) != r_orig);
+    // v0.13 (audit #9 Finding 6): batch_id is now canonically derived from
+    // coordinator_pubkey + outputs_conditions_root + prime_expiry_height,
+    // so it can't be mutated independently. The b2 (expiry change) and
+    // b4/b5 (entries/output_values change) cases already cover the
+    // "any field change → different root" invariant.
 
     QABIBlock b4 = b1;
     b4.entries[0].contribution += 1;
@@ -13310,10 +13326,10 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     // Build the QABIBlock.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x5A, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
     block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root below
+    ApplyCanonicalBatchId(block);             // v0.13 (audit #9 Finding 6)
     {
         QABIEntry e;
         e.participant_id = owner_id;
@@ -13468,10 +13484,10 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
 
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x3C, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
     block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
     QABIEntry e;
     e.participant_id = owner_id;
     e.contribution = 50000;
@@ -13601,10 +13617,10 @@ static bool BuildQABISpendHappyPath(QABISpendSetup& s)
     for (size_t i = 0; i < 32; ++i) s.owner_id.data()[i] = static_cast<uint8_t>(0x80 + (i & 0x0F));
 
     s.block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(s.block.batch_id.data(), 0x6B, 32);
     s.block.coordinator_pubkey = s.coord_pk;
     s.block.prime_expiry_height = QABISpendSetup::EXPIRY_HEIGHT;
     s.block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(s.block);  // v0.13 (audit #9 Finding 6)
     {
         QABIEntry e;
         e.participant_id = s.owner_id;
@@ -14913,10 +14929,10 @@ static QABIBlock BuildScaleQABIBlock(
 {
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x42, 32);
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = expiry;
     block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root in caller
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     for (size_t p = 0; p < participants.size(); ++p) {
         QABIEntry e;
@@ -15299,10 +15315,10 @@ BOOST_AUTO_TEST_CASE(adversarial_duplicate_participant_id_rejected_by_parse)
     // matching entry.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x99, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xAA);
     block.prime_expiry_height = 1000;
     block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     uint256 shared_id;
     std::memset(shared_id.data(), 0xCC, 32);
@@ -15409,10 +15425,10 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
     // adds a constant header overhead.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x11, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x22);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0xEE, 32);
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     constexpr size_t TARGET_FILL = 63000;
     size_t running = 966;  // 934 header + 32 outputs_conditions_root
@@ -15463,10 +15479,10 @@ BOOST_AUTO_TEST_CASE(qabi_block_over_soft_cap_rejected_by_policy)
     // mempool memory budget the soft cap is meant to bound.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0xAB, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xCD);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0x99, 32);
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     // Aim for ~70 KB (above 64 KB soft, below 256 KB hard).
     constexpr size_t TARGET_FILL = 70000;
@@ -15534,10 +15550,10 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
     // Push to just under the 256 KB hard cap to find the absolute max.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x33, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0x55, 32);
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     // Target: ~260000 bytes (just under 262144 hard cap).
     // Post-output-dedup: ~54 B per participant (entry ~41 + 8 value + ~5 varint margin).
@@ -15598,10 +15614,10 @@ BOOST_AUTO_TEST_CASE(adversarial_committed_expiry_overflow_rejected_or_handled)
     // (batch is "never expires"). This test just confirms no overflow.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x33, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 0xFFFFFFFFu;  // u32 max
     block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x55, 32);
@@ -15624,10 +15640,11 @@ BOOST_AUTO_TEST_CASE(adversarial_zero_length_coordinator_pubkey_rejected)
     // parser rejects it (must be exactly QABI_COORDINATOR_PUBKEY_SIZE).
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x77, 32);
     block.coordinator_pubkey.clear();  // zero-length
     block.prime_expiry_height = 100;
     block.outputs_conditions_root.SetNull();
+    // (no ApplyCanonicalBatchId here — coordinator_pubkey is invalid by
+    // design; parser rejects on coord_pk size before checking batch_id.)
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x88, 32);
@@ -15650,10 +15667,10 @@ BOOST_AUTO_TEST_CASE(adversarial_reordered_witness_detected_by_sighash)
     // sighash, invalidating a previously-signed tx.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x66, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x77);
     block.prime_expiry_height = 100;
     block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
     QABIEntry e1, e2;
     std::memset(e1.participant_id.data(), 0xA1, 32);
     std::memset(e2.participant_id.data(), 0xA2, 32);
@@ -16907,10 +16924,10 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_destination_index_rejected)
     // index that's outside the outputs array.
     QABIBlock block;
     block.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(block.batch_id.data(), 0x1F, 32);
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x2F);
     block.prime_expiry_height = 100;
     block.outputs_conditions_root.SetNull();
+    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x3F, 32);
@@ -16968,10 +16985,13 @@ std::vector<uint8_t> RandomBytes(StressRNG& r, size_t len) {
 std::vector<uint8_t> MutatedQABIBlock(StressRNG& r) {
     QABIBlock b;
     b.version = QABI_BLOCK_VERSION_CURRENT;
-    std::memset(b.batch_id.begin(), r.byte(), 32);
     b.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, r.byte());
     b.prime_expiry_height = static_cast<uint32_t>(r.next());
     std::memset(b.outputs_conditions_root.begin(), r.byte(), 32);
+    // v0.13 (audit #9 Finding 6): canonical batch_id. Stress test mutates
+    // other fields to exercise the parser; canonical derivation locks
+    // batch_id to those fields.
+    ApplyCanonicalBatchId(b);
     size_t n_entries = 1 + r.range(8);
     for (size_t i = 0; i < n_entries; ++i) {
         QABIEntry e;

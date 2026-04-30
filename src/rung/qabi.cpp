@@ -213,17 +213,20 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             }
         }
 
-        // v0.12 (audit 8b F8): batch_id is currently 32 free bytes chosen
-        // by the coordinator — a 32 B/batch coordinator-side data channel.
-        // The audit recommended canonical derivation
-        //   batch_id = SHA256(coordinator_pubkey || outputs_conditions_root || prime_expiry_height)
-        // and this file ships ComputeCanonicalBatchId() / ApplyCanonicalBatchId()
-        // helpers for wallets and signers. Enforcing it at parse time would
-        // break ~15 existing QABI test fixtures that use predictable
-        // memset() patterns; tightening to a hard reject is queued for the
-        // QABIO v2 release alongside fixture updates. Until then, the
-        // channel is documented and the canonical-derivation helpers are
-        // available for tooling that wants to opt in early.
+        // v0.13 (audit #9 Finding 6 / v0.12 F8 enforcement landed):
+        // batch_id MUST be the canonical SHA256 derivation. Closes the
+        // last QABI coordinator-side embedding channel (32 B/batch).
+        // Wallets / signers should call ApplyCanonicalBatchId(block)
+        // before serialising; the parser rejects any other value.
+        uint256 expected_batch_id = ComputeCanonicalBatchId(
+            std::span<const uint8_t>(block.coordinator_pubkey.data(),
+                                      block.coordinator_pubkey.size()),
+            block.outputs_conditions_root,
+            block.prime_expiry_height);
+        if (block.batch_id != expected_batch_id) {
+            error_out = "qabi_block batch_id is not canonical SHA256 derivation";
+            return std::nullopt;
+        }
     } catch (const std::exception& ex) {
         error_out = std::string("qabi_block parse failed: ") + ex.what();
         return std::nullopt;

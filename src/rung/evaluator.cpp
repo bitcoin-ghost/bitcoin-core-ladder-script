@@ -789,7 +789,23 @@ bool CheckRungTxLevel(const LadderTxView& tx,
     // safety net) always pass the populated vector — so the only way to
     // hit this branch is a future code path that forgets to wire it up,
     // and we want that to fail loud instead of silently zeroing the caps.
-    if (tx.input_count > 0 && (spent_outputs == nullptr || spent_output_count != tx.input_count)) {
+    //
+    // v0.13 (audit #9 Finding 3): coinbase exception — coinbase has a
+    // single null-prevout input and no real spent_outputs; the per-tx
+    // counters trivially see zero MLSC inputs and validate nothing
+    // beyond the output format and qabi_block / aggregated_sig gating.
+    // Detect coinbase by tx.input_count == 1 AND null prevout txid +
+    // n == 0xFFFFFFFF (the canonical coinbase prevout).
+    bool is_coinbase = (tx.input_count == 1 && tx.inputs &&
+        tx.inputs[0].prevout.n == 0xFFFFFFFF);
+    if (is_coinbase) {
+        // ok if both is_coinbase
+        for (int z = 0; z < 32; ++z) {
+            if (tx.inputs[0].prevout.txid[z] != 0) { is_coinbase = false; break; }
+        }
+    }
+    if (tx.input_count > 0 && !is_coinbase &&
+        (spent_outputs == nullptr || spent_output_count != tx.input_count)) {
         error = "TX_MLSC: tx-level check requires spent_outputs of equal length to inputs";
         return false;
     }
@@ -961,8 +977,10 @@ bool VerifyRungTx(
     };
 
     auto* shared_cache   = static_cast<SharedTreeCache*>(ctx.shared_tree_cache);
+    auto* shared_cache_mutex = static_cast<std::mutex*>(ctx.shared_tree_cache_mutex);
     auto* qabo_sig_cache = static_cast<QABOSigCache*>(ctx.qabo_sig_cache);
     auto* pq_batch_cache = static_cast<PQBatchCache*>(ctx.pq_batch_cache);
+    auto* pq_batch_cache_mutex = static_cast<std::mutex*>(ctx.pq_batch_cache_mutex);
 
     // ================================================================
     // KEY-PATH SPEND: witness = [signature]
@@ -1076,13 +1094,25 @@ bool VerifyRungTx(
                 LogPrintf("MLSC shared proof: source input %u has different prevout hash\n", src_idx);
                 return fail(LadderScriptError::UNKNOWN_ERROR);
             }
-            // Look up the verified root from the source input
-            auto it = shared_cache->find(prevout_txid(src_idx));
-            if (it == shared_cache->end()) {
+            // Look up the verified root from the source input.
+            // v0.13 (audit #9 Finding 2): mutex-protected — anchor writes
+            // by other workers are immediately visible.
+            uint256 cached_root;
+            bool cached_found = false;
+            {
+                std::optional<std::unique_lock<std::mutex>> lk;
+                if (shared_cache_mutex) lk.emplace(*shared_cache_mutex);
+                auto it = shared_cache->find(prevout_txid(src_idx));
+                if (it != shared_cache->end()) {
+                    cached_root = it->second.root;
+                    cached_found = true;
+                }
+            }
+            if (!cached_found) {
                 LogPrintf("MLSC shared proof: source input %u not in cache\n", src_idx);
                 return fail(LadderScriptError::UNKNOWN_ERROR);
             }
-            if (it->second.root != conditions_root) {
+            if (cached_root != conditions_root) {
                 LogPrintf("MLSC shared proof: cached root mismatch\n");
                 return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
             }
@@ -1135,12 +1165,18 @@ bool VerifyRungTx(
 
         // SHARED proofs: root was validated via cache. Now verify leaf membership —
         // the revealed rung's leaf must exist in the cached tree's leaf set.
+        // v0.13 (audit #9 Finding 2): mutex-protected cache access.
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
-            auto cache_it = shared_cache->find(prevout_txid(input_index));
-            if (cache_it == shared_cache->end()) {
-                return fail(LadderScriptError::UNKNOWN_ERROR);
+            std::vector<uint256> cached_leaves;
+            {
+                std::optional<std::unique_lock<std::mutex>> lk;
+                if (shared_cache_mutex) lk.emplace(*shared_cache_mutex);
+                auto cache_it = shared_cache->find(prevout_txid(input_index));
+                if (cache_it == shared_cache->end()) {
+                    return fail(LadderScriptError::UNKNOWN_ERROR);
+                }
+                cached_leaves = cache_it->second.leaves;
             }
-            const auto& cached_leaves = cache_it->second.leaves;
             bool leaf_found = false;
             for (const auto& cached_leaf : cached_leaves) {
                 if (cached_leaf == my_leaf) {
@@ -1318,6 +1354,11 @@ bool VerifyRungTx(
             SharedTreeEntry entry;
             entry.root = conditions_root;
             entry.leaves = verified_leaves_data.leaves;
+            // v0.13 (audit #9 Finding 2): mutex-protected write so anchor
+            // entries are immediately visible to other workers' SHARED-proof
+            // reads — eliminates the parallel-snapshot race.
+            std::optional<std::unique_lock<std::mutex>> lk;
+            if (shared_cache_mutex) lk.emplace(*shared_cache_mutex);
             (*shared_cache)[prevout_txid(input_index)] = std::move(entry);
         }
 
@@ -1386,6 +1427,11 @@ bool VerifyRungTx(
     // Plumb the PQ_BATCH cache so non-anchor inputs with matching HASH256
     // commits can validate from cache after the anchor has verified once.
     eval_ctx.pq_batch_cache = pq_batch_cache;
+    // v0.13 (audit #9 F1-real + Finding 2): plumb cache mutexes so the
+    // evaluator can lock for both reads and writes — eliminates the
+    // parallel snapshot races for both PQ_BATCH and SharedTreeCache.
+    eval_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
+    eval_ctx.shared_tree_cache_mutex = shared_cache_mutex;
 
     // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
     // wrapper family. Fetch it from the opaque ctx field; fall back to a
@@ -1439,7 +1485,9 @@ bool VerifyRungTx(const CTransaction& tx,
                   int32_t block_height,
                   SharedTreeCache* shared_cache,
                   QABOSigCache* qabo_sig_cache,
-                  PQBatchCache* pq_batch_cache)
+                  PQBatchCache* pq_batch_cache,
+                  std::mutex* pq_batch_cache_mutex,
+                  std::mutex* shared_cache_mutex)
 {
     LadderTxViewBuilder tx_view_builder(tx);
     LadderPrecomputedBuilder precomputed_builder(txdata);
@@ -1457,8 +1505,10 @@ bool VerifyRungTx(const CTransaction& tx,
     adapter_ctx.precomputed = &precomputed_builder.view;
     adapter_ctx.sig_checker = &sig_checker;
     adapter_ctx.shared_tree_cache = shared_cache;
+    adapter_ctx.shared_tree_cache_mutex = shared_cache_mutex;
     adapter_ctx.qabo_sig_cache = qabo_sig_cache;
     adapter_ctx.pq_batch_cache = pq_batch_cache;
+    adapter_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
     adapter_ctx.legacy_sig_checker = const_cast<BaseSignatureChecker*>(&checker);
 
     api::LadderScriptError err = api::LadderScriptError::OK;

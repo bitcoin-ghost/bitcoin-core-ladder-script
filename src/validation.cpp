@@ -2178,16 +2178,16 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
     // P2TR, etc.) in v4 txs fall through to VerifyScript for bootstrap funding.
     if (ptxTo->version == CTransaction::RUNG_TX_VERSION && rung::IsMLSCScript(m_tx_out.scriptPubKey)) {
         CachingTransactionSignatureChecker checker(ptxTo, nIn, m_tx_out.nValue, cacheStore, *m_signature_cache, *txdata);
-        // Adapter: bridge thread-safe cache to VerifyRungTx's SharedTreeCache*
-        rung::SharedTreeCache local_cache;
+        // v0.13 (audit #9 Finding 2): pass the shared cache + mutex directly,
+        // not a per-worker snapshot. Anchor (FULL/MERKLE_PATH-proof) writes
+        // are immediately visible to other workers' SHARED-proof reads —
+        // eliminates the parallel-snapshot race that allowed mempool to
+        // accept a tx that block validation rejected under -par >= 2.
         rung::SharedTreeCache* cache_ptr = nullptr;
+        std::mutex* shared_cache_mutex_ptr = nullptr;
         if (m_shared_tree_cache) {
-            // Copy current cache state (lock held briefly)
-            {
-                LOCK(m_shared_tree_cache->mutex);
-                local_cache = m_shared_tree_cache->cache;
-            }
-            cache_ptr = &local_cache;
+            cache_ptr = &m_shared_tree_cache->cache;
+            shared_cache_mutex_ptr = &m_shared_tree_cache->mutex;
         }
         // QABIO: per-tx FALCON sig verify cache. All primed inputs of a
         // QABIO tx share the same (sighash, sig, pubkey), so the verify
@@ -2209,18 +2209,21 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         // to UNSATISFIED before touching the cache.
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
 #endif
-        // PQ_BATCH: per-tx anchor verification cache. Snapshot, pass local
-        // copy so parallel input checks don't conflict, merge back after.
-        rung::PQBatchCache local_pq_batch_cache;
+        // PQ_BATCH: per-tx anchor verification cache.
+        // v0.13 (audit #9 F1-real): pass the shared cache + mutex directly,
+        // not a per-worker snapshot. Anchor writes (mutex-protected inside
+        // EvalPQBatchBlock) are immediately visible to all other workers,
+        // eliminating the parallel-snapshot race that v0.12's pre-pass
+        // tried and failed to fix. The pre-pass scanned witness for
+        // HASH256+PUBKEY+SIGNATURE triplets, but HASH256 is conditions-
+        // side, so it found zero anchors and was a no-op.
         rung::PQBatchCache* pq_batch_cache_ptr = nullptr;
+        std::mutex* pq_batch_cache_mutex_ptr = nullptr;
         if (m_pq_batch_cache) {
-            {
-                LOCK(m_pq_batch_cache->mutex);
-                local_pq_batch_cache = m_pq_batch_cache->cache;
-            }
-            pq_batch_cache_ptr = &local_pq_batch_cache;
+            pq_batch_cache_ptr = &m_pq_batch_cache->cache;
+            pq_batch_cache_mutex_ptr = &m_pq_batch_cache->mutex;
         }
-        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr);
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr);
         // Write back any new cache entries. We use emplace() here, not
         // insert_or_assign() — the cache is best-effort dedup, not exact:
         // parallel input checks may each compute the same entry from
@@ -2228,12 +2231,8 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         // first-writer-wins semantics is intentional. The redundant
         // recomputations are bounded by the number of parallel script
         // workers (typically par=N CPU cores), not the number of inputs.
-        if (m_shared_tree_cache && cache_ptr) {
-            LOCK(m_shared_tree_cache->mutex);
-            for (const auto& [k, v] : local_cache) {
-                m_shared_tree_cache->cache.emplace(k, v);
-            }
-        }
+        // v0.13: no merge-back for shared_tree_cache — writes go through the
+        // shared mutex inside VerifyRungTx and are already in place.
 #ifdef ENABLE_QABIO
         if (m_qabo_sig_cache && qabo_cache_ptr) {
             LOCK(m_qabo_sig_cache->mutex);
@@ -2242,12 +2241,8 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             }
         }
 #endif
-        if (m_pq_batch_cache && pq_batch_cache_ptr) {
-            LOCK(m_pq_batch_cache->mutex);
-            for (const auto& [k, v] : local_pq_batch_cache) {
-                m_pq_batch_cache->cache.emplace(k, v);
-            }
-        }
+        // v0.13: no merge-back for pq_batch_cache — writes go through the
+        // shared mutex inside EvalPQBatchBlock and are already in place.
         if (ok) {
             return std::nullopt;
         } else {
@@ -2306,7 +2301,35 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        std::vector<CScriptCheck>* pvChecks,
                        int32_t block_height)
 {
-    if (tx.IsCoinBase()) return true;
+    if (tx.IsCoinBase()) {
+        // v0.13 (audit #9 Finding 3): v4 coinbases must satisfy the
+        // output-format and tx-level-field gating rules — pre-v0.13 they
+        // skipped CheckRungTxLevel entirely, leaving an attacker-miner
+        // ~256 KB / coinbase / forever channel via tx.qabi_block,
+        // tx.aggregated_sig, tx.conditions_root, and unbounded
+        // DATA_RETURN-shaped outputs. v0.13 enforces:
+        //   - every output is MLSC-shaped (no DATA_RETURN >1, no dust)
+        //   - tx.qabi_block must be empty (no QABI input possible in coinbase)
+        //   - tx.aggregated_sig must be empty (same reason)
+        // Coinbase has no real spent_outputs; pass nullptr/0 — the v0.11
+        // CheckRungTxLevel guard now allows null spent_outputs when
+        // tx.input_count == 1 AND the single input is a null prevout
+        // (coinbase shape), since there are no MLSC inputs to count.
+        if (tx.version == CTransaction::RUNG_TX_VERSION) {
+            std::string err;
+            if (!rung::CheckRungTxLevel(tx, /*spent_outputs=*/{}, err)) {
+                LogPrintf("v4 coinbase consensus rejection: %s\n", err);
+                if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
+                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                        "mempool-script-verify-flag-failed (v4_coinbase)", err);
+                } else {
+                    return state.Invalid(TxValidationResult::TX_CONSENSUS,
+                        "block-script-verify-flag-failed (v4_coinbase)", err);
+                }
+            }
+        }
+        return true;
+    }
 
     if (pvChecks) {
         pvChecks->reserve(tx.vin.size());
@@ -2414,47 +2437,6 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
             }
         }
 
-        // v0.12 (audit 8b F2): populate PQ_BATCH anchor cache sequentially
-        // BEFORE the parallel script-check loop dispatches. Per-input checks
-        // snapshot the cache and merge back; if anchor and non-anchor inputs
-        // run on different workers, a non-anchor's snapshot can miss the
-        // anchor's write → consensus split between -par settings. The
-        // pre-pass eliminates the race by populating the cache once,
-        // synchronously, before dispatch.
-#ifdef ENABLE_QABIO
-        if (pq_batch_cache) {
-            // Build a LadderTxView via the shim. Use a local LadderTxViewBuilder
-            // (same one CheckRungTxLevel uses internally via rung_shims) by
-            // calling the namespace-scoped helper.
-            rung::LadderTxViewBuilder pq_b(tx);
-            std::vector<rung::api::LadderOutputView> sov;
-            sov.reserve(txdata.m_spent_outputs.size());
-            for (const auto& out : txdata.m_spent_outputs) {
-                rung::api::LadderOutputView ov;
-                ov.value = out.nValue;
-                ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
-                sov.push_back(ov);
-            }
-            rung::LadderPrecomputedBuilder pq_pcb(txdata);
-            rung::PQBatchCache prepass_cache;
-            if (!rung::PreparePQBatchAnchorCache(pq_b.view, sov.data(), sov.size(), pq_pcb.view, prepass_cache)) {
-                std::string err = "PQ_BATCH anchor pre-pass failed";
-                if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
-                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
-                        "mempool-script-verify-flag-failed (pq_batch_anchor)", err);
-                } else {
-                    return state.Invalid(TxValidationResult::TX_CONSENSUS,
-                        "block-script-verify-flag-failed (pq_batch_anchor)", err);
-                }
-            }
-            // Merge into the shared cache so per-input workers see the
-            // anchor entries on snapshot.
-            LOCK(pq_batch_cache->mutex);
-            for (const auto& [k, v] : prepass_cache) {
-                pq_batch_cache->cache.emplace(k, v);
-            }
-        }
-#endif
     }
 
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
