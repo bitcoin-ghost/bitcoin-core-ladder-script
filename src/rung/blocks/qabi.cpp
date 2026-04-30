@@ -539,6 +539,14 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
         auto parsed_opt = rung::ParseQABIBlock(qabi_bytes, parse_err);
         if (!parsed_opt) {
             cache_failure(fresh_root_hash, nullptr, false, false);
+            // v0.14 follow-up (#136): surface the specific ParseQABIBlock
+            // failure (e.g. "qabi_block batch_id is not canonical SHA256
+            // derivation", "qabi_block entries not strict ascending by
+            // participant_id") through the eval-context channel so the
+            // mempool reject reason isn't a generic "unknown error".
+            if (ctx.error_message_out && !parse_err.empty()) {
+                *ctx.error_message_out = "QABI_SPEND ParseQABIBlock: " + parse_err;
+            }
             return EvalResult::UNSATISFIED;
         }
         fresh_parsed = std::make_shared<const rung::QABIBlock>(std::move(*parsed_opt));

@@ -182,6 +182,17 @@ struct RungEvalContext {
     //! but cuts ~12.5 KB of per-input snapshot copy on busy QABIO txs and
     //! removes the inconsistency vs pq_batch_cache / shared_tree_cache.
     std::mutex* qabo_sig_cache_mutex{nullptr};
+    //! Optional output channel for block evaluators to surface a specific
+    //! failure reason — e.g. "QABI_SPEND: ParseQABIBlock: qabi_block batch_id
+    //! is not canonical SHA256 derivation", "EvalHTLC: preimage hash
+    //! mismatch". When non-null, evaluators may write here on UNSATISFIED
+    //! / ERROR returns. The reason flows up through api::VerifyRungTx's
+    //! error_message_out into the user-facing mempool reject reason.
+    //! Operator-friendliness only — same intent as the
+    //! DeserializeLadderWitness / DeserializeMLSCProof threading already
+    //! wired in api::VerifyRungTx (b423a45e4f / 7761476d90), but for the
+    //! deeper eval-stack rejections that those don't cover.
+    mutable std::string* error_message_out{nullptr};
 };
 
 // Windows headers (wingdi.h, transitively via windows.h) define ERROR as

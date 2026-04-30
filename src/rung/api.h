@@ -365,6 +365,12 @@ struct LadderEvalContext {
     //! v0.13-era snapshot/merge pattern.
     void* qabo_sig_cache_mutex{nullptr};
     void* legacy_sig_checker{nullptr};
+    //! Optional output channel for block evaluators to surface a specific
+    //! failure reason. Threaded into RungEvalContext.error_message_out by
+    //! VerifyRungTx and ultimately into the api::VerifyRungTx
+    //! error_message_out param. Set by the host (CScriptCheck) when it
+    //! wants to forward the reason into the mempool reject debug-message.
+    std::string* error_message_out{nullptr};
 };
 
 // ============================================================================

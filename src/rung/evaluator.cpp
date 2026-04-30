@@ -1290,7 +1290,8 @@ bool VerifyRungTx(
                 if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
                                       total_leaves, conditions_root, path_error)) {
                     LogPrintf("MLSC Merkle path verification failed: %s\n", path_error.c_str());
-                    return fail(LadderScriptError::MERKLE_PATH_MISMATCH);
+                    return fail_msg(LadderScriptError::MERKLE_PATH_MISMATCH,
+                                    "MLSC Merkle path: " + path_error);
                 }
             } else {
                 std::vector<uint256> leaves(total_leaves);
@@ -1333,7 +1334,11 @@ bool VerifyRungTx(
                 if (computed_root != conditions_root) {
                     LogPrintf("MLSC root mismatch: computed %s != expected %s\n",
                               computed_root.GetHex(), conditions_root.GetHex());
-                    return fail(LadderScriptError::MLSC_ROOT_MISMATCH);
+                    return fail_msg(LadderScriptError::MLSC_ROOT_MISMATCH,
+                                    "MLSC root mismatch: computed " +
+                                        computed_root.GetHex().substr(0, 16) +
+                                        " != expected " +
+                                        conditions_root.GetHex().substr(0, 16));
                 }
             }
         }
@@ -1460,6 +1465,12 @@ bool VerifyRungTx(
     // to migrate off the snapshot/merge pattern. Reads/writes inside
     // EvalQABISpendBlock now lock against this directly.
     eval_ctx.qabo_sig_cache_mutex = qabo_sig_cache_mutex;
+    // v0.14 follow-up (#136): pipe the optional eval-layer error string
+    // through. Block evaluators (EvalQABISpendBlock, EvalHTLC, etc.)
+    // write here on UNSATISFIED; we surface it via the api-level
+    // error_message_out when nothing earlier (witness/proof/merge deser)
+    // already populated it.
+    eval_ctx.error_message_out = error_message_out;
 
     // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
     // wrapper family. Fetch it from the opaque ctx field; fall back to a
@@ -1542,6 +1553,11 @@ bool VerifyRungTx(const CTransaction& tx,
     adapter_ctx.pq_batch_cache = pq_batch_cache;
     adapter_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
     adapter_ctx.legacy_sig_checker = const_cast<BaseSignatureChecker*>(&checker);
+    // v0.14 follow-up (#136): propagate the eval-layer error channel
+    // so block evaluators (EvalQABISpendBlock, EvalHTLC, etc.) can
+    // populate it on UNSATISFIED returns. api::VerifyRungTx unifies
+    // this with the deser-layer error_message_out param.
+    adapter_ctx.error_message_out = error_message_out;
 
     api::LadderScriptError err = api::LadderScriptError::OK;
     if (!api::VerifyRungTx(tx_view_builder.view, static_cast<size_t>(nIn),

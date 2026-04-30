@@ -119,15 +119,31 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
     if (!path_opt) return EvalResult::ERROR;
     int64_t path = *path_opt;
 
+    // v0.14 follow-up (#136): when ctx.error_message_out is non-null,
+    // populate it on UNSATISFIED so the mempool reject reason carries
+    // the specific check that fired.
+    auto record = [&](const char* msg) {
+        if (ctx.error_message_out && ctx.error_message_out->empty())
+            *ctx.error_message_out = std::string("HTLC: ") + msg;
+    };
+
     if (path == 0) {
         // Receiver path: hash check, no CSV.
-        if (preimage_field.data.empty()) return EvalResult::UNSATISFIED;
+        if (preimage_field.data.empty()) {
+            record("path=0 requires non-empty PREIMAGE");
+            return EvalResult::UNSATISFIED;
+        }
         unsigned char computed_hash[CSHA256::OUTPUT_SIZE];
         CSHA256().Write(preimage_field.data.data(), preimage_field.data.size()).Finalize(computed_hash);
         if (memcmp(computed_hash, hash_field.data.data(), 32) != 0) {
+            record("path=0 preimage hash mismatch");
             return EvalResult::UNSATISFIED;
         }
-        return VerifySigWithScheme(receiver_pk, sig_field, &scheme_field, sig_checker, ctx);
+        EvalResult sig_result = VerifySigWithScheme(receiver_pk, sig_field, &scheme_field, sig_checker, ctx);
+        if (sig_result != EvalResult::SATISFIED) {
+            record("path=0 receiver SIG verify failed");
+        }
+        return sig_result;
     }
     if (path == 1) {
         // Refund path: PREIMAGE must be empty (anti-data-embedding), CSV must be elapsed.
@@ -139,9 +155,19 @@ EvalResult EvalHTLCBlock(const RungBlock& block,
             // Disable flag set means timelock is unenforced — defeats the refund path.
             return EvalResult::ERROR;
         }
-        if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) return EvalResult::UNSATISFIED;
-        if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) return EvalResult::UNSATISFIED;
-        return VerifySigWithScheme(sender_pk, sig_field, &scheme_field, sig_checker, ctx);
+        if (sequence_val < 0 || sequence_val > 0xFFFFFFFFLL) {
+            record("path=1 CSV sequence out of range");
+            return EvalResult::UNSATISFIED;
+        }
+        if (!sig_checker.CheckSequence(static_cast<uint32_t>(sequence_val))) {
+            record("path=1 CSV not elapsed");
+            return EvalResult::UNSATISFIED;
+        }
+        EvalResult sig_result = VerifySigWithScheme(sender_pk, sig_field, &scheme_field, sig_checker, ctx);
+        if (sig_result != EvalResult::SATISFIED) {
+            record("path=1 sender SIG verify failed");
+        }
+        return sig_result;
     }
     return EvalResult::ERROR;
 }
