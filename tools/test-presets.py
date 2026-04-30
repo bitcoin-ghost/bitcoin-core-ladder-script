@@ -147,6 +147,48 @@ def sorted_pair_hash(a_hex, b_hex):
         combined = b + a
     return sha256(combined).hex()
 
+# ── ACCUMULATOR v2 helpers (post-`843c91e7e0` rewrite) ───────────────
+# Leaves are H_tag("LadderAccumulatorLeaf/v1", element_id_LE_4B) — NOT
+# attacker-chosen 32-byte blobs. Interiors are H_tag("LadderAccumulatorInterior/v1",
+# sorted_pair). Closes audit #2 E-001 (legacy v1 allowed ~288 B/spend
+# of attacker bytes via merkle siblings).
+def _tagged_hash(tag, data):
+    th = sha256(tag.encode("utf-8"))
+    return sha256(th + th + data)
+def accumulator_leaf(element_id):
+    return _tagged_hash("LadderAccumulatorLeaf/v1",
+                         element_id.to_bytes(4, "little")).hex()
+def _accumulator_interior(a_hex, b_hex):
+    a = bytes.fromhex(a_hex); b = bytes.fromhex(b_hex)
+    pair = (a + b) if a <= b else (b + a)
+    return _tagged_hash("LadderAccumulatorInterior/v1", pair).hex()
+def accumulator_root(n):
+    """Sorted-pair Merkle root over leaves(0..n-1) using v2 tagged hashes."""
+    if n == 0: return "0" * 64
+    level = [accumulator_leaf(i) for i in range(n)]
+    if len(level) == 1: return level[0]
+    while len(level) > 1:
+        if len(level) & 1:
+            level.append(level[-1])
+        level = [_accumulator_interior(level[i], level[i+1])
+                 for i in range(0, len(level), 2)]
+    return level[0]
+def accumulator_proof(n, idx):
+    """Return list of sibling hashes (root-bound proof) for leaf `idx` of n."""
+    if n <= 1: return []
+    level = [accumulator_leaf(i) for i in range(n)]
+    siblings = []
+    cur = idx
+    while len(level) > 1:
+        if len(level) & 1:
+            level.append(level[-1])
+        sib = cur + 1 if cur % 2 == 0 else cur - 1
+        siblings.append(level[sib])
+        level = [_accumulator_interior(level[i], level[i+1])
+                 for i in range(0, len(level), 2)]
+        cur //= 2
+    return siblings
+
 def compute_ctv_hash(version, locktime, num_inputs, sequences, num_outputs, outputs_blob, input_index):
     """Compute BIP-119 CheckTemplateVerify hash (matches ComputeCTVHash in evaluator.cpp).
     SHA256(version || locktime || scriptsigs_hash || num_inputs || sequences_hash ||
@@ -232,8 +274,12 @@ BLOCK_FIELDS = {
         {"name": "scheme", "dataType": "SCHEME", "optional": True},
     ],
     "ADAPTOR_SIG": [
+        # v0.7: dropped the second `adaptor_point` slot (off-chain only, never
+        # consumed on-chain — see PubkeyCountForBlock in src/rung/types.h).
+        # Fund-time and spend-time pubkey counts must match for the Merkle
+        # leaf to verify; passing two PUBKEYs here would commit 2 pubkeys
+        # at fund time while consensus extracts only 1 at spend time.
         {"name": "signing_key", "dataType": "PUBKEY"},
-        {"name": "adaptor_point", "dataType": "PUBKEY"},
     ],
     "MUSIG_THRESHOLD": [
         {"name": "agg_pubkey", "dataType": "PUBKEY"},
@@ -284,8 +330,11 @@ BLOCK_FIELDS = {
     ],
     "ANCHOR": [{"name": "anchor_id", "dataType": "NUMERIC"}],
     "ANCHOR_CHANNEL": [
-        {"name": "local_key", "dataType": "PUBKEY"},
-        {"name": "remote_key", "dataType": "PUBKEY"},
+        # v0.7 ANCHOR_CHANNEL is a pure commitment_number marker —
+        # PubkeyCountForBlock returns 0, no pubkeys folded into the leaf.
+        # Pre-v0.7 fields local_key / remote_key were consumed at spend
+        # time but the new design relies on a sibling SIG rung carrying
+        # the actual key. Conditions: [NUMERIC(commitment_number)].
         {"name": "commitment_number", "dataType": "NUMERIC"},
     ],
     "ANCHOR_POOL": [
@@ -446,10 +495,6 @@ BLOCK_FIELDS = {
         {"name": "committed_depth", "dataType": "NUMERIC"},
         {"name": "committed_expiry", "dataType": "NUMERIC"},
         {"name": "owner_id", "dataType": "PUBKEY_COMMIT"},
-    ],
-    "P2TR_SCRIPT_LEGACY": [
-        {"name": "hash256", "dataType": "HASH256"},
-        {"name": "pubkey_commit", "dataType": "HASH256"},
     ],
 }
 
@@ -1246,6 +1291,15 @@ PRESETS = [
     {
         "title": "QABIO BATCH PAYOUT --COORDINATOR VIEW",
         "qabio_batch": True,
+        # Driver shortcut: funds P2WPKH inputs and attaches a qabi_block to
+        # the spend. v0.10 (T-1/T-2) gated qabi_block on QABI_SPEND being
+        # present in at least one input; this driver shape is rejected at
+        # the tx-level check ("TX_MLSC: tx.qabi_block must be empty when
+        # no QABI input is present"). Full coordinator+participant QABI
+        # lifecycle (with real QABI_SPEND-conditioned inputs that are
+        # primed via QABI_PRIME) is exercised by
+        # test/functional/feature_qabi_size.py end-to-end.
+        "skip_reason": "Coordinator-view shortcut incompatible with v0.10+ qabi_block gating; see feature_qabi_size.py for full lifecycle",
     },
 ]
 
@@ -1472,17 +1526,19 @@ def fund_preset(preset, verbose=True):
 
             block["values"] = vals
 
-    # 6. Compute ACCUMULATOR merkle roots
+    # 6. Compute ACCUMULATOR merkle roots — v2 (audit #2 E-001 fix).
+    # The preset's `merkle_leaves` field is interpreted as the COUNT of
+    # element_ids in the allowlist (0..N-1). Driver will spend element_id=0.
     for ri, bi in accumulator_locations:
         block = rungs[ri]["blocks"][bi]
         vals = block["values"]
         leaves_str = vals.get("merkle_leaves", "")
-        # Replace fake hashes in leaves with... we keep them as-is since they're arbitrary
-        leaves = [s.strip() for s in leaves_str.split(",") if s.strip()]
-        if leaves:
-            root = merkle_root(leaves)
+        n = len([s for s in leaves_str.split(",") if s.strip()])
+        if n > 0:
+            root = accumulator_root(n)
             vals["merkle_root"] = root
-            log(f"ACCUMULATOR root computed: {root[:16]}...")
+            vals["_accumulator_size"] = str(n)  # remembered for spend
+            log(f"ACCUMULATOR v2 root computed (N={n}): {root[:16]}...")
 
     ctv_outputs_map = {}
 
@@ -1921,7 +1977,10 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                 # (PubkeyCountForBlock returns 2). Witness emits the signing
                 # pubkey then SIGNATURE then the second pubkey then PREIMAGE
                 # then NUMERIC — keep both pubkeys consistent with fund-time.
-                signer_blocks.append({"type": "HTLC", "privkey": key["privkey"], "preimage": preimage, "pubkeys": [pk2]})
+                # path=0 (receiver/claim with preimage) since this preset
+                # spends the CLAIM rung. signrungtx requires the full
+                # [receiver, sender] pubkey list.
+                signer_blocks.append({"type": "HTLC", "path": 0, "privkey": key["privkey"], "preimage": preimage, "pubkeys": [pk, pk2]})
 
         elif btype == "HASH_SIG":
             pk = vals.get("pubkey", "")
@@ -1992,10 +2051,18 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                 signer_blocks.append(entry)
 
         elif btype == "ACCUMULATOR":
-            leaves = [s.strip() for s in vals.get("merkle_leaves", "").split(",") if s.strip()]
-            if leaves:
-                proof = merkle_proof(leaves, 0)
-                signer_blocks.append({"type": "ACCUMULATOR", "proof": proof["siblings"], "leaf": proof["leaf"]})
+            # v2 (audit #2 E-001 fix): element_id (NUMERIC) + proof (siblings).
+            # Spend element_id=0 — driver always allowlists positions 0..N-1.
+            n_str = vals.get("_accumulator_size") or str(len([
+                s for s in vals.get("merkle_leaves", "").split(",") if s.strip()
+            ]))
+            n = int(n_str) if n_str.isdigit() else 0
+            if n > 0:
+                signer_blocks.append({
+                    "type": "ACCUMULATOR",
+                    "element_id": 0,
+                    "proof": accumulator_proof(n, 0),
+                })
             else:
                 signer_blocks.append({"type": "ACCUMULATOR"})
 
@@ -2282,6 +2349,39 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                     log(f"Carry-forward: {', '.join(b['type'] for b in recurse_blocks)}")
     else:
         create_outputs = [fresh_sig_output]
+
+    # 4b. Pad spend tx outputs so that vout (committed at fund-time as the
+    # rung's coil.output_index AND set on the witness coil by signrungtx
+    # via prevout.n) addresses a real output. Consensus checks
+    # `coil.output_index < tx.output_count` (evaluator.cpp:1421); without
+    # padding, spending vout > 0 of a multi-output fund into a 1-output
+    # spend fails. Pad with dust SIG outputs to match. Skipped for carry-
+    # forward / CTV / RECURSE shapes which already build their own multi-
+    # output structure.
+    if (vout > 0
+            and not is_carry_forward_split if 'is_carry_forward_split' in dir() else vout > 0):
+        pass  # placeholder so we can compute below
+    # Compute is_carry_forward_split now (was deferred to step 5)
+    _is_carry_forward_split = (
+        len(create_outputs) > 1 and all(out.get("_isCarryForward") for out in create_outputs)
+    )
+    if vout > 0 and not _is_carry_forward_split and not has_ctv:
+        # Spend tx output[i] for i > 0 is required only for the
+        # consensus check `coil.output_index < tx.output_count`. Use
+        # 1000 sats (above MLSC dust threshold) to keep the policy
+        # accept path quiet.
+        PAD_AMOUNT = 1000
+        while len(create_outputs) <= vout:
+            create_outputs.append({
+                "amount": PAD_AMOUNT / 1e8,
+                "conditions": [{"blocks": [{"type": "SIG", "fields": [
+                    {"type": "PUBKEY", "hex": wallet_key["pubkey"]}
+                ]}]}],
+            })
+            send_sats -= PAD_AMOUNT
+        # Re-do the destination output amount after the pad subtraction
+        create_outputs[0]["amount"] = send_sats / 1e8
+        log(f"Padded spend tx to {len(create_outputs)} outputs (vout={vout})")
 
     # 5. Create spend TX via the shared-tree createrungtx. Two cases:
     # carry-forward (RECURSE_SPLIT/RATE_LIMIT) where every output shares
