@@ -476,8 +476,10 @@ static RPCHelpMan decoderawtransaction()
     bool try_witness = request.params[1].isNull() ? true : request.params[1].get_bool();
     bool try_no_witness = request.params[1].isNull() ? true : !request.params[1].get_bool();
 
-    if (!DecodeHexTx(mtx, request.params[0].get_str(), try_no_witness, try_witness)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+    std::string decode_err;
+    if (!DecodeHexTx(mtx, request.params[0].get_str(), try_no_witness, try_witness, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty() ? "TX decode failed" : "TX decode failed: " + decode_err);
     }
 
     UniValue result(UniValue::VOBJ);
@@ -650,8 +652,12 @@ static RPCHelpMan combinerawtransaction()
     std::vector<CMutableTransaction> txVariants(txs.size());
 
     for (unsigned int idx = 0; idx < txs.size(); idx++) {
-        if (!DecodeHexTx(txVariants[idx], txs[idx].get_str())) {
-            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, strprintf("TX decode failed for tx %d. Make sure the tx has at least one input.", idx));
+        std::string decode_err;
+        if (!DecodeHexTx(txVariants[idx], txs[idx].get_str(), false, true, &decode_err)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                decode_err.empty()
+                    ? strprintf("TX decode failed for tx %d. Make sure the tx has at least one input.", idx)
+                    : strprintf("TX decode failed for tx %d: %s", idx, decode_err));
         }
     }
 
@@ -779,8 +785,12 @@ static RPCHelpMan signrawtransactionwithkey()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     CMutableTransaction mtx;
-    if (!DecodeHexTx(mtx, request.params[0].get_str())) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed. Make sure the tx has at least one input.");
+    std::string decode_err;
+    if (!DecodeHexTx(mtx, request.params[0].get_str(), false, true, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty()
+                ? "TX decode failed. Make sure the tx has at least one input."
+                : "TX decode failed: " + decode_err);
     }
 
     FlatSigningProvider keystore;
@@ -1739,8 +1749,10 @@ static RPCHelpMan converttopsbt()
     bool iswitness = witness_specified ? request.params[2].get_bool() : false;
     const bool try_witness = witness_specified ? iswitness : true;
     const bool try_no_witness = witness_specified ? !iswitness : true;
-    if (!DecodeHexTx(tx, request.params[0].get_str(), try_no_witness, try_witness)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+    std::string decode_err_decoderaw;
+    if (!DecodeHexTx(tx, request.params[0].get_str(), try_no_witness, try_witness, &decode_err_decoderaw)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err_decoderaw.empty() ? "TX decode failed" : "TX decode failed: " + decode_err_decoderaw);
     }
 
     // Remove all scriptSigs and scriptWitnesses from inputs

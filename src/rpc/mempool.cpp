@@ -79,8 +79,12 @@ static RPCHelpMan sendrawtransaction()
             const CAmount max_burn_amount = request.params[2].isNull() ? 0 : AmountFromValue(request.params[2]);
 
             CMutableTransaction mtx;
-            if (!DecodeHexTx(mtx, request.params[0].get_str())) {
-                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed. Make sure the tx has at least one input.");
+            std::string decode_err;
+            if (!DecodeHexTx(mtx, request.params[0].get_str(), false, true, &decode_err)) {
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                    decode_err.empty()
+                        ? "TX decode failed. Make sure the tx has at least one input."
+                        : "TX decode failed: " + decode_err);
             }
 
             for (const auto& out : mtx.vout) {
@@ -181,9 +185,12 @@ static RPCHelpMan testmempoolaccept()
             txns.reserve(raw_transactions.size());
             for (const auto& rawtx : raw_transactions.getValues()) {
                 CMutableTransaction mtx;
-                if (!DecodeHexTx(mtx, rawtx.get_str())) {
+                std::string decode_err;
+                if (!DecodeHexTx(mtx, rawtx.get_str(), false, true, &decode_err)) {
                     throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
-                                       "TX decode failed: " + rawtx.get_str() + " Make sure the tx has at least one input.");
+                        decode_err.empty()
+                            ? "TX decode failed: " + rawtx.get_str() + " Make sure the tx has at least one input."
+                            : "TX decode failed: " + rawtx.get_str() + " — " + decode_err);
                 }
                 txns.emplace_back(MakeTransactionRef(std::move(mtx)));
             }
@@ -1008,9 +1015,12 @@ static RPCHelpMan submitpackage()
             txns.reserve(raw_transactions.size());
             for (const auto& rawtx : raw_transactions.getValues()) {
                 CMutableTransaction mtx;
-                if (!DecodeHexTx(mtx, rawtx.get_str())) {
+                std::string decode_err;
+                if (!DecodeHexTx(mtx, rawtx.get_str(), false, true, &decode_err)) {
                     throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
-                                       "TX decode failed: " + rawtx.get_str() + " Make sure the tx has at least one input.");
+                        decode_err.empty()
+                            ? "TX decode failed: " + rawtx.get_str() + " Make sure the tx has at least one input."
+                            : "TX decode failed: " + rawtx.get_str() + " — " + decode_err);
                 }
 
                 for (const auto& out : mtx.vout) {

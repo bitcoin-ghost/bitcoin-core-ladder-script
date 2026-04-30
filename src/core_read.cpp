@@ -122,7 +122,7 @@ static bool CheckTxScriptsSanity(const CMutableTransaction& tx)
     return true;
 }
 
-static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& tx_data, bool try_no_witness, bool try_witness)
+static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& tx_data, bool try_no_witness, bool try_witness, std::string* error_out = nullptr)
 {
     // General strategy:
     // - Decode both with extended serialization (which interprets the 0x0001 tag as a marker for
@@ -136,9 +136,18 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
     // - If both decode attempts succeed:
     //   - If only one passes the CheckTxScriptsSanity check, return that one.
     //   - If neither or both pass CheckTxScriptsSanity, return the extended one.
+    //
+    // Ladder Script note: when error_out is non-null, the most-recent
+    // deserialiser exception text is captured so callers can surface the
+    // actual `ios_base::failure` message (e.g. "qabi_block too large",
+    // "non-canonical ReadCompactSize()") instead of the generic
+    // "TX decode failed". v4 RUNG_TX has many wire-format checks that
+    // throw at deserialise time; reviewers debugging a malformed tx need
+    // to see which one fired.
 
     CMutableTransaction tx_extended, tx_legacy;
     bool ok_extended = false, ok_legacy = false;
+    std::string last_error;
 
     // Try decoding with extended serialization support, and remember if the result successfully
     // consumes the entire input.
@@ -147,8 +156,9 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
         try {
             ssData >> TX_WITH_WITNESS(tx_extended);
             if (ssData.empty()) ok_extended = true;
-        } catch (const std::exception&) {
-            // Fall through.
+            else last_error = "trailing bytes after witness deserialisation";
+        } catch (const std::exception& e) {
+            last_error = e.what();
         }
     }
 
@@ -165,8 +175,12 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
         try {
             ssData >> TX_NO_WITNESS(tx_legacy);
             if (ssData.empty()) ok_legacy = true;
-        } catch (const std::exception&) {
-            // Fall through.
+            else if (last_error.empty()) last_error = "trailing bytes after legacy deserialisation";
+        } catch (const std::exception& e) {
+            // Prefer the extended-mode error if both failed (legacy is a
+            // fallback path used mainly for incomplete txs); witness-form
+            // errors are usually more actionable for v4 RUNG_TX debugging.
+            if (last_error.empty()) last_error = e.what();
         }
     }
 
@@ -190,17 +204,19 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
     }
 
     // If none succeeded, we failed.
+    if (error_out) *error_out = last_error;
     return false;
 }
 
-bool DecodeHexTx(CMutableTransaction& tx, const std::string& hex_tx, bool try_no_witness, bool try_witness)
+bool DecodeHexTx(CMutableTransaction& tx, const std::string& hex_tx, bool try_no_witness, bool try_witness, std::string* error_out)
 {
     if (!IsHex(hex_tx)) {
+        if (error_out) *error_out = "input is not valid hex";
         return false;
     }
 
     std::vector<unsigned char> txData(ParseHex(hex_tx));
-    return DecodeTx(tx, txData, try_no_witness, try_witness);
+    return DecodeTx(tx, txData, try_no_witness, try_witness, error_out);
 }
 
 bool DecodeHexBlockHeader(CBlockHeader& header, const std::string& hex_header)

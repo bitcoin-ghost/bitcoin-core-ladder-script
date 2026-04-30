@@ -853,8 +853,10 @@ RPCHelpMan fundrawtransaction()
     CMutableTransaction tx;
     bool try_witness = request.params[2].isNull() ? true : request.params[2].get_bool();
     bool try_no_witness = request.params[2].isNull() ? true : !request.params[2].get_bool();
-    if (!DecodeHexTx(tx, request.params[0].get_str(), try_no_witness, try_witness)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+    std::string decode_err;
+    if (!DecodeHexTx(tx, request.params[0].get_str(), try_no_witness, try_witness, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty() ? "TX decode failed" : "TX decode failed: " + decode_err);
     }
     UniValue options = request.params[1];
     std::vector<std::pair<CTxDestination, CAmount>> destinations;
@@ -951,8 +953,12 @@ RPCHelpMan signrawtransactionwithwallet()
     if (!pwallet) return UniValue::VNULL;
 
     CMutableTransaction mtx;
-    if (!DecodeHexTx(mtx, request.params[0].get_str())) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed. Make sure the tx has at least one input.");
+    std::string decode_err;
+    if (!DecodeHexTx(mtx, request.params[0].get_str(), false, true, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty()
+                ? "TX decode failed. Make sure the tx has at least one input."
+                : "TX decode failed: " + decode_err);
     }
 
     // Sign the transaction
