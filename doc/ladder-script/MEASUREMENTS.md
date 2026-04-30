@@ -2,6 +2,10 @@
 
 **Status:** reference numbers for the BIP draft and integrator docs.
 **Measured on:** commit `1dd8f562a5` (post Stage 2 tidy).
+**Re-verified at:** v0.14 (`v30.0-ladder-0.14`, 2026-04-30) — every
+table below reproduces bit-for-bit on the v0.14 binary. No size drift
+across v0.7–v0.14 (canonical encodings + tagged-hash domains added in
+the audit campaign do not change wire size).
 **Companion tests (reproducible):**
 - `rung_tests/mlsc_creation_tx_size_sweep`
 - `rung_tests/mlsc_spend_tx_size_sweep`
