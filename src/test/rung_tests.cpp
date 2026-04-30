@@ -5,6 +5,10 @@
 
 #include <rung/block_helpers.h>
 #include <rung/conditions.h>
+
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include <rung_shims.h>
 #include <rung/descriptor.h>
 #include <rung/evaluator.h>
@@ -8886,6 +8890,44 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_revealed_relay_refs)
                         "expected 'strict ascending' in error, got: " + error);
 }
 
+// v0.14 (audit #9 Finding 5): regression for the mutation_target site of
+// v0.11 #1 / audit #7 #1. revealed_mutation_targets[*].rung.relay_refs
+// must be strict-ascending unique. Reverting the conditions.cpp:1010-1024
+// fix would make this test fail.
+BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_mutation_target_relay_refs)
+{
+    DataStream ss;
+    WriteCompactSize(ss, 2);                    // total_rungs (so target.idx=1 is valid)
+    WriteCompactSize(ss, 3);                    // total_relays = 3 (refs [1,0] in range)
+    WriteCompactSize(ss, 0);                    // rung_index
+    // Revealed rung: 1 SIG block (n_blocks=0 rejected)
+    WriteCompactSize(ss, 1);                    // n_blocks
+    ss << uint8_t{0x00};                        // SIG slot
+    ss << uint8_t{0x01};                        // SCHEME
+    WriteCompactSize(ss, 0);                    // rung relay_refs: empty
+    WriteCompactSize(ss, 0);                    // n_revealed_relays: empty
+    WriteCompactSize(ss, 1);                    // n_proof_hashes (leaf for unrevealed rung 1)
+    for (int z = 0; z < 32; ++z) ss << uint8_t{0xAB};  // arbitrary leaf hash
+    // Mutation target: idx=1 with descending relay_refs [1, 0]
+    WriteCompactSize(ss, 1);                    // n_mutation_targets
+    WriteCompactSize(ss, 1);                    // mt_idx = 1
+    WriteCompactSize(ss, 1);                    // mt n_blocks
+    ss << uint8_t{0x00};                        // SIG slot
+    ss << uint8_t{0x01};                        // SCHEME
+    WriteCompactSize(ss, 2);                    // mt n_relay_refs
+    WriteCompactSize(ss, 1);                    // mt relay_refs[0] = 1
+    WriteCompactSize(ss, 0);                    // mt relay_refs[1] = 0  ← descending
+
+    std::vector<uint8_t> bytes(ss.size());
+    ss.read(MakeWritableByteSpan(bytes));
+
+    MLSCProof proof;
+    std::string error;
+    BOOST_CHECK(!DeserializeMLSCProof(bytes, proof, error));
+    BOOST_CHECK_MESSAGE(error.find("strict ascending") != std::string::npos,
+                        "expected 'strict ascending' in error, got: " + error);
+}
+
 // v0.7+: mlsc_proof_verify_single_sig / mlsc_proof_verify_two_rungs /
 // mlsc_proof_with_relays were removed. They compared `ComputeConditionsRoot`
 // (which delegates to ComputeTxMLSCRoot — TaggedHash leaves) against
@@ -17163,5 +17205,134 @@ BOOST_AUTO_TEST_CASE(stress_is_standard_rung_tx_random)
     BOOST_TEST_MESSAGE("stress_is_standard_rung_tx_random: " << accepted
                         << " accepted, " << rejected << " rejected (of " << N << ")");
 }
+
+// v0.14 (audit #9 A3 / audit #10 F1): parallel cache determinism regression.
+// v0.13's mutex-direct fix (F1-real + Finding 2) replaced the snapshot/merge
+// cache pattern with shared-cache + mutex access. Test design — exercises
+// BOTH the anchor (write) path and the non-anchor (read) path concurrently:
+//
+//   1 anchor thread: HASH256 + PUBKEY + SIGNATURE (writes cache once)
+//   (N-1) reader threads: HASH256 only (read cache)
+//
+// Audit #10 F1 noted that pre-strengthening, all 8 threads carried
+// PUBKEY+SIGNATURE so all 8 took the anchor branch at qabi.cpp:715 — the
+// non-anchor read path at qabi.cpp:744-749 was never exercised, so a
+// regression that removed the read-side mutex would have shipped silently.
+// The strengthened layout below forces (N-1) readers through the cached-
+// read code, with an atomic ordering flag so reads happen post-write.
+// Skipped if liboqs isn't compiled in.
+#ifdef ENABLE_QABIO
+BOOST_AUTO_TEST_CASE(pq_batch_parallel_cache_determinism)
+{
+    if (!HasPQSupport()) return;
+
+    // Build one valid FALCON-512 anchor block + matching commit.
+    std::vector<uint8_t> coord_pk, coord_sk;
+    BOOST_REQUIRE(GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk));
+    uint256 commit;
+    CSHA256().Write(coord_pk.data(), coord_pk.size()).Finalize(commit.data());
+
+    // Build a tx the eval can sighash against (single input).
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.emplace_back();
+    mtx.vin[0].prevout = COutPoint(Txid::FromUint256(uint256::ONE), 0);
+    mtx.vin[0].nSequence = 0xFFFFFFFF;
+    mtx.vout.emplace_back(1000, CScript());
+    mtx.conditions_root.SetNull();
+    CTransaction tx(mtx);
+
+    // Sign over a fixed sighash so the FALCON anchor verifies. The eval's
+    // FetchLadderSighash will return the all-zero stub (no input_conditions
+    // wired), so we sign over zeros to match.
+    uint256 sighash;
+    sighash.SetNull();
+    std::vector<uint8_t> sig;
+    BOOST_REQUIRE(SignPQ(RungScheme::FALCON512, coord_sk,
+                          std::span<const uint8_t>(sighash.begin(), 32), sig));
+
+    // Anchor block: HASH256 + PUBKEY + SIGNATURE (write path).
+    RungBlock anchor_block;
+    anchor_block.type = RungBlockType::PQ_BATCH;
+    anchor_block.fields.push_back({RungDataType::HASH256,
+                                    std::vector<uint8_t>(commit.begin(), commit.end())});
+    anchor_block.fields.push_back({RungDataType::PUBKEY, coord_pk});
+    anchor_block.fields.push_back({RungDataType::SIGNATURE, sig});
+
+    // Reader block: HASH256 only (read path — `if (!pubkey_field || !sig_field)`).
+    RungBlock reader_block;
+    reader_block.type = RungBlockType::PQ_BATCH;
+    reader_block.fields.push_back({RungDataType::HASH256,
+                                    std::vector<uint8_t>(commit.begin(), commit.end())});
+
+    // Shared cache + mutex (the v0.13 plumbing).
+    PQBatchCache cache;
+    std::mutex cache_mutex;
+
+    constexpr int N = 8; // 1 anchor + 7 readers
+    std::vector<std::thread> workers;
+    std::atomic<int> anchor_satisfied{0};
+    std::atomic<int> reader_satisfied{0};
+    std::atomic<bool> anchor_done{false};
+    workers.reserve(N);
+
+    auto eval_lambda = [&](const RungBlock& blk, bool is_anchor) {
+        RungEvalContext ctx;
+        rung::LadderTxViewBuilder tvb(tx);
+        ctx.tx = &tvb.view;
+        ctx.input_index = 0;
+        ctx.tx_weight = GetTransactionWeight(tx);
+        ctx.pq_batch_cache = &cache;
+        ctx.pq_batch_cache_mutex = &cache_mutex;
+        PrecomputedTransactionData txdata;
+        txdata.Init(tx, /*spent_outputs=*/{});
+        rung::LadderPrecomputedBuilder pcb(txdata);
+        ctx.precomputed = &pcb.view;
+
+        BaseSignatureChecker fallback_checker;
+        rung::CoreLadderSigChecker fake_sig{fallback_checker};
+        ScriptExecutionData execdata;
+        EvalResult r = EvalBlock(blk, fake_sig, fallback_checker,
+                                  SigVersion::TAPSCRIPT, execdata, ctx, 0);
+        if (r == EvalResult::SATISFIED) {
+            (is_anchor ? anchor_satisfied : reader_satisfied)
+                .fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    // Anchor thread: runs first, signals when done.
+    workers.emplace_back([&] {
+        eval_lambda(anchor_block, /*is_anchor=*/true);
+        anchor_done.store(true, std::memory_order_release);
+    });
+
+    // Reader threads: spin on `anchor_done`, then exercise the cached-read
+    // path concurrently. Pre-v0.14 a quietly-removed read-side mutex would
+    // not have been caught here; with N-1 threads on the read path now it
+    // is — and concurrent reads against the live cache during anchor-write
+    // tail-end stress the mutex coverage too.
+    for (int i = 1; i < N; ++i) {
+        workers.emplace_back([&] {
+            while (!anchor_done.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            eval_lambda(reader_block, /*is_anchor=*/false);
+        });
+    }
+
+    for (auto& t : workers) t.join();
+
+    // Anchor thread satisfied (write path).
+    BOOST_CHECK_EQUAL(anchor_satisfied.load(), 1);
+    // All reader threads satisfied (read path).
+    BOOST_CHECK_EQUAL(reader_satisfied.load(), N - 1);
+
+    // Cache should have exactly one entry: the (commit → true) write.
+    BOOST_CHECK_EQUAL(cache.size(), 1u);
+    auto it = cache.find(commit);
+    BOOST_REQUIRE(it != cache.end());
+    BOOST_CHECK(it->second);
+}
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()

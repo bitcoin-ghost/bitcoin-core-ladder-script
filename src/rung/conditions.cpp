@@ -763,7 +763,18 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
 
             // SHARED mode: compact format — just source_input + rung_index + revealed rung
             if (proof.proof_mode == MLSCProofMode::SHARED) {
-                proof.shared_source_input = static_cast<uint16_t>(ReadCompactSize(ss));
+                // v0.14 (audit #10 F4): cap shared_source_input at uint16 max
+                // before truncating. Pre-v0.14 this silently truncated wider
+                // CompactSize values to uint16, so two distinct wire encodings
+                // (e.g. 0x00 and 0xFE 0x00 0x00 0x01 0x00) decoded to the same
+                // index. Conditions-side SIG doesn't cover the SHARED proof
+                // wire encoding, so this enabled third-party wtxid malleation.
+                uint64_t raw_src = ReadCompactSize(ss);
+                if (raw_src > std::numeric_limits<uint16_t>::max()) {
+                    error = "MLSC shared proof shared_source_input exceeds uint16 max";
+                    return false;
+                }
+                proof.shared_source_input = static_cast<uint16_t>(raw_src);
                 uint64_t total_rungs = ReadCompactSize(ss);
                 uint64_t rung_index = ReadCompactSize(ss);
                 if (total_rungs == 0 || total_rungs > MAX_RUNGS) {

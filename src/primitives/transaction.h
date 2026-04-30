@@ -230,7 +230,7 @@ static constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
  * - CompactSize qabi_block_len
  * - unsigned char qabi_block[]              (QABIO: tx-level batch block)
  * - CompactSize aggregated_sig_len
- * - unsigned char aggregated_sig[]          (QABIO: FALCON-512 coordinator sig, exactly 666 B when present)
+ * - unsigned char aggregated_sig[]          (QABIO: FALCON-512 coordinator sig, 1..666 B when present — variable per BIP-FALCON; v0.14 closes audit #9 Finding 4 by carrying the actual length rather than padding to 666 B)
  * - uint32_t nLockTime
  *
  * TX_MLSC format (Ladder Script, stripped — no-witness, used for txid):
@@ -366,7 +366,10 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
             s.read(MakeWritableByteSpan(tx.qabi_block));
         }
         /* Read aggregated signature (QABIO: coordinator's FALCON-512 sig over SIGHASH_QABO).
-         * Max: 666 bytes exactly when present (FALCON-512 sig size), or 0 when absent. */
+         * Length: 1..666 bytes when present (variable-length per BIP-FALCON;
+         * v0.14 / audit #9 Finding 4 removed the pre-v0.14 "exactly 666"
+         * requirement that left trailing padding as a coordinator-side
+         * channel), or 0 when absent. */
         uint64_t agg_len = ReadCompactSize(s);
         if (agg_len > 666) throw std::ios_base::failure("aggregated_sig too large");
         tx.aggregated_sig.resize(agg_len);

@@ -154,7 +154,15 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
         // participant_id with no duplicates. Closes both:
         //   - duplicate participant_id channel (~44 B/duplicate)
         //   - log2(N!) permutation channel from coordinator-chosen order
-        block.entries.reserve(n_entries);
+        // v0.14 (audit #10 F3): bound reserve by remaining bytes / minimum
+        // entry size (32 participant_id + 8 contribution + 1 CompactSize = 41).
+        // Pre-v0.14 reserve(n_entries) trusted the wire-format n_entries up
+        // to QABI_BLOCK_MAX_HARD (262144), allowing a ≤256 KB tx to allocate
+        // ~12.5 MB transient — a 50× DoS amplification.
+        constexpr size_t MIN_ENTRY_BYTES = 32 + 8 + 1;
+        const size_t safe_entries = std::min<uint64_t>(n_entries,
+                                                        s.size() / MIN_ENTRY_BYTES);
+        block.entries.reserve(safe_entries);
         for (uint64_t i = 0; i < n_entries; ++i) {
             QABIEntry e;
             s >> e.participant_id;
@@ -188,7 +196,10 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             error_out = "qabi_block has zero outputs";
             return std::nullopt;
         }
-        block.output_values.reserve(n_outputs);
+        // v0.14 (audit #10 F3): bound by remaining bytes (each output_value
+        // is a fixed 8-byte int64).
+        const size_t safe_outputs = std::min<uint64_t>(n_outputs, s.size() / 8);
+        block.output_values.reserve(safe_outputs);
         for (uint64_t i = 0; i < n_outputs; ++i) {
             int64_t v;
             s >> v;
@@ -264,7 +275,12 @@ uint256 ComputeCanonicalBatchId(std::span<const uint8_t> coordinator_pubkey,
     // batch_id would have to collide on all three inputs — every QABI batch
     // commits the same three fields, so derived equality means functional
     // equality.
-    HashWriter hw{};
+    // v0.14 (audit #10 A3): domain-tagged HashWriter. Pre-v0.14 was untagged;
+    // not exploitable (each input is length-prefixed by the writer's
+    // structured serialisation), but the tag is one-line hardening that
+    // follows the same pattern v0.12 A1 applied to HashRungConditions.
+    static const HashWriter HASHER_LADDERQABIBATCHID{TaggedHash("LadderQABIBatchId/v1")};
+    HashWriter hw{HASHER_LADDERQABIBATCHID};
     wire::WriteBytes(hw, coordinator_pubkey.data(), coordinator_pubkey.size());
     wire::WriteBytes(hw, outputs_conditions_root.data(), 32);
     wire::WriteU32LE(hw, prime_expiry_height);

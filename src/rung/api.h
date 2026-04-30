@@ -359,6 +359,11 @@ struct LadderEvalContext {
     //! cache write yet. v0.13 closes both.
     void* shared_tree_cache_mutex{nullptr};
     void* pq_batch_cache_mutex{nullptr};
+    //! v0.14 (audit #10 F2): QABO sig cache mutex (typed std::mutex* on
+    //! the library side). When non-null, qabi.cpp locks reads and writes
+    //! against the host-owned shared cache directly, replacing the
+    //! v0.13-era snapshot/merge pattern.
+    void* qabo_sig_cache_mutex{nullptr};
     void* legacy_sig_checker{nullptr};
 };
 

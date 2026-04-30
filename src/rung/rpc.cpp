@@ -2650,8 +2650,37 @@ static RPCHelpMan signrungtx()
                     cp_relay.value_commitment = rung::ComputeValueCommitment(tmp, rpks);
                     all_leaves.push_back(rung::ComputeTxMLSCRelayLeaf(cp_relay));
                 }
-                mlsc_proof.proof_mode = rung::MLSCProofMode::MERKLE_PATH;
-                mlsc_proof.proof_hashes = rung::BuildMerklePath(all_leaves, target_rung);
+                // v0.14: QABI_PRIME's covenant check (qabi.cpp:238) verifies
+                // every mutation_target leaf against ctx.verified_leaves[idx].
+                // verified_leaves is only fully populated when the proof carries
+                // FULL_LEAVES (evaluator.cpp:1351-1361 — MERKLE_PATH mode keeps
+                // only leaves[0] = revealed leaf). Switch to FULL_LEAVES when
+                // QABI_PRIME is the spending block so all sibling leaves
+                // become available to the consensus check. Closes a multi-
+                // version regression (test_mine_qabi_prime_lifecycle, audit #10).
+                bool target_has_qabi_prime_check = false;
+#ifdef ENABLE_QABIO
+                if (target_rung < conditions.rungs.size()) {
+                    for (const auto& blk : conditions.rungs[target_rung].blocks) {
+                        if (blk.type == rung::RungBlockType::QABI_PRIME) {
+                            target_has_qabi_prime_check = true;
+                            break;
+                        }
+                    }
+                }
+#endif
+                if (target_has_qabi_prime_check) {
+                    mlsc_proof.proof_mode = rung::MLSCProofMode::FULL_LEAVES;
+                    // FULL_LEAVES carries each non-revealed leaf hash inline.
+                    mlsc_proof.proof_hashes.clear();
+                    for (size_t i = 0; i < all_leaves.size(); ++i) {
+                        if (i == target_rung) continue;
+                        mlsc_proof.proof_hashes.push_back(all_leaves[i]);
+                    }
+                } else {
+                    mlsc_proof.proof_mode = rung::MLSCProofMode::MERKLE_PATH;
+                    mlsc_proof.proof_hashes = rung::BuildMerklePath(all_leaves, target_rung);
+                }
             }
 
             auto proof_bytes = rung::SerializeMLSCProof(mlsc_proof);
@@ -4191,8 +4220,11 @@ static RPCHelpMan qabi_buildblock()
              "Coordinator's FALCON-512 public key (897 bytes, hex)"},
             {"prime_expiry_height", RPCArg::Type::NUM, RPCArg::Optional::NO,
              "Max block height at which the QABIO tx may execute"},
-            {"batch_id", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
-             "Unique batch identifier (32 bytes, hex)"},
+            {"batch_id", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED,
+             "Optional 32-byte hex. Ignored — always overridden by the canonical "
+             "SHA256 derivation that the parser enforces (v0.13 audit #9 Finding 6 / "
+             "v0.12 F8). Retained as a positional placeholder for API stability; "
+             "the result includes the actual canonical batch_id."},
             {"entries", RPCArg::Type::ARR, RPCArg::Optional::NO, "Participant list",
                 {
                     {"entry", RPCArg::Type::OBJ, RPCArg::Optional::NO, "One participant",
@@ -4222,6 +4254,7 @@ static RPCHelpMan qabi_buildblock()
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::STR_HEX, "qabi_block", "Serialised QABIBlock bytes (hex)"},
             {RPCResult::Type::STR_HEX, "qabi_root", "SHA256(serialised block) — 32 bytes hex"},
+            {RPCResult::Type::STR_HEX, "batch_id", "Canonical batch_id derived from coordinator_pubkey + outputs_conditions_root + prime_expiry_height"},
             {RPCResult::Type::NUM, "size", "Serialised block size in bytes"},
         }},
         RPCExamples{HelpExampleCli("qabi_buildblock", "...")},
@@ -4239,11 +4272,10 @@ static RPCHelpMan qabi_buildblock()
 
         block.prime_expiry_height = self.Arg<uint64_t>("prime_expiry_height");
 
-        auto bid = ParseHex(self.Arg<std::string>("batch_id"));
-        if (bid.size() != 32) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "batch_id must be 32 bytes");
-        }
-        std::memcpy(block.batch_id.data(), bid.data(), 32);
+        // batch_id parameter is ignored — auto-derive the canonical SHA256
+        // (v0.13 audit #9 Finding 6 closed the embedding channel by enforcing
+        // canonical batch_id at parse). Any user-provided value would be
+        // rejected by ParseQABIBlock, so derive the correct one here.
 
         const UniValue& entries = request.params[3].get_array();
         for (size_t i = 0; i < entries.size(); ++i) {
@@ -4279,6 +4311,31 @@ static RPCHelpMan qabi_buildblock()
             }
         }
 
+        // v0.14: auto-sort entries by participant_id (strict ascending). The
+        // parser enforces strict-ascending unique entries (v0.12 audit 8b
+        // F6/F7 — closes both the duplicate-participant channel and the
+        // log2(N!) coordinator-chosen-permutation channel). Coordinators
+        // pass entries in arbitrary order; sort here so the output is
+        // always parseable. Reject duplicate participant_ids.
+        std::sort(block.entries.begin(), block.entries.end(),
+                  [](const rung::QABIEntry& a, const rung::QABIEntry& b) {
+                      return std::memcmp(a.participant_id.data(),
+                                         b.participant_id.data(), 32) < 0;
+                  });
+        for (size_t i = 1; i < block.entries.size(); ++i) {
+            if (std::memcmp(block.entries[i - 1].participant_id.data(),
+                            block.entries[i].participant_id.data(), 32) == 0) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "duplicate participant_id in entries");
+            }
+        }
+
+        // Apply canonical batch_id (v0.13 audit #9 Finding 6 enforcement). Any
+        // user-supplied batch_id is overridden — the parser only accepts the
+        // canonical value so emitting anything else would produce a qabi_block
+        // that fails to parse.
+        rung::ApplyCanonicalBatchId(block);
+
         auto bytes = rung::SerializeQABIBlock(block);
         if (bytes.size() > rung::QABI_BLOCK_MAX_HARD) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -4289,6 +4346,7 @@ static RPCHelpMan qabi_buildblock()
         UniValue result(UniValue::VOBJ);
         result.pushKV("qabi_block", HexStr(bytes));
         result.pushKV("qabi_root", root.GetHex());
+        result.pushKV("batch_id", block.batch_id.GetHex());
         result.pushKV("size", static_cast<uint64_t>(bytes.size()));
         return result;
     },
@@ -4484,13 +4542,15 @@ static RPCHelpMan qabi_signqabo()
             throw JSONRPCError(RPC_INTERNAL_ERROR, "FALCON-512 signing failed");
         }
 
-        // Pad to exactly 666 bytes (consensus cap) — liboqs FALCON signatures
-        // are variable-length ≤666 bytes. Zero-pad any shorter result.
-        if (sig.size() > rung::QABI_AGGREGATED_SIG_MAX) {
+        // v0.14 (audit #9 Finding 4): write the actual FALCON sig bytes
+        // without padding. Pre-v0.14 padded to exactly 666 B, which left
+        // the trailing (666 - actual_len) bytes as a coordinator-side
+        // ~0-66 B/tx channel. v0.14 wire-format carries the actual sig
+        // length (consensus accepts 1..QABI_AGGREGATED_SIG_MAX=666).
+        if (sig.size() == 0 || sig.size() > rung::QABI_AGGREGATED_SIG_MAX) {
             throw JSONRPCError(RPC_INTERNAL_ERROR,
-                "FALCON signature exceeds consensus cap");
+                "FALCON signature length out of range [1, 666]");
         }
-        sig.resize(rung::QABI_AGGREGATED_SIG_MAX, 0x00);
         mtx.aggregated_sig = sig;
 
         // Re-serialise the signed tx.

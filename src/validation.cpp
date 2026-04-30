@@ -2191,23 +2191,27 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         }
         // QABIO: per-tx FALCON sig verify cache. All primed inputs of a
         // QABIO tx share the same (sighash, sig, pubkey), so the verify
-        // only needs to run once. Snapshot the thread-safe cache, pass a
-        // local copy to VerifyRungTx, then merge any new entries back.
+        // only needs to run once.
+        // v0.14 (audit #10 F2): pass the shared cache + mutex directly,
+        // mirroring the v0.13 migration of pq_batch_cache and
+        // shared_tree_cache. Pre-v0.14 this used snapshot/merge — not
+        // exploitable (the cache memoises a deterministic function so
+        // workers reach the same answer regardless of cache visibility),
+        // but inconsistent with the other caches and ~12.5 KB of redundant
+        // copy per input on busy QABIO txs.
 #ifdef ENABLE_QABIO
-        rung::QABOSigCache local_qabo_cache;
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
+        std::mutex* qabo_sig_cache_mutex_ptr = nullptr;
         if (m_qabo_sig_cache) {
-            {
-                LOCK(m_qabo_sig_cache->mutex);
-                local_qabo_cache = m_qabo_sig_cache->cache;
-            }
-            qabo_cache_ptr = &local_qabo_cache;
+            qabo_cache_ptr = &m_qabo_sig_cache->cache;
+            qabo_sig_cache_mutex_ptr = &m_qabo_sig_cache->mutex;
         }
 #else
         // QABIO disabled: VerifyRungTx still accepts the pointer but it
         // is never read because the evaluator short-circuits QABI_SPEND
         // to UNSATISFIED before touching the cache.
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
+        std::mutex* qabo_sig_cache_mutex_ptr = nullptr;
 #endif
         // PQ_BATCH: per-tx anchor verification cache.
         // v0.13 (audit #9 F1-real): pass the shared cache + mutex directly,
@@ -2223,26 +2227,13 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
             pq_batch_cache_ptr = &m_pq_batch_cache->cache;
             pq_batch_cache_mutex_ptr = &m_pq_batch_cache->mutex;
         }
-        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr);
-        // Write back any new cache entries. We use emplace() here, not
-        // insert_or_assign() — the cache is best-effort dedup, not exact:
-        // parallel input checks may each compute the same entry from
-        // their stale snapshots and race to write it back. emplace's
-        // first-writer-wins semantics is intentional. The redundant
-        // recomputations are bounded by the number of parallel script
-        // workers (typically par=N CPU cores), not the number of inputs.
-        // v0.13: no merge-back for shared_tree_cache — writes go through the
-        // shared mutex inside VerifyRungTx and are already in place.
-#ifdef ENABLE_QABIO
-        if (m_qabo_sig_cache && qabo_cache_ptr) {
-            LOCK(m_qabo_sig_cache->mutex);
-            for (const auto& [k, v] : local_qabo_cache) {
-                m_qabo_sig_cache->cache.emplace(k, v);
-            }
-        }
-#endif
-        // v0.13: no merge-back for pq_batch_cache — writes go through the
-        // shared mutex inside EvalPQBatchBlock and are already in place.
+        bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr, qabo_sig_cache_mutex_ptr);
+        // v0.14 (audit #10 F2): no merge-back for qabo_sig_cache — writes
+        // go through the shared mutex inside EvalQABISpendBlock and are
+        // already in place.
+        // v0.13: no merge-back for shared_tree_cache or pq_batch_cache —
+        // writes go through their respective shared mutexes inside the
+        // evaluator and are already in place.
         if (ok) {
             return std::nullopt;
         } else {

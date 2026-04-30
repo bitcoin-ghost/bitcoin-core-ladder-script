@@ -110,7 +110,7 @@ class QABIBatchSize(QabiTest):
         per_input_post_priming = per_input_contribution - per_input_priming_fee
         sink_amount = float(per_input_post_priming * n - Decimal("0.001"))
         batch_amounts = [sink_amount]
-        template = self.node.createtxmlsc(
+        template = self.node.createrungtx(
             [{"txid": z32, "vout": i} for i in range(n)],
             batch_amounts,
             template_rungs,
@@ -142,7 +142,7 @@ class QABIBatchSize(QabiTest):
                 owner_id_hex=p["owner_id_hex"],
                 sig_pk_compressed_hex=p["pk_hex"],
             )
-            primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+            primed_conditions_create = self._qabi_conditions_for_createrungtx(
                 auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
                 committed_root_hex=qabi_root_wire,
                 committed_depth=10,
@@ -151,7 +151,7 @@ class QABIBatchSize(QabiTest):
                 sig_pk_compressed_hex=p["pk_hex"],
             )
             primed_amount = float(initial["value_btc"] - Decimal("0.0001"))
-            priming_tx = self.node.createtxmlsc(
+            priming_tx = self.node.createrungtx(
                 [{"txid": initial["txid"], "vout": 0}],
                 [primed_amount],
                 primed_conditions_create,
@@ -197,7 +197,7 @@ class QABIBatchSize(QabiTest):
         self.log.info(f"  priming: {n} tx × ~{priming_vsizes[0]} vB = {priming_total} vB")
 
         # Build the batch spend tx.
-        batch_tx = self.node.createtxmlsc(
+        batch_tx = self.node.createrungtx(
             [{"txid": primed[i]["txid"], "vout": 0} for i in range(n)],
             batch_amounts,
             template_rungs,

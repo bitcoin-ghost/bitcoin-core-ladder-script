@@ -176,6 +176,12 @@ struct RungEvalContext {
     //! approach is the correct fix for both PQ_BATCH and SharedTreeCache.
     std::mutex* shared_tree_cache_mutex{nullptr};
     std::mutex* pq_batch_cache_mutex{nullptr};
+    //! v0.14 (audit #10 F2): final cache to migrate off snapshot/merge.
+    //! Not exploitable (QABO cache memoises a deterministic function so
+    //! workers reach the same answer regardless of cache visibility),
+    //! but cuts ~12.5 KB of per-input snapshot copy on busy QABIO txs and
+    //! removes the inconsistency vs pq_batch_cache / shared_tree_cache.
+    std::mutex* qabo_sig_cache_mutex{nullptr};
 };
 
 // Windows headers (wingdi.h, transitively via windows.h) define ERROR as
@@ -380,7 +386,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   QABOSigCache* qabo_sig_cache = nullptr,
                   PQBatchCache* pq_batch_cache = nullptr,
                   std::mutex* pq_batch_cache_mutex = nullptr,
-                  std::mutex* shared_cache_mutex = nullptr);
+                  std::mutex* shared_cache_mutex = nullptr,
+                  std::mutex* qabo_sig_cache_mutex = nullptr);
 
 } // namespace rung
 

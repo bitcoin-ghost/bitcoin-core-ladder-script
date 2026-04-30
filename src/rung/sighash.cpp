@@ -59,6 +59,12 @@ constexpr uint8_t LADDER_SIGHASH_INPUT_MASK    = 0x80;
 
 const HashWriter HASHER_LADDERSIGHASH{TaggedHash("LadderSighash/v1")};
 const HashWriter HASHER_LADDERKEYPATH{TaggedHash("LadderKeyPathSighash/v1")};
+// v0.14 (audit #10 A3): tag the QABI section hasher. Pre-v0.14 used an
+// untagged HashWriter — not exploitable today (length-prefixed inputs
+// prevent practical collisions, and the output is folded into the
+// tagged sighash one level up), but the tag is a one-line hardening
+// that follows the v0.12 A1 pattern applied to HashRungConditions.
+const HashWriter HASHER_LADDERQABISECTION{TaggedHash("LadderQABISection/v1")};
 
 static void WriteU256(HashWriter& ss, const uint256& h) {
     wire::WriteBytes(ss, h.data(), 32);
@@ -102,7 +108,7 @@ static uint256 HashRungConditions(const RungConditions& conditions)
  *  structurally collision-resistant regardless of the per-field length policy. */
 static uint256 HashQABISection(const rung::api::LadderTxView& tx)
 {
-    HashWriter qss{};
+    HashWriter qss{HASHER_LADDERQABISECTION};
     WriteCompactSize(qss, tx.qabi_block_size);
     if (tx.qabi_block_size > 0 && tx.qabi_block) {
         WriteBytes(qss, tx.qabi_block, tx.qabi_block_size);

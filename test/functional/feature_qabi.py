@@ -21,7 +21,7 @@ Covers:
     destination_index)
   - qabi_blockinfo: rejects malformed hex
   - qabi_sighash: computes a valid SIGHASH_QABO over a tx constructed
-    via the createtxmlsc RPC, verifies determinism and
+    via the createrungtx RPC, verifies determinism and
     aggregated_sig exclusion
 
 A full prime-and-spend flow at the RPC level would require additional
@@ -103,8 +103,8 @@ class QabiTest(BitcoinTestFramework):
         self.test_signqabo_full_flow()
         self.test_signrungtx_qabi_prime_witness()
         self.test_signrungtx_qabi_prime_with_auth_seed_derivation()
-        self.test_createtxmlsc_with_qabi_block_param()
-        self.test_createtxmlsc_with_qabi_conditions()
+        self.test_createrungtx_with_qabi_block_param()
+        self.test_createrungtx_with_qabi_conditions()
         self.test_full_qabi_utxo_lifecycle()
         self.test_testmempoolaccept_rejects_fake_qabio_tx()
         self.test_decode_qabio_tx_preserves_fields()
@@ -177,7 +177,11 @@ class QabiTest(BitcoinTestFramework):
         self.log.info("Testing qabi_buildblock → qabi_blockinfo roundtrip...")
 
         coordinator_pubkey = "ab" * QABI_COORDINATOR_PUBKEY_SIZE
-        batch_id = "cd" * 32
+        # batch_id is canonically derived by qabi_buildblock and returned in
+        # the result. v0.13 audit #9 Finding 6 enforces canonical batch_id at
+        # parse; v0.14 makes the RPC parameter cosmetic — auto-overridden.
+        # Pass any value here (it's ignored); read the canonical from result.
+        batch_id_in = "cd" * 32
         expiry_height = 12345
         outputs_conditions_root = "ee" * 32
 
@@ -194,18 +198,21 @@ class QabiTest(BitcoinTestFramework):
         output_values = ["0.00099"]  # 99000 sats — 1000 sats fee
 
         built = self.node.qabi_buildblock(
-            coordinator_pubkey, expiry_height, batch_id, entries,
+            coordinator_pubkey, expiry_height, batch_id_in, entries,
             outputs_conditions_root, output_values)
         assert "qabi_block" in built
         assert "qabi_root" in built
+        assert "batch_id" in built
         assert "size" in built
         assert_greater_than(built["size"], 900)  # at least the FALCON pubkey
+        # batch_id should be canonical, not what we passed in.
+        assert built["batch_id"] != batch_id_in
         self.log.info(f"  Built block: {built['size']} bytes, root={built['qabi_root'][:16]}...")
 
         # Decode it back
         info = self.node.qabi_blockinfo(built["qabi_block"])
         assert_equal(info["version"], 1)
-        assert_equal(info["batch_id"], batch_id)
+        assert_equal(info["batch_id"], built["batch_id"])
         assert_equal(info["coordinator_pubkey"], coordinator_pubkey)
         assert_equal(info["prime_expiry_height"], expiry_height)
         assert_equal(info["outputs_conditions_root"], outputs_conditions_root)
@@ -255,7 +262,7 @@ class QabiTest(BitcoinTestFramework):
     def test_sighash_determinism(self):
         self.log.info("Testing qabi_sighash determinism...")
 
-        # Build a minimal valid TX_MLSC v4 tx via createtxmlsc and run it
+        # Build a minimal valid TX_MLSC v4 tx via createrungtx and run it
         # through qabi_sighash. We verify:
         #   (a) the RPC returns a 32-byte (64-hex-char) result
         #   (b) two calls on the same bytes produce the same result
@@ -269,11 +276,11 @@ class QabiTest(BitcoinTestFramework):
 
         dummy_pubkey = "02" + "ab" * 32
 
-        # createtxmlsc signature:
+        # createrungtx signature:
         #   inputs:     [{"txid": ..., "vout": ...}]
         #   amounts:    [float, float, ...]        (value per output)
         #   conditions: [{output_index, blocks}]   (conditions per output)
-        tx_result = self.node.createtxmlsc(
+        tx_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [0.0001],
             [{
@@ -308,7 +315,7 @@ class QabiTest(BitcoinTestFramework):
         self.generate(wallet, 10)  # ensure funds on top of earlier blocks
 
         utxo = wallet.get_utxo()
-        tx_result = self.node.createtxmlsc(
+        tx_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [0.0001],
             [{
@@ -328,8 +335,11 @@ class QabiTest(BitcoinTestFramework):
     def test_signqabo_full_flow(self):
         """Full coordinator signing flow via RPCs:
         generate FALCON keypair → build QABIBlock → construct raw v4 tx with
-        qabi_block populated → qabi_signqabo → verify signed tx has a 666-byte
-        aggregated_sig and consistent sighash."""
+        qabi_block populated → qabi_signqabo → verify the signed tx carries
+        a FALCON-512 aggregated_sig of valid length (1..666 — variable per
+        BIP-FALCON, v0.14 audit #9 Finding 4 removed pre-v0.14 zero-padding
+        to exactly 666 B which left the trailing bytes as a coordinator-side
+        channel) and a consistent sighash."""
         self.log.info("Testing qabi_signqabo full signing flow...")
 
         # 1. Generate FALCON-512 coordinator keypair via RPC.
@@ -356,7 +366,7 @@ class QabiTest(BitcoinTestFramework):
         self.log.info(f"  built QABIBlock: {built['size']} bytes")
 
         # 3. Construct a minimal TX_MLSC v4 tx carrying the qabi_block. We
-        #    build the wire format by hand since createtxmlsc doesn't accept
+        #    build the wire format by hand since createrungtx doesn't accept
         #    a qabi_block parameter today.
         tx_hex = self._build_minimal_qabio_tx_hex(qabi_block_hex)
 
@@ -365,7 +375,10 @@ class QabiTest(BitcoinTestFramework):
         assert "hex" in signed
         assert "sighash" in signed
         assert "sig_size" in signed
-        assert_equal(signed["sig_size"], 666)  # QABI_AGGREGATED_SIG_MAX
+        # v0.14 audit #9 Finding 4: FALCON-512 sigs are variable-length
+        # 1..666 B. Pre-v0.14 padded with zeros to exactly 666; v0.14 carries
+        # the actual sig length to close the trailing-padding channel.
+        assert 1 <= signed["sig_size"] <= 666, f"sig_size out of range: {signed['sig_size']}"
         self.log.info(f"  signed tx: sighash={signed['sighash'][:16]}..., "
                       f"sig_size={signed['sig_size']}")
 
@@ -389,7 +402,7 @@ class QabiTest(BitcoinTestFramework):
 
     def _build_minimal_qabio_tx_hex(self, qabi_block_hex: str) -> str:
         """Construct a minimal TX_MLSC v4 tx hex with the given qabi_block
-        field populated. Bypasses createtxmlsc because that RPC doesn't
+        field populated. Bypasses createrungtx because that RPC doesn't
         currently accept a qabi_block argument — this is a hand-rolled wire
         serialisation matching the format in src/primitives/transaction.h."""
         import struct
@@ -571,14 +584,14 @@ class QabiTest(BitcoinTestFramework):
         self.log.info("  QABI_PRIME witness fields correct")
 
     # ------------------------------------------------------------------
-    # createtxmlsc: qabi_block parameter + QABI conditions
+    # createrungtx: qabi_block parameter + QABI conditions
     # ------------------------------------------------------------------
 
-    def test_createtxmlsc_with_qabi_block_param(self):
-        """Verify createtxmlsc accepts a qabi_block parameter and populates
+    def test_createrungtx_with_qabi_block_param(self):
+        """Verify createrungtx accepts a qabi_block parameter and populates
         tx.qabi_block on the returned tx. This is the mechanism coordinators
         will use to produce a QABIO batch tx template."""
-        self.log.info("Testing createtxmlsc with qabi_block parameter...")
+        self.log.info("Testing createrungtx with qabi_block parameter...")
 
         # Fund a coinbase so we have a UTXO to spend.
         from test_framework.wallet import MiniWallet
@@ -610,7 +623,7 @@ class QabiTest(BitcoinTestFramework):
             }],
         }]
 
-        result = self.node.createtxmlsc(
+        result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [0.0001],
             rungs,
@@ -636,11 +649,11 @@ class QabiTest(BitcoinTestFramework):
         assert_equal(info["qabi_root"], built["qabi_root"])
         self.log.info("  qabi_block embedded and decodable")
 
-    def test_createtxmlsc_with_qabi_conditions(self):
-        """Verify createtxmlsc accepts a multi-rung conditions tree
+    def test_createrungtx_with_qabi_conditions(self):
+        """Verify createrungtx accepts a multi-rung conditions tree
         containing QABI_PRIME and QABI_SPEND blocks. This is the shape
         wallets use to create a QABI-enabled UTXO at initial funding."""
-        self.log.info("Testing createtxmlsc with QABI conditions tree...")
+        self.log.info("Testing createrungtx with QABI conditions tree...")
 
         from test_framework.wallet import MiniWallet
         wallet = MiniWallet(self.node)
@@ -696,7 +709,7 @@ class QabiTest(BitcoinTestFramework):
             },
         ]
 
-        result = self.node.createtxmlsc(
+        result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [0.0001],
             rungs,
@@ -712,13 +725,13 @@ class QabiTest(BitcoinTestFramework):
     def test_full_qabi_utxo_lifecycle(self):
         """Construction-level lifecycle validation: build the initial
         QABI-enabled UTXO creation tx and then the priming tx that
-        transitions its state, both via createtxmlsc. Verify each
+        transitions its state, both via createrungtx. Verify each
         returned tx has the expected structure — n_rungs, conditions_root
         mutates from initial to primed, scriptPubKey reflects the new
         state.
 
         This is "construction lifecycle" rather than "mined lifecycle":
-        it proves createtxmlsc produces valid tx templates for both the
+        it proves createrungtx produces valid tx templates for both the
         initial QABI UTXO creation and the subsequent priming covenant,
         which is what wallets actually need from the RPC layer. Actual
         broadcast + mining additionally requires MiniWallet-compatible
@@ -733,12 +746,12 @@ class QabiTest(BitcoinTestFramework):
         auth_tip = self.node.qabi_authchain(auth_seed, chain_length)["auth_tip"]
         owner_id_hex = "99" * 32  # SHA256 placeholder
 
-        # Dummy funding prevout — createtxmlsc builds a tx template; we
+        # Dummy funding prevout — createrungtx builds a tx template; we
         # don't broadcast here, so a non-existent prevout is fine.
         funding_prevout = {"txid": "aa" * 32, "vout": 0}
 
         # ---- Step 1: Initial QABI-enabled UTXO conditions tree ----
-        create_result = self.node.createtxmlsc(
+        create_result = self.node.createrungtx(
             [funding_prevout],
             [0.0001],
             [
@@ -783,7 +796,7 @@ class QabiTest(BitcoinTestFramework):
         new_committed_root = "ab" * 32
         new_committed_expiry = 500
 
-        primed_create = self.node.createtxmlsc(
+        primed_create = self.node.createrungtx(
             [{"txid": "bb" * 32, "vout": 0}],  # placeholder prevout
             [0.0001],
             [
@@ -832,7 +845,7 @@ class QabiTest(BitcoinTestFramework):
                       "covenant mutation would work at consensus level")
 
         # ---- Step 3: Build a batch-spend tx with qabi_block populated ----
-        # This validates that createtxmlsc's new qabi_block parameter
+        # This validates that createrungtx's new qabi_block parameter
         # accepts a well-formed QABIBlock and returns a tx ready for
         # coordinator signing via qabi_signqabo.
         kp = self.node.generatepqkeypair("FALCON512")
@@ -848,7 +861,7 @@ class QabiTest(BitcoinTestFramework):
             "00" * 32,
             ["0.00009"],
         )
-        batch_tx = self.node.createtxmlsc(
+        batch_tx = self.node.createrungtx(
             [{"txid": "cc" * 32, "vout": 0}],  # placeholder primed UTXO
             [0.0001],
             [
@@ -868,10 +881,12 @@ class QabiTest(BitcoinTestFramework):
         batch_tx_hex = batch_tx["hex"]
 
         # Sign the batch via the coordinator RPC and verify success.
+        # v0.14 audit #9 Finding 4: variable-length FALCON sig (1..666).
         signed = self.node.qabi_signqabo(batch_tx_hex, kp["privkey"])
-        assert_equal(signed["sig_size"], 666)
+        assert 1 <= signed["sig_size"] <= 666, f"sig_size out of range: {signed['sig_size']}"
         self.log.info(f"  Step 3: QABIO batch tx signed by coordinator, "
-                      f"sighash={signed['sighash'][:16]}...")
+                      f"sighash={signed['sighash'][:16]}..., "
+                      f"sig_size={signed['sig_size']}")
 
         self.log.info("  Full QABI lifecycle validated at construction level")
 
@@ -958,8 +973,8 @@ class QabiTest(BitcoinTestFramework):
         auth_tip = self.node.qabi_authchain(auth_seed, chain_length)["auth_tip"]
         owner_id_hex = "c5" * 32
 
-        # Build the QABI-enabled UTXO via createtxmlsc.
-        create_result = self.node.createtxmlsc(
+        # Build the QABI-enabled UTXO via createrungtx.
+        create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [float(output_amount)],
             [
@@ -1136,15 +1151,15 @@ class QabiTest(BitcoinTestFramework):
     _MINED_SIG_PK_COMPRESSED_HEX = "02" + "00" * 32
     _MINED_OWNER_ID = "c5" * 32
 
-    def _qabi_conditions_for_createtxmlsc(
+    def _qabi_conditions_for_createrungtx(
             self, auth_tip_bytes_hex, committed_root_hex,
             committed_depth, committed_expiry, owner_id_hex,
             sig_pk_compressed_hex=None):
-        """3-rung [SIG, QABI_PRIME, QABI_SPEND] tree in createtxmlsc
+        """3-rung [SIG, QABI_PRIME, QABI_SPEND] tree in createrungtx
         shape.
 
         The SIG rung's pubkey can be supplied in 33-byte compressed
-        form via `sig_pk_compressed_hex`. createtxmlsc keeps
+        form via `sig_pk_compressed_hex`. createrungtx keeps
         already-compressed pubkeys verbatim, so any real secp256k1
         keypair (regardless of Y parity) works correctly here. When
         the parameter is omitted, the test falls back to the
@@ -1195,7 +1210,7 @@ class QabiTest(BitcoinTestFramework):
         fields (stripped from fields and collected into rung_pks by
         ParseBlockSpec), so the SIG rung carries a PUBKEY field in
         33-byte compressed form. Must match the value supplied to
-        createtxmlsc exactly or the Merkle leaf won't reconstruct
+        createrungtx exactly or the Merkle leaf won't reconstruct
         to the same hash.
         """
         if sig_pk_compressed_hex is None:
@@ -1260,7 +1275,7 @@ class QabiTest(BitcoinTestFramework):
         auth_tip = self.node.qabi_authchain(auth_seed, chain_length)["auth_tip"]
         auth_tip_bytes_hex = rpc_hex_to_bytes(auth_tip).hex()
 
-        conditions_create = self._qabi_conditions_for_createtxmlsc(
+        conditions_create = self._qabi_conditions_for_createrungtx(
             auth_tip_bytes_hex=auth_tip_bytes_hex,
             committed_root_hex="00" * 32,
             committed_depth=0,
@@ -1269,7 +1284,7 @@ class QabiTest(BitcoinTestFramework):
             sig_pk_compressed_hex=sig_pk_compressed_hex,
         )
 
-        create_result = self.node.createtxmlsc(
+        create_result = self.node.createrungtx(
             [{"txid": utxo["txid"], "vout": utxo["vout"]}],
             [float(output_amount)],
             conditions_create,
@@ -1315,7 +1330,7 @@ class QabiTest(BitcoinTestFramework):
         the QABI_PRIME rung, broadcasts and mines the priming tx, and
         verifies the original UTXO is spent while the primed UTXO
         lands in the UTXO set with a *different* scriptPubKey whose
-        committed root matches what createtxmlsc predicted for the
+        committed root matches what createrungtx predicted for the
         mutated conditions tree.
 
         Exercises the full covenant path:
@@ -1348,7 +1363,7 @@ class QabiTest(BitcoinTestFramework):
 
         # Build the primed conditions tree — same 2 rungs, but the
         # QABI_SPEND block's committed_root/depth/expiry are mutated.
-        primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+        primed_conditions_create = self._qabi_conditions_for_createrungtx(
             auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
             committed_root_hex=new_committed_root_hex,
             committed_depth=prime_depth,
@@ -1357,7 +1372,7 @@ class QabiTest(BitcoinTestFramework):
         )
 
         primed_amount = float(initial["value_btc"] - Decimal("0.0001"))
-        priming_tx = self.node.createtxmlsc(
+        priming_tx = self.node.createrungtx(
             [{"txid": initial["txid"], "vout": initial["vout"]}],
             [primed_amount],
             primed_conditions_create,
@@ -1423,7 +1438,7 @@ class QabiTest(BitcoinTestFramework):
             "mined primed UTXO scriptPubKey must differ from the original"
         assert primed_chain_spk == primed_spk, \
             ("mined primed UTXO scriptPubKey must match the "
-             "createtxmlsc-predicted primed scriptPubKey")
+             "createrungtx-predicted primed scriptPubKey")
         self.log.info(
             f"  Step 5: primed QABI UTXO confirmed on chain: "
             f"{primed_chain_spk[:18]}... ({primed_out['value']} BTC)")
@@ -1448,7 +1463,7 @@ class QabiTest(BitcoinTestFramework):
 
         Verifies:
           - The participant's real-key SIG rung round-trips through
-            createtxmlsc's Merkle-leaf construction (proving the
+            createrungtx's Merkle-leaf construction (proving the
             leaf recomputed at consensus time matches the committed
             leaf from creation time bit-exact).
           - signrungtx produces a SIG witness using the raw privkey.
@@ -1500,7 +1515,7 @@ class QabiTest(BitcoinTestFramework):
         new_committed_root_hex = "aa" * 32
         new_committed_expiry = 1000
 
-        primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+        primed_conditions_create = self._qabi_conditions_for_createrungtx(
             auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
             committed_root_hex=new_committed_root_hex,
             committed_depth=prime_depth,
@@ -1510,7 +1525,7 @@ class QabiTest(BitcoinTestFramework):
         )
 
         primed_amount = float(initial["value_btc"] - Decimal("0.0001"))
-        priming_tx = self.node.createtxmlsc(
+        priming_tx = self.node.createrungtx(
             [{"txid": initial["txid"], "vout": initial["vout"]}],
             [primed_amount],
             primed_conditions_create,
@@ -1558,7 +1573,7 @@ class QabiTest(BitcoinTestFramework):
         # tx is ever submitted. The participant wants their funds
         # back. They sweep the primed UTXO via the SIG rung (rung 0).
 
-        # Build the escape tx via createtxmlsc. Consensus requires
+        # Build the escape tx via createrungtx. Consensus requires
         # every v4 tx's outputs to be MLSC (ValidateRungOutputs
         # rejects anything else with `rung-non-mlsc-output`), so
         # funds cannot leave Ladder Script in a single tx. The
@@ -1579,7 +1594,7 @@ class QabiTest(BitcoinTestFramework):
             }],
             "pubkeys": [pubkey_hex],
         }]
-        escape_template = self.node.createtxmlsc(
+        escape_template = self.node.createrungtx(
             [{"txid": priming_txid, "vout": 0}],
             [escape_sweep_amount],
             escape_conditions,
@@ -1654,7 +1669,7 @@ class QabiTest(BitcoinTestFramework):
             f"escape target must be an MLSC UTXO, got {sweep_spk[:18]}"
         assert sweep_spk == escape_target_spk, \
             ("escape target scriptPubKey on chain must match the "
-             "createtxmlsc-predicted value bit-exact")
+             "createrungtx-predicted value bit-exact")
         assert sweep_spk != primed_chain_spk, \
             ("escape target must differ from the primed UTXO (else "
              "the SIG rung produced the same tree, meaning the "
@@ -1770,7 +1785,7 @@ class QabiTest(BitcoinTestFramework):
             for i, p in enumerate(participants)
         ]
         batch_amounts = [0.00049] * 3
-        template = self.node.createtxmlsc(
+        template = self.node.createrungtx(
             [{"txid": z32, "vout": i} for i in range(3)],
             batch_amounts,
             template_rungs,
@@ -1811,7 +1826,7 @@ class QabiTest(BitcoinTestFramework):
                 sig_pk_compressed_hex=p["pk_hex"],
             )
 
-            primed_conditions_create = self._qabi_conditions_for_createtxmlsc(
+            primed_conditions_create = self._qabi_conditions_for_createrungtx(
                 auth_tip_bytes_hex=initial["auth_tip_bytes_hex"],
                 committed_root_hex=qabi_root_wire,
                 committed_depth=10,
@@ -1821,7 +1836,7 @@ class QabiTest(BitcoinTestFramework):
             )
             primed_amount = float(
                 initial["value_btc"] - Decimal("0.0001"))
-            priming_tx = self.node.createtxmlsc(
+            priming_tx = self.node.createrungtx(
                 [{"txid": initial["txid"], "vout": 0}],
                 [primed_amount],
                 primed_conditions_create,
@@ -1870,7 +1885,7 @@ class QabiTest(BitcoinTestFramework):
         # ------------------------------------------------------------------
         # Step 4: build the batch-spend tx with qabi_block attached
         # ------------------------------------------------------------------
-        batch_tx = self.node.createtxmlsc(
+        batch_tx = self.node.createrungtx(
             [{"txid": primed_new[i]["txid"], "vout": 0}
              for i in range(3)],
             batch_amounts,
@@ -2041,7 +2056,9 @@ class QabiTest(BitcoinTestFramework):
         # attempted.
         # ------------------------------------------------------------------
         falcon_signed = self.node.qabi_signqabo(witnessed_hex, coord_privkey)
-        assert_equal(falcon_signed["sig_size"], 666)
+        # v0.14 audit #9 Finding 4: variable-length FALCON sig (1..666).
+        assert 1 <= falcon_signed["sig_size"] <= 666, \
+            f"sig_size out of range: {falcon_signed['sig_size']}"
         falcon_signed_hex = falcon_signed["hex"]
         falcon_signed_decoded = self.node.decoderawtransaction(falcon_signed_hex)
         self.log.info(

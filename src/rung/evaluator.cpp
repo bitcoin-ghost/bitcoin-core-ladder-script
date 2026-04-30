@@ -858,8 +858,14 @@ bool CheckRungTxLevel(const LadderTxView& tx,
             return false;
         }
     } else if (qabi.has_qabi_spend) {
-        if (tx.aggregated_sig_size != 0 && tx.aggregated_sig_size != 666) {
-            error = "TX_MLSC: tx.aggregated_sig must be exactly 666 bytes when QABI_SPEND is present";
+        // v0.14 (audit #9 Finding 4): aggregated_sig is now variable-length
+        // (1..QABI_AGGREGATED_SIG_MAX). Pre-v0.14 required exactly 666 B
+        // and signers padded with zeros — the trailing padding was a
+        // 0-66 B/tx coordinator-side channel. v0.14 wire-format carries
+        // the actual FALCON-512 sig bytes (variable length per BIP-FALCON);
+        // liboqs rejects malformed sig lengths internally.
+        if (tx.aggregated_sig_size > 666) {
+            error = "TX_MLSC: tx.aggregated_sig exceeds maximum FALCON-512 size";
             return false;
         }
     } else {
@@ -979,6 +985,7 @@ bool VerifyRungTx(
     auto* shared_cache   = static_cast<SharedTreeCache*>(ctx.shared_tree_cache);
     auto* shared_cache_mutex = static_cast<std::mutex*>(ctx.shared_tree_cache_mutex);
     auto* qabo_sig_cache = static_cast<QABOSigCache*>(ctx.qabo_sig_cache);
+    auto* qabo_sig_cache_mutex = static_cast<std::mutex*>(ctx.qabo_sig_cache_mutex);
     auto* pq_batch_cache = static_cast<PQBatchCache*>(ctx.pq_batch_cache);
     auto* pq_batch_cache_mutex = static_cast<std::mutex*>(ctx.pq_batch_cache_mutex);
 
@@ -1432,6 +1439,10 @@ bool VerifyRungTx(
     // parallel snapshot races for both PQ_BATCH and SharedTreeCache.
     eval_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
     eval_ctx.shared_tree_cache_mutex = shared_cache_mutex;
+    // v0.14 (audit #10 F2): plumb QABO sig cache mutex too — last cache
+    // to migrate off the snapshot/merge pattern. Reads/writes inside
+    // EvalQABISpendBlock now lock against this directly.
+    eval_ctx.qabo_sig_cache_mutex = qabo_sig_cache_mutex;
 
     // EvalLadder also needs a `BaseSignatureChecker&` for the legacy P2*
     // wrapper family. Fetch it from the opaque ctx field; fall back to a
@@ -1487,7 +1498,8 @@ bool VerifyRungTx(const CTransaction& tx,
                   QABOSigCache* qabo_sig_cache,
                   PQBatchCache* pq_batch_cache,
                   std::mutex* pq_batch_cache_mutex,
-                  std::mutex* shared_cache_mutex)
+                  std::mutex* shared_cache_mutex,
+                  std::mutex* qabo_sig_cache_mutex)
 {
     LadderTxViewBuilder tx_view_builder(tx);
     LadderPrecomputedBuilder precomputed_builder(txdata);
@@ -1507,6 +1519,7 @@ bool VerifyRungTx(const CTransaction& tx,
     adapter_ctx.shared_tree_cache = shared_cache;
     adapter_ctx.shared_tree_cache_mutex = shared_cache_mutex;
     adapter_ctx.qabo_sig_cache = qabo_sig_cache;
+    adapter_ctx.qabo_sig_cache_mutex = qabo_sig_cache_mutex;
     adapter_ctx.pq_batch_cache = pq_batch_cache;
     adapter_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
     adapter_ctx.legacy_sig_checker = const_cast<BaseSignatureChecker*>(&checker);

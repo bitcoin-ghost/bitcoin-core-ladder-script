@@ -471,7 +471,21 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     const std::unordered_set<uint256, QABIUint256Hasher>* entries_set_ptr = nullptr;
     std::unordered_set<uint256, QABIUint256Hasher> fresh_entries_set;
 
+    // v0.14 (audit #10 F2): mutex-direct access to a shared QABO sig cache,
+    // replacing the v0.13-era snapshot/merge in CScriptCheck::operator()().
+    // Reads and writes both lock against ctx.qabo_sig_cache_mutex when
+    // non-null. Borrowed pointers (parsed_ptr, qabi_root_hash_ptr,
+    // entries_set_ptr) remain stable after release because QABOSigCache is
+    // std::map (node addresses don't move on insert), entries are
+    // immutable post-emplace, and we never erase. Workers reach the same
+    // SATISFIED/UNSATISFIED answer regardless of cache visibility — the
+    // cache memoises a pure deterministic function — so this migration is
+    // a hardening / consistency win, not a consensus correctness fix.
     if (ctx.qabo_sig_cache != nullptr) {
+        std::unique_lock<std::mutex> qabo_lock;
+        if (ctx.qabo_sig_cache_mutex != nullptr) {
+            qabo_lock = std::unique_lock<std::mutex>(*ctx.qabo_sig_cache_mutex);
+        }
         auto it = ctx.qabo_sig_cache->find(sighash);
         if (it != ctx.qabo_sig_cache->end()) {
             // Cache HIT: read the pre-computed tx-level results.
@@ -500,6 +514,10 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
             neg.computed_root = root;
             neg.parsed = std::move(p);
             neg.vout_matches_outputs = vout_ok;
+            std::unique_lock<std::mutex> qabo_lock;
+            if (ctx.qabo_sig_cache_mutex != nullptr) {
+                qabo_lock = std::unique_lock<std::mutex>(*ctx.qabo_sig_cache_mutex);
+            }
             ctx.qabo_sig_cache->emplace(sighash, std::move(neg));
         }
     };
@@ -563,16 +581,14 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
 
         // Check 9: FALCON verify.
         //
-        // KNOWN GAP (audit #9 Finding 4, deferred to v0.14): FALCON-512
-        // signatures are variable-length up to 666 B; aggregated_sig is fixed
-        // at 666 B. When the actual encoded sig is shorter than 666, the
-        // trailing padding bytes are coordinator-controlled (~0-66 B/tx
-        // channel for QABI_SPEND txs only). Closing requires either parsing
-        // the FALCON sig header to extract the actual encoded length and
-        // verifying trailing bytes are zero, OR a wire-format change to
-        // length-prefix aggregated_sig. Tracked for v0.14 alongside the
-        // QABIO v2 wire-format work.
-        if (ctx.tx->aggregated_sig_size != rung::QABI_AGGREGATED_SIG_MAX) {
+        // v0.14 (audit #9 Finding 4): aggregated_sig is variable-length
+        // (1..QABI_AGGREGATED_SIG_MAX = 666). Pre-v0.14 required exactly
+        // 666 B (signers padded shorter sigs with zeros), which created a
+        // 0-66 B/tx coordinator-side channel via the trailing padding.
+        // v0.14 carries the actual FALCON sig bytes; liboqs validates
+        // the encoded length internally via OQS_SIG_verify.
+        if (ctx.tx->aggregated_sig_size == 0 ||
+            ctx.tx->aggregated_sig_size > rung::QABI_AGGREGATED_SIG_MAX) {
             cache_failure(fresh_root_hash, fresh_parsed, false, true);
             return EvalResult::UNSATISFIED;
         }
@@ -597,11 +613,20 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
             entry.parsed = fresh_parsed;
             entry.vout_matches_outputs = vout_matches_outputs;
             entry.entries_set = std::move(fresh_entries_set);
+            std::unique_lock<std::mutex> qabo_lock;
+            if (ctx.qabo_sig_cache_mutex != nullptr) {
+                qabo_lock = std::unique_lock<std::mutex>(*ctx.qabo_sig_cache_mutex);
+            }
             auto [it_inserted, was_inserted] =
                 ctx.qabo_sig_cache->emplace(sighash, std::move(entry));
             // After the move, re-point entries_set_ptr at the cached
-            // copy since fresh_entries_set is now empty.
+            // copy since fresh_entries_set is now empty. std::map node
+            // addresses are stable, so the borrowed pointer remains
+            // valid after the lock is released below.
             if (was_inserted) {
+                entries_set_ptr = &it_inserted->second.entries_set;
+            } else {
+                // Another worker emplaced first — borrow theirs.
                 entries_set_ptr = &it_inserted->second.entries_set;
             }
         }
