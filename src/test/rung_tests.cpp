@@ -15157,6 +15157,166 @@ BOOST_AUTO_TEST_CASE(qabi_scale_10_participants)
     RunMultiPartyBatch(10);
 }
 
+// ─── v0.14 follow-up #136: empirical proof that ctx.error_message_out
+// is populated by EvalQABISpendBlock when ParseQABIBlock rejects a
+// mutated qabi_block. Earlier deferred-vector test driver couldn't
+// exercise this because its canonical batch tx itself failed on
+// regtest; a focused boost test bypasses the regtest setup.
+//
+// Each case builds a valid 2-participant batch, mutates one byte
+// range of the serialised qabi_block to break a specific check, and
+// asserts the captured error_message_out string contains the
+// expected ParseQABIBlock reject text.
+//
+// Cases:
+//   1. Mutate batch_id (bytes 1..33) → "qabi_block batch_id is not
+//      canonical SHA256 derivation"
+//   2. Mutate first participant_id to equal second → "qabi_block
+//      entries not strict ascending by participant_id"
+namespace {
+
+struct QabiMutationFixture {
+    std::vector<ScaleParticipant> participants;
+    QABIBlock block;
+    std::vector<uint8_t> block_bytes;
+    uint256 committed_root;
+    std::vector<uint8_t> coord_pk;
+    std::vector<uint8_t> coord_sk;
+    CMutableTransaction mtx;
+    std::vector<uint8_t> sig;
+    uint32_t expiry;
+    int64_t prime_depth;
+    size_t chain_length;
+
+    bool prepare(size_t n_participants)
+    {
+        if (!HasPQSupport()) return false;
+        chain_length = 50;
+        prime_depth = 10;
+        expiry = 1000;
+        participants = BuildScaleParticipants(n_participants, chain_length, prime_depth);
+        if (!GeneratePQKeypair(RungScheme::FALCON512, coord_pk, coord_sk)) return false;
+        block = BuildScaleQABIBlock(participants, coord_pk, expiry);
+        block_bytes = SerializeQABIBlock(block);
+        committed_root = ComputeQABIRoot(block_bytes);
+
+        mtx.version = CTransaction::RUNG_TX_VERSION;
+        mtx.nLockTime = 0;
+        mtx.conditions_root.SetNull();
+        mtx.qabi_block = block_bytes;
+        for (size_t p = 0; p < n_participants; ++p) {
+            CTxIn in;
+            uint256 h;
+            std::memset(h.begin(), static_cast<uint8_t>(p), 32);
+            in.prevout = COutPoint(Txid::FromUint256(h), 0);
+            in.nSequence = 0xFFFFFFFF;
+            mtx.vin.push_back(in);
+        }
+        for (const auto& sp : participants) {
+            mtx.vout.emplace_back(sp.destination.nValue, sp.destination.scriptPubKey);
+        }
+        mtx.aggregated_sig.assign(QABI_AGGREGATED_SIG_MAX, 0x00);
+        return true;
+    }
+
+    void mutate_qabi_block(size_t offset,
+                            std::span<const uint8_t> new_bytes)
+    {
+        BOOST_REQUIRE(offset + new_bytes.size() <= mtx.qabi_block.size());
+        std::memcpy(mtx.qabi_block.data() + offset, new_bytes.data(), new_bytes.size());
+    }
+
+    // Run EvalBlock for participant 0 with a captured error_message_out.
+    EvalResult eval_input_zero(std::string& captured_error)
+    {
+        uint256 auth_tip;
+        std::memcpy(auth_tip.begin(), participants[0].chain[chain_length].data(), 32);
+        RungBlock spend_block = BuildScaleSpendBlock(
+            participants[0], auth_tip, committed_root, prime_depth, expiry);
+
+        CTransaction tx(mtx);
+        RungEvalContext ctx;
+        rung::LadderTxViewBuilder tvb(tx);
+        ctx.tx = &tvb.view;
+        ctx.tx_weight = GetTransactionWeight(tx);
+        ctx.input_index = 0;
+        ctx.block_height = 500;
+        ctx.error_message_out = &captured_error;
+
+        PrecomputedTransactionData txdata;
+        CMutableTransaction mtx_copy = mtx;
+        MutableTransactionSignatureChecker checker(
+            &mtx_copy, 0, 0, txdata, MissingDataBehavior::FAIL);
+        rung::CoreLadderSigChecker bridge_sig_checker(checker);
+        ScriptExecutionData execdata;
+
+        return EvalBlock(spend_block, bridge_sig_checker, checker,
+                          SigVersion::TAPSCRIPT, execdata, ctx, 0);
+    }
+};
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(qabi_spend_emits_error_for_non_canonical_batch_id)
+{
+    QabiMutationFixture fx;
+    if (!fx.prepare(2)) return;
+
+    // Overwrite batch_id (bytes 1..33: version=0x01 then 32-byte batch_id).
+    std::array<uint8_t, 32> garbage;
+    garbage.fill(0xCC);
+    fx.mutate_qabi_block(1, garbage);
+
+    std::string captured;
+    EvalResult r = fx.eval_input_zero(captured);
+    BOOST_CHECK(r == EvalResult::UNSATISFIED);
+    BOOST_CHECK_MESSAGE(
+        captured.find("QABI_SPEND ParseQABIBlock") != std::string::npos &&
+            captured.find("batch_id is not canonical") != std::string::npos,
+        "expected 'QABI_SPEND ParseQABIBlock: ...batch_id is not canonical...' "
+        "in error_message_out, got: '" << captured << "'");
+}
+
+BOOST_AUTO_TEST_CASE(qabi_spend_emits_error_for_duplicate_participant_id)
+{
+    QabiMutationFixture fx;
+    if (!fx.prepare(2)) return;
+
+    // Locate the first entry's participant_id offset in the serialised
+    // wire format. The layout (per src/rung/qabi.cpp ParseQABIBlock) is:
+    //   1   version
+    //   32  batch_id
+    //   1..3 CompactSize coord_pk_len (= 897 → 3 bytes: 0xfd 0x81 0x03)
+    //   897 coord_pk
+    //   4   prime_expiry_height
+    //   32  outputs_conditions_root
+    //   1..3 CompactSize n_entries
+    //   then per-entry: 32 participant_id + 8 contribution + CompactSize dest_idx
+    constexpr size_t coord_pk_len_size = 3;     // 897 needs 3-byte CompactSize
+    constexpr size_t coord_pk_size = 897;
+    constexpr size_t prime_expiry_size = 4;
+    constexpr size_t outputs_conditions_root_size = 32;
+    constexpr size_t n_entries_size = 1;        // 2 entries → 1-byte CompactSize
+    constexpr size_t entry_0_offset =
+        1 + 32 + coord_pk_len_size + coord_pk_size +
+        prime_expiry_size + outputs_conditions_root_size + n_entries_size;
+    constexpr size_t entry_1_pid_offset =
+        entry_0_offset + 32 + 8 + 1;            // skip entry 0's pid + contrib + dest_idx
+    // Copy entry_1's participant_id over entry_0's so they're identical.
+    std::array<uint8_t, 32> dup{};
+    std::memcpy(dup.data(), fx.mtx.qabi_block.data() + entry_1_pid_offset, 32);
+    fx.mutate_qabi_block(entry_0_offset, dup);
+
+    std::string captured;
+    EvalResult r = fx.eval_input_zero(captured);
+    BOOST_CHECK(r == EvalResult::UNSATISFIED);
+    BOOST_CHECK_MESSAGE(
+        captured.find("QABI_SPEND ParseQABIBlock") != std::string::npos &&
+            captured.find("strict ascending") != std::string::npos,
+        "expected 'QABI_SPEND ParseQABIBlock: ...strict ascending...' "
+        "in error_message_out, got: '" << captured << "'");
+}
+
 BOOST_AUTO_TEST_CASE(qabi_scale_50_participants)
 {
     RunMultiPartyBatch(50);
