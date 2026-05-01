@@ -108,6 +108,17 @@ reviewer is most likely to challenge.
 
 ## Specification
 
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+"SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this
+document are to be interpreted as described in RFC 2119.
+
+References of the form `src/<file>.cpp::<function>` in this section
+are normative: byte-exact behaviour of the named source file in the
+reference implementation is the consensus contract. References of
+the same form in the §Rationale section are illustrative — they
+point at the implementation that informs a design choice but do not
+constrain conforming implementations.
+
 ### Definitions
 
 The notation used throughout this document:
@@ -1167,8 +1178,13 @@ introduced blocks one at a time would carry one of two costs:
   activation, requiring every consumer (wallet, indexer, explorer)
   to track which subset is currently active.
 
-Both costs scale linearly with the number of activations. An all-in-
-one activation pays the full review cost once.
+Both options require an inductive correctness proof at every
+activation step: at activation `n`, the implementer must show that
+the union of blocks `{1..n}` is sound under the wire and evaluator
+rules current at activation `n`. The all-in-one path discharges that
+proof once for the union `{1..65}` and is done. The phased path
+discharges it 65 times, each over a strictly smaller set, with the
+review surface compounding at each step.
 
 The block registry is modular at the implementation level (each block
 in its own translation unit, registered at process start). A future
@@ -1315,20 +1331,32 @@ before hashing.
 
 ### 9. Why include QABIO in the initial activation rather than defer it?
 
-QABIO depends on the v4 wire format (the tx-level `qabi_block` and
-`aggregated_sig` fields), the `SigVersion::LADDER` semantics (so its
-per-input checks use the same evaluator dispatch), and the conditions
-tree (the QABI_PRIME / QABI_SPEND blocks live in the standard rung
-structure). Deferring it would mean a future BIP that re-opens the
-v4 wire format to add the two extra fields — equivalent to a partial
-re-activation.
+QABIO has two distinct surfaces and the question must be answered
+for each.
 
-The QABIO surface IS modular at the implementation level: the entire
-extension is gated by the `LADDER_ENABLE_QABIO` build flag, and a
-non-QABIO build is a clean omission of three block types and the two
-tx-level fields. But the wire format reserves the slots regardless,
-so the activation cost of including QABIO at v4 is zero
-incrementally.
+The wire-format surface is a consensus claim: the v4 wire format
+reserves the `qabi_block` and `aggregated_sig` fields whether QABIO
+is enabled or not. A v4 transaction always serialises the two
+`CompactSize` length prefixes; deferring QABIO would not save the
+two bytes, and including QABIO does not enlarge the serialisation
+beyond those two prefixes for non-QABIO transactions.
+
+The evaluation surface is a build-time claim: `LADDER_ENABLE_QABIO`
+gates three block types (`QABI_PRIME`, `QABI_SPEND`, and the FALCON-
+512 verify against `tx.aggregated_sig`). A non-QABIO build rejects
+those three block types via the standard "unknown block type →
+UNSATISFIED" path; a QABIO-enabled build runs the QABI evaluator.
+Deferring QABIO from the initial activation would still require the
+wire format to reserve the slots (otherwise a future activation
+would need to re-open the wire format), so the only saving from
+deferral is N block evaluators, not N bytes per transaction.
+
+Combining the two surfaces: the wire reservation is unconditional;
+the evaluator is build-flagged; activating QABIO at v4 is the same
+as deferring its evaluator while reserving its wire slot. The
+proposal chooses the former because the QABI evaluator is part of
+the same review batch and ships with the same test coverage as the
+rest of v4.
 
 ### 10. Why FALCON-512 specifically for QABIO?
 
@@ -1430,9 +1458,14 @@ NOT validate under `TapTweak`, and vice versa. Sharing the tag
 would mean a signature signed for a Taproot output could in
 principle be replayed against a Ladder Script output (or vice
 versa) if the same internal key were used in both contexts. The
-tag-level separation makes this impossible: the tweak applied to the
-internal key is different in the two domains, so the resulting public
-key is different and a signature against one cannot match the other.
+argument is operational rather than reductive: under BIP 340 tagged
+hashing, the SHA-256 prefix `SHA256(tag) || SHA256(tag)` differs
+between the two domains, so for any internal key `P` and any tweak
+input `m`, the value `t = TaggedHash(tag, P || m)` differs between
+the domains. The resulting tweaked keys `Q_taproot` and `Q_ladder`
+are therefore distinct curve points, and BIP 340's signature
+verification rejects a signature whose pubkey-bound digest does not
+match the verifying key.
 
 The implementation reuses BIP 341's tweak construction byte-for-byte
 except for the tag string — the only difference is the
@@ -1593,11 +1626,15 @@ The library exports a small public API in `src/rung/api.h`:
 - `SignatureHashLadder`, `SignatureHashLadderKeyPath`, and
   (`ENABLE_QABIO`) `ComputeSighashQABO` — sighash computations.
 
-Following the BIP 340 → libsecp256k1 model, byte-exact behaviour of
-the named source files is the consensus contract. Other
-implementations are encouraged to produce byte-identical output on
-the test vectors but are not required to follow the same internal
-structure.
+Following the convention BIP 340 established with respect to
+libsecp256k1, the named source files in `src/rung/` are the
+consensus contract: byte-exact behaviour on the wire format and the
+test vectors is what conformance means. Alternative implementations
+are encouraged to produce byte-identical output on the test vectors
+and are explicitly NOT required to mirror the internal structure of
+the reference. Diverging implementations that pass the vectors
+satisfy the consensus contract; diverging implementations that fail
+any vector do not.
 
 The canonical source is the `ladder-script` branch at
 [`https://github.com/defenwycke/bitcoin-core-ladder-script`](https://github.com/defenwycke/bitcoin-core-ladder-script).
@@ -1723,11 +1760,21 @@ leaf to permute.
 permits a participant to replace their own primed transaction with
 one having a strictly deeper `prime_depth`. The deeper-depth rule
 prevents a single participant from flooding the mempool with stale
-priming transactions at shallow depths. The coordinator cannot
-modify a primed UTXO after priming and cannot steal funds: every
-primed input commits to `committed_root = SHA256(qabi_block)`, and
-the consensus evaluator requires `tx.vout` to bit-exact match
-`qabi_block.outputs`, so any deviation rejects.
+priming transactions at shallow depths.
+
+**QABIO coordinator trust model.** The coordinator can delay batch
+settlement (by withholding the FALCON-512 signature or ordering
+participants' priming transactions arbitrarily) but cannot deviate
+from the committed payouts. Concretely: every primed input commits
+to `committed_root = SHA256(qabi_block)` via its `QABI_SPEND` block,
+and the consensus evaluator requires `tx.vout` to bit-exact match
+`qabi_block.outputs`. A coordinator who broadcasts a batch tx with
+any output change produces a transaction whose `qabi_block`
+serialisation differs from any participant's `committed_root`, and
+the evaluator rejects every primed input. The escape rung in each
+participant's conditions tree provides a unilateral exit if the
+coordinator never broadcasts. The trust model is therefore
+liveness-on-coordinator, safety-on-consensus.
 
 **Audit status.** The implementation has been internally reviewed
 across multiple iterations and runs end-to-end on a private signet
@@ -1753,16 +1800,11 @@ The post-quantum signature schemes used are the work of the original
 designers and the broader NIST post-quantum cryptography
 standardisation process:
 
-- FALCON: Pierre-Alain Fouque, Jeffrey Hoffstein, Paul Kirchner,
-  Vadim Lyubashevsky, Thomas Pornin, Thomas Prest, Thomas Ricosset,
-  Gregor Seiler, William Whyte, Zhenfei Zhang. <!-- TODO: confirm
-  author list against current NIST submission. -->
-- CRYSTALS-Dilithium: Léo Ducas, Eike Kiltz, Tancrède Lepoint,
-  Vadim Lyubashevsky, Peter Schwabe, Gregor Seiler, Damien Stehlé.
-  <!-- TODO: confirm. -->
-- SPHINCS+: the SPHINCS+ team. <!-- TODO: pick a single
-  attribution form (full author list or "the SPHINCS+ team") and be
-  consistent across the BIP. -->
+- FALCON, CRYSTALS-Dilithium, and SPHINCS+ are the work of their
+  respective NIST Post-Quantum Cryptography submission teams. This
+  BIP adopts the schemes as standardised; the authoritative
+  author lists are those carried in the submission packages
+  archived by NIST.
 
 The Open Quantum Safe project's `liboqs` library provides the
 reference implementations of the PQ schemes used at consensus level.
