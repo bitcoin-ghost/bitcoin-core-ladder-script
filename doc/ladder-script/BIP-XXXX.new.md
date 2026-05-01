@@ -243,6 +243,15 @@ exactly:
 0xDE || conditions_root            (33 bytes; marker byte 0xDE — see Rationale Q4)
 ```
 
+The `0xDE` byte is a chainstate-internal marker, not a script
+opcode. The synthetic entry is never indexed by a `COutPoint` that
+appears on a transaction input (`MLSC_ROOT_VOUT = 0xFFFFFFFF` is
+explicitly outside the legal range of `prevout.n` for any spendable
+output), so the script bytes are never passed to the script
+interpreter. The recovery code looks up the synthetic entry directly
+by `(creating_txid, 0xFFFFFFFF)` and reads the trailing 32 bytes; no
+opcode parser ever runs over `0xDE`.
+
 Per-coin chainstate cost for an MLSC output is 3 bytes (1-byte SPK
 marker + value varint + height/coinbase byte). Spending validates by
 looking up the spent prevout AND looking up the creating transaction's
@@ -357,6 +366,14 @@ MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "")
 3. Pad `leaves` with `MLSC_EMPTY_LEAF` to the next power of two.
 4. Pair adjacent leaves and compute the parent node via the byte-
    sorted interior rule. Repeat until one root remains.
+
+`MLSC_EMPTY_LEAF` is `TaggedHash("LadderLeaf/v1", "")` — the empty
+input under the same tag used by real rung leaves. A real rung leaf
+hashes a non-empty structural template (every rung has `n_blocks ≥
+1`), so a real leaf and the padding leaf cannot collide. A spender
+who claims a padding slot is real cannot construct a witness that
+deserialises into a zero-block rung, so the rule is enforced
+structurally rather than by a separate domain tag.
 
 ### Witness format
 
@@ -700,6 +717,14 @@ already bound to the spent output's scriptPubKey via the
 including the conditions a second time would create a cross-protocol
 signing-oracle hazard with no offsetting benefit.
 
+The two tags `LadderSighash/v1` and `LadderKeyPathSighash/v1` are
+distinct strings, so the BIP-340 tagged-hash domain separation
+guarantees that a digest produced by one function cannot equal a
+digest produced by the other for any input. A signature valid against
+a key-path digest therefore cannot be replayed against a script-path
+digest of the same transaction (or vice versa), even when the
+non-conditions portions of the digest agree.
+
 #### Hash-type byte set
 
 Both per-input variants accept hash type bytes from the set
@@ -716,10 +741,17 @@ Both per-input variants accept hash type bytes from the set
 | `0x83` | `SINGLE \| ANYONECANPAY` |
 
 The BIP-118 ANYPREVOUT family (`0x40..0x43`, `0xC0..0xC3`) is
-unconditionally rejected. Both flags allow signature replay against
-UTXOs the signer did not intend to spend; this proposal does not
-provide the dedicated pubkey-prefix scheme that BIP-118 mitigates the
-risk with, and the safe default is to reject the entire family.
+unconditionally rejected. BIP 118 binds an APO signature to a
+script-prefixed pubkey form (`0x01` for `ANYPREVOUT`, `0x02` for
+`ANYPREVOUTANYSCRIPT`), which forces the signature to commit to the
+script even though it does not commit to a specific prevout. This
+proposal does not introduce that prefixed-pubkey scheme; without it,
+an APO-style hash-type byte would let a signer's signature be
+replayed against any v4 UTXO whose conditions root is reachable from
+the same internal key. The conservative choice is to reject the
+entire APO byte family at the deserialiser, and to revisit
+APO-equivalent functionality in a future BIP that defines the
+prefixed-pubkey form for `SigVersion::LADDER`.
 
 #### QABI section binding
 
@@ -772,16 +804,27 @@ signature.
 
 Ladder Script defines its own key tweak distinct from BIP 341's
 TapTweak. An x-only public key `P` and a 32-byte tweak input `m` (the
-conditions root) produce a tweaked key:
+raw `merkle_root` over the rung and relay leaves) produce a tweaked
+key:
 
 ```
-t = TaggedHash("LadderTweak/v1", P || m)
-Q = P + t·G                              (x-only)
+t = TaggedHash("LadderTweak/v1", P || m)     (where P is x-only)
+Q = lift_x(P) + t·G                          (curve point)
 ```
 
-The construction mirrors BIP 341 byte-for-byte except for the tag
-string. A signature valid against a `LadderTweak/v1` tweaked key MUST
-NOT validate against a `TapTweak` tweaked key, and vice versa.
+`Q` is then x-only-encoded as the 32-byte `conditions_root` written
+to the spent output's scriptPubKey. The signer holding the secret key
+for `P` derives the corresponding tweaked secret following BIP 341
+§Constructing and spending Taproot outputs (negate the secret if
+`Q.has_even_y()` is false). The construction mirrors BIP 341 byte-
+for-byte except for the tag string and the tweak input.
+
+A signature valid against a `LadderTweak/v1` tweaked key MUST NOT
+validate against a `TapTweak` tweaked key, and vice versa: the two
+tags hash to disjoint 32-byte prefixes, so for any internal pubkey
+`P` and any tweak input `m` the resulting `t` differs in both
+domains, hence the resulting public keys `Q` differ, hence a
+signature against one is not a valid signature against the other.
 
 Reference: `src/pubkey.cpp` `XOnlyPubKey::ComputeLadderTweakHash`,
 `CreateLadderTweak`, `CheckLadderTweak`.
@@ -1143,9 +1186,19 @@ specified in §Security Considerations.
 `merkle_pub_key` removes pubkey fields from the on-chain conditions
 section. In their place, the spender reveals the pubkey at spend time
 and the verifier folds it into the leaf hash during proof
-reconstruction. If the spender provides a different pubkey, the
-reconstructed leaf does not match the committed root and the proof
-fails.
+reconstruction.
+
+The binding is exact. `ComputeValueCommitment(rung, pubkeys)` hashes
+every condition-side field followed by every folded pubkey in
+declared order; `ComputeTxMLSCLeaf` then hashes the structural
+template with that value commitment under the `LadderLeaf/v1` tag.
+At spend time `ExtractBlockPubkeys` reads the pubkeys directly from
+the witness blocks and feeds them back into the same two functions.
+A spender who reveals a pubkey different from the one committed at
+fund time produces a different `value_commitment`, hence a different
+leaf hash, hence a Merkle proof that does not reconstruct the
+committed root — and verification fails. There is no byte of
+freedom in the witness that does not propagate into the leaf.
 
 The benefit is twofold. First, it removes a writable byte channel
 that would otherwise carry attacker-chosen 32–65-byte content per
