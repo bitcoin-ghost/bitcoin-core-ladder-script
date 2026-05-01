@@ -198,7 +198,14 @@ uint32  nLockTime                               (LE)
 ```
 
 The txid of a v4 transaction is the SHA256d of its stripped form. The
-wtxid is the SHA256d of its full form.
+wtxid is the SHA256d of its full form. Combined with the structural
+witness rules below — strict-ascending pubkey ordering for `Triplets
+K`, byte-sorted Merkle interior hashing, fixed leaf ordering, and
+strict CompactSize canonicalisation — every byte that distinguishes
+two valid spend representations of the same conditions changes the
+wtxid. Witness malleability is therefore detectable: two distinct
+wtxids correspond to genuinely distinct witnesses, never to the
+same witness in two encodings.
 
 ### Output reconstruction
 
@@ -413,6 +420,14 @@ for each relay:
 inherited from another input's already-resolved witness, with optional
 field-level overlays. See `src/rung/serialize.cpp` `DeserializeLadderWitness`.
 
+Diff-witness overlays count against the per-tx caps the same way
+direct witnesses do. Specifically, `MAX_PREIMAGE_FIELDS_PER_TX = 2`
+and `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` are enforced over the union
+of all inputs' realised witnesses (after diff resolution), not over
+per-input witness bytes alone. This closes the otherwise obvious
+amplification path of fanning out fresh `PREIMAGE` bytes via diff
+overlays attached to inputs that share a source.
+
 #### `MLSCProof`
 
 ```
@@ -470,7 +485,7 @@ checks listed are additional invariants the evaluator rejects on.
 | `Fixed N` | Implicit layout with N fields; positional types match the layout. | Eval consumes the fields. |
 | `Empty` | Zero witness fields. | Eval reads only conditions-side fields. |
 | `Reveal P` | Up to P `PUBKEY` fields (count = `PubkeyCountForBlock`, for `merkle_pub_key` leaf reconstruction) plus up to 2 `PREIMAGE` fields (for hash-binding against a `HASH256` in conditions). All other field types reject. | Eval rebuilds the leaf from PUBKEYs and verifies any PREIMAGE against the conditions HASH256. |
-| `Triplets K` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets in strict ascending pubkey-lex order; K is from the conditions `NUMERIC(K)` field. | Eval verifies each pubkey's Merkle proof against `pubkey_root` and each signature against the pubkey. |
+| `Triplets K` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets in strict ascending pubkey-lex order; K is from the conditions `NUMERIC(K)` field. The strict-ascending requirement removes witness malleability via triplet reordering — two different orderings of the same K signers would otherwise produce two distinct wtxids for the same satisfaction. | Eval verifies each pubkey's Merkle proof against `pubkey_root` and each signature against the pubkey. |
 | `Accumulator` | Exactly `[NUMERIC(element_id), MERKLE_PROOF]`. | Eval verifies the proof against `set_root`. |
 | `Bridging` | Exactly one `PREIMAGE` (the inner script body, hash-bound to the conditions `HASH160`/`HASH256`) followed by stack-push fields whose count must match at least one inner rung's expected witness layout sum. | Eval evaluates the inner conditions tree against the stack-push fields. |
 | `PQ-anchor` | Either `[HASH256]` (non-anchor; field merged with the conditions `HASH256` to form a 1-field merged block) or `[HASH256, PUBKEY, SIGNATURE]` (anchor; fields merged to form a 3-field merged block). Any other shape rejects. | Anchor input verifies `SHA256(PUBKEY) == HASH256` and the PQ signature; non-anchor input checks the tx-local cache. |
@@ -790,10 +805,22 @@ qabo_sighash = TaggedHash("QABOSighash",
                        || lock_time (4 LE))
 ```
 
+The digest commits to every input's full witness stack. This closes
+the per-input signature-malleability surface against the coordinator
+signature: an attacker who replaces a per-input signature in a
+broadcast batch tx invalidates the coordinator signature too, so a
+mutated batch cannot be re-broadcast as a valid alternative.
+
 The digest excludes `tx.aggregated_sig` itself (otherwise the
 signature would be self-referential). Each input of the batch produces
 an identical digest, which is why the FALCON verify can be cached
-across inputs via the `qabo_sig_cache` (see `LadderEvalContext`).
+across inputs via the `qabo_sig_cache` (see `LadderEvalContext`). The
+cache lifetime is bounded by a single transaction's verification:
+`qabo_sig_cache` is a per-`LadderEvalContext` member, freed when the
+context goes out of scope at the end of `CheckInputScripts` for that
+transaction. There is no cross-transaction cache and no opportunity
+for a stale verify result to influence a later transaction's
+acceptance.
 
 `ComputeSighashQABO` is a function call, not a hash-type byte. The
 QABI coordinator signature is selected by the presence of `tx.aggregated_sig`
@@ -1337,8 +1364,12 @@ be spent together with one signature" — does not need any of that
 machinery. PQ_BATCH commits `SHA256(canonical_pq_pubkey)` per output
 at fund time. At spend time, one anchor input in the transaction
 reveals the pubkey + a single PQ signature; every other input gated
-by the same hash short-circuits via a tx-local cache. There is no
-priming, no coordinator election, no governance over composition.
+by the same hash short-circuits via a tx-local cache (the cache
+lives in the per-tx `LadderEvalContext` and is freed at the end of
+`CheckInputScripts`; there is no cross-transaction cache so an
+attacker cannot prime a future block's verification with a
+prior-block hit). There is no priming, no coordinator election, no
+governance over composition.
 
 Per-input amortised cost (measured at N=100, see
 `doc/ladder-script/SIZING.md` §5):
@@ -1528,10 +1559,15 @@ The reference implementation has 619 unit tests under
 `src/test/rung_tests.cpp` and multiple functional tests under
 `test/functional/feature_rung_*.py`. A future revision is expected to
 extend the JSON file with vectors for QABIO priming, QABIO batch
-spends, PQ_BATCH spends, and one negative vector per witness rule.
-The current fixture is sufficient to verify byte-identical behaviour
-of an alternative implementation against the three rule families
-above.
+spends, PQ_BATCH spends, and at minimum one negative vector per
+witness rule. Negative vectors close cross-implementation
+malleability surfaces — a vector that reorders triplets in a
+`MULTISIG` witness, or pads `MAX_PREIMAGE_FIELDS_PER_TX + 1`
+preimages, lets an alternative implementation prove its
+deserialiser rejects the case identically rather than merely
+accepting the positive vectors. The current fixture is sufficient to
+verify byte-identical behaviour of an alternative implementation
+against the three rule families above for satisfying spends.
 
 ## Reference Implementation
 
