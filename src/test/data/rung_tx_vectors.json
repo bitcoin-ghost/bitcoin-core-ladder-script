@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "description": "Reference fund+spend transaction vectors for v4 RUNG_TX. All transactions were generated and broadcast on regtest using the reference implementation. Reproduce by re-running the generator with the same deterministic key seeds.",
+  "vectors": [
+    {
+      "id": 1,
+      "name": "SIG single-rung Schnorr key-path",
+      "block_types": [
+        "SIG"
+      ],
+      "key_seeds": {
+        "fund": "bip-xxxx-vec1-fund-key",
+        "sweep": "bip-xxxx-vec1-sweep-key"
+      },
+      "fund_pubkey_compressed": "02ace07a53f6ea25fe20a6762c5bd9ef4d3c29abff8aa9de82b98db57ebe16cf98",
+      "sweep_pubkey_compressed": "039854dee8b47f7b3b4b102131f62b77b27074d56e79ef890421dbfa03c4a4fcb1",
+      "fund_tx": {
+        "txid": "e6ab5a6d9b66eb462176954fb2db2e4c1556699c6196f2ada6e649b4fb68c8b4",
+        "hex": "0400000000020121f5d577c8b402e32d9ca2b71c15853da5fd7c19ff9e9e8550d067de802d173b0000000000feffffffa57899e93fb7945cbaaa602ce2235e9765135f46b57c35bb5c8c31bb041f154801f0ca052a010000000247304402204c58416e1191b1fc4257db2512b830f09888f033e2120e53312958da0f5fb1f4022070acd2cef892a6025494a3911ab315f780a13db0f714ce2d75ba7a3c63704c3501210228d71fb082b57823ede2cff5bee830044dca9efc5dc75bf075129ba4d5b519fa000000000000",
+        "size_bytes": 202,
+        "mlsc_scriptpubkey": "dfa57899e93fb7945cbaaa602ce2235e9765135f46b57c35bb5c8c31bb041f1548",
+        "mlsc_value_btc": 49.9999,
+        "conditions_root": "48151f04bb318c5cbb357cb5465f1365975e23e22c60aaba5c94b73fe99978a5",
+        "internal_pubkey": "ace07a53f6ea25fe20a6762c5bd9ef4d3c29abff8aa9de82b98db57ebe16cf98",
+        "key_path": true
+      },
+      "spend_tx": {
+        "txid": "207c17e68008af37207d368bdc889deee3b8eedf0b3fb9286fe6d7f2cc5dad44",
+        "hex": "04000000000201b4c868fbb449e6a6adf296619c6956154c2edbb24f95762146eb669b6d5aabe60000000000feffffff5ddab70154757acd1d51bb2d5b44502cb370a9df54db598f83e5b2db1d937f2001e0a3052a0100000003680101002102ace07a53f6ea25fe20a6762c5bd9ef4d3c29abff8aa9de82b98db57ebe16cf98401717778e47897c0f2aca950c89cb21ce2c4fe736abf310b27948a2b87fefd94af979138de789ff079e952100739ad45f2233c3304a0a68e1f8eb812b6f46bacb00000b000101000001000100000020ace07a53f6ea25fe20a6762c5bd9ef4d3c29abff8aa9de82b98db57ebe16cf98000000000000",
+        "size_bytes": 246
+      }
+    },
+    {
+      "id": 2,
+      "name": "P2WPKH_LEGACY wrapper (HASH160-committed pubkey)",
+      "block_types": [
+        "P2WPKH_LEGACY"
+      ],
+      "key_seeds": {
+        "p2wpkh": "bip-xxxx-vec2-p2wpkh-key",
+        "dest": "bip-xxxx-vec2-dest-key"
+      },
+      "p2wpkh_pubkey_compressed": "026d74aa98127108f912198c5875c8fac416769cd1ce893217f22c482d5b896c7b",
+      "fund_tx": {
+        "txid": "0e517e530538a046ee20b56171699caf03593a5fd28208c6d85f17bac7563368",
+        "hex": "04000000000201815225820f2bc86550c1870790d0742e8ec99b93d3e0f503d24108d12251917e0000000000feffffff6ff50b9392c0b80cfbbc2dfa0e105fd44db3eb411413b406364ff4b0ca31ea4b01f0ca052a0100000002473044022035f5056e94de4a4d9b1fe4b3221a105829cbab89d73837e69d8af15a338aeeaf0220149c5b63331527ce9238c491252d22c960bf300eea40dbb6750f71e802d816ac01210228d71fb082b57823ede2cff5bee830044dca9efc5dc75bf075129ba4d5b519fa000000000000",
+        "size_bytes": 202,
+        "mlsc_scriptpubkey": "df6ff50b9392c0b80cfbbc2dfa0e105fd44db3eb411413b406364ff4b0ca31ea4b",
+        "mlsc_value_btc": 49.9999,
+        "conditions_root": "4bea31cab0f44f3606b4131441ebb34dd45f100efa2dbcfb0cb8c092930bf56f"
+      },
+      "spend_tx": {
+        "txid": "8ec260d5d6e0f70074ad7719092694b85ae596b31ddd8e4f53f4fce5336170f1",
+        "hex": "04000000000201683356c7ba175fd8c60882d25f3a5903af9c697161b520ee46a03805537e510e0000000000feffffff4fef417a8330b0860d41b9c4802634c84d3ee3dd364a1349d3cd7bcf03264d4c01e0a3052a01000000026801013821026d74aa98127108f912198c5875c8fac416769cd1ce893217f22c482d5b896c7b408b85a8d08b61c391b678626bbe160e25b20cf1c1d8c0069500283d4df0be8537248698bcaea8a7db324644424bb1674150b6ffaec7d893c9939bfda102e47b1200001e00010100000138888e853c02b706f1b20e0492204bd8caf856ba66000000000000000000",
+        "size_bytes": 232
+      }
+    },
+    {
+      "id": 3,
+      "name": "HTLC claim (preimage + Schnorr sig)",
+      "block_types": [
+        "HTLC"
+      ],
+      "key_seeds": {
+        "htlc": "bip-xxxx-vec3-htlc-key",
+        "refund": "bip-xxxx-vec3-refund-key",
+        "dest": "bip-xxxx-vec3-dest-key"
+      },
+      "preimage_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "preimage_sha256": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+      "htlc_pubkey_compressed": "0353255fb20ed1c6951d369d632e324bdbecdc972c896631619796a454b2502c00",
+      "htlc_timeout_blocks": 10,
+      "fund_tx": {
+        "txid": "0dd4182c9521f80440bf7f0045575196fc5e80ae3949b1d8e186ab5edb1f24e8",
+        "hex": "0400000000020195b1a12693e93e9f19aed376bae9bf1618daa93b21b4b2adce968a5cd1752ebd0000000000feffffffb4198eac38e99a2f790bba2335728df0616b78320289ebd506a1f199ce13c83401f0ca052a010000000247304402205a953c006a38da28bad4561e73840286b115713d9b38c5022e7690f7b43705a902207718c252b0708464fd8e02a234aac590bf4d842d0cd5c8ddce868b40cbd8b1ab01210228d71fb082b57823ede2cff5bee830044dca9efc5dc75bf075129ba4d5b519fa000000000000",
+        "size_bytes": 202,
+        "mlsc_scriptpubkey": "dfb4198eac38e99a2f790bba2335728df0616b78320289ebd506a1f199ce13c834",
+        "mlsc_value_btc": 49.9999,
+        "conditions_root": "34c813ce99f1a106d5eb890232786b61f08d723523ba0b792f9ae938ac8e19b4"
+      },
+      "spend_tx": {
+        "txid": "5707dee361a3e3021fb6741c9a0ca6bd776b19932a7cc6361415804ffa865683",
+        "hex": "04000000000201e8241fdb5eab86e1d8b14939ae805efc96515745007fbf4004f821952c18d40d0000000000feffffffc4c34d78f69c1afbf8cc509d570526f30745cdbdb4f0a13c4c582947179b6c6001e0a3052a0100000002ac010128210353255fb20ed1c6951d369d632e324bdbecdc972c896631619796a454b2502c00210338a47b9fa21a742abd76e9e0e885008de0a91b5fce910e900d450b7388b4d64f4008bc820bfe0a0547fc11bc4f0ea420d6ba7f0eacee90eef691396cfd8bcd6ca8fae412a61249e5221cc15f54ce7e8908baf8110917563dc0f30ec9bb4f98fba720000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0000002c00010100000128630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd0a01000000000000000000",
+        "size_bytes": 314
+      }
+    }
+  ]
+}

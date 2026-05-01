@@ -789,34 +789,77 @@ Reference: `src/pubkey.cpp` `XOnlyPubKey::ComputeLadderTweakHash`,
 ### Worked example: funding transaction
 
 A single-input wallet bootstrap transaction creating one MLSC output
-locked by a single SIG rung against an x-only public key.
+locked by a single SIG rung against an x-only public key. The bytes
+below were captured from the reference implementation on regtest using
+`createrungtx` + `signrawtransactionwithwallet`. Reproduce with the
+deterministic key derived from
+`SHA256("bip-xxxx-worked-example-fund-key-v1")`:
 
-<!-- TODO: needs canonical bytes from author. The reference
-implementation can produce these via createrungtx + signrawtransactionwithwallet
-on a regtest fixture. The bytes below are intentionally omitted to
-avoid fabrication; replace with a captured signed tx from
-test/functional/feature_rung_tx.py once the worked example is
-generated. -->
+```
+fund_pubkey (compressed) :
+  02b049bddb96cfa74d98d43951c6a81604ebea3077b87b5a61557925eadc2926eb
+fund_pubkey (x-only)     :
+  b049bddb96cfa74d98d43951c6a81604ebea3077b87b5a61557925eadc2926eb
+```
+
+Single SIG rung, single key — `createrungtx` therefore auto-tweaks the
+conditions root for key-path spending (Specification §Tweak rule).
+
+Captured signed transaction (202 wire bytes, 119 vbytes, 475 weight
+units):
+
+```
+04000000000201d1547f0ae62532568ab6187cf8bccf72cc424f314de29634ba6f
+bed76faec6500000000000fefffffff9a95d1a427078c4dbcb408ce56883e7d305
+837dae56fca46370de6cab7cdcce01f0ca052a01000000024730440220419e0499
+609ace1cba5ab1b3bb28ea674b4a05b264e2acf2070bd54a4ddab730022052978f
+c2c83e87a42eef61512d1556b6c2f2a2bb9b50c8f63350f0828c062c2f01210338
+8de1f952e9d8a2072588a53dabb2599df293b182bfe613e0000266d7f82b060400
+00000000
+```
+
+Field-by-field deserialisation:
 
 ```
 version           : 04 00 00 00              (= 4, LE)
 dummy             : 00
 flags             : 02
 n_inputs          : 01
-prevout           : <32-byte funding txid LE> <vout LE>
+prevout.hash      : d1547f0ae62532568ab6187cf8bccf72cc424f314de2
+                    9634ba6fbed76faec650
+prevout.n         : 00 00 00 00
 scriptSig_len     : 00
-nSequence         : ff ff ff ff
-conditions_root   : <32 bytes — TaggedHash("LadderInternal/v1", ...)>
+nSequence         : fe ff ff ff              (RBF-signalling)
+conditions_root   : f9a95d1a427078c4dbcb408ce56883e7d305837dae56
+                    fca46370de6cab7cdcce
+                    ; tweak of the SIG-rung leaf with internal_pubkey
+                    ; b049bddb...26eb (Specification §Tweak rule).
 n_outputs         : 01
-nValue            : <8 bytes LE — value in satoshis>
-                  ; non-zero — no DATA_RETURN block
-witness[0]        : <P2WPKH spending witness for the funding input>
+nValue            : f0 ca 05 2a 01 00 00 00  (= 4_999_900_000 sats)
+                    ; non-zero, so no DATA_RETURN payload follows.
+                    ; deserialiser synthesises:
+                    ;   scriptPubKey = 0xDF || conditions_root
+witness[0]        :                          (P2WPKH bootstrap input)
+  n_elements        : 02
+  elem[0]  (DER sig + SIGHASH_ALL byte, 71 bytes)
+            30440220419e0499609ace1cba5ab1b3bb28ea674b4a05b264e2a
+            cf2070bd54a4ddab730022052978fc2c83e87a42eef61512d1556
+            b6c2f2a2bb9b50c8f63350f0828c062c2f01
+  elem[1]  (33-byte compressed bootstrap pubkey)
+            038de1f952e9d8a2072588a53dabb2599df293b182bfe613e0000
+            266d7f82b0604
 qabi_block_len    : 00                       ; non-QABI tx
 aggregated_sig_len: 00
 nLockTime         : 00 00 00 00
 ```
 
-Step-by-step deserialisation:
+Wire txid:
+`cd01e54e71c51835cbfc7a1bb255d90f876102a58e0cc052af551a447266d2a2`
+
+Per-output MLSC scriptPubKey emitted by deserialisation:
+`df f9a95d1a427078c4dbcb408ce56883e7d305837dae56fca46370de6cab7cdcce`
+
+Step-by-step interpretation:
 
 1. Read `version = 4`. The deserialiser branches into the v4 path.
 2. Read `dummy = 0x00` and `flags = 0x02`. v4 with witness.
@@ -843,70 +886,115 @@ P2WPKH and goes through standard SegWit verification. After
 ### Worked example: spending transaction
 
 A single-input v4 transaction spending the MLSC UTXO from the funding
-example via the script-path with a single-rung SIG ladder.
+example via the script-path with a single-rung SIG ladder. Because the
+funding root was auto-tweaked, the spend witness has three elements
+(LadderWitness, MLSCProof, internal_pubkey) so the verifier can
+reconstruct the tweak. It sweeps the funded value into a fresh
+single-SIG MLSC output under a new key derived from
+`SHA256("bip-xxxx-worked-example-sweep-key-v1")`:
 
-<!-- TODO: needs canonical bytes from author. Produce alongside the
-funding example so the conditions_root, leaf hash, and proof bytes
-are coherent. -->
+```
+sweep_pubkey (compressed) :
+  02147cf5a0239474d5bb67a264f7af0c83a6d1fe50f2ff190b111c547fc9152cd6
+```
+
+Captured signed transaction (246 wire bytes, 130 vbytes, 519 weight
+units):
+
+```
+04000000000201a2d26672441a55af52c00c8ea50261870fd955b21b7afccb3518
+c5714ee501cd0000000000feffffffef783de612137228ffddac5ea00ce5ee169f
+01a835ddbbf2ce5fff15b3141a9f01e0a3052a0100000003680101002102b049bd
+db96cfa74d98d43951c6a81604ebea3077b87b5a61557925eadc2926eb40f87765
+3f6ee6c0f0dabafddcd276c243fd9cc055c4f8e5c9dd6cd0029e4218b1ad2c9a06
+2d11c826d4626fe1e8eb0faae3d0fa078029d9b299362b24a64b283b00000b0001
+01000001000100000020b049bddb96cfa74d98d43951c6a81604ebea3077b87b5a
+61557925eadc2926eb000000000000
+```
+
+Field-by-field deserialisation:
 
 ```
 version           : 04 00 00 00
 dummy             : 00
 flags             : 02
 n_inputs          : 01
-prevout           : <funding txid LE> 00 00 00 00
+prevout.hash      : a2d26672441a55af52c00c8ea50261870fd955b21b7a
+                    fccb3518c5714ee501cd
+                    ; = funding-tx txid in wire (LE) order
+prevout.n         : 00 00 00 00
 scriptSig_len     : 00
-nSequence         : ff ff ff ff
-conditions_root   : <32 bytes for the spend tx — covers the new MLSC outputs>
+nSequence         : fe ff ff ff
+conditions_root   : ef783de612137228ffddac5ea00ce5ee169f01a835dd
+                    bbf2ce5fff15b3141a9f
+                    ; tweak of the SIG-rung leaf with the new
+                    ; sweep_pubkey (the spend output's MLSC root).
 n_outputs         : 01
-nValue            : <8 bytes — funded amount minus fee>
+nValue            : e0 a3 05 2a 01 00 00 00  (= 4_999_800_000 sats)
 witness[0]        :
-    n_elements        : 02
-    elem[0] LadderWitness (variable bytes)
-    elem[1] MLSCProof    (variable bytes)
+  n_elements        : 03                     (script-path + tweak proof)
+  elem[0] LadderWitness  (104 bytes)
+    01                                       ; n_rungs = 1
+    01                                       ; rung[0].n_blocks = 1
+    00                                       ; SIG micro-header (slot 0x00)
+    21 02b049bddb96cfa74d98d43951c6a81604ebea3077b87b5a61557925e
+       adc2926eb                             ; PUBKEY field (33-byte
+                                             ; length-prefixed compressed pk)
+    40 f877653f6ee6c0f0dabafddcd276c243fd9cc055c4f8e5c9dd6cd0029
+       e4218b1ad2c9a062d11c826d4626fe1e8eb0faae3d0fa078029d9b299
+       362b24a64b283b                        ; SIGNATURE (64 bytes)
+    00                                       ; n_relay_refs = 0
+    00 00                                    ; coil.{type, attestation}
+                                             ; (UNLOCK = 0x00, NONE = 0x00)
+    00                                       ; n_relays = 0
+  elem[1] MLSCProof      (11 bytes)
+    00                                       ; format prefix (versioned)
+    01                                       ; proof_mode = MERKLE_PATH
+    01                                       ; total_rungs = 1
+    00                                       ; total_relays = 0
+    00                                       ; rung_index = 0
+    01                                       ; n_blocks = 1
+    00                                       ; SIG micro-header
+    01                                       ; SCHEME field = SCHNORR
+    00                                       ; n_rung_relay_refs = 0
+    00                                       ; n_revealed_relays = 0
+    00                                       ; n_proof_hashes = 0
+                                             ; (single-leaf tree)
+  elem[2] internal_pubkey (32 bytes)
+    b049bddb96cfa74d98d43951c6a81604ebea3077b87b5a61557925eadc29
+    26eb                                     ; the funding x-only key
+                                             ; the verifier re-applies
+                                             ; CheckLadderTweak with this
+                                             ; pubkey and the reconstructed
+                                             ; raw merkle_root
 qabi_block_len    : 00
 aggregated_sig_len: 00
 nLockTime         : 00 00 00 00
 ```
 
-Walk-through of `LadderWitness` (single rung, single SIG block):
-
-- `n_rungs = 0x01`
-- rung[0]:
-  - `n_blocks = 0x01`
-  - block[0]:
-    - micro-header byte for SIG with implicit witness layout
-    - `PUBKEY` field (32 bytes x-only)
-    - `SIGNATURE` field (64 bytes Schnorr)
-  - `n_relay_refs = 0x00`
-- coil: `01 01 01 00` (UNLOCK, INLINE, SCHNORR, output_index = 0)
-- `n_relays = 0x00`
-
-Walk-through of `MLSCProof`:
-
-- `total_rungs = 0x01`
-- `total_relays = 0x00`
-- `rung_index = 0x00`
-- `revealed_rung`: SIG block with conditions field `[SCHEME = 0x01]`
-- `n_revealed_relays = 0x00`
-- `n_proof_hashes = 0x00` (single-leaf tree)
-- `n_mutation_targets = 0x00`
+Wire txid:
+`3393b991ab951c61f74d237391f96a2bdb2137db59436a828045068a9e466125`
 
 Verification proceeds as:
 
-1. `ExtractBlockPubkeys` collects 1 PUBKEY from the witness rung's
-   SIG block.
-2. `ComputeTxMLSCLeaf` over the revealed rung produces a 32-byte
+1. `DeserializeMLSCProof` parses elem[1]: a single-leaf MERKLE_PATH
+   proof revealing one SIG block with `SCHEME = SCHNORR`.
+2. `ExtractBlockPubkeys` collects 1 PUBKEY from the witness rung's
+   SIG block (elem[0]).
+3. `ComputeTxMLSCLeaf` over `revealed_rung` produces the 32-byte
    leaf hash. With `total_rungs = 1` and `total_relays = 0`,
-   `BuildMerkleTree` returns the leaf directly.
-3. The reconstructed root equals the funding tx's
-   `conditions_root` recovered from the synthetic root coin.
-4. `coil.output_index == 0` matches the spent input's vout (0).
-5. `MergeConditionsAndWitness` produces a SIG block with `[SCHEME,
+   `BuildMerkleTree` returns the leaf directly as the raw merkle_root.
+4. Because the spend witness has 3 elements, `CheckLadderTweak` is
+   invoked with elem[2] as the internal_pubkey and the merkle_root
+   from step 3. It recovers the tweaked root and asserts equality
+   against the funding tx's `conditions_root` recovered from the
+   synthetic root coin.
+5. `coil.output_index == 0` matches the spent input's vout (0).
+6. `MergeConditionsAndWitness` produces a SIG block with `[SCHEME,
    PUBKEY, SIGNATURE]`.
-6. `EvalSigBlock` computes `SignatureHashLadder` and Schnorr-verifies
+7. `EvalSigBlock` computes `SignatureHashLadder` and Schnorr-verifies
    the signature against the pubkey and the sighash.
-7. The rung satisfies. The input is spent.
+8. The rung satisfies. The input is spent.
 
 ### Activation
 
@@ -1367,21 +1455,30 @@ The reference implementation provides the `createrungtx`,
 
 ## Test Vectors
 
-<!-- TODO: needs canonical bytes from author. The reference
-implementation has 619 unit tests under `src/test/rung_tests.cpp` and
-multiple functional tests under `test/functional/feature_rung_*.py`.
-A test-vector file derived from those tests should ship at
-`test/data/rung_tx_vectors.json` containing:
-  - One funding transaction (hex + decoded fields + expected txid + expected wtxid)
-  - One spending transaction (hex + decoded fields + expected txid + expected wtxid)
-  - The conditions tree behind both, with leaf hashes and root
-  - The MLSCProof for the spend, with all sibling hashes
-  - The sighash bytes for the spend's signature
-  - One QABIO priming transaction
-  - One QABIO batch-spend transaction
-  - One PQ_BATCH spend
-The test vectors should be machine-readable so other implementations
-can verify byte-identical behaviour. -->
+A machine-readable starter set ships at
+`src/test/data/rung_tx_vectors.json`. Each vector records the seeds
+used to derive the deterministic keys, the unsigned and signed wire
+hex of both the funding and spending transactions, the resulting MLSC
+scriptPubKey, and the conditions root. All transactions in the file
+were produced by the reference implementation on regtest and were
+broadcast to the mempool successfully. The fixture currently covers
+three block types representative of the three witness-rule families
+exercised by the consensus path:
+
+| Vector | Block type        | Witness rule                                  |
+|--------|-------------------|-----------------------------------------------|
+| v1     | `SIG`             | Triplets-K (key-path, single-rung, auto-tweaked) |
+| v2     | `P2WPKH_LEGACY`   | Bridging (HASH160-committed pubkey)           |
+| v3     | `HTLC`            | Triplets-K + Reveal-P (claim path: preimage + sig) |
+
+The reference implementation has 619 unit tests under
+`src/test/rung_tests.cpp` and multiple functional tests under
+`test/functional/feature_rung_*.py`. A future revision is expected to
+extend the JSON file with vectors for QABIO priming, QABIO batch
+spends, PQ_BATCH spends, and one negative vector per witness rule.
+The current fixture is sufficient to verify byte-identical behaviour
+of an alternative implementation against the three rule families
+above.
 
 ## Reference Implementation
 
