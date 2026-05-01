@@ -1968,8 +1968,8 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
 
         // === Covenant family ===
         // CTV witness: [HASH256]
-        // CTV witness: [HASH256] (CTV_WITNESS implicit layout)
-        {RungBlockType::CTV, {{RungDataType::HASH256, h256}}},
+        // CTV witness: empty (E-023 conditions-only)
+        {RungBlockType::CTV, {}},
         // VAULT_LOCK v0.8 witness: implicit — PUBKEY(recovery), PUBKEY(hot), SIGNATURE
         {RungBlockType::VAULT_LOCK, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // AMOUNT_LOCK conditions-only — witness must be empty after E-019

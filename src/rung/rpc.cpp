@@ -1493,20 +1493,9 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::CTV: {
-        // CTV witness: [HASH256]. Copy from conditions.
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::CTV) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::HASH256) {
-                            block.fields.push_back(f);
-                            goto ctv_done;
-                        }
-                    }
-                }
-            }
-        }
-        ctv_done:;
+        // E-023: CTV witness is empty (conditions-only). The pre-fix layout
+        // echoed the conditions HASH256 but eval read the conditions copy
+        // first via FindField, leaving the witness HASH256 unused.
         break;
     }
     case RungBlockType::COSIGN:
@@ -1971,9 +1960,11 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
     }
 #endif // ENABLE_QABIO
     default: {
-        // Blocks without specific signing logic: auto-populate witness fields.
-        // For key-consuming blocks (ANCHOR_CHANNEL, VAULT_LOCK, PLC blocks with pubkeys),
-        // the witness needs PUBKEY fields for evaluation. Copy from user-provided pubkeys.
+        // Blocks without specific signing logic: auto-populate witness from
+        // user-provided pubkeys/preimages. The wire-format E-023 check
+        // restricts conditions-only-block witnesses to PUBKEY (≤
+        // PubkeyCountForBlock) and PREIMAGE (≤2) — both consensus-bound,
+        // so this RPC layer is safe to copy them through.
         if (block_spec.exists("pubkeys")) {
             const UniValue& pk_arr = block_spec["pubkeys"].get_array();
             for (size_t i = 0; i < pk_arr.size(); ++i) {
@@ -1982,11 +1973,6 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         } else if (block_spec.exists("pubkey")) {
             PushWitnessPubkey(block, ParseHex(block_spec["pubkey"].get_str()));
         }
-        // Do NOT auto-copy condition fields — MergeConditionsAndWitness combines
-        // conditions + witness, so copying would duplicate fields. Only add
-        // user-provided data (pubkeys, preimages) that the evaluator needs
-        // in addition to what's already in conditions.
-        // Copy PREIMAGE fields if user provides them (for hash-bound blocks)
         if (block_spec.exists("preimages")) {
             const UniValue& pi_arr = block_spec["preimages"].get_array();
             for (size_t i = 0; i < pi_arr.size(); ++i) {

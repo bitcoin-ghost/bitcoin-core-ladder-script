@@ -2018,12 +2018,11 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                 signer_blocks.append({"type": "TAGGED_HASH"})
 
         elif btype == "ANCHOR_CHANNEL":
-            # Witness must include both local + remote pubkeys (KEY_BLOCKS
-            # has 2 entries) so the leaf's pubkey-fold reproduces fund-time
-            # value_commitment.
-            local_pk = vals.get("local_key", "")
-            remote_pk = vals.get("remote_key", "")
-            signer_blocks.append({"type": "ANCHOR_CHANNEL", "pubkeys": [local_pk, remote_pk]})
+            # v0.7+ ANCHOR_CHANNEL is a pure commitment_number marker
+            # (PubkeyCountForBlock = 0). The pre-v0.7 local_key/remote_key
+            # slots were never consumed by eval; v0.17 E-019 + v0.18 E-023
+            # close the witness side entirely for this block.
+            signer_blocks.append({"type": "ANCHOR_CHANNEL"})
 
         elif btype == "ANCHOR_ORACLE":
             oracle_pk = vals.get("oracle_pk", "")

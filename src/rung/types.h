@@ -1219,8 +1219,10 @@ inline constexpr ImplicitFieldLayout HASH_GUARDED_WITNESS = {1, {
     {RungDataType::PREIMAGE, 0},
 }};
 
-/** CTV witness: [HASH256(32)] */
-inline constexpr ImplicitFieldLayout CTV_WITNESS = CTV_CONDITIONS;
+// E-023: CTV witness is empty (was [HASH256] echoing conditions; eval read
+// the conditions copy first via FindField, leaving the witness HASH256 as
+// silent embedding). CTV is now truly conditions-only.
+inline constexpr ImplicitFieldLayout CTV_WITNESS = NO_IMPLICIT;
 
 // COSIGN witness — empty after E-022. The conditions side carries the
 // HASH256 of the anchor's scriptPubKey; the witness echoed it, leaving
@@ -1548,7 +1550,7 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::TAGGED_HASH, "TAGGED_HASH", true, true, false, 0, &TAGGED_HASH_CONDITIONS, &TAGGED_HASH_WITNESS, false},
         {RungBlockType::HASH_GUARDED, "HASH_GUARDED", true, false, false, 0, &HASH_GUARDED_CONDITIONS, &HASH_GUARDED_WITNESS, false},
         // Covenant family
-        {RungBlockType::CTV, "CTV", true, true, false, 0, &CTV_CONDITIONS, &CTV_WITNESS, true},
+        {RungBlockType::CTV, "CTV", true, true, false, 0, &CTV_CONDITIONS, nullptr, true},
         {RungBlockType::VAULT_LOCK, "VAULT_LOCK", true, false, true, 2, &VAULT_LOCK_CONDITIONS, &VAULT_LOCK_WITNESS, false},
         {RungBlockType::AMOUNT_LOCK, "AMOUNT_LOCK", true, true, false, 0, &AMOUNT_LOCK_CONDITIONS, nullptr, true},
         // Recursion family

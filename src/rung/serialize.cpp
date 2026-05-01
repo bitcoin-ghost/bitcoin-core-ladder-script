@@ -387,32 +387,22 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
         // SCRIPT_LEGACY (SCRIPT_BODY hash-bound + inner-script CleanStack
         // semantics consume push data), DATA_RETURN (eval rejects all
         // spends, so witness bytes never land on-chain).
-        if (ctx == static_cast<uint8_t>(SerializationContext::WITNESS) && n_fields > 0) {
-            const BlockDescriptor* desc = LookupBlockDescriptor(block_out.type);
-            const bool exempt =
-                block_out.type == RungBlockType::MULTISIG ||
-                block_out.type == RungBlockType::TIMELOCKED_MULTISIG ||
-                block_out.type == RungBlockType::ACCUMULATOR ||
-                block_out.type == RungBlockType::P2SH_LEGACY ||
-                block_out.type == RungBlockType::P2WSH_LEGACY ||
-                block_out.type == RungBlockType::P2TR_SCRIPT_LEGACY ||
-                block_out.type == RungBlockType::DATA_RETURN;
-            const bool conditions_only_block = desc && desc->conditions_only;
-            // RECURSE_MODIFIED / RECURSE_DECAY aren't on the conditions_only
-            // whitelist (their conditions side uses explicit-encoding for
-            // variable mutation-spec count), but their evaluators read only
-            // NUMERIC from the merged block — conditions already carry every
-            // NUMERIC the eval consumes, so the witness side must be empty
-            // too. Closing this matches the audit-flagged LOOSE entries.
-            const bool recurse_explicit_must_be_empty =
-                block_out.type == RungBlockType::RECURSE_MODIFIED ||
-                block_out.type == RungBlockType::RECURSE_DECAY;
-            if (!exempt && (conditions_only_block || recurse_explicit_must_be_empty)) {
-                error = "block " + std::string(BlockTypeName(block_out.type)) +
-                        " is conditions-only; witness must carry no fields, got " +
-                        std::to_string(n_fields);
-                return false;
-            }
+        // E-019/E-022/E-023: pre-loop reject for cases where conditions-only
+        // blocks must have a strictly empty witness (no PUBKEY/PREIMAGE
+        // either). These are blocks whose evaluator reads zero fields from
+        // the witness side AND whose leaf reconstruction does not need a
+        // revealed pubkey — i.e. PubkeyCountForBlock == 0 AND no hash-binding.
+        // The fine-grained per-field-type check after the loop handles
+        // conditions-only blocks that *do* legitimately carry PUBKEY (for
+        // leaf reconstruction) or PREIMAGE (for hash-binding).
+        const bool recurse_explicit_must_be_empty =
+            block_out.type == RungBlockType::RECURSE_MODIFIED ||
+            block_out.type == RungBlockType::RECURSE_DECAY;
+        if (ctx == static_cast<uint8_t>(SerializationContext::WITNESS)
+            && n_fields > 0 && recurse_explicit_must_be_empty) {
+            error = "block " + std::string(BlockTypeName(block_out.type)) +
+                    " witness must carry no fields, got " + std::to_string(n_fields);
+            return false;
         }
 
         block_out.fields.resize(n_fields);
@@ -521,6 +511,58 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
             }
 
             if (!DeserializeField(ss, block_out.fields[f], dtype, 0, error)) {
+                return false;
+            }
+        }
+    }
+
+    // E-023 (audit #4): post-loop type whitelist for `conditions_only` block
+    // witnesses. Pre-fix the wire-format rejected any non-empty witness for
+    // these block types, but several legitimately need the witness to reveal
+    // a PUBKEY (for Merkle-leaf reconstruction via `merkle_pub_key`) or a
+    // PREIMAGE (for HASH256 hash-binding in ANCHOR_POOL/RESERVE/SEAL etc.).
+    // Allow only PUBKEY (≤ PubkeyCountForBlock) and PREIMAGE (≤2 per block;
+    // the global per-tx PREIMAGE cap is 2 so a per-block 2 is never
+    // amplifying). Reject every other field type. This keeps the embedding
+    // ceiling tight — PUBKEY content is bound to the leaf hash, PREIMAGE
+    // content is bound to a HASH256 in conditions.
+    if (ctx == static_cast<uint8_t>(SerializationContext::WITNESS)
+        && !block_out.fields.empty()) {
+        const BlockDescriptor* desc = LookupBlockDescriptor(block_out.type);
+        const bool exempt =
+            block_out.type == RungBlockType::MULTISIG ||
+            block_out.type == RungBlockType::TIMELOCKED_MULTISIG ||
+            block_out.type == RungBlockType::ACCUMULATOR ||
+            block_out.type == RungBlockType::P2SH_LEGACY ||
+            block_out.type == RungBlockType::P2WSH_LEGACY ||
+            block_out.type == RungBlockType::P2TR_SCRIPT_LEGACY ||
+            block_out.type == RungBlockType::DATA_RETURN;
+        if (desc && desc->conditions_only && !exempt) {
+            size_t pk_count = 0;
+            size_t preimage_count = 0;
+            for (const auto& field : block_out.fields) {
+                if (field.type == RungDataType::PUBKEY) {
+                    ++pk_count;
+                } else if (field.type == RungDataType::PREIMAGE) {
+                    ++preimage_count;
+                } else {
+                    error = "block " + std::string(BlockTypeName(block_out.type)) +
+                            " is conditions-only; witness can only carry PUBKEY/PREIMAGE, got " +
+                            DataTypeName(field.type);
+                    return false;
+                }
+            }
+            const size_t allowed_pks = PubkeyCountForBlock(block_out.type, block_out);
+            if (pk_count > allowed_pks) {
+                error = "block " + std::string(BlockTypeName(block_out.type)) +
+                        " witness has " + std::to_string(pk_count) +
+                        " PUBKEY fields, max " + std::to_string(allowed_pks);
+                return false;
+            }
+            if (preimage_count > 2) {
+                error = "block " + std::string(BlockTypeName(block_out.type)) +
+                        " witness has " + std::to_string(preimage_count) +
+                        " PREIMAGE fields, max 2";
                 return false;
             }
         }
