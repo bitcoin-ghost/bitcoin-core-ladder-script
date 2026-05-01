@@ -10510,6 +10510,44 @@ BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_inner_conditions_satisfied)
     BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
+BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_rejects_extra_witness_fields_e020)
+{
+    // E-020: outer block must carry exactly the inner-rung-required count of
+    // stack-push fields (PUBKEY/SIGNATURE/NUMERIC/SCHEME). Pre-fix, FindField
+    // inside inner evaluators silently ignored extras — up to ~98 KB attacker-
+    // controlled bytes per legacy-wrapper input. Inner SIG witness layout has
+    // exactly 2 fields; supply 3 (extra PUBKEY) and expect ERROR.
+    MockSignatureChecker checker;
+    checker.schnorr_result = true;
+
+    LadderWitness inner_ladder;
+    Rung inner_rung;
+    RungBlock inner_block;
+    inner_block.type = RungBlockType::SIG;
+    auto pk = MakePubkey();
+    inner_block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
+    inner_rung.blocks.push_back(inner_block);
+    inner_ladder.rungs.push_back(inner_rung);
+    auto inner_bytes = SerializeLadderWitness(inner_ladder, SerializationContext::CONDITIONS);
+
+    unsigned char hash160[CHash160::OUTPUT_SIZE];
+    CHash160().Write(inner_bytes).Finalize(hash160);
+    std::vector<uint8_t> hash160_vec(hash160, hash160 + 20);
+
+    RungBlock block;
+    block.type = RungBlockType::P2SH_LEGACY;
+    block.fields.push_back({RungDataType::HASH160, hash160_vec});
+    block.fields.push_back({RungDataType::PREIMAGE, inner_bytes});
+    // Stack pushes: 2 expected (PUBKEY, SIGNATURE) but include an extra PUBKEY
+    block.fields.push_back({RungDataType::PUBKEY, pk});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
+    block.fields.push_back({RungDataType::PUBKEY, pk}); // attacker-embedded extra
+
+    ScriptExecutionData execdata;
+    RungEvalContext ctx;
+    BOOST_CHECK(EvalP2SHLegacyBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
+}
+
 BOOST_AUTO_TEST_CASE(eval_p2sh_legacy_malformed_inner_conditions)
 {
     MockSignatureChecker checker;
@@ -12825,6 +12863,38 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_accumulator_witness_wrong_field_order)
     BOOST_CHECK_MESSAGE(!DeserializeBlock(ss, block,
         static_cast<uint8_t>(SerializationContext::WITNESS), err),
         "should reject; got err=" + err);
+}
+
+// E-020 (audit #2 finding 2): PQ_BATCH evaluator must reject any field shape
+// other than 1 (non-anchor) or 3 (anchor). Pre-fix, FindField inside the
+// evaluator silently ignored extras and the descriptor's promised "0-or-2
+// field rule" wasn't enforced anywhere — up to ~98 KB attacker-chosen bytes
+// per anchor input. The count check fires before any sig verification, so
+// this test doesn't require liboqs.
+BOOST_AUTO_TEST_CASE(pq_batch_rejects_extra_fields_e020)
+{
+    // 4 fields after merge: HASH256 + PUBKEY + SIGNATURE + extra PUBKEY.
+    // Pre-fix evaluator would proceed to PQ verification with the first
+    // PUBKEY/SIG pair and silently embed the second PUBKEY's bytes.
+    RungBlock block;
+    block.type = RungBlockType::PQ_BATCH;
+    block.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0xAA)});
+    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x02)});
+    block.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(666, 0x03)});
+    block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x04)});
+
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
+
+    // Also reject the 2-field "PUBKEY-only" shape (anchor without sig).
+    RungBlock partial;
+    partial.type = RungBlockType::PQ_BATCH;
+    partial.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0xAA)});
+    partial.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x02)});
+    BOOST_CHECK(EvalBlock(partial, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

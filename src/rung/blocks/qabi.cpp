@@ -735,6 +735,17 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
 
+    // E-020 (audit #2): the descriptor comment in types.h:1359-1366 promises
+    // "Evaluator enforces the 0-or-2 field rule" for the witness side. Pre-fix,
+    // it didn't — block.fields.size() was unchecked, leaving up to ~98 KB of
+    // attacker-chosen PUBKEY/SIGNATURE/NUMERIC/SCHEME bytes per anchor input
+    // through the FindField-ignores-extras path. After merge with conditions
+    // the legitimate shapes are exactly 1 (non-anchor: [HASH256]) or 3
+    // (anchor: [HASH256, PUBKEY, SIGNATURE]).
+    if (block.fields.size() != 1 && block.fields.size() != 3) {
+        return EvalResult::ERROR;
+    }
+
     if (!hash_field || hash_field->data.size() != 32) {
         return EvalResult::ERROR;
     }

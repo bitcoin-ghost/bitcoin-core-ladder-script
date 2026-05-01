@@ -94,6 +94,29 @@ static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
         }
     }
 
+    // E-020 (audit #2): bound the outer's witness-side stack-push fields to
+    // exactly what at least one inner rung legitimately consumes. Pre-fix,
+    // FindField inside the inner evaluators silently ignored extras — up to
+    // ~98 KB of attacker-chosen PUBKEY/SIGNATURE/NUMERIC/SCHEME bytes per
+    // legacy-wrapper input slipped through the conditions tightening of
+    // E-019. The exact-match rule forbids both extras (which would be data
+    // embedding) and shortfalls (which never satisfied a rung anyway).
+    bool any_rung_matches_count = false;
+    for (const auto& rung : inner.rungs) {
+        size_t expected = 0;
+        for (const auto& block : rung.blocks) {
+            const auto& wlayout = GetImplicitLayout(block.type, /*ctx=*/0);
+            expected += wlayout.count;
+        }
+        if (witness_fields.size() == expected) {
+            any_rung_matches_count = true;
+            break;
+        }
+    }
+    if (!any_rung_matches_count) {
+        return EvalResult::ERROR;
+    }
+
     // Evaluate inner rungs: OR logic (first satisfied rung wins)
     for (const auto& rung : inner.rungs) {
         bool all_satisfied = true;
