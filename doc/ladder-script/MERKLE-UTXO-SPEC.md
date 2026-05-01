@@ -62,17 +62,23 @@ static constexpr uint8_t RUNG_CONDITIONS_PREFIX = 0xc1; // conditions.h (rejecte
 
 ### Leaf Order
 
-The leaf array is constructed in fixed order:
+The consensus leaf array is constructed in fixed order:
 
 ```
 [ rung_leaf[0], rung_leaf[1], ..., rung_leaf[N-1],
-  relay_leaf[0], relay_leaf[1], ..., relay_leaf[M-1],
-  coil_leaf ]
+  relay_leaf[0], relay_leaf[1], ..., relay_leaf[M-1] ]
 ```
 
-Total leaves = `total_rungs + total_relays + 1`.
+Total leaves = `total_rungs + total_relays`. Coil structural fields
+(`coil_type`, `attestation`, `scheme`, `output_index`) are folded
+into each rung leaf's structural template — there is no separate
+coil leaf in the consensus path.
 
-**Source**: `ComputeConditionsRoot()` in `conditions.cpp:316-335`.
+**Source**: `ComputeTxMLSCRoot()` in `conditions.cpp` (live consensus
+path). The legacy `ComputeRungLeaf` / `ComputeCoilLeaf` /
+`ComputeRelayLeaf` helpers retained in the same file are test-only
+and produce different leaf hashes than consensus; they MUST NOT be
+called by new code.
 
 ### Tagged Hashing (BIP-341 style)
 
@@ -111,15 +117,15 @@ and therefore the root.
 TaggedHash("LadderLeaf/v1", SerializeRelayBlocks(relay, CONDITIONS) || pk[0] || pk[1] || ... || pk[N])
 ```
 
-**Coil leaf**: `ComputeCoilLeaf(coil)`
+**Coil**: not a separate leaf in the consensus path. The coil's four
+bytes (`coil_type`, `attestation`, `scheme`, `output_index`) are
+appended to each rung leaf's structural template via
+`SerializeStructuralTemplate`. The legacy `ComputeCoilLeaf` helper in
+`conditions.cpp` is retained for unit tests that exercise pre-TX_MLSC
+shapes; it MUST NOT be called from new code.
 
-```
-TaggedHash("LadderLeaf/v1", SerializeCoilData(coil))
-```
-
-No pubkeys are appended to the coil leaf.
-
-**Source**: `conditions.cpp:226-263`.
+**Source**: `SerializeStructuralTemplate` and `ComputeTxMLSCLeaf` in
+`conditions.cpp`.
 
 ### Empty Leaf Padding
 
@@ -312,8 +318,11 @@ The number of proof hashes must equal the number of unrevealed leaves:
 max_proofs = (total_rungs - 1) + (total_relays - n_revealed_relays)
 ```
 
-The coil leaf is always revealed (from the witness), the spending rung is
-always revealed, and each revealed relay displaces one proof hash.
+The spending rung is always revealed, and each revealed relay
+displaces one proof hash. The coil is not a separate leaf in the
+consensus path — its four bytes are folded into the spending rung's
+leaf via the structural template, so the coil contributes no proof
+hash either way.
 
 **Source**: `conditions.cpp:449-455`.
 
@@ -358,15 +367,18 @@ bool VerifyMLSCProof(
 
 ### Algorithm
 
-1. **Allocate leaf array**: size = `total_rungs + total_relays + 1`.
+1. **Allocate leaf array**: size = `total_rungs + total_relays`.
+   (No `+ 1` for coil — coil bytes live inside each rung leaf's
+   structural template, not as a separate leaf.)
 
-2. **Compute revealed rung leaf**: `leaves[rung_index] = ComputeRungLeaf(revealed_rung, rung_pubkeys)`.
+2. **Compute revealed rung leaf**: `leaves[rung_index] = ComputeTxMLSCLeaf(revealed_rung)`.
 
 3. **Compute revealed relay leaves**: For each `(relay_idx, relay)` in
    `revealed_relays`, set `leaves[total_rungs + relay_idx] = ComputeRelayLeaf(relay, relay_pubkeys[i])`.
 
-4. **Compute coil leaf**: `leaves[total_leaves - 1] = ComputeCoilLeaf(coil)`.
-   The coil is always the last leaf.
+4. (No coil-leaf step in the consensus path — coil bytes are folded
+   into each rung leaf's structural template via
+   `SerializeStructuralTemplate`.)
 
 5. **Fill unrevealed leaves**: Walk the leaf array in order; for each
    unrevealed slot, assign the next proof hash from `proof_hashes`.
@@ -404,13 +416,21 @@ preimage-field cap.
 
 ### Step 2: Enforce Witness Stack Size
 
-```cpp
-if (witness.stack.size() != 2)  // evaluator.cpp:3337
-    return false;
-```
+The witness stack must have exactly 1, 2, or 3 elements:
 
-Exactly 2 elements: `stack[0]` = LadderWitness, `stack[1]` = MLSCProof.
-This prevents data stuffing via extra witness elements.
+- **1 element** — key-path spend: `[Schnorr signature]` against the
+  conditions_root interpreted as an x-only public key. No conditions
+  are revealed.
+- **2 elements** — script-path, no internal-pubkey tweak:
+  `[LadderWitness, MLSCProof]`.
+- **3 elements** — script-path with internal-pubkey tweak:
+  `[LadderWitness, MLSCProof, internal_pubkey (33 bytes)]`. The
+  internal pubkey is x-only-tweaked by the conditions_root via
+  `LadderTweak/v1` and the tweaked key must equal the spent output's
+  conditions_root.
+
+Any other stack size rejects. Reference: `src/rung/evaluator.cpp`
+`VerifyRungTx` dispatch (`witness.count == 0 || witness.count > 3`).
 
 ### Step 3: Deserialize LadderWitness
 
@@ -551,8 +571,14 @@ Every TX_MLSC output is exactly 8 bytes (value only) on the wire regardless
 of the number of spending paths, blocks, or fields. The shared
 `conditions_root` is stored once per transaction. This is a constant-size
 commitment that does not leak the complexity of the spending conditions.
-Anti-spam surface: 112 bytes per transaction (flat, no contiguous block).
-Zero readable attacker data in UTXOs (root is protocol-derived).
+Anti-spam: ~11 B floor for the smallest spendable v4 tx; per-tx
+ceiling depends on which block types are revealed and is bounded
+structurally by per-block field-count enforcement plus per-tx caps
+(`MAX_PREIMAGE_FIELDS_PER_TX = 2`,
+`MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`,
+`MAX_LADDER_WITNESS_SIZE = 100 KB` per input). UTXO entries carry
+zero attacker bytes — the root is protocol-derived. Full empirical
+analysis in `EMBEDDING_CHALLENGE.md`.
 
 ### Chainstate Compression
 

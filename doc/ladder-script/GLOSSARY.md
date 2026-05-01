@@ -55,14 +55,19 @@ Block type 0x0505 (Anchor family). Seal anchor. Conditions: HASH256(32), HASH256
 Invertible. Not key-consuming.
 
 ### ANYPREVOUT
-Sighash flag `LADDER_SIGHASH_ANYPREVOUT = 0x40`. When set, the sighash computation skips
-the prevout commitment (outpoint hash) while still committing to amounts, sequences, and
-conditions. Enables LN-Symmetry/eltoo-style protocols. Defined in `sighash.h`.
+The `0x40-0x43` hash-type byte family. Unconditionally rejected by
+`SignatureHashLadder` and `SignatureHashLadderKeyPath` in
+`src/rung/sighash.cpp`. The flag would skip the prevout commitment,
+which lets a signer's signature be replayed against UTXOs the signer
+did not intend to spend. BIP-118 mitigates this with a dedicated
+pubkey-prefix scheme that Ladder Script does not currently provide;
+LN-Symmetry / eltoo workflows that require ANYPREVOUT need a future
+opt-in mechanism (a dedicated block type or pubkey-prefix scheme)
+before these flags become available.
 
 ### ANYPREVOUTANYSCRIPT
-Sighash flag `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT = 0xC0`. When set, the sighash skips
-both prevout and conditions commitments. Enables rebindable signatures across different
-scripts. Defined in `sighash.h`.
+The `0xC0-0xC3` hash-type byte family. Unconditionally rejected
+alongside ANYPREVOUT for the same reason.
 
 ### BlockDescriptor
 Compile-time descriptor struct in `types.h`. Contains block type metadata: type code, name,
@@ -551,11 +556,14 @@ carries a single shared `conditions_root` with MLSC prefix byte `0xDF`. The 32-b
 is recovered at spend time from the synthetic UTXO entry at
 `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`. Leaf computation uses
 `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`. Each rung's coil
-has an `output_index` field declaring which output it governs. Anti-spam surface:
-**112 bytes per transaction** (flat). Simple payment: **109 vB** (key-path) / **148 vB**
-(script-path no-tweak). Batch 100: **911 vB** (71% cheaper than P2WPKH). Key functions:
+has an `output_index` field declaring which output it governs. Anti-spam: ~11 B floor
+for the smallest spendable tx; per-tx ceiling depends on which block types are revealed
+and is bounded structurally by per-block field-count enforcement plus per-tx caps
+(`MAX_PREIMAGE_FIELDS_PER_TX = 2`, `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`,
+`MAX_LADDER_WITNESS_SIZE = 100 KB` per input). Simple payment: **109 vB** (key-path) /
+**148 vB** (script-path no-tweak). Batch 100: **911 vB** (71% cheaper than P2WPKH). Key functions:
 `IsMLSCScript()`, `GetMLSCRoot()`, `CreateMLSCScript()`, `VerifyMLSCProof()`. Leaf order:
-`[rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1], coil_leaf]`.
+`[rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1]]` (no separate coil leaf — coil bytes are folded into each rung leaf's structural template).
 
 ### SCHEME
 Data type 0x09. Signature scheme selector, exactly 1 byte. Values defined by RungScheme.

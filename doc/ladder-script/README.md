@@ -68,7 +68,7 @@ Interactive HTML pages in [`tools/`](../../tools/) (served at `ladder-script.org
 | `src/rung/descriptor.cpp` | 1,841 | Descriptor language parser and formatter |
 | `src/rung/conditions.cpp` | 1,027 | MLSC proof verification, Merkle tree, creation proofs |
 | `src/rung/serialize.cpp` | 984 | Wire format, micro-headers, anti-spam validation |
-| `src/rung/sighash.cpp` | 234 | LadderSighash with ANYPREVOUT/ANYPREVOUTANYSCRIPT |
+| `src/rung/sighash.cpp` | 234 | `LadderSighash` (script-path) and `LadderKeyPathSighash` (key-path); hash-type set `{0x00-0x03, 0x81-0x83}` (ANYPREVOUT family rejected) |
 | `src/rung/adaptor.cpp` | 187 | Adaptor signature utilities |
 | `src/rung/pq_verify.cpp` | 145 | Post-quantum signature verification |
 | `src/rung/policy.cpp` | 137 | Mempool policy checks |

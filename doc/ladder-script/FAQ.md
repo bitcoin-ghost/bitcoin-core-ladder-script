@@ -176,7 +176,7 @@ governs.
 The `conditions_root` is a Merkle tree root computed from leaves:
 
 ```
-Leaf order: [rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1], coil_leaf]
+Leaf order: [rung_leaf[0], ..., rung_leaf[N-1], relay_leaf[0], ..., relay_leaf[M-1]] (no separate coil leaf — coil bytes are folded into each rung leaf's structural template)
 ```
 
 Leaf hashing uses `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`.
@@ -200,8 +200,16 @@ against the transaction's `conditions_root`.
 **Privacy benefit**: only the spending rung is revealed. All other rungs remain
 hidden behind their leaf hashes.
 
-**Anti-spam surface**: 112 bytes per transaction (flat, no contiguous block).
-Zero readable attacker data in UTXOs (root is protocol-derived).
+**Anti-spam surface**: ~11 B floor for the smallest spendable tx
+(`nLockTime`, `nSequence`, Schnorr nonce — same floor every Bitcoin
+tx has). Above that, the per-tx ceiling depends on which block types
+are revealed; every byte is a typed field consumed by a specific
+evaluator (no `OP_DROP` / `OP_IF false` dead-code channel).
+Structural caps: `MAX_PREIMAGE_FIELDS_PER_TX = 2`,
+`MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`,
+`MAX_LADDER_WITNESS_SIZE = 100 KB` per input. UTXO entries carry
+zero attacker bytes (the root is protocol-derived). Full empirical
+breakdown in [`EMBEDDING_CHALLENGE.md`](EMBEDDING_CHALLENGE.md).
 
 ---
 
@@ -220,29 +228,29 @@ to it via the x-only key tweak). Supported hash types:
 | `SIGHASH_NONE` | `0x02` | Commits to all inputs, no outputs |
 | `SIGHASH_SINGLE` | `0x03` | Commits to all inputs, only the matching output |
 | `SIGHASH_ANYONECANPAY` | `0x81`-`0x83` | Commits to only the signing input |
-| `SIGHASH_ANYPREVOUT` | `0x40`-`0x43` | Skips prevout commitment (BIP-118 analogue) |
-| `SIGHASH_ANYPREVOUTANYSCRIPT` | `0xC0`-`0xC3` | Skips prevout + conditions commitment |
 
-The valid hash type ranges are: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}`.
+The valid hash type ranges are: `{0x00-0x03, 0x81-0x83}`. The
+BIP-118 ANYPREVOUT family (`0x40-0x43`) and ANYPREVOUTANYSCRIPT
+family (`0xC0-0xC3`) are unconditionally rejected pending a future
+opt-in mechanism — both flags allow signature replay against UTXOs
+the signer did not intend to spend, and Ladder Script does not yet
+provide the dedicated pubkey-prefix scheme that BIP-118 mitigates the
+risk with.
 
 The sighash commits to:
 - Epoch (always 0)
 - Hash type byte
 - Transaction version and locktime
-- Prevouts hash, amounts hash, sequences hash (unless ANYONECANPAY; prevouts
-  skipped for ANYPREVOUT)
+- Prevouts hash, amounts hash, sequences hash (unless ANYONECANPAY)
 - Outputs hash (unless NONE)
 - Spend type (always 0 for ladder; no annex or extensions)
 - Input-specific data (prevout or index)
 - Conditions hash: SHA256 of serialized conditions, or the MLSC `conditions_root`
-  directly (skipped for ANYPREVOUTANYSCRIPT)
+  directly (script-path only; key-path sighash omits the conditions
+  commitment because the x-only tweak already binds them)
 - Output hash for SIGHASH_SINGLE
-
-**ANYPREVOUT** enables LN-Symmetry/eltoo: the signature still commits to amounts,
-sequences, and conditions, but not to the specific prevout being spent.
-
-**ANYPREVOUTANYSCRIPT** enables rebindable signatures across different scripts
-by additionally skipping the conditions commitment.
+- Tagged hash of the QABI section (`tx.qabi_block` and
+  `tx.aggregated_sig`) so v4 signatures lock in QABIO state too
 
 ---
 

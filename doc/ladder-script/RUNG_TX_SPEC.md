@@ -168,14 +168,16 @@ transaction. Leaf membership verified against cached leaf set via `SharedTreeCac
 
 ### Proof Verification Algorithm
 
-1. Allocate leaf array: size = `total_rungs + total_relays + 1`
-2. Compute revealed rung leaf from conditions + pubkeys
-3. Compute revealed relay leaves
-4. Compute coil leaf (always revealed from witness)
-5. Fill unrevealed slots with proof hashes
-6. Verify mutation targets (if present)
-7. Build Merkle tree → `computed_root`
-8. Compare `computed_root == conditions_root` (or verify tweak for 3-element witness)
+1. Allocate leaf array: size = `total_rungs + total_relays` (no
+   coil leaf in the consensus path — coil bytes are folded into each
+   rung leaf's structural template)
+2. Compute revealed rung leaf from conditions + pubkeys (via
+   `ComputeTxMLSCLeaf`)
+3. Compute revealed relay leaves (via `ComputeTxMLSCRelayLeaf`)
+4. Fill unrevealed slots with proof hashes
+5. Verify mutation targets (if present)
+6. Build Merkle tree → `computed_root`
+7. Compare `computed_root == conditions_root` (or verify tweak for 3-element witness)
 
 **Source**: `conditions.cpp:560-655`.
 

@@ -183,7 +183,7 @@ Ladder:
 
 ### Wire format size (claim path via Rung 0)
 
-**MLSC proof**: ~75 bytes (rung 0 blocks + rung 1 leaf hash + coil leaf hash)
+**MLSC proof**: ~75 bytes (rung 0 blocks + rung 1 leaf hash; no separate coil leaf)
 
 **Witness**: HTLC micro-header(1) + HASH256(32) + PREIMAGE(1+32) + NUMERIC(1+1)
 + PUBKEY(1+32) + SIGNATURE(1+64) + coil(6) = ~172 bytes
@@ -337,7 +337,7 @@ leaf hash. An observer cannot determine that a dead man's switch exists.
 
 ### Wire format size (owner path)
 
-**MLSC proof**: ~42 bytes (rung 0 revealed, rung 1 leaf hash, coil leaf hash)
+**MLSC proof**: ~42 bytes (rung 0 revealed, rung 1 leaf hash; no separate coil leaf)
 
 **Witness**: SIG(1+1+1+32+1+64) + coil(6) = ~106 bytes
 
@@ -510,54 +510,20 @@ conditions. Plus coil overhead.
 
 ---
 
-## Example 10: ANYPREVOUT Eltoo Channel (SIG with APO Sighash)
+## Example 10: ANYPREVOUT Eltoo Channel — not currently supported
 
-**Use case**: An eltoo/LN-Symmetry payment channel using ANYPREVOUT signatures.
-Each channel state update creates a new transaction that can spend any previous
-state, enabling a clean replace-by-state mechanism without penalty transactions.
+LN-Symmetry / eltoo channels would require ANYPREVOUT (`0x40-0x43`)
+or ANYPREVOUTANYSCRIPT (`0xC0-0xC3`) sighash flags. Both are
+unconditionally rejected by `SignatureHashLadder` /
+`SignatureHashLadderKeyPath` in the current implementation — the
+flags allow signature replay against UTXOs the signer did not intend
+to spend, and Ladder Script does not yet provide the dedicated
+pubkey-prefix scheme that BIP-118 mitigates the risk with.
 
-### Conditions structure
-
-```
-Ladder:
-  Rung 0: (update path: either party can publish latest state)
-    Block 0: SIG (0x0001)
-      Conditions fields: [SCHEME(0x01)]
-      Witness fields:    [PUBKEY(32), SIGNATURE(65)]  -- 65 bytes: 64 + sighash type
-  Rung 1: (settlement path: after CSV delay)
-    Block 0: TIMELOCKED_SIG (0x0701)
-      Conditions fields: [SCHEME(0x01), NUMERIC(144)]
-      Witness fields:    [PUBKEY(32), SIGNATURE(64)]
-  Coil: UNLOCK(0x01), INLINE(0x01), SCHNORR(0x01)
-```
-
-### Evaluation (update path)
-
-1. `EvalSigBlock` is called.
-2. SIGNATURE field is 65 bytes: 64-byte sig + 1-byte sighash type.
-3. The library extracts the trailing byte as hashtype = `0x41`
-   (ANYPREVOUT | ALL) and computes the sighash via `api::SignatureHashLadder`:
-   - `anyprevout = true` (bit 0x40 set).
-   - Skips `m_prevouts_single_hash` in the sighash computation.
-   - Still commits to amounts, sequences, outputs, and conditions.
-4. `sig_checker.CheckSchnorrSignature(sig, pubkey, sighash)` on the supplied
-   `api::LadderSigChecker` adapter verifies the signature against the APO sighash.
-5. Returns SATISFIED.
-
-### Why ANYPREVOUT matters
-
-Because the signature does not commit to the specific prevout, the same
-signed update transaction can spend any previous channel state output.
-This eliminates the need for revocation mechanisms: the latest state
-simply replaces any older state.
-
-The conditions hash is still committed (unless ANYPREVOUTANYSCRIPT is used),
-so the signature is bound to this specific channel's conditions.
-
-### Wire format size
-
-Same as Example 1 except SIGNATURE is 65 bytes instead of 64 (extra sighash
-type byte). Total witness: ~109 bytes.
+A future opt-in mechanism (a dedicated block type or pubkey-prefix
+scheme) is required before this pattern becomes available. See the
+sighash entry in [`GLOSSARY.md`](GLOSSARY.md) for the rejected hash-
+type ranges.
 
 ---
 
@@ -718,15 +684,17 @@ When spending via rung N of a K-rung ladder:
 - Only rung N's conditions are revealed
 - Rungs 0..N-1 and N+1..K-1 are represented by opaque leaf hashes
 - Referenced relays are revealed; unreferenced relays are opaque
-- The coil is always revealed
+- The coil is always revealed (it travels in the witness, not as a
+  separate Merkle leaf — the four coil bytes are folded into the
+  spending rung's structural template)
 - An observer learns K (total rungs) and N (which rung was used), but not the
   conditions of unrevealed rungs
 
 For a 2-rung ladder (e.g., normal + recovery), the MLSC proof includes:
-- 1 revealed rung leaf (with blocks + pubkeys)
+- 1 revealed rung leaf (with blocks + pubkeys + folded-in coil)
 - 1 proof hash (the other rung's leaf)
-- 1 coil leaf (always computed)
-- Padded to 4 leaves with MLSC_EMPTY_LEAF
+- Padded to 2 leaves (the next power of 2) with MLSC_EMPTY_LEAF if
+  needed
 
 ### Diff witness savings
 

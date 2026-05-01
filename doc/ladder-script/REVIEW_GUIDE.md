@@ -246,20 +246,20 @@ Every file entry below uses this structure:
   `TaggedHash("LadderSighash/v1")` (script-path) and `TaggedHash("LadderKeyPathSighash/v1")`
   (key-path, does NOT commit to conditions).
 - **Behaviour**: commits to epoch, hash_type, tx metadata (version, locktime), amounts
-  and sequences via extension data, and the spent output's conditions_root (unless
-  ANYPREVOUTANYSCRIPT).
+  and sequences via extension data, and the spent output's conditions_root.
 - **Load-bearing invariants**:
   - Tagged hash domains are versioned.
-  - Hash type set: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}` — anything outside is
-    rejected.
+  - Hash type set: `{0x00-0x03, 0x81-0x83}` — anything outside is rejected. The BIP-118
+    ANYPREVOUT family (`0x40-0x43`) and ANYPREVOUTANYSCRIPT family (`0xC0-0xC3`) are
+    unconditionally rejected pending a future opt-in mechanism (a dedicated block type
+    or pubkey-prefix scheme); both flags allow signature replay against UTXOs the
+    signer did not intend to spend, and Ladder Script does not currently provide the
+    pubkey-prefix mitigation BIP-118 uses.
   - For MLSC outputs: `conditions_root` is hashed *as-is* (no re-serialisation). This is
     a consequence of the one-shared-root-per-tx wire format.
   - Key-path sighash deliberately *omits* conditions — the tweak already commits to
     them via the x-only tweak, so including them again is redundant and creates a
     cross-protocol signing-oracle risk.
-- **Optional / removable**: ANYPREVOUT variants (`0x40`, `0xC0`) are not load-bearing for
-  basic spends — they enable channel-close patterns (eltoo-like). A minimum-viable BIP
-  could ship with `0x00-0x03` and `0x81-0x83` only.
 
 ## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (107 LOC) / `block_helpers.cpp`
 
@@ -495,14 +495,29 @@ code versus the full 19,345 — the same 805-LOC Core Integration Patch in both 
 
 # Part 6 — Anti-Spam Properties
 
-A reviewer verifying user-chosen data limits should confirm:
+A reviewer verifying the embedding surface should confirm:
 
-Total user-chosen arbitrary data per transaction: **112 bytes**
-- 64 bytes (2 × PREIMAGE × 32) — capped per-witness and per-tx
-- 40 bytes (DATA_RETURN) — one per tx
-- 8 bytes (nLockTime + nSequence) — standard Bitcoin
+The minimum spendable v4 transaction has approximately 11 bytes of
+attacker-controllable content (`nLockTime`, `nSequence`, the Schnorr
+nonce — same floor every Bitcoin tx has). Above that floor, the
+per-tx ceiling depends on which block types are revealed at spend
+time and is bounded structurally by per-block field-count enforcement
+plus the per-tx caps below. There is no `OP_DROP` / `OP_FALSE OP_IF`
+dead-code channel — every byte in an MLSC witness is consumed by a
+typed evaluator.
 
-Mechanisms that enforce this:
+Per-tx caps (consensus):
+- `MAX_PREIMAGE_FIELDS_PER_TX = 2` × 32 B = 64 B of preimage.
+- `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` × ≤80 B of script body.
+- `DATA_RETURN`: at most one per tx, payload 1..40 B.
+- `MAX_LADDER_WITNESS_SIZE = 100 KB` per input.
+
+The 11 B floor matches every Bitcoin transaction format. The
+per-input MLSC reveal scales with the spent rung's block count and
+field shapes. Full empirical analysis in
+[`EMBEDDING_CHALLENGE.md`](EMBEDDING_CHALLENGE.md).
+
+Mechanisms that enforce these caps:
 
 1. **Fail-closed deserialisation** (`serialize.cpp`) — unknown types, deprecated blocks,
    non-invertible inversion, trailing bytes all reject.

@@ -37,13 +37,27 @@ MLSC vs **3,179 vB** P2WPKH and **4,369 vB** P2TR — 3.5× and 4.8×
 smaller. Per-output marginal cost asymptotes to **8 vB** (MLSC) vs ~31
 (P2WPKH) and ~43 (P2TR).
 
-**Inscriptions are structurally impossible.** Every byte must belong to
-a typed field. There is no contiguous attacker-chosen data block in a
-RUNG_TX. The total user-chosen arbitrary data surface is **112 bytes
-per transaction**, flat, regardless of output count: 64 B (2 PREIMAGE
-fields × 32) + 40 B (one DATA_RETURN payload) + 8 B (locktime +
-sequence). Fail-closed deserialisation rejects unknown types, unknown
-fields, and trailing bytes.
+**No inscription-style channel.** Every byte in an MLSC witness
+belongs to a typed field that a specific block evaluator reads.
+There is no equivalent of `OP_DROP` (push-and-discard) and no
+equivalent of `OP_FALSE OP_IF ... OP_ENDIF` dead-code blocks — the
+two patterns Ordinals and other inscription protocols use to embed
+arbitrary bytes inside Tapscripts and P2WSH redeem scripts. Fail-
+closed deserialisation rejects unknown block types, unknown field
+types, oversize fields, and trailing bytes.
+
+The minimum spendable v4 transaction has roughly 11 bytes of
+attacker-controllable content (`nLockTime`, `nSequence`, the Schnorr
+nonce). Above that floor, the per-tx ceiling depends on which block
+types are revealed — every additional `HASH256`, `PREIMAGE`, or
+`PUBKEY` field is structurally bounded by per-block field-count
+enforcement (`MAX_FIELDS_PER_BLOCK = 16`), per-rung block count
+(`MAX_BLOCKS_PER_RUNG = 8`), per-tx caps
+(`MAX_PREIMAGE_FIELDS_PER_TX = 2`,
+`MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`), and the per-input
+`MAX_LADDER_WITNESS_SIZE = 100 KB` cap. See
+[`EMBEDDING_CHALLENGE.md`](EMBEDDING_CHALLENGE.md) for the full
+empirical analysis.
 
 **Privacy by default.** When you spend via one rung, only that rung's
 conditions are revealed. Every other spending path stays hidden behind
@@ -74,10 +88,6 @@ recursive covenants (`RECURSE_SAME`, `RECURSE_MODIFIED`, `RECURSE_COUNT`,
 clawback (`VAULT_LOCK`), rate limiters, latches, counters, sequencers,
 and cross-input constraints (`COSIGN`) — all as single typed blocks,
 not fragile opcode sequences.
-
-**ANYPREVOUT for payment channels.** BIP-118 analogue sighash flags
-(`0x40`, `0xC0`) enable LN-Symmetry / eltoo-style channels where the
-latest state simply replaces any older state.
 
 ## How It Works
 

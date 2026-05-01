@@ -756,10 +756,9 @@ sighash). Two tagged hashes: `LadderSighash/v1` for script-path,
 
 | Symbol                                       | Purpose |
 |----------------------------------------------|---------|
-| `LADDER_SIGHASH_ANYPREVOUT = 0x40`           | BIP-118 analogue: skip prevout commitment. Enables LN-Symmetry / eltoo. |
-| `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT = 0xC0`  | Skip prevout AND conditions commitment. Rebindable signatures across scripts. |
 | `SignatureHashLadder(cache, tx, nIn, ht, conditions, out)` | Script-path sighash. Tagged hash `LadderSighash/v1`. Commits to conditions hash from spent output. |
 | `SignatureHashLadderKeyPath(cache, tx, nIn, ht, out)` | Key-path sighash. Tagged hash `LadderKeyPathSighash/v1`. Does NOT commit to conditions (not revealed in key-path). |
+| Hash-type set | `{0x00-0x03, 0x81-0x83}`. The BIP-118 ANYPREVOUT family (`0x40-0x43`) and ANYPREVOUTANYSCRIPT family (`0xC0-0xC3`) are unconditionally rejected pending a future opt-in mechanism. |
 
 ### What's in the sighash
 

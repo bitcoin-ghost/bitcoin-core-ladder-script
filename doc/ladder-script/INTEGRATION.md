@@ -64,7 +64,7 @@ from `conditions.h`:
    and appends pubkeys for key-consuming blocks.
 2. For each relay, compute `ComputeRelayLeaf(relay, relay_pubkeys)`.
 3. Compute `ComputeCoilLeaf(coil)`.
-4. Leaf order: `[rung_leaves..., relay_leaves..., coil_leaf]`.
+4. Leaf order: `[rung_leaves..., relay_leaves...]` — no separate coil leaf in the consensus path; coil bytes (`coil_type`, `attestation`, `scheme`, `output_index`) are folded into each rung leaf's structural template.
 5. `BuildMerkleTree(leaves)` pads to next power of 2 with `MLSC_EMPTY_LEAF` and returns the root.
 
 ### Step 3: Create the Output
@@ -134,11 +134,14 @@ hash, sequences hash, outputs hash, spend_type (0), input-specific data, and con
 | 0x01 | SIGHASH_ALL | Commit to all outputs |
 | 0x02 | SIGHASH_NONE | Do not commit to outputs |
 | 0x03 | SIGHASH_SINGLE | Commit to matching output only |
-| 0x40 | ANYPREVOUT | Skip prevout commitment (BIP-118 analogue) |
-| 0xC0 | ANYPREVOUTANYSCRIPT | Skip prevout and conditions commitment |
 | 0x80 | ANYONECANPAY | Combine with above; commit to this input only |
 
-ANYPREVOUT enables LN-Symmetry/eltoo. ANYPREVOUTANYSCRIPT enables rebindable signatures.
+Valid hash-type bytes: `{0x00-0x03, 0x81-0x83}`. The BIP-118
+ANYPREVOUT family (`0x40-0x43`) and ANYPREVOUTANYSCRIPT family
+(`0xC0-0xC3`) are unconditionally rejected by `SignatureHashLadder`.
+LN-Symmetry / eltoo workflows that require these flags need a future
+opt-in mechanism (a dedicated block type or pubkey-prefix scheme)
+before these flags become available.
 
 ### Post-Quantum Signing
 

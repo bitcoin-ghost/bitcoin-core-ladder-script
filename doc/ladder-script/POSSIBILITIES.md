@@ -40,16 +40,17 @@ RECURSE_MODIFIED allows a single mutation per hop (e.g., decrementing a counter)
 RECURSE_COUNT creates a countdown that terminates after N hops. These compose into chains
 of constrained transactions with deterministic state progression.
 
-## ANYPREVOUT Channels (LN-Symmetry / Eltoo)
+## ANYPREVOUT Channels (LN-Symmetry / Eltoo) — not yet supported
 
-Payment channels where either party can close with the latest state, without penalty
-transactions.
-
-**Block types:** SIG (0x0001) with ANYPREVOUT sighash (0x40)
-
-ANYPREVOUT allows signatures to rebind to any prevout with matching amounts and conditions.
-This enables the LN-Symmetry (eltoo) protocol: each new state is signed with ANYPREVOUT,
-and the latest state can always replace an older one without needing a justice transaction.
+LN-Symmetry / eltoo channels would require ANYPREVOUT (`0x40-0x43`)
+or ANYPREVOUTANYSCRIPT (`0xC0-0xC3`) sighash flags. Both are
+unconditionally rejected by the current sighash implementation —
+they let a signer's signature be replayed against UTXOs the signer
+did not intend to spend, and Ladder Script does not yet provide the
+dedicated pubkey-prefix scheme that BIP-118 mitigates the risk with.
+Channel-replacement workflows that require ANYPREVOUT semantics will
+need a future opt-in mechanism (a dedicated block type or pubkey-
+prefix scheme) before this pattern becomes available.
 
 ## OUTPUT_CHECK Governance
 

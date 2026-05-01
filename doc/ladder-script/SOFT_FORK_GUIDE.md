@@ -187,11 +187,15 @@ codeseparator extensions. Two tagged hashes:
 `TaggedHash("LadderSighash/v1")` for script-path,
 `TaggedHash("LadderKeyPathSighash/v1")` for key-path.
 
-New sighash flags (BIP-118 analogues):
-- `LADDER_SIGHASH_ANYPREVOUT = 0x40` — skip prevout commitment
-- `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT = 0xC0` — skip prevout + conditions commitment
-
-Valid hash types: `{0x00-0x03, 0x40-0x43, 0x81-0x83, 0xC0-0xC3}`.
+Valid hash types: `{0x00-0x03, 0x81-0x83}`. The BIP-118 ANYPREVOUT
+family (`0x40-0x43`) and ANYPREVOUTANYSCRIPT family (`0xC0-0xC3`) are
+unconditionally rejected by `SignatureHashLadder` /
+`SignatureHashLadderKeyPath`. Both let a signer's signature be
+replayed against UTXOs the signer did not intend to spend; BIP-118
+mitigates with a dedicated pubkey-prefix scheme that Ladder Script
+does not currently provide. Channel-replacement workflows that
+require these flags will need a future opt-in mechanism (a dedicated
+block type or pubkey-prefix scheme) before they become available.
 
 ## Block Types
 
@@ -215,7 +219,11 @@ Total: **65 across 11 families.**
 
 ## User-Chosen Data Limits
 
-The soft fork limits user-chosen arbitrary data to 112 bytes per transaction. The following consensus rules enforce this:
+The minimum spendable v4 transaction has roughly 11 bytes of
+attacker-controllable content (`nLockTime`, `nSequence`, the Schnorr
+nonce — same floor every Bitcoin tx has). Above that floor, the
+per-tx ceiling depends on which block types are revealed at spend
+time. The following consensus rules bound the structural surface:
 
 1. **Fail-closed deserialization.** Unknown block types, unknown data types, and deprecated
    blocks are rejected at the wire format level.

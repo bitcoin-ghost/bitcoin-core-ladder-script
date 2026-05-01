@@ -37,8 +37,15 @@ Not a proposal — working transactions on a live network.
 
 ## Anti-Spam
 
-~112 bytes of user-writable surface per transaction. Inscription-style data embedding
-is structurally impossible. Conditions contain zero user-chosen bytes.
+~11 B floor for the smallest spendable v4 tx (`nLockTime`,
+`nSequence`, Schnorr nonce — same floor every Bitcoin tx has). Above
+that, per-tx ceiling depends on which block types are revealed; every
+byte is a typed field consumed by a specific evaluator (no `OP_DROP`
+/ `OP_FALSE OP_IF` dead-code channel — the patterns Ordinals uses
+inside Tapscripts and the push-and-discard pattern P2WSH allows).
+UTXO entries carry zero attacker bytes (root is protocol-derived).
+See [`EMBEDDING_CHALLENGE.md`](EMBEDDING_CHALLENGE.md) for the
+empirical breakdown.
 
 ## Usability
 
