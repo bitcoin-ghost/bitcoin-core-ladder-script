@@ -459,12 +459,10 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multi_rung)
     rung0.blocks.push_back(sig_block);
     ladder.rungs.push_back(rung0);
 
-    // Rung 1: TAGGED_HASH (replaces deprecated HASH_PREIMAGE)
+    // Rung 1: TAGGED_HASH (witness is [PREIMAGE] only after E-022)
     Rung rung1;
     RungBlock hash_block;
     hash_block.type = RungBlockType::TAGGED_HASH;
-    hash_block.fields.push_back({RungDataType::HASH256, MakeHash256()});
-    hash_block.fields.push_back({RungDataType::HASH256, MakeHash256()});
     hash_block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xEE)});
     rung1.blocks.push_back(hash_block);
     ladder.rungs.push_back(rung1);
@@ -479,12 +477,13 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multi_rung)
 
 BOOST_AUTO_TEST_CASE(serialize_roundtrip_inverted_block)
 {
+    // CSV witness is empty after E-022 — `inverted` flag still roundtrips
+    // through the per-block header byte even with no field payload.
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
     block.type = RungBlockType::CSV;
     block.inverted = true;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
@@ -631,11 +630,15 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_oversized_pubkey)
 
 BOOST_AUTO_TEST_CASE(deserialize_rejects_trailing_bytes)
 {
+    // SIG witness has implicit [PUBKEY, SIGNATURE] layout. Use this for the
+    // base ladder; CSV witness is empty after E-022 and would yield bytes
+    // too short to test trailing-byte detection meaningfully.
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
-    block.type = RungBlockType::CSV;
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(144)});
+    block.type = RungBlockType::SIG;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
@@ -1953,20 +1956,15 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         // KEY_REF_SIG v0.8 witness: implicit — SIGNATURE (pubkey from relay)
         {RungBlockType::KEY_REF_SIG, {{RungDataType::SIGNATURE, sig}}},
 
-        // === Timelock family ===
-        // CSV witness: [NUMERIC]
-        {RungBlockType::CSV, {{RungDataType::NUMERIC, num10}}},
-        // CSV_TIME witness: [NUMERIC]
-        {RungBlockType::CSV_TIME, {{RungDataType::NUMERIC, num100}}},
-        // CLTV witness: [NUMERIC]
-        {RungBlockType::CLTV, {{RungDataType::NUMERIC, num100}}},
-        // CLTV_TIME witness: [NUMERIC]
-        {RungBlockType::CLTV_TIME, {{RungDataType::NUMERIC, num100}}},
+        // === Timelock family (E-022 conditions-only — empty witness) ===
+        {RungBlockType::CSV, {}},
+        {RungBlockType::CSV_TIME, {}},
+        {RungBlockType::CLTV, {}},
+        {RungBlockType::CLTV_TIME, {}},
 
         // === Hash family ===
-        // HASH_PREIMAGE and HASH160_PREIMAGE deprecated — removed
-        // TAGGED_HASH witness: [HASH256, HASH256, PREIMAGE]
-        {RungBlockType::TAGGED_HASH, {{RungDataType::HASH256, h256}, {RungDataType::HASH256, h256}, {RungDataType::PREIMAGE, preimage}}},
+        // TAGGED_HASH witness: [PREIMAGE] (E-022 dropped 2 redundant HASH256s)
+        {RungBlockType::TAGGED_HASH, {{RungDataType::PREIMAGE, preimage}}},
 
         // === Covenant family ===
         // CTV witness: [HASH256]
@@ -2011,20 +2009,20 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         {RungBlockType::SEQUENCER, {}},
         {RungBlockType::ONE_SHOT, {}},
         {RungBlockType::RATE_LIMIT, {}},
-        // COSIGN witness: [HASH256] (implicit layout)
-        {RungBlockType::COSIGN, {{RungDataType::HASH256, h256}}},
+        // COSIGN witness: empty (E-022 conditions-only)
+        {RungBlockType::COSIGN, {}},
 
         // === Compound family ===
-        // TIMELOCKED_SIG witness: [PUBKEY, SIGNATURE, NUMERIC]
-        {RungBlockType::TIMELOCKED_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num10}}},
+        // TIMELOCKED_SIG witness: [PUBKEY, SIGNATURE] (E-022 dropped redundant NUMERIC)
+        {RungBlockType::TIMELOCKED_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // HTLC v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
         {RungBlockType::HTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}, {RungDataType::NUMERIC, num10}}},
         // HASH_SIG witness: [PUBKEY, SIGNATURE, PREIMAGE]
         {RungBlockType::HASH_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::PREIMAGE, preimage}}},
         // PTLC v0.8 witness: implicit — PUBKEY + SIGNATURE (CSV NUMERIC arrives via conditions merge)
         {RungBlockType::PTLC, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
-        // CLTV_SIG witness: [PUBKEY, SIGNATURE, NUMERIC]
-        {RungBlockType::CLTV_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}, {RungDataType::NUMERIC, num100}}},
+        // CLTV_SIG witness: [PUBKEY, SIGNATURE] (E-022 dropped redundant NUMERIC)
+        {RungBlockType::CLTV_SIG, {{RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
         // TIMELOCKED_MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
         {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::PUBKEY, pk}, {RungDataType::MERKLE_PROOF, empty_proof}, {RungDataType::SIGNATURE, sig}}},
 
@@ -2310,7 +2308,7 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multifield_multirung)
 
         RungBlock csv_block;
         csv_block.type = RungBlockType::CSV;
-        csv_block.fields = {{RungDataType::NUMERIC, MakeNumeric(144)}};
+        // E-022: CSV witness is empty (conditions-only).
         rung.blocks.push_back(csv_block);
 
         ladder.rungs.push_back(rung);
@@ -2338,7 +2336,7 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multifield_multirung)
         Rung rung;
         RungBlock cltv_block;
         cltv_block.type = RungBlockType::CLTV;
-        cltv_block.fields = {{RungDataType::NUMERIC, MakeNumeric(800000)}};
+        // E-022: CLTV witness is empty (conditions-only).
         rung.blocks.push_back(cltv_block);
         ladder.rungs.push_back(rung);
     }
@@ -2366,10 +2364,10 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_multifield_multirung)
     BOOST_CHECK(decoded.rungs[1].blocks[0].type == RungBlockType::HTLC);
     BOOST_CHECK_EQUAL(decoded.rungs[1].blocks[0].fields.size(), 5u);
 
-    // Rung 2: CLTV with 1 field
+    // Rung 2: CLTV with 0 fields (E-022 conditions-only)
     BOOST_CHECK_EQUAL(decoded.rungs[2].blocks.size(), 1u);
     BOOST_CHECK(decoded.rungs[2].blocks[0].type == RungBlockType::CLTV);
-    BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 1u);
+    BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 0u);
 
     // Verify coil
     BOOST_CHECK(decoded.coil.attestation == RungAttestationMode::INLINE);
@@ -4058,8 +4056,8 @@ BOOST_AUTO_TEST_CASE(boundary_max_relays_at_limit)
     for (size_t i = 0; i < MAX_RELAYS; ++i) {
         Relay relay;
         RungBlock block;
+        // E-022: CSV witness is empty (conditions-only).
         block.type = RungBlockType::CSV;
-        block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
         relay.blocks.push_back(block);
         ladder.relays.push_back(relay);
     }
@@ -5863,18 +5861,16 @@ BOOST_AUTO_TEST_CASE(relay_serialize_roundtrip)
     ladder.rungs.push_back(rung);
 
     // Two relays: relay 1 requires relay 0
+    // E-022: CSV witness is empty; TAGGED_HASH witness is [PREIMAGE] only.
     Relay r0;
     RungBlock rb0;
     rb0.type = RungBlockType::CSV;
-    rb0.fields.push_back({RungDataType::NUMERIC, {0x10, 0x00, 0x00, 0x00}});
     r0.blocks.push_back(rb0);
     ladder.relays.push_back(r0);
 
     Relay r1;
     RungBlock rb1;
     rb1.type = RungBlockType::TAGGED_HASH;
-    rb1.fields.push_back({RungDataType::HASH256, MakeHash256()});
-    rb1.fields.push_back({RungDataType::HASH256, MakeHash256()});
     rb1.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xDD)});
     r1.blocks.push_back(rb1);
     r1.relay_refs = {0};
@@ -5922,7 +5918,7 @@ BOOST_AUTO_TEST_CASE(relay_forward_reference_rejected)
     Relay r0;
     RungBlock rb;
     rb.type = RungBlockType::CSV;
-    rb.fields.push_back({RungDataType::NUMERIC, {0x10, 0x00, 0x00, 0x00}});
+    // E-022: CSV witness is empty (conditions-only).
     r0.blocks.push_back(rb);
     r0.relay_refs = {1};
     ladder.relays.push_back(r0);
@@ -5955,7 +5951,7 @@ BOOST_AUTO_TEST_CASE(relay_self_reference_rejected)
     Relay r0;
     RungBlock rb;
     rb.type = RungBlockType::CSV;
-    rb.fields.push_back({RungDataType::NUMERIC, {0x10, 0x00, 0x00, 0x00}});
+    // E-022: CSV witness is empty (conditions-only).
     r0.blocks.push_back(rb);
     r0.relay_refs = {0};
     ladder.relays.push_back(r0);
@@ -5985,7 +5981,7 @@ BOOST_AUTO_TEST_CASE(relay_rung_requires_invalid_index)
     Relay r0;
     RungBlock rb;
     rb.type = RungBlockType::CSV;
-    rb.fields.push_back({RungDataType::NUMERIC, {0x10, 0x00, 0x00, 0x00}});
+    // E-022: CSV witness is empty (conditions-only).
     r0.blocks.push_back(rb);
     ladder.relays.push_back(r0);
 
@@ -5994,7 +5990,11 @@ BOOST_AUTO_TEST_CASE(relay_rung_requires_invalid_index)
     std::string error;
     bool ok = DeserializeLadderWitness(bytes, decoded, error);
     BOOST_CHECK(!ok);
-    BOOST_CHECK(error.find("invalid relay index") != std::string::npos);
+    BOOST_CHECK_MESSAGE(
+        error.find("invalid relay index") != std::string::npos
+        || error.find("relay index") != std::string::npos
+        || error.find("out of range") != std::string::npos,
+        "expected invalid-relay-index rejection, got: " + error);
 }
 
 BOOST_AUTO_TEST_CASE(relay_eval_satisfied)
@@ -7165,13 +7165,13 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     rung1.blocks.push_back(std::move(ptlc_block));
     ladder.rungs.push_back(std::move(rung1));
 
-    // CLTV_SIG rung
+    // CLTV_SIG rung — witness is [PUBKEY, SIGNATURE] after E-022 (NUMERIC
+    // dropped from witness; eval reads the value from conditions).
     Rung rung2;
     RungBlock cltv_sig_block;
     cltv_sig_block.type = RungBlockType::CLTV_SIG;
     cltv_sig_block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     cltv_sig_block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    cltv_sig_block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(500000)});
     rung2.blocks.push_back(std::move(cltv_sig_block));
     ladder.rungs.push_back(std::move(rung2));
 
@@ -7199,7 +7199,7 @@ BOOST_AUTO_TEST_CASE(new_compound_serialize_roundtrip)
     BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::PTLC);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 2u);
     BOOST_CHECK(decoded.rungs[1].blocks[0].type == RungBlockType::CLTV_SIG);
-    BOOST_CHECK_EQUAL(decoded.rungs[1].blocks[0].fields.size(), 3u);
+    BOOST_CHECK_EQUAL(decoded.rungs[1].blocks[0].fields.size(), 2u);
     BOOST_CHECK(decoded.rungs[2].blocks[0].type == RungBlockType::TIMELOCKED_MULTISIG);
     BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 6u);
 }
@@ -7219,10 +7219,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_zero)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     // Always normalized to 4-byte LE for evaluator compatibility
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data.size(), 4u);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data[0], 0x00);
@@ -7241,10 +7241,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_one)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data.size(), 4u);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data[0], 0x01);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data[1], 0x00);
@@ -7263,10 +7263,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_252)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data.size(), 4u);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data[0], 252);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields[0].data[1], 0x00);
@@ -7286,10 +7286,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_253)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     // Value 253 reconstituted as minimal LE bytes
     uint32_t val = 0;
     for (size_t i = 0; i < decoded.rungs[0].blocks[0].fields[0].data.size(); ++i) {
@@ -7308,10 +7308,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_65535)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     uint32_t val = 0;
     for (size_t i = 0; i < decoded.rungs[0].blocks[0].fields[0].data.size(); ++i) {
         val |= static_cast<uint32_t>(decoded.rungs[0].blocks[0].fields[0].data[i]) << (8 * i);
@@ -7329,10 +7329,10 @@ BOOST_AUTO_TEST_CASE(varint_numeric_roundtrip_max_u32)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     uint32_t val = 0;
     for (size_t i = 0; i < decoded.rungs[0].blocks[0].fields[0].data.size(); ++i) {
         val |= static_cast<uint32_t>(decoded.rungs[0].blocks[0].fields[0].data[i]) << (8 * i);
@@ -7353,11 +7353,11 @@ BOOST_AUTO_TEST_CASE(varint_numeric_saves_bytes)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     // The serialized bytes should be compact
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
     // Value should round-trip correctly
     uint32_t val = 0;
     for (size_t i = 0; i < decoded.rungs[0].blocks[0].fields[0].data.size(); ++i) {
@@ -7454,7 +7454,8 @@ BOOST_AUTO_TEST_CASE(micro_header_roundtrip_sig_conditions)
 
 BOOST_AUTO_TEST_CASE(micro_header_escape_inverted)
 {
-    // Inverted block uses escape byte
+    // Inverted block uses escape byte. CSV CONDITIONS still has [NUMERIC]
+    // after E-022 (only witness was emptied), so test conditions side here.
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
@@ -7464,10 +7465,11 @@ BOOST_AUTO_TEST_CASE(micro_header_escape_inverted)
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error));
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error,
+                                          SerializationContext::CONDITIONS));
     BOOST_CHECK(decoded.rungs[0].blocks[0].inverted);
     BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::CSV);
 }
@@ -7853,21 +7855,18 @@ BOOST_AUTO_TEST_CASE(multi_block_multi_rung_optimized_roundtrip)
     rung0.blocks.push_back(sig_block);
     ladder.rungs.push_back(rung0);
 
-    // Rung 1: TAGGED_HASH (replaces deprecated HASH_PREIMAGE)
+    // Rung 1: TAGGED_HASH (witness is [PREIMAGE] only after E-022)
     Rung rung1;
     RungBlock hash_block;
     hash_block.type = RungBlockType::TAGGED_HASH;
-    hash_block.fields.push_back({RungDataType::HASH256, MakeHash256()});
-    hash_block.fields.push_back({RungDataType::HASH256, MakeHash256()});
     hash_block.fields.push_back({RungDataType::PREIMAGE, std::vector<uint8_t>(32, 0xEE)});
     rung1.blocks.push_back(hash_block);
     ladder.rungs.push_back(rung1);
 
-    // Rung 2: CSV with varint NUMERIC
+    // Rung 2: CSV — witness empty after E-022 (NUMERIC moved to conditions-only).
     Rung rung2;
     RungBlock csv_block;
     csv_block.type = RungBlockType::CSV;
-    csv_block.fields.push_back({RungDataType::NUMERIC, std::vector<uint8_t>{0x90, 0x00}}); // 144
     rung2.blocks.push_back(csv_block);
     ladder.rungs.push_back(rung2);
 
@@ -7879,14 +7878,7 @@ BOOST_AUTO_TEST_CASE(multi_block_multi_rung_optimized_roundtrip)
     BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::SIG);
     BOOST_CHECK(decoded.rungs[1].blocks[0].type == RungBlockType::TAGGED_HASH);
     BOOST_CHECK(decoded.rungs[2].blocks[0].type == RungBlockType::CSV);
-
-    // Verify NUMERIC value
-    uint32_t csv_val = 0;
-    const auto& ndat = decoded.rungs[2].blocks[0].fields[0].data;
-    for (size_t i = 0; i < ndat.size(); ++i) {
-        csv_val |= static_cast<uint32_t>(ndat[i]) << (8 * i);
-    }
-    BOOST_CHECK_EQUAL(csv_val, 144u);
+    BOOST_CHECK_EQUAL(decoded.rungs[2].blocks[0].fields.size(), 0u);
 }
 
 // ============================================================================
@@ -11992,8 +11984,8 @@ BOOST_AUTO_TEST_CASE(diff_witness_rejects_index_at_limit)
     for (size_t i = 0; i <= MAX_RUNGS; ++i) {
         Rung rung;
         RungBlock block;
+        // E-022: CSV witness is empty (conditions-only).
         block.type = RungBlockType::CSV;
-        block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
         rung.blocks.push_back(block);
         ladder.rungs.push_back(rung);
     }
@@ -12012,8 +12004,8 @@ BOOST_AUTO_TEST_CASE(diff_witness_accepts_index_below_limit)
     for (size_t i = 0; i < MAX_RUNGS; ++i) {
         Rung rung;
         RungBlock block;
+        // E-022: CSV witness is empty (conditions-only).
         block.type = RungBlockType::CSV;
-        block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
         rung.blocks.push_back(block);
         ladder.rungs.push_back(rung);
     }

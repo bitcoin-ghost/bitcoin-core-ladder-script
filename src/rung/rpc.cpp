@@ -1478,21 +1478,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::TAGGED_HASH: {
-        // TAGGED_HASH witness: [HASH256(tag), HASH256(expected), PREIMAGE]
-        // Auto-populate HASH256 fields from conditions
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::TAGGED_HASH) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::HASH256) {
-                            block.fields.push_back(f);
-                        }
-                    }
-                    goto tagged_hash_done;
-                }
-            }
-        }
-        tagged_hash_done:;
+        // E-022: TAGGED_HASH witness is now [PREIMAGE] only. The pre-fix
+        // [HASH256, HASH256, PREIMAGE] layout echoed conditions and the
+        // evaluator never read the witness HASH256 copies (FindField
+        // returned the conditions match first, ~64 B/block silent embedding).
         if (block_spec.exists("preimage")) {
             std::string preimage_hex = block_spec["preimage"].get_str();
             auto preimage_data = ParseHex(preimage_hex);
@@ -1520,69 +1509,23 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         ctv_done:;
         break;
     }
-    case RungBlockType::COSIGN: {
-        // COSIGN witness: [HASH256]. Copy from conditions.
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::COSIGN) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::HASH256) {
-                            block.fields.push_back(f);
-                            goto cosign_done;
-                        }
-                    }
-                }
-            }
-        }
-        cosign_done:;
-        break;
-    }
+    case RungBlockType::COSIGN:
     case RungBlockType::CSV:
     case RungBlockType::CSV_TIME:
     case RungBlockType::CLTV:
     case RungBlockType::CLTV_TIME: {
-        // Witness implicit layout requires [NUMERIC]. Auto-populate from
-        // conditions or user-provided value for the timelock.
-        if (block_spec.exists("value")) {
-            auto val_hex = block_spec["value"].get_str();
-            block.fields.push_back({RungDataType::NUMERIC, ParseHex(val_hex)});
-        } else {
-            // Copy NUMERIC from conditions (same value echoed in witness)
-            for (const auto& rung : conditions.rungs) {
-                for (const auto& cblk : rung.blocks) {
-                    if (cblk.type == btype) {
-                        for (const auto& f : cblk.fields) {
-                            if (f.type == RungDataType::NUMERIC) {
-                                block.fields.push_back(f);
-                                goto csv_done;
-                            }
-                        }
-                    }
-                }
-            }
-            // Fallback: add 0 if no matching condition found
-            block.fields.push_back({RungDataType::NUMERIC, {0x00, 0x00, 0x00, 0x00}});
-            csv_done:;
-        }
+        // E-022: conditions-only witness. The pre-fix layouts echoed the
+        // conditions [HASH256] (COSIGN) or [NUMERIC] (CSV/CLTV variants)
+        // but the evaluators read only the conditions copy via FindField,
+        // leaving 4-32 B/block of silent embedding. Witness is now empty.
         break;
     }
     case RungBlockType::TIMELOCKED_SIG: {
-        // Compound SIG + CSV: PQ or Schnorr sign, CSV timelock from conditions
+        // E-022: TIMELOCKED_SIG witness is now [PUBKEY, SIGNATURE]. The
+        // pre-fix layout's trailing NUMERIC echoed conditions and the
+        // evaluator never read the witness copy (FindField returned the
+        // conditions match first, ~4 B/block silent embedding).
         SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "TIMELOCKED_SIG");
-        // Add CSV NUMERIC from conditions (witness layout: PUBKEY, SIGNATURE, NUMERIC)
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::TIMELOCKED_SIG) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::NUMERIC) {
-                            block.fields.push_back(f);
-                            goto timelocked_sig_done;
-                        }
-                    }
-                }
-            }
-        }
-        timelocked_sig_done:
         break;
     }
     case RungBlockType::HASH_SIG: {
@@ -1707,22 +1650,11 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         break;
     }
     case RungBlockType::CLTV_SIG: {
-        // Witness layout: [PUBKEY, SIGNATURE, NUMERIC]
+        // E-022: CLTV_SIG witness is now [PUBKEY, SIGNATURE]. The pre-fix
+        // layout's trailing NUMERIC echoed conditions and the evaluator
+        // never read the witness copy (FindField returned the conditions
+        // match first, ~4 B/block silent embedding).
         SignSingleKey(block_spec, block, mtx, input_idx, txdata, conditions, "CLTV_SIG");
-        // Add CLTV NUMERIC from conditions
-        for (const auto& rung : conditions.rungs) {
-            for (const auto& cblk : rung.blocks) {
-                if (cblk.type == RungBlockType::CLTV_SIG) {
-                    for (const auto& f : cblk.fields) {
-                        if (f.type == RungDataType::NUMERIC) {
-                            block.fields.push_back(f);
-                            goto cltv_sig_done;
-                        }
-                    }
-                }
-            }
-        }
-        cltv_sig_done:
         break;
     }
     case RungBlockType::TIMELOCKED_MULTISIG: {

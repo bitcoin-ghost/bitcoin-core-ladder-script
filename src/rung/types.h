@@ -1200,13 +1200,17 @@ inline constexpr ImplicitFieldLayout SIG_WITNESS = {2, {
     {RungDataType::SIGNATURE, 0},
 }};
 
-/** CSV witness: [NUMERIC(varint)] */
-inline constexpr ImplicitFieldLayout CSV_WITNESS = CSV_CONDITIONS;
+// CSV/CSV_TIME/CLTV/CLTV_TIME witness — empty after E-022. The conditions
+// side already pins the [NUMERIC] timelock value; the v0.17 witness layout
+// echoed it, leaving 4 B/block of attacker-controlled bytes silently embedded
+// (eval reads the conditions copy first via FindField). Witness is now
+// conditions-only at the descriptor level; E-019 enforces empty witness.
+inline constexpr ImplicitFieldLayout CSV_WITNESS = NO_IMPLICIT;
 
-/** TAGGED_HASH witness: [HASH256(32), HASH256(32), PREIMAGE(var)] */
-inline constexpr ImplicitFieldLayout TAGGED_HASH_WITNESS = {3, {
-    {RungDataType::HASH256, 32},
-    {RungDataType::HASH256, 32},
+/** TAGGED_HASH witness: [PREIMAGE(var)] — the 2 HASH256s in the v0.17
+ *  layout echoed conditions and were unused by the evaluator (64 B/block
+ *  silent embedding channel). E-022 drops them; only PREIMAGE remains. */
+inline constexpr ImplicitFieldLayout TAGGED_HASH_WITNESS = {1, {
     {RungDataType::PREIMAGE, 0},
 }};
 
@@ -1218,14 +1222,17 @@ inline constexpr ImplicitFieldLayout HASH_GUARDED_WITNESS = {1, {
 /** CTV witness: [HASH256(32)] */
 inline constexpr ImplicitFieldLayout CTV_WITNESS = CTV_CONDITIONS;
 
-/** COSIGN witness: [HASH256(32)] */
-inline constexpr ImplicitFieldLayout COSIGN_WITNESS = COSIGN_CONDITIONS;
+// COSIGN witness — empty after E-022. The conditions side carries the
+// HASH256 of the anchor's scriptPubKey; the witness echoed it, leaving
+// 32 B/block silent embedding (eval reads conditions first via FindField).
+inline constexpr ImplicitFieldLayout COSIGN_WITNESS = NO_IMPLICIT;
 
-/** TIMELOCKED_SIG witness: [PUBKEY(var), SIGNATURE(var), NUMERIC(varint)] */
-inline constexpr ImplicitFieldLayout TIMELOCKED_SIG_WITNESS = {3, {
+/** TIMELOCKED_SIG witness: [PUBKEY(var), SIGNATURE(var)] — the trailing
+ *  NUMERIC in the v0.17 layout echoed conditions and was unused by the
+ *  evaluator (4 B/block silent embedding). E-022 drops it. */
+inline constexpr ImplicitFieldLayout TIMELOCKED_SIG_WITNESS = {2, {
     {RungDataType::PUBKEY, 0},
     {RungDataType::SIGNATURE, 0},
-    {RungDataType::NUMERIC, 0},
 }};
 
 /** HTLC v0.7 witness: [PUBKEY(receiver), PUBKEY(sender), SIGNATURE,
@@ -1530,11 +1537,13 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::ADAPTOR_SIG, "ADAPTOR_SIG", true, false, true, 1, nullptr, &ADAPTOR_SIG_WITNESS, false},
         {RungBlockType::MUSIG_THRESHOLD, "MUSIG_THRESHOLD", true, false, true, 1, &MUSIG_THRESHOLD_CONDITIONS, &MUSIG_THRESHOLD_WITNESS, false},
         {RungBlockType::KEY_REF_SIG, "KEY_REF_SIG", true, false, true, 0, &KEY_REF_SIG_CONDITIONS, &KEY_REF_SIG_WITNESS, false},
-        // Timelock family
-        {RungBlockType::CSV, "CSV", true, true, false, 0, &CSV_CONDITIONS, &CSV_WITNESS, false},
-        {RungBlockType::CSV_TIME, "CSV_TIME", true, true, false, 0, &CSV_TIME_CONDITIONS, &CSV_WITNESS, false},
-        {RungBlockType::CLTV, "CLTV", true, true, false, 0, &CLTV_CONDITIONS, &CSV_WITNESS, false},
-        {RungBlockType::CLTV_TIME, "CLTV_TIME", true, true, false, 0, &CLTV_TIME_CONDITIONS, &CSV_WITNESS, false},
+        // Timelock family — E-022 marks them conditions-only; witness must be
+        // empty (E-019 enforces). The v0.17 witness echoed the conditions
+        // [NUMERIC] which the evaluator never read.
+        {RungBlockType::CSV, "CSV", true, true, false, 0, &CSV_CONDITIONS, nullptr, true},
+        {RungBlockType::CSV_TIME, "CSV_TIME", true, true, false, 0, &CSV_TIME_CONDITIONS, nullptr, true},
+        {RungBlockType::CLTV, "CLTV", true, true, false, 0, &CLTV_CONDITIONS, nullptr, true},
+        {RungBlockType::CLTV_TIME, "CLTV_TIME", true, true, false, 0, &CLTV_TIME_CONDITIONS, nullptr, true},
         // Hash family
         {RungBlockType::TAGGED_HASH, "TAGGED_HASH", true, true, false, 0, &TAGGED_HASH_CONDITIONS, &TAGGED_HASH_WITNESS, false},
         {RungBlockType::HASH_GUARDED, "HASH_GUARDED", true, false, false, 0, &HASH_GUARDED_CONDITIONS, &HASH_GUARDED_WITNESS, false},
@@ -1571,7 +1580,9 @@ inline const BlockDescriptor* LookupBlockDescriptor(RungBlockType type)
         {RungBlockType::SEQUENCER, "SEQUENCER", true, true, false, 0, &SEQUENCER_CONDITIONS, nullptr, true},
         {RungBlockType::ONE_SHOT, "ONE_SHOT", true, true, false, 0, &ONE_SHOT_CONDITIONS, nullptr, true},
         {RungBlockType::RATE_LIMIT, "RATE_LIMIT", true, true, false, 0, &RATE_LIMIT_CONDITIONS, nullptr, true},
-        {RungBlockType::COSIGN, "COSIGN", true, false, false, 0, &COSIGN_CONDITIONS, &COSIGN_WITNESS, false},
+        // E-022: COSIGN witness echoed conditions [HASH256] but the evaluator
+        // only consumed the conditions copy via FindField. Now conditions-only.
+        {RungBlockType::COSIGN, "COSIGN", true, false, false, 0, &COSIGN_CONDITIONS, nullptr, true},
         // Compound family
         {RungBlockType::TIMELOCKED_SIG, "TIMELOCKED_SIG", true, false, true, 1, &TIMELOCKED_SIG_CONDITIONS, &TIMELOCKED_SIG_WITNESS, false},
         {RungBlockType::HTLC, "HTLC", true, false, true, 2, &HTLC_CONDITIONS, &HTLC_WITNESS, false},
@@ -1651,6 +1662,12 @@ inline bool VerifyImplicitLayoutPairing()
         RungBlockType::ACCUMULATOR,
         RungBlockType::ANCHOR, RungBlockType::COMPARE,
         RungBlockType::OUTPUT_CHECK,
+        // E-022 (audit #3): timelock + COSIGN witness layouts dropped — the
+        // pre-fix layouts echoed conditions and the evaluator never read the
+        // witness copy (FindField returned the conditions match first).
+        RungBlockType::CSV, RungBlockType::CSV_TIME,
+        RungBlockType::CLTV, RungBlockType::CLTV_TIME,
+        RungBlockType::COSIGN,
     };
 
     for (uint32_t code = 0; code <= 0x0FFF; ++code) {
