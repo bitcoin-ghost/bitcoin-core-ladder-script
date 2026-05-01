@@ -53,11 +53,12 @@ Identified by `nValue == 0`. Maximum 1 per transaction. Payload up to 40 bytes.
 
 Total leaves = `total_rungs + total_relays`.
 
-v0.8 dropped the separate coil leaf — coil structural fields (type / attestation /
-scheme / output_index) are folded into each rung leaf's structural template.
+Coil structural fields (type / attestation / scheme / output_index) are
+folded into each rung leaf's structural template — there is no separate
+coil leaf.
 
-v0.7 folded the relay leaves into the conditions_root tree (E-008): a spender
-can no longer swap in a different relay pubkey at spend time.
+Relay leaves are folded into the same `conditions_root` tree as the rungs,
+so a spender cannot swap in a different relay pubkey at spend time.
 
 ### Leaf Computation
 
@@ -192,7 +193,7 @@ Production validation runs `CheckRungTxLevel` unconditionally per v4 tx
    dust threshold (546 sats)
 2. Creation proof: required for 3+ spendable outputs. Validates leaf hashes build
    to conditions_root. Optional for 1-2 outputs (validated if present)
-3. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). v0.10 (audit #6 F-2) tightened this to MLSC-spending inputs only — bootstrap inputs (P2WPKH/P2WSH/P2TR etc) are excluded by the cap, since their witness bytes are not Ladder Script.
+3. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). The cap counts MLSC-spending inputs only — bootstrap inputs (P2WPKH/P2WSH/P2TR etc) are excluded since their witness bytes are not Ladder Script. Diff-witness overlays count too: an N-input tx with diff witnesses cannot use diffs to fan out fresh PREIMAGE/SCRIPT_BODY bytes past the cap.
 
 ### Per-input
 
@@ -279,31 +280,63 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 
 ## 9. Anti-spam
 
-### Embeddable data per transaction
+### Attacker-controllable bytes per transaction
 
-| Channel | Bytes | Note |
-|---------|-------|------|
-| DATA_RETURN | 40 | Max 1 per tx, zero-value output |
-| PREIMAGE fields | 64 max | 2 per tx × 32 bytes, hash-bound |
-| nLockTime + nSequence | 8 | Standard Bitcoin fields |
-| **Total** | **112** | Flat, regardless of output count |
+A spender that funds + spends their own MLSC UTXOs reveals committed
+content at spend time. The protocol bounds this revelation but does not
+zero it — every commit-reveal scheme is structurally the same in this
+respect (P2WSH commits 32 B per output, P2TR commits 32 B per output,
+MLSC commits 32 B per output via `conditions_root`).
 
-The `conditions_root` is protocol-derived (not attacker-chosen).
+| Channel | Per-instance | Per-tx cap | Notes |
+|---------|--------------|------------|-------|
+| `DATA_RETURN` block | up to 40 B | 1 block per tx | Zero-value output, payload is the application-defined commitment |
+| `conditions_root` | 32 B | per MLSC output | Attacker-picked Merkle root; same shape as P2WSH script-hash |
+| Conditions-side `HASH256` (TAGGED_HASH, CTV, COSIGN, HTLC etc) | 32 B per field | bound by per-block layout × `MAX_BLOCKS_PER_RUNG` × revealed rungs | Application-defined commitments |
+| `PREIMAGE` (witness) | up to 32 B | `MAX_PREIMAGE_FIELDS_PER_TX = 2` | Hash-bound to a `HASH256` in conditions |
+| `SCRIPT_BODY` (witness) | up to 80 B | `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` | Hash-bound, used by legacy P2SH/P2WSH/P2TR_SCRIPT wrappers |
+| `PUBKEY` (witness, leaf reconstruction) | 32-65 B per pubkey | bounded by `PubkeyCountForBlock` per block | Must reproduce the committed leaf hash on validation |
+| MLSC proof sibling hashes | 32 B per sibling | depth ≤ log₂(`MAX_RUNGS`) = 4 per input | Each sibling hashes an attacker-chosen subtree |
+| `nLockTime` + `nSequence` | 4 + 4 per input | standard Bitcoin | Inherited from the base tx format |
+| `OP_RETURN` outputs | up to 80 B (relay) / 10 KB (consensus) | standardness limit | Standard Bitcoin, not MLSC-specific |
 
-### Defences
+Because MLSC bytes are typed (no `OP_DROP` / `OP_IF false` / push-and-
+discard equivalents), every byte in an MLSC witness is consumed by
+consensus — no "dead-code" channel exists. This is the structural
+distinction from Taproot script-path tapscripts, where `OP_FALSE OP_IF
+<arbitrary> OP_ENDIF` blocks (used by Ordinals inscriptions) embed
+witness bytes that the executed path never reaches.
 
-1. **merkle_pub_key**: pubkeys folded into leaf hash, not in conditions
-2. **Key-consuming blocks never invertible**: prevents garbage-pubkey data embedding
-3. **Implicit field layouts**: fixed field counts/types per block
-4. **Fail-closed deserialisation**: unknown types/fields rejected
-5. **IsDataEmbeddingType**: HASH256/HASH160/DATA rejected in layout-less blocks
-6. **PREIMAGE cap**: `MAX_PREIMAGE_FIELDS_PER_TX = 2`
-7. **DATA restriction**: DATA type only in DATA_RETURN blocks
-8. **Dust threshold**: `MIN_RUNG_OUTPUT_VALUE = 546 sats` (consensus)
+### Structural defences
+
+1. **merkle_pub_key**: pubkeys folded into the leaf hash, not the
+   conditions field stream — the wire only carries the hash root.
+2. **Key-consuming blocks are never invertible**: prevents garbage-
+   pubkey data embedding via the `inverted` flag.
+3. **Implicit field layouts**: fixed field counts/types per block on
+   both conditions and witness sides; explicit-encoded blocks must
+   match the implicit layout exactly.
+4. **Fail-closed deserialisation**: unknown block types, unknown data
+   types, oversize fields, non-canonical `CompactSize` reject.
+5. **`IsDataEmbeddingType`**: `HASH256` / `HASH160` / `PUBKEY_COMMIT` /
+   `DATA` reject inside any layout-less block (`RECURSE_MODIFIED`,
+   `RECURSE_DECAY`).
+6. **Conditions-only witness whitelist**: block types whose evaluator
+   reads only conditions-side fields accept witnesses containing only
+   `PUBKEY` (count ≤ `PubkeyCountForBlock`) and `PREIMAGE` (count ≤ 2)
+   — every other field type rejects.
+7. **Per-tx caps**: `MAX_PREIMAGE_FIELDS_PER_TX = 2`,
+   `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`,
+   `MAX_LADDER_WITNESS_SIZE = 100 KB` per input. Caps count diff-
+   witness overlays alongside direct witnesses — overlays cannot fan
+   out fresh PREIMAGE/SCRIPT_BODY past the cap.
+8. **`DATA` restriction**: `DATA` field type allowed only inside
+   `DATA_RETURN` blocks.
+9. **Dust threshold**: `MIN_RUNG_OUTPUT_VALUE = 546 sats` (consensus).
 
 ---
 
-## 10. Coil (v0.8)
+## 10. Coil
 
 Fixed 4-byte tail. Each MLSC output ends with the coil; nothing else after.
 
@@ -314,14 +347,14 @@ Fixed 4-byte tail. Each MLSC output ends with the coil; nothing else after.
 | scheme | 1 B | SCHNORR, ECDSA, FALCON512, FALCON1024, DILITHIUM3, SPHINCS_SHA |
 | output_index | 1 B | Position of this output in the spending tx (0…255) |
 
-`coil.address_hash` and `coil.rung_destinations` were removed in v0.8 (E-009/E-010).
-They were advertised as wallet-routing metadata but never bound to any consensus
-check — pure spender data channels. Wallets that need destination metadata must
-track it locally. `UNLOCK_TO` is reserved for a future wire format that binds
-output structure on-chain (e.g. via a CTV-style template hash).
+The coil carries no `address_hash` or `rung_destinations`. Wallets that
+need destination metadata track it locally. `UNLOCK_TO` is reserved for a
+future wire format that binds output structure on-chain (e.g. via a
+CTV-style template hash).
 
-The compact-coil sentinel (`0x00 + output_index`) still expands to the default
-`UNLOCK + INLINE + SCHNORR` shape.
+The compact-coil sentinel (`0x00 + output_index`) expands to the default
+`UNLOCK + INLINE + SCHNORR` shape — saves 3 bytes per coil for the common
+case.
 
 ---
 
@@ -359,7 +392,7 @@ PREIMAGE, SCRIPT_BODY, SCHEME. The coil is never inherited.
 | `MAX_LADDER_WITNESS_SIZE` | 100,000 B | `serialize.h` |
 | `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | `serialize.h` |
 | `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | `serialize.h` |
-| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | `serialize.h` (v0.7, E-003) |
+| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | `serialize.h` |
 | `MAX_PUBKEYS_PER_MULTISIG` | 16 | `serialize.h` |
 | `MAX_MULTISIG_TREE_DEPTH` | 4 | `serialize.h` |
 | `MAX_MULTISIG_WITNESS_FIELDS` | 48 | `serialize.h` |

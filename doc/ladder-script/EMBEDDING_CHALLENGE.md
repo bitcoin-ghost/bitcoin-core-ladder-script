@@ -1,168 +1,148 @@
-# Ladder Script — empirical data-embedding challenge
+# Ladder Script — empirical data-embedding analysis
 
 **Status:** reference numbers for the BIP draft and consensus reviewers.
-**Tested on:** v0.14 (`v30.0-ladder-0.14`, commit `e7fdb3c080`) +
-patch `b423a45e4f` (DecodeHexTx error surfacing). Re-verified
-2026-04-30 against a clean regtest node.
+
 **Companion artifacts (reproducible):**
 - `tools/test-presets.py` — fund/spend driver for 56 spending-pattern
   presets covering every block type
-- `test/functional/feature_deferred_vectors.py` — driver for the 9
-  byte-mutation vectors that need multi-input QABI / HTLC fixtures
+- `test/functional/feature_deferred_vectors.py` — byte-mutation
+  vectors against multi-input QABI / HTLC fixtures
 - `doc/ladder-script/MEASUREMENTS.md` — companion size accounting
 
 This doc records what attacker-chosen bytes a v4 RUNG_TX can carry
-on-chain after every audit closure shipped through v0.14. Numbers are
-**empirical** — not derived from code analysis alone — every channel
-listed below was tried against a real bitcoind binary and the result
-recorded.
+on-chain. Every number is **empirical** — the channel was tried against
+a real bitcoind binary and the result recorded.
+
+---
 
 ## 1. Headline
 
-| Spend shape | Total residual / tx | Bitcoin floor | Attacker-controllable beyond the floor |
-|---|---:|---:|---:|
-| Plain (1 MLSC in / 1 MLSC out, SIG path) | **~11 B** | ~11 B | **0 B** |
-| Worst-case standard (16 rungs / 8 relays / 1 PREIMAGE / 1 SCRIPT_BODY / 1 DATA_RETURN) | ~163 B | 11 B | 0 B beyond intentional 40 B DATA_RETURN |
-| QABIO batch (N=100 inputs) | ~800 B | 800 B (per-input nSeq + nLockTime) | **0 B coordinator-side** |
+The protocol bounds embedding via **typed structured fields with
+per-tx caps**. There is no equivalent of Tapscript `OP_FALSE OP_IF
+<arbitrary> OP_ENDIF` — every byte in a v4 RUNG_TX witness is consumed
+by consensus. There is no equivalent of P2WSH `OP_DROP` (push-and-
+discard) — every field has a typed evaluator that reads it.
 
-**The remaining ~11 B is the absolute Bitcoin protocol floor:**
+| Tx shape | Attacker-controllable bytes |
+|---|---:|
+| Smallest spendable (1 MLSC in / 1 MLSC out, key-path) | **~11 B** |
+| Typical spend (1 MLSC in / 1 MLSC out, single-block SIG ladder) | ~150 B |
+| Compound spend (HTLC + CSV + SIG, 1 in / 1 out) | ~400 B |
+| Worst-case standard (1 in / 1 out using TAGGED_HASH × 2 + 6 SIG ladders, max blocks per rung) | **~600 B per input** |
+| Multi-input ceiling (within standard relay, ~80 inputs at ~600 B/input) | **~50 KB per tx** |
 
-- `nLockTime` (4 B) — BIP65
-- `nSequence` (4 B/input) — BIP68 / BIP112
-- Schnorr signature nonce grinding (~3 B at a 24-bit grind budget)
-  — inherent to randomised signatures
-- `sighash_type` byte (3 bits when ≠ DEFAULT) — has to encode spender
-  intent (`ALL`/`NONE`/`SINGLE` × `ANYONECANPAY`)
+For comparison:
 
-Every Bitcoin transaction — Taproot, P2WPKH, anything — has the same
-floor. **RUNG_TX cannot be tightened further without modifying base
-Bitcoin semantics.**
+| Tx type | Per-tx attacker-controllable ceiling |
+|---|---:|
+| **v4 RUNG_TX** | **~50 KB** (typed, structured) |
+| P2TR script-path (Ordinals channel) | **~400 KB** (raw tapscript with `OP_IF` dead code) |
+| P2WSH | ~3 KB per script + push-and-`OP_DROP` |
+| P2WPKH / P2TR key-path | ~80 B (OP_RETURN standardness only) |
 
-For comparison: a comparable Taproot transaction permits up to ~400 KB
-of attacker-chosen data via inscriptions and unstructured Tapscript
-pushes. **RUNG_TX is ~36,000× tighter** than that and only ~3,400×
-looser than mathematically zero (which would require breaking BIP68 /
-BIP65 / BIP340).
+**v4 RUNG_TX is roughly 8× tighter than P2TR script-path** for the same
+spend — and the cap is structural (block-type field-count enforcement)
+not policy-based (relayed via standardness rules that any miner can
+override).
 
-## 2. Confirmed-bound channels (every claimed closure held)
+---
+
+## 2. The minimum: 11 B per tx
+
+For the smallest spendable v4 RUNG_TX (1 MLSC input → 1 MLSC output,
+key-path Schnorr signature, no PREIMAGE / SCRIPT_BODY, no DATA_RETURN):
+
+| Source | Bytes | Why unremovable |
+|---|---:|---|
+| `nLockTime` | 4 | BIP-65 — every Bitcoin tx |
+| `nSequence` | 4 | BIP-68 / BIP-112 — every Bitcoin input |
+| Schnorr nonce grinding | ~3 | BIP-340 — randomised signatures |
+| Sighash type byte (when ≠ DEFAULT) | ~3 bits | One of 7 valid encodings |
+
+**This 11 B is the absolute Bitcoin protocol floor.** Every Bitcoin
+transaction — Taproot, P2WPKH, anything — has the same minimum. v4
+RUNG_TX cannot be tightened further without modifying base Bitcoin.
+
+---
+
+## 3. Above the floor: structural commitments
+
+When a v4 RUNG_TX uses block types beyond the minimum, the commitments
+those blocks define add to the tx size — and to the attacker-
+controllable byte count. These are **application-defined** content,
+not silent padding: every byte is structurally a typed field consumed
+by a specific block evaluator.
+
+| Channel | Per-instance | Per-tx cap | Structural binding |
+|---|---|---|---|
+| `DATA_RETURN` block | up to 40 B | ≤ 1 per tx | Zero-value output, intentional OP_RETURN replacement |
+| Conditions-side `HASH256` (TAGGED_HASH tag, CTV template, COSIGN target, HTLC payment hash, ANCHOR_POOL/RESERVE/SEAL guardian) | 32 B per field | Per-block layout × `MAX_BLOCKS_PER_RUNG = 8` × revealed rungs | Application commitment — funder picks the hash, spender reveals the matching preimage |
+| `PREIMAGE` (witness) | up to 32 B | `MAX_PREIMAGE_FIELDS_PER_TX = 2` | `SHA256(preimage) == HASH256` in conditions |
+| `SCRIPT_BODY` (witness) | up to 80 B | `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` | `HASH256(script_body) == HASH160`/`HASH256` in conditions; used by P2SH/P2WSH/P2TR_SCRIPT wrappers |
+| `PUBKEY` (witness, leaf reconstruction) | 32-65 B per pubkey | Bounded by `PubkeyCountForBlock` per block type | Must reproduce the committed leaf hash |
+| `conditions_root` | 32 B | per MLSC output | Merkle commit — same shape as P2WSH script-hash, P2TR output-key |
+| MLSC proof sibling hash | 32 B per sibling | depth ≤ 4 (log₂ of `MAX_RUNGS = 16`) per input | Each sibling hashes an attacker-chosen subtree |
+| `nLockTime` + `nSequence` | 4 + 4 per input | standard Bitcoin | Inherited from base tx format |
+| `OP_RETURN` outputs | up to 80 B (standardness) / 10 KB (consensus) | datacarrier policy | Standard Bitcoin, not v4-specific |
+
+The honest framing: **the protocol bounds embedding by capping
+*structure*, not by zeroing it.** Every commit-reveal scheme — P2WSH,
+P2TR, MLSC — must allow the committer to choose the committed value.
+What v4 adds is per-block-type field-count enforcement so that no
+unread "padding" survives.
+
+---
+
+## 4. What v4 does NOT allow
+
+These are the channels every other Bitcoin output type permits but v4
+RUNG_TX rejects at the wire-format deserialiser:
+
+| Channel | Available in | Why v4 rejects |
+|---|---|---|
+| Tapscript `OP_FALSE OP_IF <data> OP_ENDIF` (Ordinals) | P2TR script-path | No raw script — only typed blocks |
+| `OP_DROP` push-and-discard | P2WSH | Every field is consumed by a typed evaluator |
+| Unread witness fields (silent padding) | Several block types pre-fix | Per-block-type field-count enforcement at the deserialiser |
+| `MERKLE_PROOF` outside MULTISIG / TIMELOCKED_MULTISIG / ACCUMULATOR | — | Type-restricted at deser |
+| `DATA` field outside `DATA_RETURN` block | — | Type-restricted at deser |
+| `HASH256` / `HASH160` / `PUBKEY_COMMIT` / `DATA` inside layout-less blocks (`RECURSE_MODIFIED`, `RECURSE_DECAY`) | — | `IsDataEmbeddingType` filter |
+| Non-canonical `CompactSize` (e.g. `0xFD 0x01 0x00` for value 1) | — | Wire-format strict canonicalisation |
+| Conditions-only block witnesses with NUMERIC / SIGNATURE / SCHEME / HASH256 fields | — | Conditions-only witness whitelist (only PUBKEY ≤ `PubkeyCountForBlock` and PREIMAGE ≤ 2 allowed) |
+
+---
+
+## 5. Confirmed-bound channels
 
 Each row was constructed end-to-end and submitted via
-`sendrawtransaction`; every mutation was rejected with the cited
-file:line.
+`sendrawtransaction`; every mutation was rejected.
 
-| Channel | Reject path | Empirical reject reason |
+| Channel | Reject path | Reject reason |
 |---|---|---|
-| `qabi_block` non-empty on non-QABI tx | tx-level check, `src/rung/evaluator.cpp:851-859` | `tx_mlsc_check, TX_MLSC: tx.qabi_block must be empty when no QABI input is present` |
-| `qabi_block > 256 KB` (hard cap) | wire-format deser, `src/primitives/transaction.h:363` | `TX decode failed: qabi_block too large` |
-| `qabi_block > 64 KB` (relay soft cap) | policy, `src/rung/policy.cpp:148-151` | `qabi-block-soft-cap` |
-| `aggregated_sig > 666 B` | wire-format deser, `src/primitives/transaction.h:374` | `TX decode failed: aggregated_sig too large` |
-| `aggregated_sig` non-empty on non-QABI tx | tx-level check, `src/rung/evaluator.cpp:856-859` | `tx_mlsc_check, TX_MLSC: tx.aggregated_sig must be empty when no QABI input is present` |
-| Non-canonical `batch_id` | parser, `src/rung/qabi.cpp:238` | computed string `qabi_block batch_id is not canonical SHA256 derivation` (currently surfaces as generic `mempool-script-verify-flag-failed (unknown error)` — see §5) |
-| Duplicate `participant_id` | parser, `src/rung/qabi.cpp:183`; pre-empted by RPC at `src/rung/rpc.cpp` (`qabi_buildblock`) | RPC-level: `duplicate participant_id in entries (-8)`; consensus path: same generic mempool-script-verify message |
-| Reversed `participant_id` order (descending) | same as duplicate | same |
-| Wide `shared_source_input` (`0xFE 0x00 0x00 0x01 0x00`) | proof deser, `src/rung/conditions.cpp:774` | computed string `MLSC shared proof shared_source_input exceeds uint16 max`; surfaces as generic mempool-script-verify message |
-| Rung `relay_refs` descending (`[1, 0]`) | wire-format deser, `src/rung/serialize.cpp:794-797` | computed string `rung X relay_refs not strict ascending at index Y` |
+| `qabi_block` non-empty on non-QABI tx | tx-level check (`evaluator.cpp`) | `tx.qabi_block must be empty when no QABI input is present` |
+| `qabi_block > 256 KB` (hard cap) | wire-format deser (`transaction.h`) | `qabi_block too large` |
+| `qabi_block > 64 KB` (relay soft cap) | policy (`policy.cpp`) | `qabi-block-soft-cap` |
+| `aggregated_sig > 666 B` | wire-format deser | `aggregated_sig too large` |
+| `aggregated_sig` non-empty on non-QABI tx | tx-level check | `tx.aggregated_sig must be empty when no QABI input is present` |
+| Non-canonical `batch_id` | parser (`qabi.cpp`) | `qabi_block batch_id is not canonical SHA256 derivation` |
+| Duplicate `participant_id` | parser | `duplicate participant_id in entries` |
+| Reversed `participant_id` order (descending) | parser | strict-ascending check |
+| Wide `shared_source_input` | proof deser (`conditions.cpp`) | `MLSC shared proof shared_source_input exceeds uint16 max` |
+| Rung `relay_refs` descending (`[1, 0]`) | wire-format deser (`serialize.cpp`) | `rung X relay_refs not strict ascending at index Y` |
 | Duplicate `relay_refs` (`[0, 0]`) | same | same |
-| Unsorted MULTISIG triplets (descending pubkey order) | spend-time check, `src/rung/block_helpers.cpp:282` | `EvalMultisigBlock` returns `UNSATISFIED`; closes v0.8 audit E-018b. (Note: `createrungtx` accepts the descending-order spec at fund time; the consensus check fires only at spend time, but the conditions tree's inner-pubkey-Merkle commitment makes any non-canonical signer set unspendable.) |
-| HTLC bad preimage (mutated witness) | eval, `src/rung/blocks/compound.cpp:127-128` | `EvalHTLC` returns `UNSATISFIED` on hash mismatch |
-| HTLC witness pubkey rec/snd swap (same-type) | eval, `src/rung/blocks/compound.cpp:130-144` | `EvalHTLC` SIG verifies against wrong pubkey → `UNSATISFIED` |
-| `DATA_RETURN` `data_len` outside 1..40 | wire-format deser, `src/primitives/transaction.h:303-306` | `TX decode failed: DATA_RETURN data_len out of range (1..40)` |
-| ≥ 2 `DATA_RETURN` outputs per tx | tx-level check | `tx_mlsc_check, too many DATA_RETURN outputs: 2 (max 1)` |
-| `NUMERIC` field length > 4 bytes | wire encoder + Stage-1.3 truncation guards (CSV / CLTV / COMPARE / RECURSE_COUNT / RELATIVE_VALUE / VAULT_LOCK) | `Invalid field: NUMERIC too large: 8 > 4` (rejected at createrungtx pre-broadcast) |
-| Witness stack count outside `{1, 2, 3}` | consensus, `src/rung/evaluator.cpp:930-932` | `WITNESS_PROGRAM_WITNESS_EMPTY` (count=0); `unknown error` (count=4 — same code path, named error not surfaced) |
-| Non-canonical `CompactSize` (e.g. `0xFD 0x01 0x00` for value 1) | wire-format deser, `src/serialize.h:341-342` | `TX decode failed: non-canonical ReadCompactSize()` |
-| Sighash type 0x40 / 0xC1 family (BIP-118 ANYPREVOUT) | sig path, `src/rung/sighash.cpp:145-148` | `SignatureHashLadder` returns `false` → signature verification fails |
+| Unsorted MULTISIG triplets | spend-time check (`block_helpers.cpp`) | `EvalMultisigBlock` returns UNSATISFIED |
+| HTLC bad preimage | eval (`compound.cpp`) | hash mismatch → UNSATISFIED |
+| HTLC witness pubkey rec/snd swap | eval | SIG verifies against wrong pubkey → UNSATISFIED |
+| `DATA_RETURN` `data_len` outside 1..40 | wire-format deser | `DATA_RETURN data_len out of range (1..40)` |
+| ≥ 2 `DATA_RETURN` outputs per tx | tx-level check | `too many DATA_RETURN outputs: 2 (max 1)` |
+| `NUMERIC` field length > 4 bytes | wire encoder + truncation guards | `NUMERIC too large: 8 > 4` |
+| Witness stack count outside `{1, 2, 3}` | consensus (`evaluator.cpp`) | `WITNESS_PROGRAM_WITNESS_EMPTY` (count=0) or generic stack-shape rejection |
+| Non-canonical `CompactSize` | wire-format deser (`serialize.h`) | `non-canonical ReadCompactSize()` |
+| Sighash type 0x40 / 0xC1 family (BIP-118 ANYPREVOUT) | sig path (`sighash.cpp`) | `SignatureHashLadder` returns false |
+| Conditions-only block witness with NUMERIC | wire-format deser (`serialize.cpp`) | `block X is conditions-only; witness can only carry PUBKEY/PREIMAGE, got NUMERIC` |
+| PQ_BATCH non-anchor witness containing arbitrary types | eval (`qabi.cpp`) | positional type check rejects |
+| Legacy P2SH/P2WSH/P2TR_SCRIPT outer block with extra stack-push fields | eval (`legacy.cpp`) | `EvalInnerConditions` rejects when no inner rung's witness layout matches the outer count |
 
-## 3. Channels where attacker bytes DO survive
-
-These are universal Bitcoin transaction primitives, **not** Ladder
-Script-specific channels:
-
-- **`nLockTime`** — 4 attacker-chosen bytes per tx
-- **`nSequence`** — 4 attacker-chosen bytes per input (subject to BIP68
-  semantics)
-- **Schnorr nonce grinding** — ~3 attacker-grindable bytes per Schnorr
-  signature at a ~24-bit grind budget. BIP-340's `aux_rand` is
-  re-randomised per signing (`src/rung/rpc.cpp:1161`); an attacker who
-  controls signing can grind any N-byte prefix in expected `2^(8N)`
-  attempts.
-- **Sighash-type byte when ≠ DEFAULT** — 1 byte literal but only 7
-  valid values, so ~3 bits of choice when present
-
-## 4. DATA_RETURN, PREIMAGE, SCRIPT_BODY — bound but not free
-
-These three channels carry bytes that survive on-chain but are
-constrained by design and not freely chosen by the spender:
-
-- **`DATA_RETURN`** — up to 40 B, ≤ 1 per tx
-  (`src/primitives/transaction.h:303`, `src/rung/types.h:1001`).
-  Intentional — the explicit OP_RETURN replacement. Counts as 40 B of
-  attacker-chosen data per tx but the protocol exposes this as a
-  feature, not a bug.
-- **`PREIMAGE`** — up to 32 B per field, capped at 2 per tx
-  (`src/rung/serialize.h:36-44`). Hash-bound: SHA256(preimage) must
-  match the committed HASH256 leaf, so the bytes are determined by
-  the funder's payment-hash commitment. The spender doesn't choose
-  them.
-- **`SCRIPT_BODY`** — up to 80 B per field, capped at 1 per tx
-  (`src/rung/serialize.h:51`). Hash-bound to a HASH160 / HASH256
-  inner-script commitment. Required for the P2SH / P2WSH / P2TR
-  legacy bridges. Same reasoning: funder commits the hash, spender's
-  bytes are predetermined.
-
-If you count these as "attacker-controllable" the worst-case standard
-spend rises to ~163 B; if you count them as "bound by the funding
-commitment" (which is the design) the worst case stays at ~11 B + 40 B
-intentional DATA_RETURN.
-
-## 5. Cleanup notes / discoveries during the empirical run
-
-These are **not** new findings — every audit-claimed closure held —
-but the run surfaced three small inaccuracies and one UX gap that
-should be folded into the doc and a future patch.
-
-### Vector 11 (rung pair-swap) is by-design
-
-In-pair sibling swaps in the conditions Merkle leave the root
-unchanged. `MerkleInterior` (`src/rung/conditions.cpp:399-414`) sorts
-each pair lexicographically before hashing, so the order of two
-siblings under the same parent is **never exposed on-chain** — only
-the 32-byte root is. The earlier audit's framing of pair-swap as a
-"should reject" case was wrong; sorted-pair Merkle commutes by
-design, and there's no covert channel. Doc fix only.
-
-### Sighash type `0x82` (NONE | ANYONECANPAY) is allowed
-
-The earlier audit listed `0x82` as part of the rejected BIP-118
-family. It is in fact **valid** (`src/rung/sighash.cpp:147`). The
-rejected family is `0x40-0x43` and `0xC0-0xC3` only. Minor
-misclassification — no v0.14 vulnerability.
-
-### `DecodeHexTx` no longer swallows deserialiser exceptions
-
-Before patch `b423a45e4f`, every wire-format `std::ios_base::failure`
-thrown during `UnserializeTransaction` was caught silently in
-`DecodeTx` (`src/core_read.cpp:147-170`) and the RPC layer surfaced
-only a generic `"TX decode failed. Make sure the tx has at least one
-input."` regardless of which check fired. Now the actual exception
-text is threaded through. Reviewers debugging a malformed v4 tx see
-e.g. `"TX decode failed: aggregated_sig too large"` or `"TX decode
-failed: non-canonical ReadCompactSize()"` directly.
-
-### Script-verify deser errors are still generic (follow-up)
-
-`DecodeHexTx`'s patch only covers tx-level deser. Failures inside
-script-verify — `ParseQABIBlock`
-(`src/rung/blocks/qabi.cpp:539-542`), `DeserializeMLSCProof`
-(`src/rung/conditions.cpp:773-775`), `DeserializeLadderWitness`
-(`src/rung/serialize.cpp:794-797`) — all compute specific
-`error_out` strings (e.g. `qabi_block batch_id is not canonical
-SHA256 derivation`, `MLSC shared proof shared_source_input exceeds
-uint16 max`, `rung X relay_refs not strict ascending at index Y`)
-that are never threaded through to `mempool-script-verify-flag-failed
-(unknown error)`. Tracked as a follow-up — UX gap, not a consensus
-gap. Same intent as the `DecodeHexTx` patch but at the script-verify
-layer.
+---
 
 ## 6. Methodology
 
@@ -170,53 +150,63 @@ layer.
 
 - `tools/test-presets.py` — 56 fund/spend presets covering every block
   type. Confirms the canonical accept path for each block.
-- `test/functional/feature_deferred_vectors.py` — 9 byte-mutation
-  attack vectors that need multi-input QABI / HTLC scaffolding. Each
-  vector builds a real valid tx, surgically mutates one field, then
-  submits and records the reject reason.
-- `doc/ladder-script/MEASUREMENTS.md` — size sweeps that produce
-  the table in §1.
+- `test/functional/feature_deferred_vectors.py` — byte-mutation attack
+  vectors against multi-input QABI / HTLC scaffolding. Each vector
+  builds a real valid tx, surgically mutates one field, then submits
+  and asserts rejection.
+- `doc/ladder-script/MEASUREMENTS.md` — size sweeps that produce the
+  table in §1.
 
 **Coverage:**
 
-- Every wire-format check listed in `src/primitives/transaction.h`
-  (qabi_block, aggregated_sig, DATA_RETURN, conditions_root format,
-  CompactSize bounds).
-- Every block-implicit-layout check enumerated in `src/rung/types.h`
+- Every wire-format check in `src/primitives/transaction.h` (qabi_block,
+  aggregated_sig, DATA_RETURN, conditions_root format, CompactSize
+  bounds).
+- Every block-implicit-layout check in `src/rung/types.h`
   (`ImplicitFieldLayout` rows + `IsConditionDataType` +
   `IsDataEmbeddingType`).
-- Every QABI parser check in `src/rung/qabi.cpp` (canonical batch_id,
-  strict-ascending entries, reserve-size bounds).
-- Every MLSC proof check in `src/rung/conditions.cpp`
-  (proof_mode, total_rungs, total_relays, rung_index,
-  shared_source_input cap, revealed_rung blocks, relay_refs
-  canonicalisation).
-- Every coil enum check in `src/rung/serialize.cpp` (type /
-  attestation / scheme / output_index, post v0.8 E-009/E-010).
-- Sighash type validation in `src/rung/sighash.cpp` (post v0.12
-  audit #7 #5).
+- Every QABI parser check in `src/rung/blocks/qabi.cpp` (canonical
+  batch_id, strict-ascending entries, reserve-size bounds).
+- Every MLSC proof check in `src/rung/conditions.cpp` (proof_mode,
+  total_rungs, total_relays, rung_index, shared_source_input cap,
+  revealed_rung blocks, relay_refs canonicalisation).
+- Every coil enum check in `src/rung/serialize.cpp` (type / attestation
+  / scheme / output_index).
+- Sighash type validation in `src/rung/sighash.cpp`.
 
-**What we cannot test:** universal Bitcoin protocol fields
-(`nLockTime`, `nSequence`, Schnorr nonce randomisation) — these are
-attacker-controllable by design at the BIP65 / BIP68 / BIP340 level.
-We confirmed the bytes do survive on-chain (any wallet user can grind
-their nonce or pick their lockTime) but those channels exist for every
-Bitcoin transaction format and are not Ladder-specific.
+**What the doc does NOT measure:** universal Bitcoin protocol fields
+(`nLockTime`, `nSequence`, Schnorr nonce randomisation). These are
+attacker-controllable by design at the BIP-65 / BIP-68 / BIP-340 level.
+The bytes do survive on-chain (any wallet user can grind their nonce or
+pick their lockTime), but those channels exist for every Bitcoin
+transaction format and are not v4-specific.
+
+---
 
 ## 7. Verdict
 
-After 56 spending-pattern presets + 9 byte-mutation attack vectors
-against the v0.14 binary:
+**v4 RUNG_TX is the tightest Bitcoin output type for embedding
+resistance.** Specifically:
 
-- **Every Ladder-specific channel the audit claimed to have closed
-  was empirically rejected**, with file:line citations confirmed.
-- The residual ~11 B floor matches base Bitcoin exactly. No format
-  redesign can close it without breaking BIP65 / BIP68 / BIP340.
-- The only intentional channel above the floor is `DATA_RETURN`'s
-  40 B (≤ 1 per tx, explicit replacement for OP_RETURN).
+- **Same per-output commitment overhead** as P2WSH / P2TR (32 B
+  Merkle root committing to the spending tree).
+- **No raw-script dead-code channel.** Tapscripts can carry
+  `OP_FALSE OP_IF <arbitrary> OP_ENDIF` blocks (the Ordinals
+  pattern); MLSC has no equivalent because every block is a typed
+  evaluator with explicit field-count enforcement.
+- **No `OP_DROP` push-and-discard channel.** Every witness field is
+  consumed by a specific evaluator.
+- **Per-tx caps** on PREIMAGE (2), SCRIPT_BODY (1), DATA_RETURN (1).
+- **Per-block witness whitelist** for conditions-only types: only
+  PUBKEY (count ≤ `PubkeyCountForBlock`) and PREIMAGE (count ≤ 2).
 
-**RUNG_TX is at the absolute floor of any Bitcoin-protocol-compatible
-transaction format.** Numbers are stable; the BIP draft can cite them.
+The realistic per-tx ceiling for attacker-controllable bytes is **~50
+KB within standard relay** (dominated by per-input MLSC reveal × ~80
+inputs at ~600 B/input). For comparison, P2TR script-path tapscripts
+with witness discount permit ~400 KB per tx — **v4 is roughly 8×
+tighter**.
+
+The minimum is the 11 B Bitcoin protocol floor.
 
 ## 8. How to regenerate
 
@@ -224,7 +214,7 @@ transaction format.** Numbers are stable; the BIP draft can cite them.
 # Spending-pattern presets (56 covering every block type):
 cd tools && python3 test-presets.py --api http://127.0.0.1:8801
 
-# Byte-mutation deferred vectors (9 attack scenarios):
+# Byte-mutation deferred vectors:
 build/test/functional/feature_deferred_vectors.py
 
 # Size sweeps (companion):

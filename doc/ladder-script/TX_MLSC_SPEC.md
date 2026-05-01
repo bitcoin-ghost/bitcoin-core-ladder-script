@@ -105,10 +105,12 @@ Where:
 - relay_template:      block types, inverted flags, relay_refs
 - value_commitment:    SHA256(field_values || pubkeys) — 32 bytes, opaque
 
-v0.7 introduced the distinct `LadderRelayLeaf/v1` domain so relay leaves
-fold into the conditions_root tree (E-008).
-v0.8 dropped the trailing `has_address` byte from the coil section of the
-structural_template (E-009 — `coil.address_hash` was an unbound channel).
+Relay leaves use a distinct tagged-hash domain (`LadderRelayLeaf/v1`)
+from rung leaves (`LadderLeaf/v1`) so a relay leaf can never alias a
+rung leaf at the same block layout, while folding into the same
+`conditions_root` tree. The coil section of the structural_template is
+exactly 4 bytes (`type / attestation / scheme / output_index`) — there
+is no trailing `has_address` byte.
 
 ### Tree construction
 
@@ -152,10 +154,10 @@ per rung:
     per block:
       block_type:  uint16  (must be known — one of 65 types)
       inverted:    uint8   (0x00 or 0x01, validated per block type)
-    n_relay_refs:  uint8   (v0.9 — was missing pre-v0.9, see audit #5 R-1)
+    n_relay_refs:  uint8
     per ref:
       relay_index: uint16  (LE; must be < n_relays)
-    coil (v0.8 — 4 bytes total, no trailing has_address byte):
+    coil (4 bytes total):
       coil_type:     uint8 (UNLOCK=0x01, UNLOCK_TO=0x02)
       attestation:   uint8 (INLINE=0x01; AGGREGATE/DEFERRED reserved)
       scheme:        uint8
@@ -163,10 +165,11 @@ per rung:
   value_commitment:  32 bytes (SHA256 of field values + pubkeys for this rung)
 ```
 
-Typical size per rung: ~42 bytes (10 template + 32 commitment) for a single-block,
-no-relay rung. v0.9 added 1 byte (`n_relay_refs`) to bind the rung's relay
-dependencies into the leaf — without this, a spender could drop `relay_refs` at
-spend time and skip relay enforcement entirely (audit #5 R-1).
+Typical size per rung: ~42 bytes (10 template + 32 commitment) for a
+single-block, no-relay rung. The `n_relay_refs` byte and any relay
+indices are part of the structural template — the spender cannot drop
+relay dependencies at spend time and skip relay enforcement; the leaf
+hash binds them.
 Witness weight: 1 WU per byte.
 
 ### Validation (block acceptance)

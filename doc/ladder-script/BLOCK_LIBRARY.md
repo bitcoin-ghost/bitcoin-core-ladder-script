@@ -5,109 +5,17 @@ The QABI / PQ family ([`QABIO.md`](QABIO.md), [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC
 sits at `0x0A00`-`0x0AFF`. Each block type has a `uint16_t` type code encoded
 little-endian on the wire.
 
-> **v0.12 (2026-04-29)** — audit 8a/8b follow-up:
-> - **F1 (HIGH)**: `VerifyMutatedLeaves` cross-rung path and `EvalQABIPrimeBlock`
->   full-tree reconstruction now verify `ComputeTxMLSCLeaf(BuildCPRung(target.rung))`
->   matches the leaf the conditions_root committed to before applying any
->   mutation. Closes a covenant-escape vector where a spender substituted a
->   fake rung at non-revealed indices.
-> - **F2 (HIGH)**: PQ_BATCH cross-input cache is now populated by a
->   sequential anchor pre-pass (`PreparePQBatchAnchorCache` in
->   `validation.cpp:2417`) before the parallel script-check loop dispatches.
->   Closes a consensus split between nodes with different `-par` settings.
-> - **F3 (HIGH)**: `RELATIVE_VALUE` cross-multiply now uses `__int128`.
->   Closes signed-overflow UB at `(numerator-1) * denominator` near the
->   deserialiser cap (consensus split risk).
-> - **#5 (MED)**: `LADDER_SIGHASH_ANYPREVOUTANYSCRIPT` (`0xC0..0xC3`) and
->   `LADDER_SIGHASH_ANYPREVOUT` (`0x40..0x43`) are unconditionally rejected
->   by `SignatureHashLadder`. Until a future release introduces opt-in via
->   a dedicated block type (BIP-118 style), eltoo workflows are gated.
-> - **F4 (MED)**: extended regression coverage for v0.11 #1 — added
->   `mlsc_proof_rejects_unsorted_revealed_relay_refs` to cover the
->   revealed_relays site.
-> - **F6 / F7 (LOW)**: QABI parser enforces strict-ascending unique order
->   on `entries[*].participant_id`. Closes coordinator-side duplicate +
->   permutation channels.
-> - **F8 (LOW, helper-only)**: `ComputeCanonicalBatchId` /
->   `ApplyCanonicalBatchId` helpers exposed; deserialiser enforcement
->   queued for QABIO v2.
-> - **F9 (LOW)**: `MUSIG_THRESHOLD` evaluator now requires M and N
->   NUMERIC fields (was conditional). Defence-in-depth — implicit layout
->   already enforces 2 NUMERICs at deserialise.
->
-> **v0.11 (2026-04-29)** — audit #7 follow-up:
-> - **#1**: `MLSCProof` deserialise now enforces strict ascending unique
->   on the proof-side `relay_refs` (revealed_rung, revealed_relays,
->   mutation_target). v0.10's F-4 fix landed only on the wire-format
->   witness; the proof side bypassed canonical encoding because
->   `MergeConditionsAndWitness` takes `relay_refs` from the proof.
-> - **#2**: `HashQABISection` length-prefixes both `qabi_block` and
->   `aggregated_sig` (CompactSize each). Defence-in-depth: makes the
->   binding structurally collision-resistant regardless of any future
->   change to the F-5 length enumeration.
-> - **#4**: `CheckRungTxLevel` now rejects when `spent_outputs` is
->   missing or doesn't match input count. Prior nullptr branch was
->   silent fail-OPEN for preimage / script_body / accumulator caps;
->   production callers always populate, but the assumption is now
->   load-bearing.
-> - **#14**: doc sweep — `MAX_PREIMAGE_FIELDS_PER_TX` etc. rewritten as
->   "across all MLSC-spending inputs" since v0.10 F-2 excluded bootstrap
->   inputs.
->
-> **v0.10 (2026-04-29)** — audit #6 follow-up:
-> - **F-1**: `BuildCPRung` (used by every recursive-covenant transition —
->   `RECURSE_DECAY` / `RECURSE_SPLIT` / `RECURSE_MODIFIED`) now propagates
->   `rung.relay_refs` into the leaf. v0.9 R-1 closed the spend-input bypass
->   but missed this output-side build site, re-opening relay enforcement
->   skip across covenant transitions.
-> - **F-2**: `HasTxQABIInputs` / `CountTxPreimageFields` /
->   `CountTxScriptBodyFields` / `CountTxAccumulatorBlocks` now filter to
->   MLSC-spending inputs by checking each spent output against
->   `IsMLSCScript`. Without the filter, a crafted bootstrap input
->   (e.g. P2WSH `OP_DROP OP_TRUE`) with a fake QABI ladder in element[0]
->   bypassed every per-tx cap.
-> - **F-3**: per-tx PREIMAGE / SCRIPT_BODY counters now also walk diff
->   witness entries (`witness_ref->diffs`). Pre-v0.10 a diff witness's
->   PREIMAGE/SCRIPT_BODY overlays contributed 0 to the count, allowing N
->   diff inputs to overlay 2 source positions with fresh attacker bytes
->   while passing the cap.
-> - **F-4**: `relay_refs` must now be in strict ascending unique order at
->   deserialise. Closes the canonicalisation channel where `[0]`, `[0,0]`,
->   `[0,1,0]`, `[1,0]` were eval-equivalent (set semantics) but produced
->   different leaf hashes — funder-side embedding via the chosen encoding.
-> - **F-5**: `tx.aggregated_sig` must be exactly 0 (no `QABI_SPEND`) or
->   666 bytes (when `QABI_SPEND` is present). Pre-v0.10 the deserialiser
->   accepted any 1..665 bytes for QABI_PRIME / PQ_BATCH-only txs.
-> - **F-6** (defence-in-depth): `tx.qabi_block` and `tx.aggregated_sig`
->   are now folded into the sighash via a 32-byte SHA256 commitment.
-> - **F-7**: `coil.output_index >= tx.output_count` now rejects at the
->   evaluator. Pre-v0.10 it silently fell back to `outputs[0]`.
-> - **F-8**: `MergeConditionsAndWitness` now caps the post-merge field
->   count per block (`2 × MAX_FIELDS_PER_BLOCK`, with the wider
->   `MAX_FIELDS_PER_BLOCK + MAX_MULTISIG_WITNESS_FIELDS` cap for
->   `MULTISIG` / `TIMELOCKED_MULTISIG`).
->
-> **v0.9 (2026-04-29)** — audit #5 follow-up:
-> - **R-1**: `rung.relay_refs` is now folded into the rung's structural
->   template (the leaf hash). Before v0.9 this field was unbound, so a
->   spender could drop relay dependencies at spend time and skip relay
->   enforcement. Affects every rung that uses a relay — the funder must
->   declare `relay_refs` at fund time, and the spender cannot mutate them.
-> - **T-1 / T-2**: `tx.qabi_block` and `tx.aggregated_sig` are now rejected
->   when no input carries a QABI block type (`QABI_SPEND` / `QABI_PRIME` /
->   `PQ_BATCH`). Closes a 64 KB / 666 B per-tx embedding channel for
->   non-QABIO transactions.
-> - **D-1**: diff-witness deserialise now rejects duplicate
->   `(rung_index, block_index, field_index)` targets. Closes ~12 KB of
->   per-input witness inflation via no-op repeat diffs.
->
-> **v0.8 (2026-04-29)** — six blocks gained strict implicit witness layouts
-> (E-018a): `ADAPTOR_SIG`, `PTLC`, `KEY_REF_SIG`, `VAULT_LOCK`, `ANCHOR_FEE`,
-> `ANCHOR_ORACLE`. `MULTISIG` / `TIMELOCKED_MULTISIG` triplets must now be in
-> strict ascending pubkey-lex order (E-018b). The witness side of
-> `KEY_REF_SIG` reduced to `[SIGNATURE]` only — the prior `PUBKEY` was unbound
-> spender bytes since the evaluator pulls the key out of the referenced
-> relay block.
+
+> Each block has one of two on-wire encodings — **implicit** (single
+> micro-header byte, fields packed in a fixed positional layout from
+> the type's implicit-layout table) or **explicit** (escape header byte
+> + CompactSize field count + per-field type byte + per-field data).
+> Block types with an implicit layout serialise implicitly by default;
+> the explicit form is reserved for layout-less types (`RECURSE_MODIFIED`,
+> `RECURSE_DECAY`) and the inverted form. When an explicitly-encoded
+> block uses a type that also has an implicit layout, the deserialiser
+> requires the explicit field count and types to exactly match the
+> implicit layout — alternate orderings or counts reject.
 
 ## Legend
 
@@ -124,10 +32,10 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0001 | SIG | no | yes | 1 | SCHEME(1) | Single Schnorr/ECDSA/PQ signature |
-| 0x0002 | MULTISIG | no | yes | 0 | NUMERIC(K), SCHEME(1), HASH256(pubkey_root) | K-of-N threshold; N pubkeys committed via inner Merkle root, K revealed at spend with MERKLE_PROOFs. v0.8: K triplets must be in strict ascending pubkey-lex order (E-018b). |
-| 0x0003 | ADAPTOR_SIG | no | yes | 1 | (none) | Adaptor signature verification (v0.7: dropped dead second pubkey slot; v0.8: strict implicit witness `[PUBKEY, SIGNATURE]`). |
+| 0x0002 | MULTISIG | no | yes | 0 | NUMERIC(K), SCHEME(1), HASH256(pubkey_root) | K-of-N threshold; N pubkeys committed via inner Merkle root, K revealed at spend as `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets in strict ascending pubkey-lex order. |
+| 0x0003 | ADAPTOR_SIG | no | yes | 1 | (none) | Adaptor signature verification. Witness: implicit `[PUBKEY, SIGNATURE]`. |
 | 0x0004 | MUSIG_THRESHOLD | no | yes | 1 | NUMERIC(M), NUMERIC(N) | MuSig2/FROST aggregate threshold |
-| 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using key from a relay block. v0.7 folds relay leaves into conditions_root so a spender cannot swap in a different relay pubkey at spend time (closes E-008). v0.8 witness reduces to `[SIGNATURE]` only — pubkey is resolved from the referenced relay block, never on the witness wire (E-018a). |
+| 0x0005 | KEY_REF_SIG | no | yes | 0 | NUMERIC(relay_idx), NUMERIC(block_idx) | Signature using a key from a relay block. The relay leaf is folded into `conditions_root` so the referenced pubkey cannot be swapped at spend time. Witness: implicit `[SIGNATURE]` only — pubkey is resolved from the referenced relay block, never on the witness wire. |
 
 ## Timelock Family (0x0100 - 0x01FF)
 
@@ -150,7 +58,7 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0301 | CTV | yes | no | 0 | HASH256(32) | OP_CHECKTEMPLATEVERIFY covenant |
-| 0x0302 | VAULT_LOCK | no | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys. v0.8 witness: implicit `[PUBKEY(recovery), PUBKEY(hot), SIGNATURE]` (E-018a — `NUMERIC(hot_delay)` is conditions-side, arrives via merge). |
+| 0x0302 | VAULT_LOCK | no | yes | 2 | NUMERIC(hot_delay) | Vault timelock with hot/cold keys. Witness: implicit `[PUBKEY(recovery), PUBKEY(hot), SIGNATURE]` — `NUMERIC(hot_delay)` is conditions-side, arrives via merge. |
 | 0x0303 | AMOUNT_LOCK | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Output amount range constraint |
 
 ## Recursion Family (0x0400 - 0x04FF)
@@ -169,11 +77,11 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0501 | ANCHOR | yes | no | 0 | NUMERIC(anchor_id) | Generic anchor marker |
-| 0x0502 | ANCHOR_CHANNEL | yes | no | 0 | NUMERIC(commitment_number) | Lightning channel anchor marker (v0.7: dropped dead local/remote pubkey slots — were a 66 B/spend data channel) |
+| 0x0502 | ANCHOR_CHANNEL | yes | no | 0 | NUMERIC(commitment_number) | Lightning channel anchor marker (pure commitment_number; the channel keys live in a sibling SIG rung). |
 | 0x0503 | ANCHOR_POOL | yes | no | 0 | HASH256(vtxo_root), NUMERIC(count) | Pool anchor |
 | 0x0504 | ANCHOR_RESERVE | yes | no | 0 | NUMERIC(n), NUMERIC(m), HASH256(guardian) | Reserve anchor (guardian set) |
 | 0x0505 | ANCHOR_SEAL | yes | no | 0 | HASH256(32), HASH256(32) | Seal anchor |
-| 0x0506 | ANCHOR_ORACLE | yes | yes | 1 | NUMERIC(outcome_count) | Oracle anchor. v0.8 witness: implicit `[PUBKEY(oracle)]` (E-018a). |
+| 0x0506 | ANCHOR_ORACLE | yes | yes | 1 | NUMERIC(outcome_count) | Oracle anchor. Witness: implicit `[PUBKEY(oracle)]`. |
 | 0x0507 | DATA_RETURN | yes | no | 0 | DATA(var, max 40) | Unspendable data commitment (replaces OP_RETURN) |
 
 ## PLC Family (0x0600 - 0x06FF)
@@ -200,12 +108,12 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0701 | TIMELOCKED_SIG | no | yes | 1 | SCHEME(1), NUMERIC(csv) | SIG + CSV in one block |
-| 0x0702 | HTLC | no | yes | 2 | HASH256(32), NUMERIC(csv), SCHEME(1) | v0.7 true two-path: receiver(pubkeys[0])+preimage spend OR sender(pubkeys[1])+CSV refund. Witness adds NUMERIC(path) discriminator. |
+| 0x0702 | HTLC | no | yes | 2 | HASH256(32), NUMERIC(csv), SCHEME(1) | True two-path HTLC: receiver(pubkeys[0])+preimage spend OR sender(pubkeys[1])+CSV refund. Witness: `[PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]`. |
 | 0x0703 | HASH_SIG | no | yes | 1 | HASH256(32), SCHEME(1) | Hash preimage + signature |
-| 0x0704 | PTLC | no | yes | 1 | NUMERIC(csv) | Adaptor sig + CSV (v0.7: dropped dead adaptor-point pubkey slot; T = t·G is off-chain only). v0.8 witness: implicit `[PUBKEY, SIGNATURE]` — `NUMERIC(csv)` is conditions-side (E-018a). |
+| 0x0704 | PTLC | no | yes | 1 | NUMERIC(csv) | Point timelock contract — adaptor sig + CSV. Adaptor point T = t·G is off-chain only. Witness: implicit `[PUBKEY, SIGNATURE]` — `NUMERIC(csv)` is conditions-side. |
 | 0x0705 | CLTV_SIG | no | yes | 1 | SCHEME(1), NUMERIC(cltv) | SIG + CLTV in one block |
-| 0x0706 | TIMELOCKED_MULTISIG | no | yes | 0 | NUMERIC(K), NUMERIC(csv), SCHEME(1), HASH256(pubkey_root) | MULTISIG v2 + CSV in one block. v0.8: K triplets must be in strict ascending pubkey-lex order (E-018b). |
-| 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning). v0.8 witness: implicit `[PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]` (E-018a). |
+| 0x0706 | TIMELOCKED_MULTISIG | no | yes | 0 | NUMERIC(K), NUMERIC(csv), SCHEME(1), HASH256(pubkey_root) | MULTISIG + CSV in one block. K triplets in strict ascending pubkey-lex order. |
+| 0x0707 | ANCHOR_FEE | no | yes | 2 | SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment) | Fee anchor: 2-of-2 sigs + fee rate band + weight limit (anti-pinning). Witness: implicit `[PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]`. |
 
 ## Governance Family (0x0800 - 0x08FF)
 
@@ -256,4 +164,26 @@ little-endian on the wire.
   in conditions), and the spend witness reveals K pubkeys with `MERKLE_PROOF` inclusion proofs
   — neither the conditions nor the outer leaf carries the raw N-pubkey list.
 - RECURSE_MODIFIED and RECURSE_DECAY have variable-length fields (no implicit layout).
-  Anti-spam protection uses `IsDataEmbeddingType` rejection for layout-less blocks.
+  Layout-less blocks reject any field whose type is in `IsDataEmbeddingType`
+  (`HASH256` / `HASH160` / `PUBKEY_COMMIT` / `DATA`) on the witness side.
+- **Conditions-only block witness:** block types whose evaluator reads
+  only conditions-side fields (`ANCHOR` family, `RECURSE_*`, all PLC,
+  governance, `CTV`, `AMOUNT_LOCK`, `CSV` / `CSV_TIME` / `CLTV` /
+  `CLTV_TIME`, `COSIGN`) accept witnesses containing only `PUBKEY`
+  fields (count ≤ `PubkeyCountForBlock`, used for Merkle-leaf
+  reconstruction) and `PREIMAGE` fields (count ≤ 2 per block, used for
+  hash-binding against a `HASH256` in conditions). Every other field
+  type rejects. Exempt block types — `MULTISIG` /
+  `TIMELOCKED_MULTISIG` (triplet enforcement at the deserialiser),
+  `ACCUMULATOR` (`[NUMERIC, MERKLE_PROOF]` shape pinned), `P2SH_LEGACY`
+  / `P2WSH_LEGACY` / `P2TR_SCRIPT_LEGACY` (the outer witness's stack-
+  push count must match an inner rung's expected witness layout sum),
+  `DATA_RETURN` (eval rejects all spends).
+- **Per-tx field caps**: `MAX_PREIMAGE_FIELDS_PER_TX = 2`,
+  `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1`. These count `PREIMAGE` /
+  `SCRIPT_BODY` across every MLSC-spending input's witness AND every
+  diff-witness overlay. Bootstrap inputs (P2WPKH / P2WSH wallet
+  spends) are excluded from the count.
+- **Per-block / per-rung structural caps**: `MAX_FIELDS_PER_BLOCK = 16`,
+  `MAX_BLOCKS_PER_RUNG = 8`, `MAX_RUNGS = 16`, `MAX_RELAYS = 8`,
+  `MAX_LADDER_WITNESS_SIZE = 100 KB` per input.
