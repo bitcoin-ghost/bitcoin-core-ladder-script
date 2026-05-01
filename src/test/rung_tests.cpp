@@ -575,33 +575,49 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_invalid_header_byte)
 
 BOOST_AUTO_TEST_CASE(deserialize_rejects_unknown_data_type)
 {
-    // v3 wire: escape byte + ANCHOR block type (no implicit layout) + unknown data type
+    // SIG witness explicit-encoded (escape byte forces fallback) with two
+    // fields: PUBKEY (matches expected layout slot 0) + a second field whose
+    // type byte is 0xFF (unknown). The strict field-count check (expected=2,
+    // got=2) passes; the per-field IsKnownDataType check then rejects 0xFF.
+    // Pre-E-019 this used ANCHOR with a single 0xFF field — the conditions-
+    // only gate now rejects ANCHOR witnesses before the per-field loop runs.
     std::vector<uint8_t> data{
-        0x01,             // 1 rung
-        0x01,             // 1 block
-        0x80,             // escape (not inverted)
-        0x01, 0x05,       // ANCHOR block type (0x0501, no implicit layout)
-        0x01,             // 1 field
-        0xFF,             // unknown data type
-        0x01,             // 1 byte data (CompactSize)
-        0xAA,             // data
-        0x01, 0x01, 0x01, // coil bytes
+        0x01,           // 1 rung
+        0x01,           // 1 block
+        0x80,           // escape (not inverted) — forces explicit fields
+        0x01, 0x00,     // SIG block type (0x0001 LE)
+        0x02,           // n_fields = 2 (matches SIG_WITNESS expected count)
+        0x01,           // PUBKEY type byte (slot 0 — matches expected layout)
+        0x21,           // 33 bytes pubkey (CompactSize)
     };
+    // 33 bytes for the pubkey blob — prefix 0x02 satisfies the per-field
+    // PUBKEY shape check (compressed-pubkey first byte).
+    data.push_back(0x02);
+    data.insert(data.end(), 32, 0x00);
+    data.insert(data.end(), {
+        0xFF,           // unknown data type for second field
+        0x01,           // 1 byte data (CompactSize)
+        0xAA,           // data
+        0x01, 0x01, 0x01, // coil bytes (UNLOCK / INLINE / SCHNORR)
+    });
     LadderWitness decoded;
     std::string error;
     BOOST_CHECK(!DeserializeLadderWitness(data, decoded, error));
-    BOOST_CHECK(error.find("unknown data type") != std::string::npos);
+    BOOST_CHECK_MESSAGE(error.find("unknown data type") != std::string::npos,
+                        "expected 'unknown data type' in error, got: " + error);
 }
 
 BOOST_AUTO_TEST_CASE(deserialize_rejects_oversized_pubkey)
 {
-    // Use ANCHOR block (no implicit layout) to test oversized PUBKEY rejection
-    // without triggering strict field enforcement
+    // SIG witness has implicit [PUBKEY, SIGNATURE] layout. Build with an
+    // oversized PUBKEY (2049 B vs the 2048 B FieldMaxSize cap) and check
+    // the per-field size check fires. ANCHOR was used here pre-E-019.
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
-    block.type = RungBlockType::ANCHOR;
+    block.type = RungBlockType::SIG;
     block.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(2049, 0x02)}); // max is 2048
+    block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
@@ -1954,43 +1970,47 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
 
         // === Covenant family ===
         // CTV witness: [HASH256]
+        // CTV witness: [HASH256] (CTV_WITNESS implicit layout)
         {RungBlockType::CTV, {{RungDataType::HASH256, h256}}},
         // VAULT_LOCK v0.8 witness: implicit — PUBKEY(recovery), PUBKEY(hot), SIGNATURE
         {RungBlockType::VAULT_LOCK, {{RungDataType::PUBKEY, pk}, {RungDataType::PUBKEY, pk}, {RungDataType::SIGNATURE, sig}}},
-        // AMOUNT_LOCK witness: explicit — NUMERIC, NUMERIC
-        {RungBlockType::AMOUNT_LOCK, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
+        // AMOUNT_LOCK conditions-only — witness must be empty after E-019
+        {RungBlockType::AMOUNT_LOCK, {}},
 
-        // === Recursion family ===
-        {RungBlockType::RECURSE_SAME, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::RECURSE_MODIFIED, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num2}, {RungDataType::NUMERIC, num3}}},
-        {RungBlockType::RECURSE_UNTIL, {{RungDataType::NUMERIC, num100}}},
-        {RungBlockType::RECURSE_COUNT, {{RungDataType::NUMERIC, num10}}},
-        {RungBlockType::RECURSE_SPLIT, {{RungDataType::NUMERIC, num100}}},
-        {RungBlockType::RECURSE_DECAY, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num2}}},
+        // === Recursion family (all 6 must have empty witness after E-019:
+        // SAME/UNTIL/COUNT/SPLIT via conditions_only flag; MODIFIED/DECAY via
+        // recurse_explicit_must_be_empty since their evaluators read NUMERIC
+        // from the merged block and conditions already carry every NUMERIC.) ===
+        {RungBlockType::RECURSE_SAME, {}},
+        {RungBlockType::RECURSE_MODIFIED, {}},
+        {RungBlockType::RECURSE_UNTIL, {}},
+        {RungBlockType::RECURSE_COUNT, {}},
+        {RungBlockType::RECURSE_SPLIT, {}},
+        {RungBlockType::RECURSE_DECAY, {}},
 
-        // === Anchor family (conditions-only — no witness fields needed) ===
-        {RungBlockType::ANCHOR, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::ANCHOR_CHANNEL, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::ANCHOR_POOL, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::ANCHOR_RESERVE, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::ANCHOR_SEAL, {{RungDataType::NUMERIC, num1}}},
+        // === Anchor family (conditions-only — witness must be empty after E-019) ===
+        {RungBlockType::ANCHOR, {}},
+        {RungBlockType::ANCHOR_CHANNEL, {}},
+        {RungBlockType::ANCHOR_POOL, {}},
+        {RungBlockType::ANCHOR_RESERVE, {}},
+        {RungBlockType::ANCHOR_SEAL, {}},
         // ANCHOR_ORACLE v0.8 witness: implicit — PUBKEY(oracle)
         {RungBlockType::ANCHOR_ORACLE, {{RungDataType::PUBKEY, pk}}},
 
-        // === Automation family (no witness fields use HASH256/PUBKEY_COMMIT) ===
-        {RungBlockType::HYSTERESIS_FEE, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        {RungBlockType::HYSTERESIS_VALUE, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        {RungBlockType::TIMER_CONTINUOUS, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        {RungBlockType::TIMER_OFF_DELAY, {{RungDataType::NUMERIC, num10}}},
-        {RungBlockType::LATCH_SET, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::LATCH_RESET, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
-        {RungBlockType::COUNTER_DOWN, {{RungDataType::NUMERIC, num10}}},
-        {RungBlockType::COUNTER_PRESET, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        {RungBlockType::COUNTER_UP, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
-        {RungBlockType::COMPARE, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        {RungBlockType::SEQUENCER, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num3}}},
-        {RungBlockType::ONE_SHOT, {{RungDataType::NUMERIC, num1}}},
-        {RungBlockType::RATE_LIMIT, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
+        // === Automation family (conditions-only — witness must be empty after E-019) ===
+        {RungBlockType::HYSTERESIS_FEE, {}},
+        {RungBlockType::HYSTERESIS_VALUE, {}},
+        {RungBlockType::TIMER_CONTINUOUS, {}},
+        {RungBlockType::TIMER_OFF_DELAY, {}},
+        {RungBlockType::LATCH_SET, {}},
+        {RungBlockType::LATCH_RESET, {}},
+        {RungBlockType::COUNTER_DOWN, {}},
+        {RungBlockType::COUNTER_PRESET, {}},
+        {RungBlockType::COUNTER_UP, {}},
+        {RungBlockType::COMPARE, {}},
+        {RungBlockType::SEQUENCER, {}},
+        {RungBlockType::ONE_SHOT, {}},
+        {RungBlockType::RATE_LIMIT, {}},
         // COSIGN witness: [HASH256] (implicit layout)
         {RungBlockType::COSIGN, {{RungDataType::HASH256, h256}}},
 
@@ -2008,17 +2028,12 @@ BOOST_AUTO_TEST_CASE(serialize_roundtrip_all_59_types_witness)
         // TIMELOCKED_MULTISIG v2 witness: 1 × (PUBKEY, MERKLE_PROOF, SIGNATURE)
         {RungBlockType::TIMELOCKED_MULTISIG, {{RungDataType::PUBKEY, pk}, {RungDataType::MERKLE_PROOF, empty_proof}, {RungDataType::SIGNATURE, sig}}},
 
-        // === Governance family ===
-        // EPOCH_GATE: explicit — NUMERIC, NUMERIC
-        {RungBlockType::EPOCH_GATE, {{RungDataType::NUMERIC, num10}, {RungDataType::NUMERIC, num100}}},
-        // WEIGHT_LIMIT: explicit — NUMERIC
-        {RungBlockType::WEIGHT_LIMIT, {{RungDataType::NUMERIC, num100}}},
-        // INPUT_COUNT: explicit — NUMERIC, NUMERIC
-        {RungBlockType::INPUT_COUNT, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
-        // OUTPUT_COUNT: explicit — NUMERIC, NUMERIC
-        {RungBlockType::OUTPUT_COUNT, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num10}}},
-        // RELATIVE_VALUE: explicit — NUMERIC, NUMERIC
-        {RungBlockType::RELATIVE_VALUE, {{RungDataType::NUMERIC, num1}, {RungDataType::NUMERIC, num2}}},
+        // === Governance family (conditions-only — witness must be empty after E-019) ===
+        {RungBlockType::EPOCH_GATE, {}},
+        {RungBlockType::WEIGHT_LIMIT, {}},
+        {RungBlockType::INPUT_COUNT, {}},
+        {RungBlockType::OUTPUT_COUNT, {}},
+        {RungBlockType::RELATIVE_VALUE, {}},
         // ACCUMULATOR v2 witness: NUMERIC(element_id) + MERKLE_PROOF(siblings)
         {RungBlockType::ACCUMULATOR, {{RungDataType::NUMERIC, num1}, {RungDataType::MERKLE_PROOF, std::vector<uint8_t>{}}}},
 
@@ -3928,7 +3943,12 @@ BOOST_AUTO_TEST_CASE(boundary_max_fields_at_limit)
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
-    block.type = RungBlockType::ANCHOR; // ANCHOR has no implicit layout — any field count OK
+    // RECURSE_MODIFIED has no implicit layout and uses explicit encoding for
+    // its conditions side (variable mutation-spec count — max_depth + N pairs).
+    // Test the protocol-level MAX_FIELDS_PER_BLOCK = 16 cap on the conditions
+    // side, which still permits up to 16 NUMERICs. The witness side is now
+    // empty for this type per E-019.
+    block.type = RungBlockType::RECURSE_MODIFIED;
     for (size_t i = 0; i < MAX_FIELDS_PER_BLOCK; ++i) {
         block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(static_cast<uint32_t>(i))});
     }
@@ -3936,12 +3956,13 @@ BOOST_AUTO_TEST_CASE(boundary_max_fields_at_limit)
     ladder.rungs.push_back(rung);
     BOOST_CHECK_EQUAL(block.fields.size(), 16u);
 
-    auto bytes = SerializeLadderWitness(ladder);
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
     BOOST_CHECK(!bytes.empty());
 
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK_MESSAGE(DeserializeLadderWitness(bytes, decoded, error),
+    BOOST_CHECK_MESSAGE(DeserializeLadderWitness(bytes, decoded, error,
+                                                  SerializationContext::CONDITIONS),
         "At-limit MAX_FIELDS_PER_BLOCK failed: " + error);
     BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), MAX_FIELDS_PER_BLOCK);
 }
@@ -7453,23 +7474,52 @@ BOOST_AUTO_TEST_CASE(micro_header_escape_inverted)
 
 BOOST_AUTO_TEST_CASE(micro_header_explicit_fallback_extra_fields)
 {
-    // Block type without implicit layout uses explicit encoding with arbitrary fields
+    // Block type without implicit layout uses explicit encoding via the
+    // escape byte. Tests the explicit-encoding round-trip for a variable
+    // field count, on the CONDITIONS side where RECURSE_MODIFIED legitimately
+    // carries a variable NUMERIC count for its mutation specs. Pre-E-019
+    // this used ANCHOR with PUBKEY/SIGNATURE on the witness side — both
+    // paths are now closed by the conditions-only / RECURSE-must-be-empty
+    // gates.
     LadderWitness ladder;
     Rung rung;
     RungBlock block;
-    block.type = RungBlockType::ANCHOR; // No implicit witness layout — explicit encoding used
+    block.type = RungBlockType::RECURSE_MODIFIED;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2)});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(3)});
+    rung.blocks.push_back(block);
+    ladder.rungs.push_back(rung);
+
+    auto bytes = SerializeLadderWitness(ladder, SerializationContext::CONDITIONS);
+    LadderWitness decoded;
+    std::string error;
+    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::CONDITIONS));
+    BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::RECURSE_MODIFIED);
+    BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 3u);
+}
+
+BOOST_AUTO_TEST_CASE(conditions_only_witness_rejected_e019)
+{
+    // E-019: a `conditions_only` block (here ANCHOR) cannot carry witness
+    // fields. This test pins the rejection so a future change that re-
+    // weakens the deserialiser shows up immediately. The pre-fix path
+    // accepted up to 16 PUBKEY (≤2048 B) / SIGNATURE (≤50000 B) fields
+    // — capped only by MAX_LADDER_WITNESS_SIZE = 100 KB per input.
+    LadderWitness ladder;
+    Rung rung;
+    RungBlock block;
+    block.type = RungBlockType::ANCHOR;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::SIGNATURE, MakeSignature(64)});
-    block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
     rung.blocks.push_back(block);
     ladder.rungs.push_back(rung);
 
     auto bytes = SerializeLadderWitness(ladder, SerializationContext::WITNESS);
     LadderWitness decoded;
     std::string error;
-    BOOST_CHECK(DeserializeLadderWitness(bytes, decoded, error, SerializationContext::WITNESS));
-    BOOST_CHECK(decoded.rungs[0].blocks[0].type == RungBlockType::ANCHOR);
-    BOOST_CHECK_EQUAL(decoded.rungs[0].blocks[0].fields.size(), 3u);
+    BOOST_CHECK(!DeserializeLadderWitness(bytes, decoded, error, SerializationContext::WITNESS));
+    BOOST_CHECK(error.find("conditions-only") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(micro_header_hash_preimage_rejected)

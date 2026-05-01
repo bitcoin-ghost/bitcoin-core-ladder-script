@@ -366,6 +366,55 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
             return false;
         }
 
+        // v0.17 (E-019): close the witness-side embedding channel for
+        // conditions-only block types whose evaluators don't validate
+        // witness field counts. ~30 block types under types.h:1628's
+        // `conditions_only` whitelist (ANCHOR family, RECURSE_*, PLC,
+        // EPOCH_GATE/WEIGHT_LIMIT/INPUT_COUNT/OUTPUT_COUNT/
+        // RELATIVE_VALUE/OUTPUT_CHECK, CTV, AMOUNT_LOCK) consume only
+        // condition-side fields; their evaluators (anchor.cpp,
+        // recursion.cpp, governance.cpp, plc.cpp, covenant.cpp) use
+        // FindField/FindAllFields and silently ignore extras. Pre-fix
+        // the deserialiser allowed up to 16 PUBKEY (≤2048 B) / SIGNATURE
+        // (≤50000 B) fields per such block — ≈32 KB attacker-chosen bytes
+        // per block, capped only by MAX_LADDER_WITNESS_SIZE = 100 KB per
+        // input.
+        //
+        // Exempt the conditions_only types whose witness IS legitimately
+        // explicit and content-bound elsewhere: MULTISIG /
+        // TIMELOCKED_MULTISIG (triplet enforcement above), ACCUMULATOR
+        // ([NUMERIC, MERKLE_PROOF] enforcement above), P2SH/P2WSH/P2TR_
+        // SCRIPT_LEGACY (SCRIPT_BODY hash-bound + inner-script CleanStack
+        // semantics consume push data), DATA_RETURN (eval rejects all
+        // spends, so witness bytes never land on-chain).
+        if (ctx == static_cast<uint8_t>(SerializationContext::WITNESS) && n_fields > 0) {
+            const BlockDescriptor* desc = LookupBlockDescriptor(block_out.type);
+            const bool exempt =
+                block_out.type == RungBlockType::MULTISIG ||
+                block_out.type == RungBlockType::TIMELOCKED_MULTISIG ||
+                block_out.type == RungBlockType::ACCUMULATOR ||
+                block_out.type == RungBlockType::P2SH_LEGACY ||
+                block_out.type == RungBlockType::P2WSH_LEGACY ||
+                block_out.type == RungBlockType::P2TR_SCRIPT_LEGACY ||
+                block_out.type == RungBlockType::DATA_RETURN;
+            const bool conditions_only_block = desc && desc->conditions_only;
+            // RECURSE_MODIFIED / RECURSE_DECAY aren't on the conditions_only
+            // whitelist (their conditions side uses explicit-encoding for
+            // variable mutation-spec count), but their evaluators read only
+            // NUMERIC from the merged block — conditions already carry every
+            // NUMERIC the eval consumes, so the witness side must be empty
+            // too. Closing this matches the audit-flagged LOOSE entries.
+            const bool recurse_explicit_must_be_empty =
+                block_out.type == RungBlockType::RECURSE_MODIFIED ||
+                block_out.type == RungBlockType::RECURSE_DECAY;
+            if (!exempt && (conditions_only_block || recurse_explicit_must_be_empty)) {
+                error = "block " + std::string(BlockTypeName(block_out.type)) +
+                        " is conditions-only; witness must carry no fields, got " +
+                        std::to_string(n_fields);
+                return false;
+            }
+        }
+
         block_out.fields.resize(n_fields);
         for (uint64_t f = 0; f < n_fields; ++f) {
             uint8_t data_type_byte;
