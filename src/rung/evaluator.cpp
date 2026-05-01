@@ -902,7 +902,7 @@ bool VerifyRungTx(
     };
     auto fail_msg = [&](LadderScriptError code, std::string_view msg) -> bool {
         if (error_out) *error_out = code;
-        if (error_message_out && !msg.empty()) {
+        if (error_message_out && error_message_out->empty() && !msg.empty()) {
             *error_message_out = std::string(msg);
         }
         return false;

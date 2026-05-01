@@ -116,6 +116,17 @@ class DeferredVectorsTest(QabiTest):
 
         self.write_report()
 
+        # Assert no mutated tx slipped through. Every row records the
+        # acceptance outcome in column index 3 ("yes" if accepted else "no").
+        # If a future consensus regression caused a deliberately-malformed tx
+        # to be accepted, this would fail-fast instead of silently writing a
+        # green REPORT.md.
+        unexpectedly_accepted = [r for r in self.results if r[3] == "yes"]
+        assert not unexpectedly_accepted, (
+            "deferred vectors unexpectedly accepted: "
+            + ", ".join(f"#{r[0]} {r[1]!r}" for r in unexpectedly_accepted)
+        )
+
     # ─────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────

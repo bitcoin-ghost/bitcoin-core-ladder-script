@@ -192,7 +192,7 @@ struct RungEvalContext {
     //! DeserializeLadderWitness / DeserializeMLSCProof threading already
     //! wired in api::VerifyRungTx (b423a45e4f / 7761476d90), but for the
     //! deeper eval-stack rejections that those don't cover.
-    mutable std::string* error_message_out{nullptr};
+    std::string* error_message_out{nullptr};
 };
 
 // Windows headers (wingdi.h, transitively via windows.h) define ERROR as

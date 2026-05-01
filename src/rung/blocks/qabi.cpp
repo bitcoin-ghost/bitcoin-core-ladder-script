@@ -544,7 +544,8 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
             // derivation", "qabi_block entries not strict ascending by
             // participant_id") through the eval-context channel so the
             // mempool reject reason isn't a generic "unknown error".
-            if (ctx.error_message_out && !parse_err.empty()) {
+            if (ctx.error_message_out && ctx.error_message_out->empty()
+                && !parse_err.empty()) {
                 *ctx.error_message_out = "QABI_SPEND ParseQABIBlock: " + parse_err;
             }
             return EvalResult::UNSATISFIED;
