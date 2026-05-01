@@ -12897,6 +12897,54 @@ BOOST_AUTO_TEST_CASE(pq_batch_rejects_extra_fields_e020)
                 == EvalResult::ERROR);
 }
 
+// E-021 (audit #3 finding 1): the E-020 cardinality-only check (size 1 or 3)
+// was bypassable. An attacker can craft witness=[SIG, SIG] which gives a
+// 3-field merged block with no PUBKEY. The cardinality check passes; the
+// non-anchor cache-lookup branch (`!pubkey_field` is true) returns SATISFIED
+// if any other input legitimately anchored the same commit. ~99 KB attacker
+// bytes per such non-anchor input. The positional type pinning in E-021
+// makes the 3-field shape strictly [HASH256, PUBKEY, SIGNATURE].
+BOOST_AUTO_TEST_CASE(pq_batch_rejects_cardinality_bypass_e021)
+{
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    // 3 fields but no PUBKEY: [HASH256, SIGNATURE, SIGNATURE].
+    // Pre-E-021 falls through to non-anchor cache lookup with extras.
+    RungBlock sig_sig;
+    sig_sig.type = RungBlockType::PQ_BATCH;
+    sig_sig.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0xAA)});
+    sig_sig.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(666, 0x03)});
+    sig_sig.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(666, 0x04)});
+    BOOST_CHECK(EvalBlock(sig_sig, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
+
+    // 3 fields but no SIGNATURE: [HASH256, PUBKEY, PUBKEY].
+    RungBlock pk_pk;
+    pk_pk.type = RungBlockType::PQ_BATCH;
+    pk_pk.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0xBB)});
+    pk_pk.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x02)});
+    pk_pk.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x04)});
+    BOOST_CHECK(EvalBlock(pk_pk, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
+
+    // 3 fields with right types but wrong order: [PUBKEY, HASH256, SIGNATURE].
+    RungBlock wrong_order;
+    wrong_order.type = RungBlockType::PQ_BATCH;
+    wrong_order.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x02)});
+    wrong_order.fields.push_back({RungDataType::HASH256, std::vector<uint8_t>(32, 0xCC)});
+    wrong_order.fields.push_back({RungDataType::SIGNATURE, std::vector<uint8_t>(666, 0x03)});
+    BOOST_CHECK(EvalBlock(wrong_order, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
+
+    // 1 field with wrong type: [PUBKEY] (not HASH256).
+    RungBlock wrong_solo;
+    wrong_solo.type = RungBlockType::PQ_BATCH;
+    wrong_solo.fields.push_back({RungDataType::PUBKEY, std::vector<uint8_t>(897, 0x02)});
+    BOOST_CHECK(EvalBlock(wrong_solo, checker, checker, SigVersion::LADDER, execdata)
+                == EvalResult::ERROR);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 // ============================================================================

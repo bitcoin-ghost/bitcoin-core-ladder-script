@@ -735,14 +735,26 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
 
-    // E-020 (audit #2): the descriptor comment in types.h:1359-1366 promises
-    // "Evaluator enforces the 0-or-2 field rule" for the witness side. Pre-fix,
-    // it didn't — block.fields.size() was unchecked, leaving up to ~98 KB of
-    // attacker-chosen PUBKEY/SIGNATURE/NUMERIC/SCHEME bytes per anchor input
-    // through the FindField-ignores-extras path. After merge with conditions
-    // the legitimate shapes are exactly 1 (non-anchor: [HASH256]) or 3
-    // (anchor: [HASH256, PUBKEY, SIGNATURE]).
-    if (block.fields.size() != 1 && block.fields.size() != 3) {
+    // E-020 / E-021 (audit #3): pin PQ_BATCH to one of two exact field
+    // shapes. The cardinality check alone (E-020) was bypassable —
+    // witness=[SIG, SIG] gives a 3-field merged block with no PUBKEY,
+    // falling through to the non-anchor cache-lookup branch with up to
+    // ~99 KB of attacker bytes silently embedded. Pinning the per-slot
+    // types closes the remaining channel; legitimate spend shapes are
+    // exactly:
+    //   1 field: [HASH256]                              (non-anchor)
+    //   3 fields: [HASH256, PUBKEY, SIGNATURE]          (anchor)
+    if (block.fields.size() == 1) {
+        if (block.fields[0].type != RungDataType::HASH256) {
+            return EvalResult::ERROR;
+        }
+    } else if (block.fields.size() == 3) {
+        if (block.fields[0].type != RungDataType::HASH256 ||
+            block.fields[1].type != RungDataType::PUBKEY ||
+            block.fields[2].type != RungDataType::SIGNATURE) {
+            return EvalResult::ERROR;
+        }
+    } else {
         return EvalResult::ERROR;
     }
 
