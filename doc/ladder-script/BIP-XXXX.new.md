@@ -441,96 +441,129 @@ revealed leaf (and any revealed relays) up to `conditions_root`.
 Each block has a canonical 16-bit type code encoded little-endian on
 the wire.
 
-| Code | Family | Name | Conditions layout | Witness layout (notes in registry source) |
-|---|---|---|---|---|
-| 0x0001 | Signature | `SIG` | `[SCHEME(1)]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0002 | Signature | `MULTISIG` | `[NUMERIC(K), SCHEME, HASH256(pubkey_root)]` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets in strict ascending pubkey-lex order |
-| 0x0003 | Signature | `ADAPTOR_SIG` | (none) | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0004 | Signature | `MUSIG_THRESHOLD` | `[NUMERIC(M), NUMERIC(N)]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0005 | Signature | `KEY_REF_SIG` | `[NUMERIC(relay_idx), NUMERIC(block_idx)]` | implicit `[SIGNATURE]` |
-| 0x0101 | Timelock | `CSV` | `[NUMERIC(blocks)]` | empty |
-| 0x0102 | Timelock | `CSV_TIME` | `[NUMERIC(seconds)]` | empty |
-| 0x0103 | Timelock | `CLTV` | `[NUMERIC(height)]` | empty |
-| 0x0104 | Timelock | `CLTV_TIME` | `[NUMERIC(time)]` | empty |
-| 0x0203 | Hash | `TAGGED_HASH` | `[HASH256(tag), HASH256(expected)]` | implicit `[PREIMAGE]` |
-| 0x0204 | Hash | `HASH_GUARDED` | `[HASH256]` | implicit `[PREIMAGE]` |
-| 0x0301 | Covenant | `CTV` | `[HASH256]` | empty |
-| 0x0302 | Covenant | `VAULT_LOCK` | `[NUMERIC(hot_delay)]` | implicit `[PUBKEY(recovery), PUBKEY(hot), SIGNATURE]` |
-| 0x0303 | Covenant | `AMOUNT_LOCK` | `[NUMERIC(min), NUMERIC(max)]` | empty |
-| 0x0401 | Recursion | `RECURSE_SAME` | `[NUMERIC(max_depth)]` | empty |
-| 0x0402 | Recursion | `RECURSE_MODIFIED` | (variable: NUMERICs encoding mutation specs) | empty |
-| 0x0403 | Recursion | `RECURSE_UNTIL` | `[NUMERIC(until_height)]` | empty |
-| 0x0404 | Recursion | `RECURSE_COUNT` | `[NUMERIC(max_count)]` | empty |
-| 0x0405 | Recursion | `RECURSE_SPLIT` | `[NUMERIC(max_splits), NUMERIC(min_sats)]` | empty |
-| 0x0406 | Recursion | `RECURSE_DECAY` | (variable: NUMERICs encoding decay deltas) | empty |
-| 0x0501 | Anchor | `ANCHOR` | `[NUMERIC(anchor_id)]` | optional `[PREIMAGE]` (hash-binding only) |
-| 0x0502 | Anchor | `ANCHOR_CHANNEL` | `[NUMERIC(commitment_number)]` | empty |
-| 0x0503 | Anchor | `ANCHOR_POOL` | `[HASH256(vtxo_root), NUMERIC(count)]` | optional `[PREIMAGE]` |
-| 0x0504 | Anchor | `ANCHOR_RESERVE` | `[NUMERIC(n), NUMERIC(m), HASH256(guardian)]` | optional `[PREIMAGE]` |
-| 0x0505 | Anchor | `ANCHOR_SEAL` | `[HASH256, HASH256]` | optional `[PREIMAGE × ≤2]` |
-| 0x0506 | Anchor | `ANCHOR_ORACLE` | `[NUMERIC(outcome_count)]` | implicit `[PUBKEY(oracle)]` |
-| 0x0507 | Anchor | `DATA_RETURN` | `[DATA(1..40)]` | unspendable (eval rejects) |
-| 0x0601 | PLC | `HYSTERESIS_FEE` | `[NUMERIC(high), NUMERIC(low)]` | empty |
-| 0x0602 | PLC | `HYSTERESIS_VALUE` | `[NUMERIC(high), NUMERIC(low)]` | empty |
-| 0x0611 | PLC | `TIMER_CONTINUOUS` | `[NUMERIC(accumulated), NUMERIC(target)]` | empty |
-| 0x0612 | PLC | `TIMER_OFF_DELAY` | `[NUMERIC(remaining)]` | empty |
-| 0x0621 | PLC | `LATCH_SET` | `[NUMERIC(state)]` | optional `[PUBKEY]` |
-| 0x0622 | PLC | `LATCH_RESET` | `[NUMERIC(state), NUMERIC(delay)]` | optional `[PUBKEY]` |
-| 0x0631 | PLC | `COUNTER_DOWN` | `[NUMERIC(count)]` | optional `[PUBKEY]` |
-| 0x0632 | PLC | `COUNTER_PRESET` | `[NUMERIC(current), NUMERIC(preset)]` | empty |
-| 0x0633 | PLC | `COUNTER_UP` | `[NUMERIC(current), NUMERIC(target)]` | optional `[PUBKEY]` |
-| 0x0641 | PLC | `COMPARE` | `[NUMERIC(op), NUMERIC(b), NUMERIC(c)]` | empty |
-| 0x0651 | PLC | `SEQUENCER` | `[NUMERIC(current), NUMERIC(total)]` | empty |
-| 0x0661 | PLC | `ONE_SHOT` | `[NUMERIC(state), HASH256(commitment)]` | empty |
-| 0x0671 | PLC | `RATE_LIMIT` | `[NUMERIC(max), NUMERIC(cap), NUMERIC(refill)]` | empty |
-| 0x0681 | PLC | `COSIGN` | `[HASH256]` | empty |
-| 0x0701 | Compound | `TIMELOCKED_SIG` | `[SCHEME, NUMERIC(csv)]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0702 | Compound | `HTLC` | `[HASH256, NUMERIC(csv), SCHEME]` | implicit `[PUBKEY(recv), PUBKEY(send), SIGNATURE, PREIMAGE, NUMERIC(path)]` |
-| 0x0703 | Compound | `HASH_SIG` | `[HASH256, SCHEME]` | implicit `[PUBKEY, SIGNATURE, PREIMAGE]` |
-| 0x0704 | Compound | `PTLC` | `[NUMERIC(csv)]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0705 | Compound | `CLTV_SIG` | `[SCHEME, NUMERIC(cltv)]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0706 | Compound | `TIMELOCKED_MULTISIG` | `[NUMERIC(K), NUMERIC(csv), SCHEME, HASH256(pubkey_root)]` | K × triplets |
-| 0x0707 | Compound | `ANCHOR_FEE` | `[SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment)]` | implicit `[PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]` |
-| 0x0801 | Governance | `EPOCH_GATE` | `[NUMERIC(period), NUMERIC(offset)]` | empty |
-| 0x0802 | Governance | `WEIGHT_LIMIT` | `[NUMERIC(max_weight)]` | empty |
-| 0x0803 | Governance | `INPUT_COUNT` | `[NUMERIC(min), NUMERIC(max)]` | empty |
-| 0x0804 | Governance | `OUTPUT_COUNT` | `[NUMERIC(min), NUMERIC(max)]` | empty |
-| 0x0805 | Governance | `RELATIVE_VALUE` | `[NUMERIC(num), NUMERIC(denom)]` | empty |
-| 0x0806 | Governance | `ACCUMULATOR` | `[HASH256(set_root)]` | implicit `[NUMERIC(element_id), MERKLE_PROOF]` |
-| 0x0807 | Governance | `OUTPUT_CHECK` | `[NUMERIC(idx), NUMERIC(min), NUMERIC(max), HASH256(script)]` | empty |
-| 0x0901 | Legacy | `P2PK_LEGACY` | `[SCHEME]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0902 | Legacy | `P2PKH_LEGACY` | `[HASH160]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0903 | Legacy | `P2SH_LEGACY` | `[HASH160]` | `[PREIMAGE(redeem_script)]` + matched stack-push fields |
-| 0x0904 | Legacy | `P2WPKH_LEGACY` | `[HASH160]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0905 | Legacy | `P2WSH_LEGACY` | `[HASH256]` | `[PREIMAGE(witness_script)]` + matched stack-push fields |
-| 0x0906 | Legacy | `P2TR_LEGACY` | `[SCHEME]` | implicit `[PUBKEY, SIGNATURE]` |
-| 0x0907 | Legacy | `P2TR_SCRIPT_LEGACY` | `[HASH256]` | `[PREIMAGE(tapscript)]` + matched stack-push fields |
-| 0x0A01 | QABI / PQ | `QABI_PRIME` | (none) | implicit `[HASH256(new_root), NUMERIC(prime_depth), NUMERIC(new_expiry), PREIMAGE(prime_preimage)]` |
-| 0x0A02 | QABI / PQ | `QABI_SPEND` | `[HASH256(auth_tip), HASH256(committed_root), NUMERIC(committed_depth), NUMERIC(committed_expiry), PUBKEY_COMMIT(owner_id)]` | implicit `[PREIMAGE(spend_preimage)]` |
-| 0x0A03 | QABI / PQ | `PQ_BATCH` | `[HASH256(SHA256(canonical_pq_pubkey))]` | anchor input: `[PREIMAGE(pubkey_bytes), SIGNATURE]`; non-anchor: empty |
+#### Witness rules (used by the column below)
+
+The `WitnessRule` column on each row picks one of seven enforcement
+rules, defined below. All rules are enforced at the wire-format
+deserialiser before any cryptographic operation; the eval-time
+checks listed are additional invariants the evaluator rejects on.
+
+| Rule | Wire-format enforcement | Eval-time invariant |
+|---|---|---|
+| `Fixed N` | Implicit layout with N fields; positional types match the layout. | Eval consumes the fields. |
+| `Empty` | Zero witness fields. | Eval reads only conditions-side fields. |
+| `Reveal P` | Up to P `PUBKEY` fields (count = `PubkeyCountForBlock`, for `merkle_pub_key` leaf reconstruction) plus up to 2 `PREIMAGE` fields (for hash-binding against a `HASH256` in conditions). All other field types reject. | Eval rebuilds the leaf from PUBKEYs and verifies any PREIMAGE against the conditions HASH256. |
+| `Triplets K` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets in strict ascending pubkey-lex order; K is from the conditions `NUMERIC(K)` field. | Eval verifies each pubkey's Merkle proof against `pubkey_root` and each signature against the pubkey. |
+| `Accumulator` | Exactly `[NUMERIC(element_id), MERKLE_PROOF]`. | Eval verifies the proof against `set_root`. |
+| `Bridging` | Exactly one `PREIMAGE` (the inner script body, hash-bound to the conditions `HASH160`/`HASH256`) followed by stack-push fields whose count must match at least one inner rung's expected witness layout sum. | Eval evaluates the inner conditions tree against the stack-push fields. |
+| `PQ-anchor` | Either `[HASH256]` (non-anchor; field merged with the conditions `HASH256` to form a 1-field merged block) or `[HASH256, PUBKEY, SIGNATURE]` (anchor; fields merged to form a 3-field merged block). Any other shape rejects. | Anchor input verifies `SHA256(PUBKEY) == HASH256` and the PQ signature; non-anchor input checks the tx-local cache. |
+| `Unspendable` | Witness ignored — eval rejects every spend attempt. | The block is unspendable by design. |
+
+#### Registry table
+
+| Code | Family | Name | Conditions layout | WitnessRule | Witness layout |
+|---|---|---|---|---|---|
+| 0x0001 | Signature | `SIG` | `[SCHEME]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0002 | Signature | `MULTISIG` | `[NUMERIC(K), SCHEME, HASH256(pubkey_root)]` | `Triplets K` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` |
+| 0x0003 | Signature | `ADAPTOR_SIG` | (none) | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0004 | Signature | `MUSIG_THRESHOLD` | `[NUMERIC(M), NUMERIC(N)]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0005 | Signature | `KEY_REF_SIG` | `[NUMERIC(relay_idx), NUMERIC(block_idx)]` | `Fixed 1` | `[SIGNATURE]` |
+| 0x0101 | Timelock | `CSV` | `[NUMERIC(blocks)]` | `Empty` | — |
+| 0x0102 | Timelock | `CSV_TIME` | `[NUMERIC(seconds)]` | `Empty` | — |
+| 0x0103 | Timelock | `CLTV` | `[NUMERIC(height)]` | `Empty` | — |
+| 0x0104 | Timelock | `CLTV_TIME` | `[NUMERIC(time)]` | `Empty` | — |
+| 0x0203 | Hash | `TAGGED_HASH` | `[HASH256(tag), HASH256(expected)]` | `Fixed 1` | `[PREIMAGE]` |
+| 0x0204 | Hash | `HASH_GUARDED` | `[HASH256]` | `Fixed 1` | `[PREIMAGE]` |
+| 0x0301 | Covenant | `CTV` | `[HASH256(template)]` | `Empty` | — |
+| 0x0302 | Covenant | `VAULT_LOCK` | `[NUMERIC(hot_delay)]` | `Fixed 3` | `[PUBKEY(recovery), PUBKEY(hot), SIGNATURE]` |
+| 0x0303 | Covenant | `AMOUNT_LOCK` | `[NUMERIC(min), NUMERIC(max)]` | `Empty` | — |
+| 0x0401 | Recursion | `RECURSE_SAME` | `[NUMERIC(max_depth)]` | `Empty` | — |
+| 0x0402 | Recursion | `RECURSE_MODIFIED` | variable: NUMERICs encoding mutation specs | `Empty` | — |
+| 0x0403 | Recursion | `RECURSE_UNTIL` | `[NUMERIC(until_height)]` | `Empty` | — |
+| 0x0404 | Recursion | `RECURSE_COUNT` | `[NUMERIC(max_count)]` | `Empty` | — |
+| 0x0405 | Recursion | `RECURSE_SPLIT` | `[NUMERIC(max_splits), NUMERIC(min_sats)]` | `Empty` | — |
+| 0x0406 | Recursion | `RECURSE_DECAY` | variable: NUMERICs encoding decay deltas | `Empty` | — |
+| 0x0501 | Anchor | `ANCHOR` | `[NUMERIC(anchor_id)]` | `Empty` | — |
+| 0x0502 | Anchor | `ANCHOR_CHANNEL` | `[NUMERIC(commitment_number)]` | `Empty` | — |
+| 0x0503 | Anchor | `ANCHOR_POOL` | `[HASH256(vtxo_root), NUMERIC(count)]` | `Reveal 0` | up to 1 `PREIMAGE` for hash-binding |
+| 0x0504 | Anchor | `ANCHOR_RESERVE` | `[NUMERIC(n), NUMERIC(m), HASH256(guardian)]` | `Reveal 0` | up to 1 `PREIMAGE` for hash-binding |
+| 0x0505 | Anchor | `ANCHOR_SEAL` | `[HASH256, HASH256]` | `Reveal 0` | up to 2 `PREIMAGE` for hash-binding |
+| 0x0506 | Anchor | `ANCHOR_ORACLE` | `[NUMERIC(outcome_count)]` | `Fixed 1` | `[PUBKEY(oracle)]` |
+| 0x0507 | Anchor | `DATA_RETURN` | `[DATA(1..40)]` | `Unspendable` | — |
+| 0x0601 | PLC | `HYSTERESIS_FEE` | `[NUMERIC(high), NUMERIC(low)]` | `Empty` | — |
+| 0x0602 | PLC | `HYSTERESIS_VALUE` | `[NUMERIC(high), NUMERIC(low)]` | `Empty` | — |
+| 0x0611 | PLC | `TIMER_CONTINUOUS` | `[NUMERIC(accumulated), NUMERIC(target)]` | `Empty` | — |
+| 0x0612 | PLC | `TIMER_OFF_DELAY` | `[NUMERIC(remaining)]` | `Empty` | — |
+| 0x0621 | PLC | `LATCH_SET` | `[NUMERIC(state)]` | `Reveal 1` | 1 `PUBKEY` for leaf reconstruction |
+| 0x0622 | PLC | `LATCH_RESET` | `[NUMERIC(state), NUMERIC(delay)]` | `Reveal 1` | 1 `PUBKEY` for leaf reconstruction |
+| 0x0631 | PLC | `COUNTER_DOWN` | `[NUMERIC(count)]` | `Reveal 1` | 1 `PUBKEY` for leaf reconstruction |
+| 0x0632 | PLC | `COUNTER_PRESET` | `[NUMERIC(current), NUMERIC(preset)]` | `Empty` | — |
+| 0x0633 | PLC | `COUNTER_UP` | `[NUMERIC(current), NUMERIC(target)]` | `Reveal 1` | 1 `PUBKEY` for leaf reconstruction |
+| 0x0641 | PLC | `COMPARE` | `[NUMERIC(op), NUMERIC(b), NUMERIC(c)]` | `Empty` | — |
+| 0x0651 | PLC | `SEQUENCER` | `[NUMERIC(current), NUMERIC(total)]` | `Empty` | — |
+| 0x0661 | PLC | `ONE_SHOT` | `[NUMERIC(state), HASH256(commitment)]` | `Empty` | — |
+| 0x0671 | PLC | `RATE_LIMIT` | `[NUMERIC(max), NUMERIC(cap), NUMERIC(refill)]` | `Empty` | — |
+| 0x0681 | PLC | `COSIGN` | `[HASH256(spk_hash)]` | `Empty` | — |
+| 0x0701 | Compound | `TIMELOCKED_SIG` | `[SCHEME, NUMERIC(csv)]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0702 | Compound | `HTLC` | `[HASH256, NUMERIC(csv), SCHEME]` | `Fixed 5` | `[PUBKEY(recv), PUBKEY(send), SIGNATURE, PREIMAGE, NUMERIC(path)]` |
+| 0x0703 | Compound | `HASH_SIG` | `[HASH256, SCHEME]` | `Fixed 3` | `[PUBKEY, SIGNATURE, PREIMAGE]` |
+| 0x0704 | Compound | `PTLC` | `[NUMERIC(csv)]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0705 | Compound | `CLTV_SIG` | `[SCHEME, NUMERIC(cltv)]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0706 | Compound | `TIMELOCKED_MULTISIG` | `[NUMERIC(K), NUMERIC(csv), SCHEME, HASH256(pubkey_root)]` | `Triplets K` | K × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` |
+| 0x0707 | Compound | `ANCHOR_FEE` | `[SCHEME, NUMERIC(min_fee), NUMERIC(max_fee), NUMERIC(max_weight), NUMERIC(commitment)]` | `Fixed 4` | `[PUBKEY, PUBKEY, SIGNATURE, SIGNATURE]` |
+| 0x0801 | Governance | `EPOCH_GATE` | `[NUMERIC(period), NUMERIC(offset)]` | `Empty` | — |
+| 0x0802 | Governance | `WEIGHT_LIMIT` | `[NUMERIC(max_weight)]` | `Empty` | — |
+| 0x0803 | Governance | `INPUT_COUNT` | `[NUMERIC(min), NUMERIC(max)]` | `Empty` | — |
+| 0x0804 | Governance | `OUTPUT_COUNT` | `[NUMERIC(min), NUMERIC(max)]` | `Empty` | — |
+| 0x0805 | Governance | `RELATIVE_VALUE` | `[NUMERIC(num), NUMERIC(denom)]` | `Empty` | — |
+| 0x0806 | Governance | `ACCUMULATOR` | `[HASH256(set_root)]` | `Accumulator` | `[NUMERIC(element_id), MERKLE_PROOF]` |
+| 0x0807 | Governance | `OUTPUT_CHECK` | `[NUMERIC(idx), NUMERIC(min), NUMERIC(max), HASH256(script)]` | `Empty` | — |
+| 0x0901 | Legacy | `P2PK_LEGACY` | `[SCHEME]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0902 | Legacy | `P2PKH_LEGACY` | `[HASH160]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0903 | Legacy | `P2SH_LEGACY` | `[HASH160(redeem_script_hash)]` | `Bridging` | see Legacy bridging rule below |
+| 0x0904 | Legacy | `P2WPKH_LEGACY` | `[HASH160]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0905 | Legacy | `P2WSH_LEGACY` | `[HASH256(witness_script_hash)]` | `Bridging` | see Legacy bridging rule below |
+| 0x0906 | Legacy | `P2TR_LEGACY` | `[SCHEME]` | `Fixed 2` | `[PUBKEY, SIGNATURE]` |
+| 0x0907 | Legacy | `P2TR_SCRIPT_LEGACY` | `[HASH256(tapscript_hash)]` | `Bridging` | see Legacy bridging rule below |
+| 0x0A01 | QABI / PQ | `QABI_PRIME` | (none) | `Fixed 4` | `[HASH256(new_root), NUMERIC(prime_depth), NUMERIC(new_expiry), PREIMAGE(prime_preimage)]` |
+| 0x0A02 | QABI / PQ | `QABI_SPEND` | `[HASH256(auth_tip), HASH256(committed_root), NUMERIC(committed_depth), NUMERIC(committed_expiry), PUBKEY_COMMIT(owner_id)]` | `Fixed 1` | `[PREIMAGE(spend_preimage)]` |
+| 0x0A03 | QABI / PQ | `PQ_BATCH` | `[HASH256(SHA256(canonical_pq_pubkey))]` | `PQ-anchor` | non-anchor: empty witness; anchor: `[PUBKEY(pubkey_bytes), SIGNATURE]` |
 
 The 11 condition data types referenced above are: `PUBKEY`,
 `PUBKEY_COMMIT`, `SCHEME`, `NUMERIC`, `HASH256`, `HASH160`,
 `SIGNATURE`, `PREIMAGE`, `SCRIPT_BODY`, `MERKLE_PROOF`, `DATA`. Their
 allowed sizes and contexts are defined in `src/rung/types.h`.
 
-#### Conditions-only witness rule
+#### Legacy bridging rule (`P2SH_LEGACY` / `P2WSH_LEGACY` / `P2TR_SCRIPT_LEGACY`)
 
-Block types whose evaluator reads only conditions-side fields (the
-ANCHOR family except `ANCHOR_ORACLE`, `RECURSE_*`, all PLC,
-governance, `CTV`, `AMOUNT_LOCK`, `CSV` / `CSV_TIME` / `CLTV` /
-`CLTV_TIME`, `COSIGN`) accept a witness containing ONLY:
+The three legacy script-bridging blocks share one witness shape:
 
-- `PUBKEY` fields (count up to `PubkeyCountForBlock(type)`, used for
-  Merkle-leaf reconstruction via `merkle_pub_key`); and
-- `PREIMAGE` fields (count ≤ 2 per block, used for hash-binding
-  against a `HASH256` in the conditions side).
+```
+[ PREIMAGE(inner_script),                         (1 field — bound by HASH160/HASH256 in conditions)
+  stack_push_field_0,
+  stack_push_field_1,
+  ...,
+  stack_push_field_K-1 ]
+```
 
-Any other field type rejects at the wire-format deserialiser.
-`MULTISIG`, `TIMELOCKED_MULTISIG`, `ACCUMULATOR`, `P2SH_LEGACY`,
-`P2WSH_LEGACY`, `P2TR_SCRIPT_LEGACY`, and `DATA_RETURN` have explicit
-per-block witness shapes enforced separately and are exempt from this
-generic rule.
+`PREIMAGE` carries the inner redeem script / witness script /
+tapscript bytes (≤80 bytes by `MAX_SCRIPT_BODY` rule for SCRIPT_BODY
+fields, also valid as PREIMAGE here under the same per-tx cap of 1).
+The hash binding to the conditions `HASH160` (P2SH) or `HASH256`
+(P2WSH / P2TR_SCRIPT) is verified before evaluation.
+
+The stack-push fields are typed: each MUST be one of
+`{PUBKEY, SIGNATURE, NUMERIC, SCHEME}`. Their count K is enforced
+by the evaluator: K MUST equal the sum of expected witness layout
+counts for at least one rung in the inner conditions tree. A spender
+that supplies more or fewer stack pushes than any inner rung needs
+fails evaluation. The inner-script's evaluation consumes the stack-
+push fields positionally as inner block witness fields.
+
+This rule is the legacy bridge: it preserves the on-chain spending
+shape of a wrapped P2SH / P2WSH / P2TR script while typing every byte
+that appears in the witness. There is no untyped stack push and no
+`OP_DROP` analogue.
 
 #### Reserved block-type codes
 
@@ -622,20 +655,55 @@ For each MLSC input, after the per-tx checks pass:
 
 ### Sighash
 
-Two sighash variants for per-input signatures, computed by the library
-without consuming a host signature checker:
+This proposal defines two per-input sighash variants and one tx-level
+QABI digest. The per-input variants are not selected by a hash-type
+byte; the spend mode (key-path vs script-path) is implicit in the
+witness stack count, and the variant follows. Hash-type bytes select
+which of the BIP-143-style `prevouts` / `sequences` / `outputs`
+digests are committed; they do not select between Ladder Script
+variants.
 
-- `SignatureHashLadder` — script-path. Tag: `LadderSighash/v1`.
-  Commits to: epoch byte (0), hash_type byte, version, locktime, the
-  appropriate prevouts / sequences / spent-amounts / outputs digests
-  (per `hash_type`), the conditions hash, and the QABI section hash.
-- `SignatureHashLadderKeyPath` — key-path. Tag:
-  `LadderKeyPathSighash/v1`. Commits to the same fields EXCEPT the
-  conditions hash, on the grounds that the x-only tweak applied to
-  the internal pubkey already binds the conditions in.
+#### `SignatureHashLadder` — script-path
 
-Both variants accept hash type bytes from the set `{0x00..0x03,
-0x81..0x83}` only:
+Tag: `LadderSighash/v1`. Computed via
+`api::SignatureHashLadder(cache, tx, nIn, hash_type, conditions, hash_out)`.
+The digest commits to:
+
+1. epoch byte (`0x00`).
+2. `hash_type` byte.
+3. `tx.version` (4 bytes LE).
+4. `tx.lock_time` (4 bytes LE).
+5. `cache.hash_prevouts_sha256`, `cache.hash_spent_amounts_sha256`,
+   `cache.hash_sequences_sha256` — committed when `hash_type & 0x80
+   == 0` (i.e. not `ANYONECANPAY`).
+6. `cache.hash_outputs_sha256` — committed when the output type is
+   `ALL`.
+7. spend_type byte (`0x00` — no annex).
+8. For `ANYONECANPAY`: this input's prevout, spent output, and
+   sequence directly. Otherwise the input index (4 bytes LE).
+9. For `SINGLE`: the SHA256 of the matching output.
+10. The 32-byte conditions hash. For an MLSC input this is the spent
+    output's `conditions_root` directly; for fixture inputs that
+    construct `RungConditions` outside the consensus path the digest
+    is `TaggedHash("LadderSighash/v1", serialised_conditions)` (test-
+    only fallback; consensus rejects non-MLSC v4 outputs so the path
+    is unreachable in production).
+11. The 32-byte QABI section hash defined in §Sighash → QABI section
+    binding below.
+
+#### `SignatureHashLadderKeyPath` — key-path
+
+Tag: `LadderKeyPathSighash/v1`. Identical to `SignatureHashLadder`
+except that **no conditions hash is committed**. The conditions are
+already bound to the spent output's scriptPubKey via the
+`LadderTweak/v1` x-only tweak applied to the internal pubkey, so
+including the conditions a second time would create a cross-protocol
+signing-oracle hazard with no offsetting benefit.
+
+#### Hash-type byte set
+
+Both per-input variants accept hash type bytes from the set
+`{0x00..0x03, 0x81..0x83}` only:
 
 | Byte | Semantic |
 |---|---|
@@ -647,21 +715,58 @@ Both variants accept hash type bytes from the set `{0x00..0x03,
 | `0x82` | `NONE \| ANYONECANPAY` |
 | `0x83` | `SINGLE \| ANYONECANPAY` |
 
-The BIP 118 ANYPREVOUT family (`0x40..0x43`, `0xC0..0xC3`) is
-unconditionally rejected by both variants. Reference: `src/rung/sighash.cpp`.
+The BIP-118 ANYPREVOUT family (`0x40..0x43`, `0xC0..0xC3`) is
+unconditionally rejected. Both flags allow signature replay against
+UTXOs the signer did not intend to spend; this proposal does not
+provide the dedicated pubkey-prefix scheme that BIP-118 mitigates the
+risk with, and the safe default is to reject the entire family.
 
-The QABI coordinator signature uses a separate, single-purpose digest
-function:
+#### QABI section binding
 
-- `ComputeSighashQABO` — coordinator FALCON-512 signature over the
-  whole batch transaction. Tag: `QABOSighash`. Commits to: version,
-  every input's prevout and sequence, every output, the
-  conditions_root, the qabi_block, every input's full witness stack,
-  and locktime. Excludes `aggregated_sig` itself. Reference:
-  `src/rung/qabi.cpp`.
+Every sighash digest computed by `SignatureHashLadder` and
+`SignatureHashLadderKeyPath` includes a 32-byte commitment to the
+transaction-level QABI fields:
 
-This is not a hash-type byte — the QABO digest is computed once per
-tx and the FALCON signature stored at `tx.aggregated_sig` covers it.
+```
+qabi_section_hash = TaggedHash("LadderQABISection/v1",
+                               CompactSize(len(tx.qabi_block))
+                            || tx.qabi_block
+                            || CompactSize(len(tx.aggregated_sig))
+                            || tx.aggregated_sig)
+```
+
+The `CompactSize`-prefixed length on each field makes the binding
+structurally collision-resistant — two distinct
+`(qabi_block, aggregated_sig)` pairs cannot produce the same digest
+even if their byte concatenations would coincide.
+
+#### `ComputeSighashQABO` — QABI coordinator signature
+
+The coordinator's FALCON-512 signature over a QABI batch transaction
+commits to a separate digest:
+
+```
+qabo_sighash = TaggedHash("QABOSighash",
+                          version (4 LE)
+                       || foreach input: prevout || sequence (4 LE)
+                       || foreach output: serialised CTxOut
+                       || conditions_root (32 bytes)
+                       || CompactSize(len(qabi_block)) || qabi_block
+                       || foreach input: full witness stack
+                                          (CompactSize(count)
+                                           + per element CompactSize(len)+bytes)
+                       || lock_time (4 LE))
+```
+
+The digest excludes `tx.aggregated_sig` itself (otherwise the
+signature would be self-referential). Each input of the batch produces
+an identical digest, which is why the FALCON verify can be cached
+across inputs via the `qabo_sig_cache` (see `LadderEvalContext`).
+
+`ComputeSighashQABO` is a function call, not a hash-type byte. The
+QABI coordinator signature is selected by the presence of `tx.aggregated_sig`
+on the v4 transaction, not by a sighash flag in any per-input
+signature.
 
 ### Key-path tweak
 
@@ -940,11 +1045,10 @@ the most expensive byte in Bitcoin.
 
 The synthetic root coin is the load-bearing piece. Its prefix byte is
 `0xDE` (not `0xDF`) so the existing `0xDF`-aware compressor does not
-strip its 32-byte payload. Stateless verifiers (libbitcoinkernel-
-style paths, snapshot loaders) MUST recover the conditions root via
-the host-provided `LadderBlockAccessor` callback or refuse to
-validate the spend; this is documented as the load-bearing UTXO-
-recovery invariant.
+strip its 32-byte payload. The recovery path is normative —
+implementations that get it wrong consensus-split silently. The
+stateless-verifier obligation that follows from this design is
+specified in §Security Considerations.
 
 ### 5. Why fold pubkeys into the leaf hash?
 
@@ -1094,8 +1198,15 @@ at fund time. At spend time, one anchor input in the transaction
 reveals the pubkey + a single PQ signature; every other input gated
 by the same hash short-circuits via a tx-local cache. There is no
 priming, no coordinator election, no governance over composition.
-Per-input amortised cost is roughly `2.9×` cheaper than QABIO and
-roughly `22×` cheaper than per-input FALCON.
+
+Per-input amortised cost (measured at N=100, see
+`doc/ladder-script/SIZING.md` §5):
+
+| Primitive | vB per input @ N=100 |
+|---|---:|
+| Per-input FALCON-512 `SIG` | ~400 |
+| QABIO batch | ~143 |
+| PQ_BATCH | ~17.8 |
 
 The two primitives sit in the same `0x0A__` family because they
 share the cryptography, but their use cases — coordinator-governed
@@ -1157,29 +1268,28 @@ except for the tag string — the only difference is the
 `TaggedHash("TapTweak", ...)`. The "/v1" suffix gives a clean upgrade
 path if the construction ever needs to evolve.
 
-### 15. Why three new sighash flags?
+### 15. Why two sighash variants and a separate QABO digest, instead of new sighash flag bytes?
 
-There are not three new sighash flags. There are two sighash variants
-for per-input signatures (`SignatureHashLadder` and
-`SignatureHashLadderKeyPath`), distinguished by which function the
-verifier calls based on the spend mode (script-path vs key-path), and
-one separate digest function for the QABI coordinator FALCON
-signature (`ComputeSighashQABO`).
+A new sighash flag byte is the wrong shape for this proposal's
+needs. Spend mode (key-path vs script-path) is implicit in the
+witness stack count, so a flag byte that selects between them would
+be redundant. The QABI coordinator signature is selected by the
+presence of `tx.aggregated_sig` on the v4 transaction, so a flag
+byte that selects it would also be redundant. In both cases the
+selection is a structural property of the transaction, not a per-
+signature choice.
 
-Both per-input variants accept the standard hash type bytes
-`{0x00..0x03, 0x81..0x83}` only. There is no new hash type byte at
-the wire level — the spend mode is implicit in the witness stack
-size, and the QABI coordinator signature is not selected by a hash
-type byte but by the tx-level `aggregated_sig` field's presence.
-
-The BIP 118 ANYPREVOUT family (`0x40..0x43`, `0xC0..0xC3`) is
-unconditionally rejected. ANYPREVOUT lets a signer's signature be
-replayed against UTXOs the signer did not intend to spend; BIP 118
-mitigates with a dedicated pubkey prefix that Ladder Script does
-not currently provide. Channel-replacement workflows that require
-ANYPREVOUT semantics will need a future opt-in mechanism (a
-dedicated block type or pubkey-prefix scheme) before those flags
-become available.
+So the proposal defines `SignatureHashLadder` and
+`SignatureHashLadderKeyPath` as two distinct functions called by
+the verifier based on the witness stack count, and `ComputeSighashQABO`
+as a separate function the coordinator calls once per batch. The
+hash-type byte on per-input signatures keeps its standard meaning
+(`{0x00..0x03, 0x81..0x83}` selecting which BIP-143-style digests
+are committed). The BIP-118 ANYPREVOUT family (`0x40..0x43`,
+`0xC0..0xC3`) is unconditionally rejected: ANYPREVOUT lets a
+signer's signature be replayed against UTXOs the signer did not
+intend to spend, and this proposal does not provide the dedicated
+pubkey-prefix scheme that BIP-118 mitigates the risk with.
 
 ### 16. Why this set of legacy wrapper blocks rather than a generic `LEGACY_SCRIPT` block?
 
@@ -1338,6 +1448,45 @@ attacker-controllable byte count for a specific spend depends on
 which block types are revealed — the maximum within standard relay
 limits is bounded by the witness-size cap and the per-tx preimage cap,
 not by an unstructured "padding" channel.
+
+**Stateless verifier obligation.** This is the single most subtle
+correctness trap in the proposal. The chainstate compressor stores
+each MLSC coin as one byte (`0x06`); the 32-byte `conditions_root` is
+NOT stored per-coin. Validating a v4 spend requires recovering that
+root from the synthetic UTXO entry at `(creating_txid,
+MLSC_ROOT_VOUT = 0xFFFFFFFF)`. Implementations MUST honour this path:
+
+- The full-node validation path (`bitcoind`) recovers the root
+  through the standard chainstate / undo-data lookup. No additional
+  obligation.
+- Any validation path that treats UTXOs as self-describing — block
+  template validators, libbitcoinkernel-style stateless verifiers,
+  `assumeutxo` snapshot loaders, alternative full-node
+  implementations — MUST either:
+  1. Provide a `LadderBlockAccessor::FetchConditionsRoot` callback
+     that resolves the synthetic entry from block storage, OR
+  2. Refuse to validate spends of v4 outputs.
+
+A node that silently returns failure (or, worse, success) on the
+recovery path without honouring the synthetic-entry lookup will
+diverge from conforming nodes on whether a given v4 spend is valid.
+This is a hard chain split with no in-protocol detection. The
+load-bearing recovery invariant is documented in
+`src/compressor.cpp` at the top of file; any change to type-`0x06`
+semantics that breaks the recovery path is a silent consensus
+divergence.
+
+Snapshot loaders specifically (`assumeutxo` and equivalents) MUST
+either carry the synthetic root entries in the snapshot or reject
+snapshots that include any v4 MLSC UTXO. A snapshot that drops the
+root entries leaves a downstream validator unable to spend the
+preserved MLSC outputs.
+
+Pruned-node spend validation works today via the standard undo-data
+retention path: the creating block is kept indefinitely while any
+spawned MLSC UTXO is unspent. Any future change to pruning behaviour
+around MLSC UTXOs MUST replace the access path before removing the
+data.
 
 **Soft-fork forward compatibility.** New block types are added by
 allocating a fresh 16-bit type code (the registry has 65 used codes
