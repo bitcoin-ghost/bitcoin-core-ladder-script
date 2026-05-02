@@ -5,8 +5,9 @@
 **Scope:** the full RPC-driven flow for creating QABI-enabled UTXOs, priming them, assembling a batch, and signing it with a single FALCON-512 coordinator signature.
 
 **Related docs:**
-- `project_qabi.md` — design spec (693 lines)
-- `bip-qabio.md` — BIP-format adaptation for integration into the main Ladder Script BIP
+- `QABIO.md` — concise protocol spec (the canonical reference)
+- `project_qabi.md` — original long-form design spec (kept for archival reference)
+- `QABIO_PLAYGROUND_GUIDE.md` — interactive multi-party walkthrough
 
 ---
 
@@ -26,7 +27,7 @@ Measured on the QABIO branch's scale tests:
 | 1000 | 74 KB | ~75 KB |
 | 3238 | 240 KB | at hard cap |
 
-All batches use **one** 666-byte FALCON-512 signature regardless of participant count. For comparison, 1000 participants with per-input FALCON sigs would require 666 KB of signature bytes — QABIO reduces that to 666 B (~1000× compression).
+All batches use **one** FALCON-512 signature regardless of participant count (variable length, up to `QABI_AGGREGATED_SIG_MAX = 666 B` per `src/rung/qabi.h`). For comparison, 1000 participants with per-input FALCON sigs would require ~666 KB of signature bytes — QABIO reduces that to a single sub-666 B sig (~1000× compression).
 
 ### Security properties
 
@@ -34,7 +35,7 @@ All batches use **one** 666-byte FALCON-512 signature regardless of participant 
 - **Cryptographic ownership**: each participant reveals a hash-chain preimage at spend time, proving they authorised this specific batch. An attacker cannot forge a preimage without the participant's `auth_seed`.
 - **Compact signature**: the coordinator's FALCON signature covers a sighash that includes `tx.qabi_block` — the block is bound to this exact signature.
 - **Replace-By-Depth mempool policy**: deeper preimages can only be produced by the UTXO owner (one-way hash), so the owner has cryptographic last word over mempool snipers.
-- **Full output-set match**: `tx.vout` must bit-exactly equal `block.outputs`. Coordinators cannot siphon extra outputs — any fee they want to charge must be an explicit `block.outputs` entry visible to participants.
+- **Output-set binding**: the QABI_SPEND check enforces (1) `tx.conditions_root == parsed_block.outputs_conditions_root`, (2) `tx.vout.size() == parsed_block.output_values.size()`, and (3) `tx.vout[i].value == parsed_block.output_values[i]` for every output. Because every v4 MLSC output's structural script is `0xDF ‖ tx.conditions_root` (no per-output scriptPubKey), pinning `conditions_root` + the value list pins every destination without storing scriptPubKeys on the wire. Coordinators cannot siphon extra outputs — any fee must be an explicit entry visible to participants in the QABIBlock.
 
 ---
 
@@ -113,11 +114,11 @@ qabi_signqabo <tx_hex> <coordinator_privkey_hex>
 {
   "hex":      "<signed tx hex>",
   "sighash":  "<hex SIGHASH_QABO>",
-  "sig_size": 666
+  "sig_size": <actual FALCON sig length, 1..666>
 }
 ```
 
-Computes SIGHASH_QABO, signs it with the FALCON-512 private key, pads to exactly 666 bytes (consensus cap), and re-serialises the tx with `aggregated_sig` populated. Rejects txs without a `qabi_block` (not a QABIO batch).
+Computes SIGHASH_QABO, signs it with the FALCON-512 private key, and re-serialises the tx with `aggregated_sig` populated by the actual variable-length signature (consensus accepts `1..QABI_AGGREGATED_SIG_MAX = 666` bytes). Rejects txs without a `qabi_block` (not a QABIO batch). v0.14 dropped the previous fixed-666 padding after audit #9 Finding 4 closed a coordinator-side embedding channel.
 
 ---
 
@@ -330,9 +331,14 @@ def u32_le_hex(n: int) -> str:
 
 The TX_MLSC serialiser takes the standard (non-MLSC) serialisation path when `conditions_root.IsNull() == true`. Any all-zero conditions_root will silently drop the `qabi_block` and `aggregated_sig` fields on re-encoding. Always set a non-zero conditions_root when constructing raw v4 txs.
 
-### `tx.vout` must exactly match `block.outputs`
+### Output-set binding (QABI_SPEND check 8)
 
-QABI_SPEND check 8 enforces bit-exact equality between `tx.vout` and `block.outputs`. Any mismatch (different value, different scriptPubKey, different order, extra outputs) rejects the whole tx. Coordinator fees must be explicit entries in `block.outputs`.
+The check enforces three things in sequence:
+1. `tx.conditions_root == parsed_block.outputs_conditions_root`
+2. `tx.vout.size() == parsed_block.output_values.size()`
+3. `tx.vout[i].value == parsed_block.output_values[i]` for every output
+
+Because every v4 MLSC output's structural script is `0xDF ‖ tx.conditions_root` (no per-output scriptPubKey on the wire), pinning `conditions_root` plus the value list pins every destination. Any value or count mismatch rejects the whole tx. Coordinator fees must be explicit entries in the QABIBlock.
 
 ### SIGHASH_QABO stability
 
@@ -346,13 +352,14 @@ The sighash is deterministic over all tx fields **except** `tx.aggregated_sig`. 
 
 ## 6. Further reading
 
-- **Design spec**: `doc/ladder-script/project_qabi.md` — 14 sections covering goals, definitions, UTXO structure, priming and spend flows, QABIBlock structure, size analysis, mempool policies, full security analysis with 15 attack scenarios
-- **BIP adaptation**: `doc/ladder-script/bip-qabio.md` — standards-track format for integration into the main Ladder Script BIP
+- **Protocol spec**: `doc/ladder-script/QABIO.md` — concise canonical reference
+- **Original design spec**: `doc/ladder-script/project_qabi.md` — long-form design walk covering goals, definitions, UTXO structure, priming and spend flows, QABIBlock structure, size analysis, mempool policies, and security analysis
+- **Playground walkthrough**: `doc/ladder-script/QABIO_PLAYGROUND_GUIDE.md`
 - **Reference implementation**:
-  - Core: `src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp` (EvalQABIPrimeBlock, EvalQABISpendBlock), `src/rung/policy.cpp` (RBD helpers)
-  - Consensus wiring: `src/validation.cpp` (RBD in ReplacementChecks), `src/primitives/transaction.h` (tx-level fields)
-  - RPC: `src/rung/rpc.cpp` (5 QABI commands + signrungtx/createrungtx extensions)
-  - Descriptors: `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens)
+  - Core: `src/rung/qabi.{h,cpp}`, `src/rung/blocks/qabi.cpp` (`EvalQABIPrimeBlock`, `EvalQABISpendBlock`, `EvalPQBatchBlock`), `src/rung/policy.cpp` / `policy.h` (RBD helpers)
+  - Consensus wiring: `src/validation.cpp` (RBD in `ReplacementChecks`), `src/primitives/transaction.h` (tx-level `qabi_block` / `aggregated_sig` fields)
+  - RPC: `src/rung/rpc.cpp` (5 QABI commands + `signrungtx` / `createrungtx` extensions)
+  - Descriptors: `src/rung/descriptor.cpp` (`qabi_prime()` / `qabi_spend()` tokens)
 - **Tests**:
-  - C++: `src/test/rung_tests.cpp` — 86 test cases in the `qabi_tests` suite covering serialisation, root determinism, sighash, full FALCON end-to-end, per-check failure modes, RBD policy, multi-party scale (up to 1000 participants), and adversarial edge cases
-  - Python: `test/functional/feature_qabi.py` — 24 test cases covering the full RPC surface on regtest
+  - C++: `src/test/rung_tests.cpp` — 49 Boost test cases with `qabi` in the name (serialisation, root determinism, sighash, full FALCON end-to-end, per-check failure modes, RBD policy, multi-party scale up to 1000 participants, adversarial edge cases) plus the dedicated `qabi_tests/pq_batch_*` PQ_BATCH cases
+  - Python: `test/functional/feature_qabi.py` — 24 test methods covering the full RPC surface on regtest, plus `feature_rung_pq_batch.py` and `feature_rung_pq_batch_stress.py` for PQ_BATCH
