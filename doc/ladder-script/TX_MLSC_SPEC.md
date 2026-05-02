@@ -1,6 +1,6 @@
 # TX_MLSC — Transaction-Level Merkelised Ladder Script Conditions
 
-**Status:** Draft v0.2 · March 2026
+**Status:** Implemented in v4 RUNG_TX · 2026
 
 ---
 
@@ -89,9 +89,9 @@ rung_2 coil: output_index=1   (SIG Bob → output 1)
 rung_3 coil: output_index=1   (SIG Carol + CSV → output 1)
 ```
 
-No rung limit per transaction. The tree can hold any number of rungs.
-The number of rungs is bounded only by MAX_LADDER_WITNESS_SIZE for the
-creation proof and standard transaction weight limits.
+Consensus limit: `MAX_RUNGS = 16` rungs per transaction
+(`src/rung/serialize.h`). The witness creation proof is also bounded by
+MAX_LADDER_WITNESS_SIZE and standard transaction weight limits.
 
 ### Leaf computation
 
@@ -186,7 +186,7 @@ For each v4 transaction with outputs:
       - output_index must be < vout_count
    b. Accept value_commitment as-is (opaque 32-byte hash)
 3. Compute rung_leaf for each rung:
-   `TaggedHash("LadderLeaf", template || value_commitment)`
+   `TaggedHash("LadderLeaf/v1", template || value_commitment)`
 4. Build Merkle tree from all rung_leaves using sorted interior nodes.
 5. Verify computed root == conditions_root in the transaction body.
 6. Verify every non-DATA_RETURN output has at least one rung assigned to it
@@ -361,10 +361,10 @@ output. To embed a specific 32-byte message requires a preimage attack.
 
 **Method:** Encode data in block_type choices and flags.
 
-**Defense:** Validated enums. block_type must be one of 61 values (~6 bits
+**Defense:** Validated enums. block_type must be one of 65 values (~6 bits
 freedom), inverted must be 0/1 (1 bit), coil fields are constrained enums.
-~4 bits of steganographic freedom per rung. For 100 rungs: ~50 bytes, not
-readable without attacker's codebook. **Negligible.**
+~4 bits of steganographic freedom per rung. At MAX_RUNGS = 16 rungs per
+tx: ~8 bytes, not readable without attacker's codebook. **Negligible.**
 
 ### Attack 4: Skip creation proof
 
@@ -514,9 +514,12 @@ same as signatures.
 
 ### Backward compatibility
 
-Pre-activation v4 MLSC outputs use per-output roots. Post-activation
-uses TX_MLSC. Spending pre-activation outputs: unchanged (prove against
-per-output root in UTXO set). Standard soft fork activation boundary.
+There is no pre-activation TX_MLSC format. v4 RUNG_TX ships TX_MLSC as
+the only valid output format from genesis activation; the per-output
+MLSC root layout that earlier drafts described was rejected during
+review (it duplicated 32 B per output and exposed an attacker-supplied
+root in the UTXO set). The legacy P2*_LEGACY block family remains the
+compatibility surface for pre-v4 outputs.
 
 ---
 
@@ -558,51 +561,50 @@ per-output root in UTXO set). Standard soft fork activation boundary.
 
 ### Core (serialize.h / serialize.cpp / conditions.cpp / evaluator.cpp)
 
-- [ ] Transaction serialization: conditions_root field, 8-byte output format
-- [ ] DATA_RETURN detection via nValue == 0 (no rung_mask sentinel needed)
-- [ ] CreationProof struct and deserialization
-- [ ] ValidateCreationProof: template checks + root recomputation
-- [ ] Verify every output has at least one rung (coil.output_index coverage)
-- [ ] UTXO set: shared conditions_root + per-entry value
-- [ ] VerifyRungTx: check coil.output_index matches spent output
-- [ ] Leaf computation: TaggedHash("LadderLeaf", template || value_commitment)
-- [ ] Sighash: Hash(conditions_root || output_values)
+- [x] Transaction serialization: conditions_root field, 8-byte output format
+- [x] DATA_RETURN detection via nValue == 0 (no rung_mask sentinel needed)
+- [x] CreationProof struct and deserialization
+- [x] ValidateCreationProof: template checks + root recomputation
+- [x] Verify every output has at least one rung (coil.output_index coverage)
+- [x] UTXO set: shared conditions_root + per-entry value
+- [x] VerifyRungTx: check coil.output_index matches spent output
+- [x] Leaf computation: TaggedHash("LadderLeaf/v1", template || value_commitment)
+- [x] Sighash: Hash(conditions_root || output_values)
 
 ### RPC (rpc.cpp)
 
-- [ ] signrungtx: generate creation proof from conditions
-- [ ] signladder: generate creation proof from descriptor
-- [ ] createrungtx: new output format (value only)
-- [ ] decoderungtx: display shared tree + creation proof + output assignments
+- [x] signrungtx: generate creation proof from conditions
+- [x] signladder: generate creation proof from descriptor
+- [x] createrungtx: new output format (value only)
+- [x] decoderungtx: display shared tree + creation proof + output assignments
 
 ### Descriptor (descriptor.cpp / descriptor.h)
 
-- [ ] output() wrapper in descriptor grammar
-- [ ] parseladder: per-output rung assignment
-- [ ] formatladder: emit output() wrappers
+- [x] output() wrapper in descriptor grammar
+- [x] parseladder: per-output rung assignment
+- [x] formatladder: emit output() wrappers
 
 ### Tests
 
-- [ ] Creation proof: valid accepted
-- [ ] Creation proof: missing rejected
-- [ ] Creation proof: root mismatch rejected
-- [ ] Creation proof: invalid block type rejected
-- [ ] Creation proof: invalid inversion rejected
-- [ ] Creation proof: output_index out of range rejected
-- [ ] Creation proof: output with no rungs rejected
-- [ ] Spend: coil output_index mismatch rejected
-- [ ] Spend: valid Merkle proof accepted
-- [ ] Spend: invalid Merkle proof rejected
-- [ ] Spend from 1-output TX_MLSC (degenerate tree, 0 proof hashes)
-- [ ] Spend from 10-output TX_MLSC (deep tree)
-- [ ] Attestation mode enforcement (INLINE only, AGGREGATE/DEFERRED reserved)
-- [ ] Backward compat: spend pre-activation per-output MLSC
-- [ ] DATA_RETURN handling (nValue == 0)
-- [ ] Dust threshold enforcement (nValue >= 546 for non-DATA_RETURN)
-- [ ] MAX_PREIMAGE_FIELDS_PER_TX enforcement
-- [ ] Spam: root not embeddable (protocol-derived)
-- [ ] Spam: value_commitment not embeddable (hash output)
-- [ ] Performance: validation overhead benchmark
+- [x] Creation proof: valid accepted
+- [x] Creation proof: missing rejected
+- [x] Creation proof: root mismatch rejected
+- [x] Creation proof: invalid block type rejected
+- [x] Creation proof: invalid inversion rejected
+- [x] Creation proof: output_index out of range rejected
+- [x] Creation proof: output with no rungs rejected
+- [x] Spend: coil output_index mismatch rejected
+- [x] Spend: valid Merkle proof accepted
+- [x] Spend: invalid Merkle proof rejected
+- [x] Spend from 1-output TX_MLSC (degenerate tree, 0 proof hashes)
+- [x] Spend from 10-output TX_MLSC (deep tree)
+- [x] Attestation mode enforcement (INLINE only, AGGREGATE/DEFERRED reserved)
+- [x] DATA_RETURN handling (nValue == 0)
+- [x] Dust threshold enforcement (nValue >= 546 for non-DATA_RETURN)
+- [x] MAX_PREIMAGE_FIELDS_PER_TX enforcement
+- [x] Spam: root not embeddable (protocol-derived)
+- [x] Spam: value_commitment not embeddable (hash output)
+- [x] Performance: validation overhead benchmark
 
 ---
 
@@ -619,16 +621,16 @@ per-output root in UTXO set). Standard soft fork activation boundary.
    a different output_index. This is a minor duplication but keeps the
    model clean. Recommendation: no rung sharing, duplicate if needed.
 
-3. **Maximum rungs per transaction.** No hard limit in this spec — bounded
-   by creation proof witness size and tx weight. For a 400K WU standard
-   tx: ~9,500 rungs maximum (each ~42 bytes at 1 WU). Practical limit
-   is far lower. Consider a soft consensus limit (e.g., 256 rungs) for
-   DoS protection.
+3. **Maximum rungs per transaction.** Resolved: `MAX_RUNGS = 16`
+   (`src/rung/serialize.h`). The 16-rung cap covers every realistic
+   condition graph (per `examples/` and `tests/functional/feature_rung_*.py`)
+   while keeping the creation-proof witness and DoS surface bounded.
 
-4. **Activation.** Standard soft fork. Post-activation: v4 transactions
-   must use TX_MLSC format. Pre-activation outputs remain spendable
-   with the old per-output MLSC proof format.
+4. **Activation.** v4 RUNG_TX activates as a single soft fork; TX_MLSC
+   ships as the only valid output format. There is no per-output MLSC
+   compatibility path — pre-v4 spends use the dedicated P2*_LEGACY
+   block family inside a v4 envelope.
 
 ---
 
-*TX_MLSC Specification v0.2 · Ladder Script Project · March 2026*
+*TX_MLSC Specification · Ladder Script Project · 2026*
