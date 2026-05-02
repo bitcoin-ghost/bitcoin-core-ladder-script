@@ -139,9 +139,9 @@ Spend many UTXOs gated by the same FALCON key in one transaction with one verify
 `PQ_BATCH` commits `SHA256(falcon_pubkey)` per output. In the spending tx, one
 **anchor** input reveals the pubkey + a FALCON-512 signature; every other input
 gated by the same hash carries an empty witness and short-circuits via a tx-local
-cache. **~55 vB amortised per input** — about an order of magnitude cheaper than
-per-input FALCON sigs (~666 B sig + ~897 B pubkey each). No coordinator, no
-priming round.
+cache. **~17.8 vB per input at N=100** (anchor ~392 vB, non-anchors ~14 vB each)
+&mdash; about **22&times; cheaper** than per-input FALCON-512 sigs. No coordinator,
+no priming round.
 
 Use cases: exchange consolidations, co-owned PQ-key UTXO pools, recurring
 subscription drains. See [`PQ_BATCH_PLAYGROUND_GUIDE.md`](PQ_BATCH_PLAYGROUND_GUIDE.md).
@@ -157,9 +157,9 @@ Each participant funds an MLSC UTXO with a 3-rung tree:
 `[SIG_escape, QABI_PRIME, QABI_SPEND]`. Participants prime independently by
 revealing an auth-chain preimage. The coordinator signs `SIGHASH_QABO` once over
 the whole batch. Consensus checks the coordinator's signature once per tx via
-the `QABOSigCache`. **~143 vB per cosigner at N=100** — roughly equivalent to a
-P2WPKH payment per participant. If the coordinator bails, every participant
-sweeps via Rung 0.
+the `QABOSigCache`. **~143 vB per cosigner at N=100** (converges to ~139 vB
+at N=500+) &mdash; roughly in the P2WPKH (110 vB) ballpark per participant. If
+the coordinator bails, every participant sweeps via Rung 0.
 
 Use cases: exchange settlement, atomic issuance, pooled custody. See
 [`QABIO.md`](QABIO.md) and [`QABIO_PLAYGROUND_GUIDE.md`](QABIO_PLAYGROUND_GUIDE.md).
