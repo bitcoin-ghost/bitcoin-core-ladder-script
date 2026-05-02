@@ -2137,38 +2137,85 @@ their named bars.
   component fails to complete to the named bar, the phased
   activation option (Q3 Option A) is the agreed fallback and a
   separate phased BIP will be prepared from this proposal's text.
+  The components are intentionally set to bars a Bitcoin Core
+  reviewer would conventionally expect for a proposal of this scope;
+  the realistic envelope between first mailing-list circulation and
+  filing a mainnet-activation proposal under this gate is **18 to
+  24 months**, with the 12-month signet soak as the floor and the
+  three-cycle mailing-list iteration the next-largest item. The
+  components run in parallel rather than series.
 
-  1. **External security audit.** Two independent reviewers,
-     comprising at least one post-quantum cryptography reviewer and
-     at least one Bitcoin consensus reviewer, sign off on the
-     consensus surface (the 961-line integration patch, the library
-     under `src/rung/`, the wire format, and the QABIO and PQ_BATCH
-     evaluators).
+  1. **External security audit.** Three or more named independent
+     reviewers, comprising at least one post-quantum cryptography
+     reviewer (FALCON / Dilithium / liboqs experience), at least
+     one Bitcoin consensus reviewer (libbitcoinkernel or
+     Core-validation fluency), and at least one cryptography /
+     Schnorr-tweak reviewer. Each publishes a written assessment
+     of the consensus surface (the 961-line integration patch, the
+     library under `src/rung/`, the wire format, the per-input and
+     QABO sighashes, the LadderTweak/v1 construction, and the
+     QABIO and PQ_BATCH evaluators).
   2. **TLA+ pass at production constants.** State-space exploration
      of the 27 specifications under `spec/` completes at the
      production constants `MAX_RUNGS = 16`,
-     `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`. Counter-
+     `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`. The
+     specifications themselves are peer-reviewed: at least one named
+     reviewer other than the author has validated the model. Counter-
      examples (if any) close to zero or are explained in a published
      gap analysis.
-  3. **Test vectors.** At minimum one positive and one negative
-     vector per witness-rule family (`Fixed N`, `Empty`, `Reveal P`,
+  3. **Test vectors.** At least 50 vectors across the eight
+     witness-rule families (`Fixed N`, `Empty`, `Reveal P`,
      `Triplets K`, `Accumulator`, `Bridging`, `PQ-anchor`,
-     `Unspendable`) — 16+ vectors total. Negative vectors close
-     cross-implementation malleability surfaces by demonstrating that
-     conforming implementations reject identically.
+     `Unspendable`), covering positive cases, negative cases, and
+     edge cases. Edge cases include boundary values for every cap
+     (`MAX_RUNGS`, `MAX_BLOCKS_PER_RUNG`,
+     `MAX_PREIMAGE_FIELDS_PER_TX`, `MAX_SCRIPT_BODY_FIELDS_PER_TX`,
+     dust threshold, FALCON sig length bounds), sighash cross-
+     replay attempts (key-path digest replayed against script-path
+     and vice versa, pre-tweak vs post-tweak, `LadderSighash` vs
+     `TapSighash`), and witness malleability negatives (triplet
+     reordering, non-canonical CompactSize, padding-leaf vs real-
+     leaf collisions). Negative vectors close cross-implementation
+     malleability surfaces by demonstrating that conforming
+     implementations reject identically.
   4. **Live signet exposure.** Three or more independently-operated
      nodes on the `ladder-script.org` signet running for at least
-     six months without a consensus disagreement.
-  5. **Mailing-list review.** Every substantive objection raised on
-     the Bitcoin development mailing list is addressed in this BIP —
-     incorporated, refuted in the relevant Rationale Q, or deferred
-     with an explicit reason. The BIP is iterated until no
-     substantive objection remains unaddressed.
+     **twelve months** without a consensus disagreement. Diversity
+     requirements: operators in at least two distinct jurisdictions,
+     running at least two distinct host operating systems, on at
+     least two distinct hardware architectures (e.g. x86_64 and
+     arm64). The single-operator state at draft time is the
+     starting point, not the activation-gate state.
+  5. **Mailing-list review.** **At least three full review cycles**
+     on the Bitcoin development mailing list. Every substantive
+     objection is addressed in this BIP — incorporated, refuted in
+     the relevant Rationale Q, or deferred with an explicit reason.
+     The BIP is version-tagged at the close of each cycle so
+     reviewers can diff successive rounds; iteration continues
+     until no substantive objection remains unaddressed.
   6. **Named reviewer sign-offs.** Following the BIP 340 / 341
      model, named reviewers are listed in §Acknowledgements.
      Sign-off implies the reviewer has read the consensus surface
      and judges it sound; it does not imply blanket endorsement of
      activation.
+  7. **Independent implementation.** At least one alternative
+     implementation, written from this BIP's text without recourse
+     to the reference implementation's source, produces byte-
+     identical output on every test vector. A subset implementation
+     (for example, a libbitcoinkernel-style stateless verifier
+     covering deserialisation, root recovery, sighash, and one
+     witness-rule family) satisfies this gate; full-validation
+     parity is not required. The existence of a second
+     implementation that read the spec alone and got the same
+     answer is the strongest available signal of spec clarity, and
+     is the explicit answer to the stateless-verifier obligation
+     raised in §Security Considerations.
+  8. **Reproducible Guix builds.** Bit-identical builds across
+     reproducer hosts matching upstream Bitcoin Core's
+     `contrib/guix` discipline, for the supported targets (Linux
+     x86_64, macOS arm64, Windows x86_64). Reproducible builds are
+     non-negotiable for Bitcoin Core releases under current
+     practice; activation should match.
 
   Each numbered component is also tracked as its own Open Item below
   with its current state.
@@ -2178,10 +2225,11 @@ their named bars.
   mailing list is the first invitation for review. (Activation gate
   components 5 and 6.)
 - **External security audit.** No formal external security audit
-  has been performed. An independent post-quantum cryptography
-  audit and an independent Bitcoin consensus review are scheduled
-  before any mainnet-activation proposal. (Activation gate component
-  1.)
+  has been performed. The activation gate requires three or more
+  named independent reviewers (post-quantum cryptography +
+  Bitcoin consensus + cryptography / Schnorr-tweak), each
+  publishing a written assessment, before any mainnet-activation
+  proposal. (Activation gate component 1.)
 - **TLA+ model checking at consensus-level constants.** 27 TLA+
   specifications under `spec/` cover the consensus surface
   (evaluation semantics, anti-spam, wire format, Merkle proof
@@ -2196,18 +2244,19 @@ their named bars.
 - **Test vectors expansion.** The starter set in
   `src/test/data/rung_tx_vectors.json` covers `SIG`,
   `P2WPKH_LEGACY`, and `HTLC` — three of eight witness-rule
-  families. The activation gate requires at least one positive and
-  one negative vector per family (16+ vectors total). A future
-  revision will extend the fixture toward that bar with vectors for
-  QABIO priming and batch-spend, PQ_BATCH spends, and the negative
-  cases per family. (Activation gate component 3.)
+  families. The activation gate requires at least 50 vectors across
+  all eight families, including positive, negative, and edge cases
+  (cap boundaries, sighash cross-replay, witness malleability
+  negatives). A future revision will extend the fixture toward that
+  bar. (Activation gate component 3.)
 - **Activation parameters.** The deployment bit, start time, and
   timeout are out of scope for this BIP. They will be specified in
   a separate activation document at the time of mainnet proposal.
 - **Development signet decentralisation.** The signet at
   `ladder-script.org` is currently single-operator. The activation
-  gate requires three or more independently-operated nodes for at
-  least six months without a consensus disagreement; a second
+  gate requires three or more independently-operated nodes (with
+  jurisdictional, OS, and hardware-architecture diversity) for at
+  least twelve months without a consensus disagreement; a second
   independently-operated node and a public faucet are planned
   immediately, with the third node sourced from the mailing-list
   review cycle. (Activation gate component 4.)
@@ -2220,8 +2269,14 @@ their named bars.
 - **Reproducible Guix builds.** Pre-built signed binaries are
   published per release (Linux x86_64, macOS arm64, Windows
   x86_64). Reproducible Guix builds matching upstream Bitcoin Core's
-  `contrib/guix` discipline are not yet wired in; this is required
-  for any mainnet-activation proposal.
+  `contrib/guix` discipline are not yet wired in. (Activation gate
+  component 8.)
+- **Independent implementation.** No alternative implementation of
+  v4 RUNG_TX exists at the time of this draft. The activation gate
+  requires at least one alternative implementation (subset
+  permitted; libbitcoinkernel-style stateless verifier qualifies)
+  written from this BIP alone, producing byte-identical output on
+  every test vector. (Activation gate component 7.)
 
 ## Acknowledgements
 
