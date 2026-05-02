@@ -1,8 +1,8 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: 20,888 lines across 38 files in `src/rung/`, plus the
-363-line `src/rung_shims.h` boundary header (21,251 lines across 39 new
+implementation: 20,884 lines across 38 files in `src/rung/`, plus the
+363-line `src/rung_shims.h` boundary header (21,247 lines across 39 new
 files in total).
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
