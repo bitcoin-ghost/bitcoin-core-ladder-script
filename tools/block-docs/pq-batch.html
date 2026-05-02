@@ -107,21 +107,21 @@
       <tr>
         <td class="field-name">pubkey<br><em>(anchor only)</em></td>
         <td class="field-type">PUBKEY</td>
-        <td class="field-size">897 / 1,793 / 1,952 / 64 B</td>
+        <td class="field-size">32 / 33 / 897 / 1,793 / 1,952 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Canonical PQ pubkey. Scheme is derived from pubkey size: 897 &rarr; FALCON-512, 1,793 &rarr; FALCON-1024, 1,952 &rarr; Dilithium3, 64 &rarr; SPHINCS+/SHA</td>
+        <td class="field-desc">Canonical PQ pubkey (or Schnorr/ECDSA carve-out). Scheme derived from pubkey size: 32-33 &rarr; SCHNORR (rejected by PQ_BATCH &mdash; classical sigs handled by SIG with merkle_pub_key gating), 897 &rarr; FALCON-512, 1,793 &rarr; FALCON-1024, 1,952 &rarr; Dilithium3. Any other size &rarr; UNSATISFIED. <strong>SPHINCS+ is not supported</strong> &mdash; its ~13&nbsp;KB sig makes the amortisation benefit marginal.</td>
       </tr>
       <tr>
         <td class="field-name">signature<br><em>(anchor only)</em></td>
         <td class="field-type">SIGNATURE</td>
         <td class="field-size">scheme-dependent</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">PQ signature over the per-input ladder sighash. FALCON-512 = 666 B exact</td>
+        <td class="field-desc">PQ signature over the per-input ladder sighash (<span class="eval-keyword">FetchLadderSighash(SIGHASH_DEFAULT)</span>). FALCON-512 sigs are variable up to ~666&nbsp;B; <code>OQS_SIG_verify</code> validates the encoded length internally.</td>
       </tr>
     </tbody>
   </table>
   <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">
-    The witness is variable: <strong>0 fields</strong> for non-anchor inputs (cache reads), <strong>2 fields</strong> for the anchor input (PUBKEY + SIGNATURE). The evaluator enforces the 0-or-2 rule. This is the only block whose witness layout is not fixed (declared <code>nullptr</code> in <code>BlockTypeInfo</code> &mdash; see <code>src/rung/types.h</code>).
+    The merged conditions+witness block has <strong>1 field</strong> for non-anchor inputs (just <code>HASH256</code>) or <strong>3 fields</strong> for the anchor input (<code>HASH256, PUBKEY, SIGNATURE</code>). <strong>Audit #3 fix E-020/E-021:</strong> the evaluator pins these per-slot types exactly &mdash; the cardinality check alone was bypassable (<code>witness=[SIG, SIG]</code> gave a 3-field merged block with no PUBKEY, falling through to the non-anchor cache lookup with up to ~99&nbsp;KB of attacker bytes silently embedded). PQ_BATCH_WITNESS is declared <code>nullptr</code> in <code>BlockTypeInfo</code> precisely because the merged shape is what's pinned.
   </p>
 </div>
 
@@ -131,27 +131,31 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Read the committed <code>pubkey_hash</code> from conditions. Look up the per-tx <code>PQBatchCache</code> for this commit.</span>
+      <span class="eval-step-text">Strict shape check on the merged conditions+witness block: must be either 1 field <code>[HASH256]</code> (non-anchor) or 3 fields <code>[HASH256, PUBKEY, SIGNATURE]</code> in that exact order. Anything else &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
-      <span class="eval-step-num">2a.</span>
-      <span class="eval-step-text"><strong>If witness is empty</strong> (non-anchor input): if the cache says the commit is verified &rarr; <span class="eval-result-sat">SATISFIED</span>. If no cache entry exists yet (anchor not seen yet) &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
-    </div>
-    <div class="eval-step">
-      <span class="eval-step-num">2b.</span>
-      <span class="eval-step-text"><strong>If witness has 2 fields</strong> (anchor input): check <code>SHA256(PUBKEY) == pubkey_hash</code>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+      <span class="eval-step-num">2.</span>
+      <span class="eval-step-text">HASH256 must be exactly 32&nbsp;B. Convert to a <code>uint256 commit_key</code> for the cache.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Derive the PQ scheme from the pubkey size. Compute the per-input ladder sighash via <code>FetchLadderSighash</code>.</span>
+      <span class="eval-step-text"><strong>Non-anchor path</strong> (1-field merged block): take the mutex on <code>ctx.pq_batch_cache_mutex</code> (when provided), look up <code>commit_key</code>; cached &amp; true &rarr; <span class="eval-result-sat">SATISFIED</span>; absent or false &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (anchor must precede this input in script-check order).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify the signature: <code>VerifyPQSignature(scheme, signature, sighash, pubkey)</code>. If valid &rarr; populate <code>PQBatchCache[pubkey_hash] = true</code> and return <span class="eval-result-sat">SATISFIED</span>. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span>.</span>
+      <span class="eval-step-text"><strong>Anchor path</strong> (3-field merged block): compute <code>SHA256(PUBKEY)</code> and <code>memcmp</code> against the committed HASH256. Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (failures are <em>not</em> cached, so a later input with a different commit can still anchor).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">Witness shape other than 0 or 2 fields &rarr; <span class="eval-result-err">ERROR</span>.</span>
+      <span class="eval-step-text">Derive scheme from <code>pubkey.size()</code>: 32 or 33 &rarr; SCHNORR; 897 &rarr; FALCON512; 1793 &rarr; FALCON1024; 1952 &rarr; DILITHIUM3; anything else &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Then <span class="eval-keyword">FetchLadderSighash(ctx, SIGHASH_DEFAULT)</span> &rarr; 32-byte message; failure &rarr; <span class="eval-result-err">ERROR</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">6.</span>
+      <span class="eval-step-text">If <code>IsPQScheme(scheme)</code>: <span class="eval-keyword">VerifyPQSignature(scheme, sig, sighash, pubkey)</span> &rarr; verified flag. Schnorr/ECDSA carve-out: <code>verified</code> stays false &mdash; PQ_BATCH's value-add is PQ-specific (use SIG with merkle_pub_key for classical paths). On <code>verified</code>: take the mutex and write <code>(*ctx.pq_batch_cache)[commit_key] = true</code> so subsequent non-anchor inputs (and concurrent workers) see the verification immediately. v0.13 audit #9 F1-real fix.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">7.</span>
+      <span class="eval-step-text"><code>verified</code> &rarr; <span class="eval-result-sat">SATISFIED</span>; else &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
   </div>
 </div>
