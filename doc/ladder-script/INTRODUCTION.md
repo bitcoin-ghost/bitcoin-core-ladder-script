@@ -73,14 +73,16 @@ what they contain.
 - **`PQ_BATCH`** commits `SHA256(falcon_pubkey)` per output. One
   "anchor" input in the spend tx reveals the pubkey + signature once;
   every other input gated by the same hash short-circuits via a
-  tx-local cache. **~55 vB amortised per input** — about an order of
-  magnitude cheaper than per-input FALCON. No coordinator, no priming
-  round.
+  tx-local cache. **~17.8 vB amortised per input at N=100** — about
+  22&times; cheaper than per-input FALCON-512. No coordinator, no
+  priming round. (See [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) for the
+  full cost table; pq-batch.html mirrors it.)
 - **QABIO** (Quantum Atomic Batch I/O) is a multi-party batch
   ceremony: a coordinator + N participants, one FALCON-512 aggregate
-  signature covers the whole tx. **~143 vB per cosigner at N=100** —
+  signature covers the whole tx. **~139 vB per cosigner at N=100** —
   roughly equivalent to a P2WPKH payment, fully PQ-safe and atomically
-  settled.
+  settled. (See [`QABIO.md`](QABIO.md) §8 for the converging cost
+  table.)
 
 **Native covenants and state machines.** CTV template verification,
 recursive covenants (`RECURSE_SAME`, `RECURSE_MODIFIED`, `RECURSE_COUNT`,
