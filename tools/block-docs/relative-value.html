@@ -125,13 +125,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">numerator</span> and <span class="eval-keyword">denominator</span> from NUMERIC fields</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Validate: numerator &ge; 0, denominator &gt; 0. If invalid &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Compute <span class="eval-keyword">lhs</span> = output_amount &times; denominator</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Compute <span class="eval-keyword">rhs</span> = input_amount &times; numerator</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Overflow check: if 64-bit multiplication overflows, recompute using <span class="eval-keyword">__int128</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">If lhs &ge; rhs &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span>s. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>numerator</code> and the second as <code>denominator</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Validate: <code>numerator &lt; 0</code> or <code>denominator &le; 0</code> &rarr; <span class="eval-result-err">ERROR</span>. Defence-in-depth uint32 range check: <code>numerator &gt; 0xFFFFFFFF</code> or <code>denominator &gt; 0xFFFFFFFF</code> &rarr; <span class="eval-result-err">ERROR</span> (overflow guard for the cross-multiply).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Special case: <code>numerator == 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> immediately (the inequality <code>0 &ge; output * 0</code> trivially holds).</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Cross-multiply via <code>__int128</code>: <code>lhs = (__int128)output_amount * denominator</code>, <code>rhs = (__int128)input_amount * numerator</code>. v0.12 audit-8b F3 fix &mdash; pre-v0.12 the comparison used a quotient/remainder decomposition that could overflow int64 (UB &rarr; consensus split between compilers). Both products fit in 128 bits because amounts are bounded by MAX_MONEY and num/denom by 2&sup3;&sup2;.</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If <code>lhs &ge; rhs</code> &rarr; <span class="eval-result-sat">SATISFIED</span>; else &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 

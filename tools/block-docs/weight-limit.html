@@ -118,11 +118,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_weight</span> from NUMERIC field. If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If max_weight &le; 0 &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If no transaction context (structural validation) &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Compute <span class="eval-keyword">GetTransactionWeight</span>(tx). If &le; max_weight &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Weight exceeds limit &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">NUMERIC</span> field. Missing &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> as <code>max_weight</code>; undecodable or <code>&le; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Require <code>ctx.tx_weight &gt; 0</code>; missing or &le; 0 &rarr; <span class="eval-result-err">ERROR</span> (fail-closed; the evaluator does <em>not</em> compute weight from the tx — the caller pre-computes it).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>ctx.tx_weight &le; max_weight</code> &rarr; <span class="eval-result-sat">SATISFIED</span>; else &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
