@@ -61,7 +61,7 @@ parseladder "descriptor" '{"key_alias":"hex_pubkey", ...}'
 | `descriptor` | string | The Ladder Script descriptor string                      |
 | `keys`       | object | Optional alias→pubkey map (for `@alice` style references)|
 
-**Returns:** `{ "conditions_hex": "...", "mlsc_root": "..." }`.
+**Returns:** `{ "conditions_hex": "...", "mlsc_root": "...", "n_rungs": <int> }`.
 
 **Example:**
 
@@ -89,16 +89,23 @@ the witness stack. Use this unless you need to control the witness
 construction yourself.
 
 ```
-signladder "raw_tx" "descriptor" '{"alias":"wif", ...}'
+signladder "hex" "descriptor" '{"alias":"wif", ...}' spent_outputs
+           [input_index] [rung_index] [keypath_key] [keypath_merkle_root] [shared_source]
 ```
 
-| Arg          | Type   | Description                                              |
-|--------------|--------|----------------------------------------------------------|
-| `raw_tx`     | string | Unsigned v4 RUNG_TX hex (from `createrungtx`)            |
-| `descriptor` | string | The spending-side descriptor                             |
-| `keys`       | object | Alias→WIF map (private keys)                             |
+| Arg                    | Type    | Description                                                                                                              |
+|------------------------|---------|--------------------------------------------------------------------------------------------------------------------------|
+| `hex`                  | string  | Unsigned v4 RUNG_TX hex (from `createrungtx`)                                                                            |
+| `descriptor`           | string  | The spending-side descriptor                                                                                             |
+| `keys`                 | object  | Alias→WIF map (private keys)                                                                                             |
+| `spent_outputs`        | array   | Outputs being spent (`[{"amount":..., "scriptPubKey":...}, ...]`) — required for sighash computation                     |
+| `input_index`          | integer | Optional, default 0                                                                                                      |
+| `rung_index`           | integer | Optional, default 0 — target rung for multi-rung conditions                                                              |
+| `keypath_key`          | string  | Optional WIF for key-path spending. When provided, produces a 1-element witness                                          |
+| `keypath_merkle_root`  | string  | Optional 32-byte Merkle root hex for key-path with a script tree. Omit for key-path-only                                 |
+| `shared_source`        | integer | Optional input index of an already-signed input from the same source tx (SHARED proof mode)                              |
 
-**Returns:** the signed transaction hex.
+**Returns:** `{ "hex": "...", "complete": <bool> }`.
 
 ### `createrungtx`
 
@@ -109,15 +116,18 @@ it governs (`output_index`). The wire format used is TX_MLSC (8-byte
 value-only outputs, conditions_root once per tx).
 
 ```
-createrungtx inputs amounts rungs locktime
+createrungtx inputs outputs rungs [locktime] [internal_pubkey] [qabi_block] [relays]
 ```
 
-| Arg        | Type    | Description                                                    |
-|------------|---------|----------------------------------------------------------------|
-| `inputs`   | array   | UTXOs to spend (`[{"txid":..., "vout":..., "sequence":...}, ...]`) |
-| `amounts`  | array   | Output amounts (BTC)                                           |
-| `rungs`    | array   | Per-rung condition spec (each rung carries blocks + coil)      |
-| `locktime` | integer | Optional, default 0                                            |
+| Arg               | Type    | Description                                                                                                                  |
+|-------------------|---------|------------------------------------------------------------------------------------------------------------------------------|
+| `inputs`          | array   | UTXOs to spend (`[{"txid":..., "vout":..., "sequence":...}, ...]`)                                                           |
+| `outputs`         | array   | Output amounts (BTC) — value-only on the wire (TX_MLSC format)                                                               |
+| `rungs`           | array   | Per-rung spec (each rung carries `output_index`, `blocks`, optional `coil`)                                                  |
+| `locktime`        | integer | Optional, default 0                                                                                                          |
+| `internal_pubkey` | string  | Optional 32-byte x-only internal pubkey for key-path spending. When provided, the conditions_root is tweaked                 |
+| `qabi_block`      | string  | Optional serialised QABIBlock bytes (hex). Present iff this is a QABIO batch tx — use `qabi_buildblock` to construct         |
+| `relays`          | array   | Optional shared relay blocks (v0.7) folded into the conditions_root tree at positions `[N..N+M-1]`                           |
 
 **Returns:** the unsigned transaction hex.
 
@@ -129,16 +139,16 @@ need to drive witness construction directly (e.g. mixed-input txs where
 one input uses the wallet and another uses a custom keystore).
 
 ```
-signrungtx "raw_tx" signers spent_outputs
+signrungtx "hex" signers spent_outputs
 ```
 
-| Arg              | Type  | Description                                          |
-|------------------|-------|------------------------------------------------------|
-| `raw_tx`         | string| Unsigned v4 RUNG_TX hex                              |
-| `signers`        | array | Per-input `{conditions_hex, witness_spec, keys}` array |
-| `spent_outputs`  | array | Spent outputs (needed for sighash computation)       |
+| Arg              | Type   | Description                                                                                                                                                         |
+|------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `hex`            | string | Unsigned v4 RUNG_TX hex                                                                                                                                             |
+| `signers`        | array  | Per-input objects. Legacy SIG-only: `{"input":N, "privkey":"WIF"}`. Full: `{"input":N, "rung":N, "blocks":[{type,privkey,...}], "conditions":..., "relay_blocks":..., "diff_witness":...}` |
+| `spent_outputs`  | array  | Spent outputs (`[{"amount":..., "scriptPubKey":...}, ...]`) — required for sighash computation                                                                      |
 
-**Returns:** the signed transaction hex.
+**Returns:** `{ "hex": "...", "complete": <bool> }`.
 
 ---
 
@@ -217,9 +227,9 @@ into the build.
 generatepqkeypair "scheme"
 ```
 
-Schemes: `falcon512`, `falcon1024`, `dilithium3`, `sphincs_sha`.
+Schemes (case-sensitive, uppercase): `FALCON512`, `FALCON1024`, `DILITHIUM3`, `SPHINCS_SHA`.
 
-**Returns:** `{ "pubkey": "...", "privkey": "..." }`.
+**Returns:** `{ "scheme": "...", "pubkey": "...", "privkey": "..." }`.
 
 ### `extractadaptorsecret`
 
@@ -250,17 +260,20 @@ the ceremony commits to via `committed_root` in every participant's
 `QABI_SPEND` block.
 
 ```
-qabi_buildblock coord_pubkey prime_expiry_height entries outputs
+qabi_buildblock coordinator_pubkey prime_expiry_height [batch_id]
+                entries outputs_conditions_root output_values
 ```
 
-| Arg                    | Type   | Description                                          |
-|------------------------|--------|------------------------------------------------------|
-| `coord_pubkey`         | string | Coordinator's FALCON-512 pubkey (897 bytes hex)      |
-| `prime_expiry_height`  | integer| Block height after which the priming expires         |
-| `entries`              | array  | Per-participant entries (preimage commitments)       |
-| `outputs`              | array  | The committed output set                             |
+| Arg                       | Type    | Description                                                                                                                       |
+|---------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `coordinator_pubkey`      | string  | Coordinator's FALCON-512 pubkey (897 bytes hex)                                                                                   |
+| `prime_expiry_height`     | integer | Block height after which the priming expires                                                                                      |
+| `batch_id`                | string  | Optional placeholder — ignored by the parser (v0.13 audit #9 F6 enforces canonical SHA256 derivation). Returned in the result     |
+| `entries`                 | array   | Per-participant entries `[{participant_id, contribution, destination_index}, ...]`                                                |
+| `outputs_conditions_root` | string  | 32-byte conditions root that the spend tx must use as `tx.conditions_root`. Pins every destination scriptPubKey structurally     |
+| `output_values`           | array   | Per-output amounts (BTC). The destination scriptPubKey is implicit (`0xDF + outputs_conditions_root` for every v4 MLSC output)    |
 
-**Returns:** `{ "block_hex": "...", "committed_root": "..." }`.
+**Returns:** `{ "qabi_block": "<hex>", "qabi_root": "<hex>", "batch_id": "<hex>", "size": <bytes> }`.
 
 ### `qabi_blockinfo`
 
@@ -276,15 +289,25 @@ to construct a QABI-enabled UTXO and to reveal preimages at priming
 and spend time.
 
 ```
-qabi_authchain "seed_hex" chain_length depth
+qabi_authchain "auth_seed" chain_length [depth]
 ```
+
+`depth` is optional. When omitted, only `auth_tip` is returned. When provided (`0 = tip`, `N = seed`), the matching preimage is also returned: `{ "auth_tip": "<hex>", "preimage": "<hex>" }`.
 
 ### `qabi_signqabo`
 
-Coordinator-side signing operation. Takes the unsigned QABIO tx and
-the coordinator's FALCON-512 private key, computes `SIGHASH_QABO`,
-and produces the FALCON-512 signature that goes into the tx-level
-`aggregated_sig` field.
+Coordinator-side signing operation. Takes the unsigned QABIO tx
+(`hex_tx`) and the coordinator's FALCON-512 private key (`privkey`),
+computes `SIGHASH_QABO`, and produces the FALCON-512 signature that
+goes into the tx-level `aggregated_sig` field.
+
+**Returns:** `{ "hex": "<signed tx>", "sighash": "<hex>", "sig_size": <1..666> }`.
+
+Since v0.14 / audit #9 F4 the signature is written without padding —
+`sig_size` is the actual FALCON sig length (consensus accepts
+`1..QABI_AGGREGATED_SIG_MAX = 666`). Pre-v0.14 behaviour padded to a
+fixed 666 B and was changed to close a coordinator-side embedding
+channel.
 
 ### `qabi_sighash`
 
