@@ -146,6 +146,40 @@ otherwise noted. `CompactSize` non-canonical encodings (e.g. encoding
 the value 1 as `0xFD 0x01 0x00` rather than `0x01`) MUST be rejected at
 deserialisation.
 
+### Tagged hash domains
+
+This proposal defines fourteen BIP 340-style tagged-hash domains,
+all using the `/v1` suffix convention so any future revision of a
+construction can introduce a `/v2` tag without colliding with deployed
+code. Each tag is listed once below for cross-reference; the
+construction that uses it is specified in the section noted.
+
+| Tag | Used by | Section |
+|---|---|---|
+| `LadderLeaf/v1` | Rung leaf and `MLSC_EMPTY_LEAF` padding constant | §Conditions and the conditions root → Leaf hashing |
+| `LadderRelayLeaf/v1` | Relay leaf | §Conditions and the conditions root → Leaf hashing |
+| `LadderInternal/v1` | Sorted interior node in the conditions tree | §Conditions and the conditions root → Interior hashing |
+| `LadderTweak/v1` | Internal-pubkey x-only tweak for key-path enablement | §Key-path tweak |
+| `LadderSighash/v1` | Per-input script-path sighash | §Sighash → `SignatureHashLadder` |
+| `LadderKeyPathSighash/v1` | Per-input key-path sighash | §Sighash → `SignatureHashLadderKeyPath` |
+| `LadderQABISection/v1` | 32-byte QABI section binding folded into both per-input sighashes | §Sighash → QABI section binding |
+| `LadderQABOSighash/v1` | Coordinator FALCON-512 signature digest | §Sighash → `ComputeSighashQABO` |
+| `LadderMultisigPubkey/v1` | Pubkey leaf in the inner-Merkle pubkey commit (`MULTISIG`, `TIMELOCKED_MULTISIG`) | §Block registry → `MULTISIG` |
+| `LadderMultisigInternal/v1` | Sorted interior node in the inner pubkey-Merkle tree | §Block registry → `MULTISIG` |
+| `LadderMultisigPadding/v1` | Padding leaf for the inner pubkey-Merkle tree | §Block registry → `MULTISIG` |
+| `LadderAccumulatorLeaf/v1` | Element-id leaf in the `ACCUMULATOR` set commitment | §Block registry → `ACCUMULATOR` |
+| `LadderAccumulatorInterior/v1` | Sorted interior node in the `ACCUMULATOR` tree | §Block registry → `ACCUMULATOR` |
+| `LadderQABIBatchId/v1` | Canonical `qabi_block.batch_id` derivation (coordinator pubkey + outputs root + expiry) | §Block registry → `QABI_PRIME` / `QABI_SPEND` |
+
+The domains are mutually disjoint by construction: BIP 340 tagged
+hashes prefix each input with `SHA256(tag) || SHA256(tag)`, so two
+distinct tag strings produce two distinct prefixes and any cross-
+domain collision would require a second-preimage break of SHA-256.
+A signature, leaf, or commitment valid under one of these tags
+therefore cannot be replayed against a digest produced under any
+other tag — including against constructions outside this proposal,
+notably BIP 341's `TapTweak` and `TapSighash`.
+
 ### Transaction format
 
 A v4 RUNG_TX uses transaction version `4`. The version field is the
