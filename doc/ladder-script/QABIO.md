@@ -356,18 +356,23 @@ Measured on the current build via the `qabi_tx_size_sweep` boost test
 | 2,000        |    102,469 |  817,191 |  277,833 | 27.78 %   |
 | 3,000        |    153,469 | 1,225,191 | 416,583 | 41.66 %   |
 
-Asymptotic cost is **~409 bytes per participant** on the wire,
-**~139 vB per participant** after witness discount, converging from
-N≈50 upward.
+Per-participant cost is **~143 vB at N=100** after witness
+discount, converging to the **~139 vB asymptote at N≈500+**
+(~409 bytes per participant on the wire). At N=50 it is still
+~147 vB; the page's earlier "from N≈50 upward" framing was loose.
+The asymptote is reached as the fixed-size coordinator overheads
+(~666 B sig + ~897 B pubkey, plus the qabi_block scaffolding) become
+negligible relative to the per-participant cost.
 
 There are three binding ceilings on the maximum number of participants
 in a single QABIO batch:
 
 - **Standard-relay (`MAX_STANDARD_TX_WEIGHT = 400,000 WU` = 100,000 vB).**
-  Binds at roughly **720 participants** (100,000 vB / 139 vB per input).
-  Batches above this do not propagate through normal p2p relay and must
-  be submitted directly to a mining pool (Stratum V2 selection, private
-  API, or cooperative pool agreement).
+  Binds at roughly **720 participants** (100,000 vB / ~139 vB per input
+  at the converged asymptote, slightly tighter at smaller N where the
+  per-input cost is higher). Batches above this do not propagate through
+  normal p2p relay and must be submitted directly to a mining pool
+  (Stratum V2 selection, private API, or cooperative pool agreement).
 - **QABIO block cap (`QABI_BLOCK_MAX_HARD = 256 KB`).** Binds at
   roughly **3,500 participants**. This is the `qabi_block` serialised-
   size limit.
@@ -376,19 +381,23 @@ in a single QABIO batch:
   transaction cannot exceed the weight of an entire block. In practice
   the qabi_block cap binds first.
 
-The coordinator signature (666 bytes) and pubkey (897 bytes) are
-fixed-size overheads amortised across every participant. Their
-relative share drops from ~75% of the tx at N=1 to ~0.4% at N=500.
+The coordinator signature (up to 666 bytes &mdash; variable post-v0.14
+audit #9 F4; OQS validates the encoded length internally) and pubkey
+(897 bytes, canonical FALCON-512 size) are roughly fixed overheads
+amortised across every participant. The combined ~1,563 B share drops
+from **~75% of the tx at N=1** to **~3.7% at N=100**, **~0.8% at N=500**,
+and **~0.4% at N=1,000**.
 
 ---
 
 ## 9. Why FALCON-512
 
 The coordinator signature is hardcoded to FALCON-512. The
-`QABI_COORDINATOR_PUBKEY_SIZE = 897` and `QABI_AGGREGATED_SIG_MAX = 666`
-constants are baked into the consensus evaluator. Other post-quantum
-schemes (FALCON-1024, DILITHIUM3, SPHINCS+) are not currently usable
-for QABIO.
+`QABI_COORDINATOR_PUBKEY_SIZE = 897` (canonical pubkey size, fixed)
+and `QABI_AGGREGATED_SIG_MAX = 666` (upper bound on the variable
+sig length) constants are baked into the consensus evaluator. Other
+post-quantum schemes (FALCON-1024, DILITHIUM3, SPHINCS+) are not
+currently usable for QABIO.
 
 The choice is driven by size, not security. FALCON-512 has the
 smallest signature of any NIST-standardised post-quantum signature
@@ -403,9 +412,10 @@ better for the amortised per-input cost.
 
 The current block format hits the `QABI_BLOCK_MAX_HARD` ceiling at
 roughly 3,500 participants — well above any practical batch shape.
-Standard-relay tx size caps first at ~720 inputs at the current
-per-input cost (~139 vB amortised at N=100). Above that limit a batch
-ships via direct-to-miner submission rather than mempool relay.
+Standard-relay tx size caps first at ~720 inputs (per-input cost
+~143 vB at N=100, converging to ~139 vB at N≈500+). Above that limit
+a batch ships via direct-to-miner submission rather than mempool
+relay.
 
 No alternative qabi_block format is planned. v1 is the design.
 
