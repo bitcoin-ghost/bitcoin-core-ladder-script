@@ -124,14 +124,14 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0906</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SCHEME &middot; 1B</span>
-      <span class="wire-bytes">= 7 bytes</span>
+      <span class="wire-bytes">&asymp; 7 bytes</span>
     </div>
   </div>
 
@@ -161,15 +161,15 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text">Locate the witness <span class="eval-keyword">PUBKEY</span> and <span class="eval-keyword">SIGNATURE</span>; either missing &rarr; <span class="eval-result-err">ERROR</span>. Pubkey identity is bound at MLSC-proof level via merkle_pub_key.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY (Schnorr default). If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Read the optional conditions <span class="eval-keyword">SCHEME</span> (default Schnorr).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(pubkey, sig, scheme, ...)</span> through the Ladder <code>LadderSigChecker</code>. The result is the block result.</span>
     </div>
   </div>
 </div>
@@ -181,8 +181,8 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Missing PUBKEY or SIGNATURE</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Signature fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature size out of range for the resolved scheme</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Signature valid</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>

@@ -160,19 +160,19 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Delegates to P2PKH evaluator.</span>
+      <span class="eval-step-text"><strong>Delegates to <code>EvalP2PKHLegacyBlock</code> directly</strong> &mdash; the wrapper exists only to give P2WPKH a distinct block-type ID. Field, hash, and sig semantics are byte-identical to P2PKH_LEGACY.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Compute <span class="eval-keyword">HASH160</span>(PUBKEY) and compare to committed hash. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">HASH160</span>, <span class="eval-keyword">PUBKEY</span>, <span class="eval-keyword">SIGNATURE</span>; any missing &rarr; <span class="eval-result-err">ERROR</span>. HASH160 not exactly 20 B &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">CHash160(PUBKEY)</span>; <code>memcmp</code> mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme</span> via the Ladder <code>LadderSigChecker</code>; result is the block result.</span>
     </div>
   </div>
 </div>

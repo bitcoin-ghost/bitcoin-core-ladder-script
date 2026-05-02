@@ -124,14 +124,14 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0901</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SCHEME &middot; 1B</span>
-      <span class="wire-bytes">= 7 bytes</span>
+      <span class="wire-bytes">&asymp; 7 bytes</span>
     </div>
   </div>
 
@@ -161,19 +161,19 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text">Locate the witness <span class="eval-keyword">PUBKEY</span> and <span class="eval-keyword">SIGNATURE</span>; either missing &rarr; <span class="eval-result-err">ERROR</span>. Pubkey identity is bound at MLSC-proof level via merkle_pub_key &mdash; no leaf check here.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Route by <span class="eval-keyword">SCHEME</span> field (Schnorr / ECDSA / PQ). Default is Schnorr.</span>
+      <span class="eval-step-text">Read the optional conditions <span class="eval-keyword">SCHEME</span> (default Schnorr).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(pubkey, sig, scheme, ...)</span>. Sig size checks fire here per the resolved scheme. Note: the legacy wrappers route through the Ladder <code>LadderSigChecker</code>, NOT Core's <code>BaseSignatureChecker</code> &mdash; handing a Schnorr sig to Core's checker would crash the process via three Taproot-only assertions in <code>CheckSchnorrSignature</code> (regression fix `83f3a99a25`).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">The <code>VerifySigWithScheme</code> result is the block result &mdash; SATISFIED on valid sig, UNSATISFIED on verification failure, ERROR on malformed inputs.</span>
     </div>
   </div>
 </div>

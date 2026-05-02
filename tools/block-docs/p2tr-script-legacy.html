@@ -124,12 +124,12 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0907</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-pubkey" style="min-width:130px">HASH256 &middot; 32B</span>
       <span class="wire-bytes">= 38 bytes</span>
     </div>
@@ -161,19 +161,15 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Compute <span class="eval-keyword">SHA256</span>(PREIMAGE) to get the leaf hash.</span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">HASH256</span> and <span class="eval-keyword">PREIMAGE</span> (or <span class="eval-keyword">SCRIPT_BODY</span> as a fallback). Either missing &rarr; <span class="eval-result-err">ERROR</span>. HASH256 not exactly 32 B &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify leaf hash is included in the Merkle tree with root <span class="eval-keyword">HASH256</span>. If proof invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Single-leaf model: compute <span class="eval-keyword">SHA256(PREIMAGE)</span> directly and <code>memcmp</code> against the committed HASH256. Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. (For deeper script trees the user must commit a structure that hashes down to a single leaf at this layer; multi-leaf taproot expansion is not implemented in the wrapper.)</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Deserialize revealed leaf (<span class="eval-keyword">PREIMAGE</span>) as Ladder Script conditions. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
-    </div>
-    <div class="eval-step">
-      <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Evaluate inner conditions with remaining witness fields. Result &rarr; <span class="eval-result-sat">SATISFIED</span> or <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Recurse into <span class="eval-keyword">EvalInnerConditions(PREIMAGE, depth+1)</span>: deserialize, enforce <code>MAX_LEGACY_INNER_DEPTH = 2</code>, audit-E-020 witness-stack exact-count guard, evaluate inner rungs with OR logic.</span>
     </div>
   </div>
 </div>

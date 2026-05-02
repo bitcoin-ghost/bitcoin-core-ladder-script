@@ -123,7 +123,7 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0902</span>
@@ -160,19 +160,19 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Compute <span class="eval-keyword">HASH160</span>(PUBKEY) = RIPEMD160(SHA256(PUBKEY)).</span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">HASH160</span>, <span class="eval-keyword">PUBKEY</span>, and <span class="eval-keyword">SIGNATURE</span>. Any missing &rarr; <span class="eval-result-err">ERROR</span>. HASH160 not exactly 20 B &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Compare computed hash to committed <span class="eval-keyword">HASH160</span>. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">CHash160(PUBKEY)</span> = RIPEMD160(SHA256(PUBKEY)). <code>memcmp</code> against the committed HASH160; mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY via VerifySigFromFields. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Read the optional conditions <span class="eval-keyword">SCHEME</span> (default Schnorr). Dispatch <span class="eval-keyword">VerifySigWithScheme(pubkey, sig, scheme, ...)</span> through the Ladder <code>LadderSigChecker</code> &mdash; <em>not</em> Core's <code>BaseSignatureChecker</code>, which would crash on a Schnorr sig outside Taproot context (regression fix `83f3a99a25`).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">The <code>VerifySigWithScheme</code> result is the block result.</span>
     </div>
   </div>
 </div>

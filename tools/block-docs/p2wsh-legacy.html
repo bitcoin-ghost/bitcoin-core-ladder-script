@@ -123,7 +123,7 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0905</span>
@@ -160,19 +160,15 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Compute <span class="eval-keyword">SHA256</span>(PREIMAGE).</span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">HASH256</span> and <span class="eval-keyword">PREIMAGE</span> (or <span class="eval-keyword">SCRIPT_BODY</span> as a fallback). Either missing &rarr; <span class="eval-result-err">ERROR</span>. HASH256 not exactly 32 B &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Compare computed hash to committed <span class="eval-keyword">HASH256</span>. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">SHA256(PREIMAGE)</span> and <code>memcmp</code> against the committed HASH256. Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Deserialize <span class="eval-keyword">PREIMAGE</span> as Ladder Script conditions. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
-    </div>
-    <div class="eval-step">
-      <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Evaluate inner conditions with remaining witness fields. Result &rarr; <span class="eval-result-sat">SATISFIED</span> or <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Recurse into <span class="eval-keyword">EvalInnerConditions(PREIMAGE, depth+1)</span>. Same recursion semantics as P2SH_LEGACY: deserialize as Ladder conditions (failure &rarr; <span class="eval-result-err">ERROR</span>), enforce <code>MAX_LEGACY_INNER_DEPTH = 2</code>, apply the audit-E-020 witness-stack exact-count guard, then evaluate inner rungs with OR logic (first satisfied wins).</span>
     </div>
   </div>
 </div>
