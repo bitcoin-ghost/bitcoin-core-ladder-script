@@ -1893,6 +1893,137 @@ boundary header. The benefit is that every long-term maintenance
 question about Ladder Script integration has a single answer: it
 lives in `src/rung/`.
 
+### 19. Why include the PLC family of programmable state-machine blocks?
+
+The PLC family — `LATCH_SET`, `LATCH_RESET`, `COUNTER_DOWN`,
+`COUNTER_UP`, `COUNTER_PRESET`, `TIMER_CONTINUOUS`, `TIMER_OFF_DELAY`,
+`RATE_LIMIT`, `HYSTERESIS_FEE`, `HYSTERESIS_VALUE`, `COMPARE`,
+`SEQUENCER`, `ONE_SHOT`, `COSIGN` — provides programmable
+state-machine primitives (latches, counters, timers, rate limiters,
+hysteresis bands, cross-input gates). The "PLC" label is heritage from
+the IEC 61131-3 ladder-diagram tradition that gave the broader Ladder
+Script project its name. The relevant question for a Bitcoin reviewer
+is not "why industrial-control terminology?" but "what spending
+semantics do these blocks enable that the simpler signature, timelock,
+and hash blocks cannot?"
+
+The case reduces to three load-bearing examples; the remaining PLC
+blocks compose with these three to express the wider state-machine
+shapes that real contract patterns reach for.
+
+**Vault arming (`LATCH_SET` / `LATCH_RESET`).** A vault that supports
+"armed for spending" and "disarmed" states needs a per-UTXO bit that
+flips on a participant's signature. Without the latch primitives, the
+vault has to model armed/disarmed as separate output types and
+migrate funds between them, paying a transaction per state change.
+With them, the vault stays in one UTXO: a spend bound by `LATCH_SET`
+produces an output with `LATCH_RESET` available, and vice versa. The
+worked example ships as the `ONE-SHOT TRIGGER + LATCH` preset in
+`tools/test-presets.py`.
+
+**Spending caps (`RATE_LIMIT`).** A hot wallet that wants to limit
+spending to N satoshis per M blocks needs a primitive that tracks
+accumulated outflow and rejects spends that breach the cap. Today
+this is approximated by holding multiple small UTXOs and accepting
+that any subset can be spent in one transaction. `RATE_LIMIT` makes
+the cap structural: the spend-time check reads the accumulated value
+from the previous spend's commitment, and the spend either fits under
+the cap or fails. The worked example ships as the `RATE-LIMITED
+WALLET` preset.
+
+**Subscription escrows and dead-man's switches (`COUNTER_DOWN` /
+`COUNTER_UP`).** A subscription that pays out every N blocks until the
+counter expires, or a dead-man's switch that hands funds to a recovery
+key after the owner fails to bump a counter, both reduce to a counter
+primitive that decrements (or increments) on each spend and changes
+the spending semantics when it reaches a threshold. Without the
+counter primitives, these patterns require either off-chain
+coordination or separate UTXO migrations per cycle. The worked
+examples ship as the `DEAD MAN'S SWITCH (INHERITANCE)` and
+`COUNTER-UP SUBSCRIPTION` presets.
+
+The remaining PLC blocks compose with the load-bearing three:
+`TIMER_*` and `HYSTERESIS_*` add time-windowed and band-gated
+controls; `COMPARE`, `SEQUENCER`, and `ONE_SHOT` provide the
+predicates and sequencing those controls need; `COSIGN` adds a
+cross-input gate that requires a signature on a partner UTXO's witness
+in the same transaction. The full preset list at
+`tools/test-presets.py` exercises every PLC block at least once.
+
+The cost is fourteen evaluator functions added to the consensus
+surface. Each evaluator is independent, layout-pinned, and reviewed
+in isolation; the family does not share state with the rest of the
+registry beyond the standard MLSC framework. The benefit is that
+Bitcoin gains the smallest set of structural primitives required to
+express state-machine contracts at consensus level. The alternative
+— off-chain state machines coordinated via separate UTXOs — is the
+exact contract-construction friction this format is intended to
+displace.
+
+### 20. Why enforce the dust threshold (`MIN_RUNG_OUTPUT_VALUE = 546`) at consensus rather than relay policy?
+
+Most output-value floors in Bitcoin live in `policy.cpp` rather than
+in consensus. The standard dust threshold is a relay rule that
+miners can override; consensus accepts smaller outputs. Ladder
+Script makes the threshold a consensus rule for one reason that
+arises from the MLSC chainstate model and is not present in any
+prior output type.
+
+Recall that every v4 transaction writes a synthetic chainstate entry
+at `(creating_txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)` carrying the
+33-byte `0xDE || conditions_root` payload. This entry is recovered
+at spend time so the verifier can reconstruct the conditions root
+from a 1-byte compressed coin. The synthetic entry's lifetime is
+bounded by the lifetime of the regular MLSC coins it serves: when
+the last spawned coin is spent, the synthetic entry can be garbage-
+collected from the chainstate.
+
+A regular MLSC coin valued below the dust threshold would never be
+economically rational to spend — the fee to claim 545 satoshis would
+exceed the recovered value at any realistic feerate. Such a coin
+sits in the chainstate indefinitely, and so does the synthetic root
+entry that serves it. Without the consensus dust rule, an attacker
+could mint thousands of below-dust v4 outputs per block, paying the
+output-value cost (which they recover as fees) and pinning the
+synthetic root entries permanently in every full node's chainstate
+RAM. This is a strictly stronger spam vector than below-dust outputs
+of any pre-v4 type, because the per-creating-tx synthetic entry
+amplifies one transaction into a permanent 33-byte chainstate
+allocation independent of the regular outputs' size.
+
+Enforcing the dust threshold at consensus closes the amplification
+path. The 546-satoshi value matches Bitcoin's standard dust
+threshold so wallets and relay policy do not need a separate rule.
+`src/rung/serialize.h` defines the constant; `src/rung/evaluator.cpp`
+enforces it at output validation.
+
+### 21. Why `MAX_PUBKEYS_PER_MULTISIG = 16`?
+
+The cap bounds the worst-case witness size of a single `MULTISIG`
+or `TIMELOCKED_MULTISIG` spend: at K-of-N with N = 16 signers, the
+witness carries 16 × `(PUBKEY, MERKLE_PROOF, SIGNATURE)` triplets
+in the worst case. Each triplet is roughly 33 + 4 × 32 + 64 = 225
+bytes for Schnorr (ignoring length prefixes); the worst-case witness
+is therefore ~3.6 KB. That sits comfortably inside the per-input
+witness cap (`MAX_LADDER_WITNESS_SIZE = 100,000`) and inside the
+practical mempool acceptance envelope.
+
+Sixteen signers also covers every realistic governance shape that
+Bitcoin users have asked for to date: corporate treasuries (typical
+boards of 5–11), multi-jurisdictional escrow (3–7), federated
+sidechain signing groups (typically 5–11), and recovery
+arrangements among small numbers of family members or
+co-fiduciaries.
+
+For the residual case of N > 16 — corporate boards, foundation
+treasuries, large federated signers — the application-layer pattern
+is to commit a hash-tree of pubkeys at the descriptor level and
+reveal the relevant subtree at spend time. This puts the
+signer-count cost on the application that needs it, not on the
+consensus surface that every node validates. A future BIP that wants
+to relax `MAX_PUBKEYS_PER_MULTISIG` can do so with a fresh
+soft-fork; nothing in the format precludes it.
+
 ## Backwards Compatibility
 
 Pre-activation, v4 transactions are accepted by legacy nodes as
