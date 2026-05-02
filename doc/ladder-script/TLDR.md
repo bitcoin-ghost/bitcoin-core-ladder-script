@@ -12,10 +12,10 @@ Live on signet today. Post-quantum signatures verified on-chain.
 
 | Transaction Type | P2PKH | P2WPKH | P2TR | **Ladder Script** |
 |-----------------|-------|--------|------|-------------------|
-| Key-path spend (1-in, 1-out) | 192 vB | 110 vB | 111 vB | **110 vB** |
+| Key-path spend (1-in, 1-out) | 192 vB | 110 vB | 111 vB | **109 vB** |
 | Standard payment (1-in, 2-out) | 226 vB | 143 vB | 157 vB | **118 vB** |
 | Script-path spend | — | — | ~170 vB | **124 vB** |
-| 10-output batch | — | 391 vB | 511 vB | **194 vB** |
+| 10-output batch | — | 389 vB | 499 vB | **191 vB** |
 | 100-output batch | — | 3,179 vB | 4,369 vB | **911 vB** |
 
 Script-path spends are smaller than P2WPKH key-path spends.
@@ -65,7 +65,8 @@ Counters. Latches. Timers. Sequencers. Multi-party signing. Adaptor signatures. 
 swaps. Payment channels. Oracle attestations. Transaction weight limits. Input/output
 count constraints. Value ratio enforcement. Cross-input binding. Data anchoring.
 Post-quantum signatures (FALCON / Dilithium / SPHINCS+). Lightweight PQ batches (PQ_BATCH).
-Multi-party PQ batches (QABIO). Legacy P2PKH/P2WPKH/P2TR wrapping.
+Multi-party PQ batches (QABIO). All 7 legacy types wrapped (P2PK,
+P2PKH, P2SH, P2WPKH, P2WSH, P2TR key-path, P2TR script-path).
 
 All type-safe. All formally specified. All live on signet.
 
