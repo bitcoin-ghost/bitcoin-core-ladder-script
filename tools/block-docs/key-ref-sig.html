@@ -109,39 +109,32 @@
         <td class="field-type">NUMERIC</td>
         <td class="field-size">4 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Index into the relay array (must be in rung's relay_refs)</td>
+        <td class="field-desc">Index into the rung's relay array. Value must fit uint16_t (&le; 0xFFFF) and must appear in the rung's <code>relay_refs</code>.</td>
       </tr>
       <tr>
         <td class="field-name">block_index</td>
         <td class="field-type">NUMERIC</td>
         <td class="field-size">4 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Index of the target block within the resolved relay</td>
-      </tr>
-      <tr>
-        <td class="field-name">pubkey</td>
-        <td class="field-type">PUBKEY</td>
-        <td class="field-size">32-33 B</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">Full public key (verified against relay's Merkle leaf)</td>
+        <td class="field-desc">Index of the target block within the resolved relay. Value must fit uint16_t (&le; 0xFFFF).</td>
       </tr>
       <tr>
         <td class="field-name">signature</td>
         <td class="field-type">SIGNATURE</td>
-        <td class="field-size">64-65 B</td>
+        <td class="field-size">var</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Schnorr signature (64B) or with sighash byte (65B). PQ signatures variable size.</td>
+        <td class="field-desc">Signature over the sighash. Scheme is read from the resolved target relay block (Schnorr default if absent); Schnorr is 64-65&nbsp;B, ECDSA 8-72&nbsp;B, PQ schemes variable.</td>
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Key resolved from relay (PubkeyCountForBlock = 0). No key field in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;0 for KEY_REF_SIG. No PUBKEY in conditions or witness — the key (and its SCHEME) is dereferenced from <code>relays[relay_index].blocks[block_index]</code>, whose own Merkle leaf already binds it at MLSC-proof level.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0005</span>
@@ -158,19 +151,18 @@
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0005</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:130px">PUBKEY &middot; 33B</span>
-      <span class="wire-segment wire-field-sig" style="min-width:140px">SIGNATURE &middot; 64B</span>
-      <span class="wire-bytes">= 105 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-sig" style="min-width:140px">SIGNATURE &middot; 64-65B</span>
+      <span class="wire-bytes">&asymp; 70 bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness)</span>
-      <span class="wire-total-bytes">119 bytes</span>
+      <span class="wire-total-bytes">&asymp; 84 bytes</span>
     </div>
   </div>
 
-  <p class="section-text">KEY_REF_SIG resolves its public key from a relay block rather than folding it into the rung's own Merkle leaf. PubkeyCountForBlock = 0 for KEY_REF_SIG; the key is bound via the relay's leaf instead. Each additional rung referencing the same relay key avoids duplicating the key in multiple Merkle leaves.</p>
+  <p class="section-text">KEY_REF_SIG resolves its public key from a relay block rather than folding it into the rung's own Merkle leaf. PubkeyCountForBlock&nbsp;=&nbsp;0 for KEY_REF_SIG; the key is bound at MLSC-proof level by the target relay block's own Merkle leaf. Each additional rung referencing the same relay key avoids duplicating the key (~33&nbsp;B) in multiple rung leaves and avoids re-revealing it in the witness.</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -179,27 +171,35 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Extract <span class="eval-keyword">relay_index</span> and <span class="eval-keyword">block_index</span> from conditions NUMERIC fields. If missing &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Read both conditions <span class="eval-keyword">NUMERIC</span> fields and decode them as little-endian 4-byte values <span class="eval-keyword">relay_index</span> and <span class="eval-keyword">block_index</span>. If either is absent or its decoded value exceeds <span class="eval-keyword">0xFFFF</span> (uint16_t range) &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Validate <span class="eval-keyword">relay_index</span> is in the current rung's <span class="eval-keyword">relay_refs</span>. If not declared &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Require relay context to be available (<span class="eval-keyword">ctx.relays</span> and <span class="eval-keyword">ctx.rung_relay_refs</span>). If unavailable &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Resolve target block: <span class="eval-keyword">relays[relay_index].blocks[block_index]</span>. Extract pubkey from relay's Merkle leaf and <span class="eval-keyword">SCHEME</span> from target.</span>
+      <span class="eval-step-text">Validate <span class="eval-keyword">relay_index</span> appears in this rung's <span class="eval-keyword">relay_refs</span>. If it was not declared by the rung &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against relay's Merkle leaf verification. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Bounds-check: <span class="eval-keyword">relay_index &lt; relays.size()</span> and <span class="eval-keyword">block_index &lt; relay.blocks.size()</span>. Out of range &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against the resolved scheme (Schnorr, ECDSA, or PQ). If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Resolve <span class="eval-keyword">target_block = relays[relay_index].blocks[block_index]</span> and read its <span class="eval-keyword">PUBKEY</span> field. If the target block has no PUBKEY &rarr; <span class="eval-result-err">ERROR</span>. (The target block's pubkey identity is already pinned by its own merkle_pub_key at MLSC-proof level — no leaf check is performed here.)</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">6.</span>
-      <span class="eval-step-text">Signature valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Read the optional <span class="eval-keyword">SCHEME</span> field from the target block. If absent, the scheme defaults to Schnorr.</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">7.</span>
+      <span class="eval-step-text">Read this block's witness <span class="eval-keyword">SIGNATURE</span>. If missing &rarr; <span class="eval-result-err">ERROR</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">8.</span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(target_pubkey, witness_sig, target_scheme, ...)</span>. Size checks for the resolved scheme apply here (Schnorr 64-65&nbsp;B, ECDSA 8-72&nbsp;B, PQ scheme-specific). Invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -210,15 +210,15 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC fields (relay_index, block_index)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Relay context unavailable or relay_refs missing</td><td class="r-err">ERROR</td></tr>
-      <tr><td>relay_index not in rung's relay_refs</td><td class="r-err">ERROR</td></tr>
-      <tr><td>relay_index or block_index out of bounds</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Target block missing pubkey in Merkle leaf</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Witness missing PUBKEY or SIGNATURE</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Either NUMERIC field absent, or value &gt; 0xFFFF (uint16_t cap)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Relay context unavailable (no <code>relays</code> or <code>rung_relay_refs</code>)</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>relay_index</code> not declared in this rung's <code>relay_refs</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>relay_index</code> or <code>block_index</code> out of bounds</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Target relay block has no PUBKEY field</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness SIGNATURE missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Resolved-scheme size check fails (e.g.&nbsp;Schnorr sig not 64-65&nbsp;B)</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Signature valid against resolved key</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Signature valid against resolved target-block key</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -251,8 +251,7 @@
   <span class="json-key">"type"</span>: <span class="json-str">"KEY_REF_SIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"...64-65 bytes (Schnorr) or scheme-specific..."</span> }
   ]
 }</pre></div>
 </div>

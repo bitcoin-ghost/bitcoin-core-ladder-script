@@ -137,7 +137,7 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0004</span>
@@ -175,7 +175,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Validate M &ge; 1, N &ge; M, N &le; 100. If invalid &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">PUBKEY</span> + <span class="eval-keyword">SIGNATURE</span> witness fields and the two <span class="eval-keyword">NUMERIC</span> conditions fields (M, N). Any missing &rarr; <span class="eval-result-err">ERROR</span>. Validate M &gt; 0, N &gt; 0, M &le; N. Otherwise &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
@@ -183,11 +183,11 @@
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Enforce Schnorr-only: SCHEME must be 0x01 (SCHNORR) or absent. No PQ path. If invalid &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Enforce Schnorr-only at the wire: SIGNATURE size must be 64 or 65 bytes (the Schnorr range; ECDSA's 8-72 B range is rejected). Outside that range &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify aggregate <span class="eval-keyword">SIGNATURE</span> against PUBKEY using BIP-340 Schnorr. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><code>VerifySigWithScheme</code> dispatches to BIP-340 Schnorr verify against the aggregate PUBKEY. Verification fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
@@ -202,12 +202,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>M = 0 or M > N or N > 100</td><td class="r-err">ERROR</td></tr>
-      <tr><td>PQ signature scheme requested</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Missing PUBKEY, SIGNATURE, or one of the two NUMERIC fields</td><td class="r-err">ERROR</td></tr>
+      <tr><td>M &le; 0 or N &le; 0 or M &gt; N</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SIGNATURE size outside 64-65 bytes (Schnorr range)</td><td class="r-err">ERROR</td></tr>
       <tr><td>Schnorr signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Aggregate key matches commitment AND signature valid</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Aggregate signature valid against the aggregate pubkey</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

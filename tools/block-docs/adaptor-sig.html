@@ -57,7 +57,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0003 &middot; SIGNATURE FAMILY</div>
   <h1 class="block-title">ADAPTOR_SIG</h1>
-  <p class="block-subtitle">Adaptor signature verification. Requires a signing key, an adaptor point, and an adapted signature. Enables scriptless scripts and atomic protocols without hash locks.</p>
+  <p class="block-subtitle">Adaptor signature verification. Verifies a Schnorr signature that has been "adapted" off-chain by combining a presig with an adaptor secret t (where T = t·G). On-chain the block sees a single signing key + the completed signature; the adaptor point T and secret t are off-chain machinery. Enables scriptless-script atomic protocols without hash locks.</p>
   <span class="block-family-badge" style="color: #ff1744; border-color: #ff174440;">Signature</span>
   <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
@@ -113,22 +113,18 @@
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Single signing pubkey folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). v0.7 dropped the second "adaptor point" slot &mdash; T = t&middot;G is needed only for off-chain witness extraction, not for on-chain consensus, since the adapted sig verifies as a normal Schnorr against the signing key. No key fields in conditions.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (no implicit fields &mdash; ADAPTOR_SIG conditions carry no per-block bytes; the signing pubkey is folded into the rung leaf via merkle_pub_key):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0003</span>
-      <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:140px">COMMIT (key) &middot; 32B</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:150px">COMMIT (adaptor) &middot; 32B</span>
-      <span class="wire-bytes">= 72 bytes</span>
+      <span class="wire-bytes">= block header only</span>
     </div>
   </div>
 
@@ -136,20 +132,12 @@
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0003</span>
-      <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">KEY &middot; 32B</span>
-      <span class="wire-segment wire-field-sig" style="min-width:120px">SIGNATURE &middot; 64B</span>
-      <span class="wire-bytes">= 104 bytes</span>
-    </div>
-
-    <div class="wire-total">
-      <span class="wire-total-label">Total (conditions + witness)</span>
-      <span class="wire-total-bytes">178 bytes</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:100px">PUBKEY &middot; 32-33B</span>
+      <span class="wire-segment wire-field-sig" style="min-width:120px">SIGNATURE &middot; 64-65B</span>
     </div>
   </div>
 
-  <p class="section-text">Minimal case with x-only keys and 64-byte Schnorr adapted signature.</p>
+  <p class="section-text">Witness reveals only the signing pubkey + the adapted Schnorr signature; no adaptor point. The adapted sig is a regular Schnorr signature verified against the signing pubkey.</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -157,16 +145,20 @@
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
     <div class="eval-step">
+      <span class="eval-step-num">0.</span>
+      <span class="eval-step-text"><em>Pre-eval (MLSC proof):</em> the signing pubkey is bound to the rung leaf via merkle_pub_key. A mismatched pubkey produces a different leaf and the proof rejects before <code>EvalAdaptorSigBlock</code> runs.</span>
+    </div>
+    <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Both pubkeys are bound to the rung leaf at MLSC-proof level (merkle_pub_key); a different pubkey produces a different leaf and the proof rejects before this evaluator runs.</span>
+      <span class="eval-step-text"><code>ResolvePubkeyCommitments</code> must return exactly 1 pubkey. <code>FindField(SIGNATURE)</code> must succeed. If either fails &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">adaptor_point</span> is a valid 32-byte x-only point on the curve. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><span class="eval-keyword">SIGNATURE</span> size must be 64 or 65 bytes (Schnorr only; ECDSA not supported). Size outside that range &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify adapted <span class="eval-keyword">SIGNATURE</span> against signing_key with adaptor_point. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><code>VerifySigWithScheme</code> dispatches to Schnorr verify. The adapted signature, having been completed off-chain by adding the adaptor secret, verifies as an ordinary Schnorr signature against the signing pubkey. Verification fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
@@ -181,11 +173,9 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing PUBKEY or SIGNATURE in witness</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Adaptor point not valid x-only point</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Signing key commitment mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Adaptor point commitment mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Adapted signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Witness pubkey count != 1, or SIGNATURE missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SIGNATURE size outside 64-65 bytes (Schnorr only)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Schnorr verification of adapted signature fails</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Adapted signature valid</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
