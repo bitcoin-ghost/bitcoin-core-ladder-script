@@ -124,8 +124,14 @@ deploy_web() {
         rsync -avz "$ROOT/tools/block-docs/" "$WEB_HOST:$WEB_ROOT/docs/blocks/"
         # docs/index.html fetches each *.md by bare filename (e.g.
         # INTRODUCTION.md?v=5) relative to itself. Ship the ladder-script
-        # markdown alongside, or every sidebar click 404s.
-        rsync -avz --include='*.md' --exclude='*' \
+        # markdown alongside, or every sidebar click 404s. The
+        # `figures/` subtree ships with it because BIP-XXXX.md embeds
+        # `![...](figures/BIP-XXXX-*.svg)` — without the SVGs the BIP
+        # renders with broken-image icons.
+        rsync -avz \
+            --include='*.md' \
+            --include='figures/' --include='figures/*' \
+            --exclude='*' \
             "$ROOT/doc/ladder-script/" "$WEB_HOST:$WEB_ROOT/docs/"
     fi
 

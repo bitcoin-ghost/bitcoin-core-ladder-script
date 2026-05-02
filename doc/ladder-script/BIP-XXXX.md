@@ -1846,8 +1846,10 @@ implementation end-to-end without a local build via three browser-
 based tools: the Ladder Engine (build, simulate, sign, and broadcast
 v4 transactions through a guided UI), the QABIO Playground (multi-
 party batch ceremony with priming, coordinator signing, and the
-escape-rung flow), and the block reference (visual documentation of
-every block type with field schemata and worked spend examples).
+escape-rung flow), and the PQ Batch Playground (lightweight FALCON
+batch with one anchor signature authorising N inputs that share a
+PQ pubkey commitment). A separate visual block reference documents
+every block type with field schemata and worked spend examples.
 Pre-built signed binaries for Linux x86_64, macOS arm64, and Windows
 x86_64 are published per release with PGP-signed `SHA256SUMS`; the
 release-signing key fingerprint is
@@ -2116,8 +2118,9 @@ BIP 341.
   <https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki>
 - `libladder` reference implementation:
   <https://github.com/defenwycke/bitcoin-core-ladder-script>
-- Live development signet, Ladder Engine, QABIO Playground, block
-  reference, and signed binaries: <https://ladder-script.org>
+- Live development signet, Ladder Engine, QABIO Playground, PQ Batch
+  Playground, block reference, and signed binaries:
+  <https://ladder-script.org>
 - Documentation hub (annotated patch, annotated library, soft-fork
   guide, sizing measurements): <https://ladder-script.org/docs>
 - In-repository spec files: `doc/ladder-script/INTRODUCTION.md`,
