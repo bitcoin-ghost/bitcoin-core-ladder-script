@@ -89,7 +89,7 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">max_depth</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Maximum recursion depth (&gt; 0). Bounds the number of recursive spends allowed.</td></tr>
+      <tr><td class="field-name">max_depth</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Recursion termination guard. The consensus evaluator only checks <code>max_depth &gt; 0</code> (positivity) &mdash; it is not compared against an actual recursion counter. The field exists for off-chain static analysis of covenant chains; encoding 0 or a negative value makes the covenant unspendable.</td></tr>
     </tbody>
   </table>
 </div>
@@ -122,14 +122,28 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_depth</span> from NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If max_depth &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Retrieve <span class="eval-keyword">input_conditions</span> and <span class="eval-keyword">spending_output</span> from evaluation context</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Deserialize output conditions from spending output</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Compare using <span class="eval-keyword">FullConditionsEqual</span> &mdash; must match exactly</span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">If conditions match &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">NUMERIC</span> field. If absent &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">ReadNumeric</span> &rarr; <code>max_depth</code>. If undecodable, or <code>max_depth &le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>ctx.verified_leaves</code> is set (leaf-centric mode &mdash; the spending rung was verified via MLSC proof): require <code>ctx.spending_output</code>; missing &rarr; <span class="eval-result-err">ERROR</span>. Then call <span class="eval-keyword">OutputRootMatchesInput(ctx.spending_output, ctx.verified_leaves)</span>; mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Else if <code>ctx.input_conditions</code> is set (fallback &mdash; full-conditions mode): require <code>ctx.spending_output</code>; missing &rarr; <span class="eval-result-err">ERROR</span>. Extract MLSC root from the output's scriptPubKey via <span class="eval-keyword">GetMLSCRoot</span>; non-MLSC output &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Recompute the expected root via <span class="eval-keyword">ComputeConditionsRootMLSC(ctx.input_conditions, ctx.rung_pubkeys)</span> and compare; mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">No covenant context (neither <code>verified_leaves</code> nor <code>input_conditions</code>): the structural <code>max_depth &gt; 0</code> check stands alone &rarr; <span class="eval-result-sat">SATISFIED</span> (used by tooling that calls the evaluator without a spending tx).</span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Both root checks passed (or skipped because no context) &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
+</div>
+
+<!-- Results -->
+<div class="doc-section">
+  <div class="section-label">Return Values</div>
+  <table class="result-table">
+    <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Conditions NUMERIC field absent</td><td class="r-err">ERROR</td></tr>
+      <tr><td>NUMERIC undecodable, or <code>max_depth &le; 0</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Covenant context present (<code>verified_leaves</code> or <code>input_conditions</code>) but no <code>spending_output</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td>Spending output is non-MLSC, or its root differs from the expected input root</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Output root matches input root, or no covenant context (structural pass)</td><td class="r-sat">SATISFIED</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <!-- Worked Example -->
@@ -139,12 +153,10 @@
     <p class="section-text" style="margin-bottom:12px"><strong>Perpetual vault with max_depth = 100</strong></p>
     <p class="section-text" style="margin-bottom:12px">Input has RECURSE_SAME(100) + SIG(pubkey_A). Output must carry identical conditions.</p>
     <div class="eval-step"><span class="eval-step-text">max_depth = 100 &gt; 0 &rarr; proceed</span></div>
-    <div class="eval-step"><span class="eval-step-text">Output conditions: RECURSE_SAME(100) + SIG(pubkey_A)</span></div>
-    <div class="eval-step"><span class="eval-step-text">FullConditionsEqual &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">Output conditions: RECURSE_SAME(100) + SIG(pubkey_A); MLSC root recomputes to the same input root &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
 
     <p class="section-text" style="margin:16px 0 12px"><strong>Output tries to remove the SIG block:</strong></p>
-    <div class="eval-step"><span class="eval-step-text">Output conditions: RECURSE_SAME(100) only</span></div>
-    <div class="eval-step"><span class="eval-step-text">FullConditionsEqual fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">Output conditions: RECURSE_SAME(100) only &rarr; produces a different MLSC root than the input &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 

@@ -122,12 +122,13 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">count</span> from NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If count &lt; 0 &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If count == 0 &rarr; <span class="eval-result-sat">SATISFIED</span> (covenant terminates, no re-encumbrance required)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If count &gt; 0: verify output carries <span class="eval-keyword">RECURSE_COUNT</span> with count = <span class="eval-keyword">count - 1</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Output verified &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Output missing or count mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">NUMERIC</span> field. Missing &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> &rarr; <code>count</code>; undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <code>count == 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> immediately (countdown done; covenant terminates, output is free).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>count &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span> (malformed; also guards <code>cur - 1</code> against signed overflow on <code>INT64_MIN</code>).</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">No spending context (no <code>input_conditions</code> or <code>spending_output</code>): structural pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Build a copy of the revealed rung (<code>input_conditions.rungs[0]</code>). Walk its blocks, find the first <code>RECURSE_COUNT</code> block, and within it find the first NUMERIC field; verify <code>cur &gt; 0</code> (else <span class="eval-result-err">ERROR</span>) and write <code>cur - 1</code>. If no <code>RECURSE_COUNT</code> block carrying a NUMERIC was found in the rung &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Recompute the expected MLSC root using the mutated rung: leaf-centric (<span class="eval-keyword">BuildCPRung</span> + <span class="eval-keyword">ComputeTxMLSCLeaf</span> + <span class="eval-keyword">ComputeExpectedRoot</span>) when <code>verified_leaves</code> is set, otherwise full-conditions fallback (<span class="eval-keyword">ComputeConditionsRootMLSC</span>).</span></div>
+    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Extract the spending output's MLSC root via <span class="eval-keyword">GetMLSCRoot</span>; non-MLSC output &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Compare against the expected root: equal &rarr; <span class="eval-result-sat">SATISFIED</span>; differs &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 

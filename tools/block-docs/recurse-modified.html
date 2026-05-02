@@ -89,13 +89,13 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">max_depth</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Maximum recursion depth (&gt; 0). Bounds the chain of modified spends.</td></tr>
-      <tr><td class="field-name">block_idx</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Target block index within rung 0 (legacy) or per-mutation target (new format).</td></tr>
-      <tr><td class="field-name">param_idx</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Target parameter index within the block.</td></tr>
-      <tr><td class="field-name">delta</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Additive delta applied to the target parameter. Can be positive or negative.</td></tr>
+      <tr><td class="field-name">max_depth</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Recursion termination guard. Consensus only checks <code>max_depth &gt; 0</code> (positivity); not compared against a counter.</td></tr>
+      <tr><td class="field-name">block_idx</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Target block index within rung 0 (legacy) or per-mutation target (new format). Per <code>feedback_recurse_covenants</code>, <code>param_idx</code> counts <em>post-fold</em> condition fields (after PUBKEYs are stripped into the Merkle leaf).</td></tr>
+      <tr><td class="field-name">param_idx</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Target parameter index within the block (post-fold counting). The targeted field must be NUMERIC; non-NUMERIC targets fail.</td></tr>
+      <tr><td class="field-name">delta</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Additive delta applied to the target parameter. Two's-complement signed; positive or negative.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px"><strong>Legacy format:</strong> max_depth, block_idx, param_idx, delta (4 NUMERICs, single mutation targeting rung 0).<br><strong>New format:</strong> max_depth, num_mutations, then per mutation: rung_idx, block_idx, param_idx, delta (2 + 4N NUMERICs).</p>
+  <p class="section-text" style="margin-top:12px"><strong>Legacy format:</strong> 4 or 5 NUMERICs &mdash; <code>max_depth, block_idx, param_idx, delta</code>; single mutation targeting <code>rung_idx&nbsp;=&nbsp;0</code>. The 5-NUMERIC case is also recognised (the extra trailing NUMERIC is ignored).<br><strong>New format:</strong> <code>max_depth, num_mutations</code>, then 4 NUMERICs per mutation (<code>rung_idx, block_idx, param_idx, delta</code>) for a total of <code>2 + 4&times;N</code>. <code>ParseMutationSpecs</code> rejects <code>num_mutations &lt; 1</code> or <code>&gt; 64</code>.</p>
 </div>
 
 <!-- Wire -->
@@ -129,15 +129,13 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_depth</span> from first NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If max_depth &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Parse mutation specs: detect legacy (4 fields, rung 0 implicit) or new format (2 + 4N fields)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">For each mutation, record target position (<span class="eval-keyword">rung_idx</span>, <span class="eval-keyword">block_idx</span>, <span class="eval-keyword">param_idx</span>) and <span class="eval-keyword">delta</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Deserialize output conditions from spending output</span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Verify: all non-targeted parameters match input exactly</span></div>
-    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Verify: each targeted parameter equals <span class="eval-keyword">input_value + delta</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">8.</span><span class="eval-step-text">All checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">9.</span><span class="eval-step-text">Any mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect all conditions <span class="eval-keyword">NUMERIC</span> fields and dispatch to <span class="eval-keyword">ParseMutationSpecs</span>. Returns false &rarr; <span class="eval-result-err">ERROR</span> (covers: fewer than 4 NUMERICs, undecodable values, <code>num_mutations</code> outside [1,&nbsp;64], or insufficient trailing NUMERICs for the declared mutation count).</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <code>max_depth &le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Dispatch <span class="eval-keyword">VerifyMutatedLeaves(ctx, mutations)</span>. Requires both <code>ctx.input_conditions</code> and <code>ctx.spending_output</code>; missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">For each mutation: bounds-check <code>rung_idx</code> against <code>verified_leaves.total_rungs</code> (or <code>input_conditions.rungs</code> in fallback). Out of range &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Cross-rung mutations require the spender to have supplied the target rung in <code>revealed_mutation_targets</code>; the evaluator verifies <code>ComputeTxMLSCLeaf(target.rung)</code> matches what the conditions_root committed to (audit 8b F1).</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Apply each mutation: locate the <code>param_idx</code>-th condition field (post-fold; PUBKEYs already stripped). Must be NUMERIC. Mutate <code>value &larr; value + delta</code>. Mutating a non-NUMERIC slot &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; missing slot &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Recompute the expected MLSC root: <span class="eval-keyword">BuildCPRung</span> + <span class="eval-keyword">ComputeTxMLSCLeaf</span> for the mutated rung, then <span class="eval-keyword">ComputeExpectedRoot</span> to splice into the verified-leaves tree (leaf-centric path) or <span class="eval-keyword">ComputeConditionsRootMLSC</span> over the mutated full conditions (fallback path).</span></div>
+    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Extract the spending output's MLSC root via <span class="eval-keyword">GetMLSCRoot</span>. Non-MLSC output &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Compare against the expected root; equal &rarr; <span class="eval-result-sat">SATISFIED</span>; differs &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 

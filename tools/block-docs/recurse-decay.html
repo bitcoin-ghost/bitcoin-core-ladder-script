@@ -129,15 +129,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_depth</span> from first NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If max_depth &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Parse mutation specs (same format as RECURSE_MODIFIED)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text"><span class="eval-keyword">Negate delta</span>: effective_delta = -delta</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Deserialize output conditions from spending output</span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Verify: all non-targeted parameters match input exactly</span></div>
-    <div class="eval-step"><span class="eval-step-num">7.</span><span class="eval-step-text">Verify: each targeted parameter equals <span class="eval-keyword">input_value + effective_delta</span> (i.e., input_value - delta)</span></div>
-    <div class="eval-step"><span class="eval-step-num">8.</span><span class="eval-step-text">All checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">9.</span><span class="eval-step-text">Any mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect all conditions <span class="eval-keyword">NUMERIC</span> fields and dispatch to <span class="eval-keyword">ParseMutationSpecs</span> (identical to RECURSE_MODIFIED). Returns false &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <code>max_depth &le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Negate every mutation's <code>delta</code> in-place (<code>m.delta = -m.delta</code>). The on-chain encoding still reads as a positive "decay amount", but the actual mutation applied is subtractive.</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Dispatch <span class="eval-keyword">VerifyMutatedLeaves(ctx, mutations)</span> &mdash; same path as RECURSE_MODIFIED. For each mutation: bounds-check rung_idx, locate the <code>param_idx</code>-th post-fold NUMERIC field in <code>blocks[block_idx]</code> (NUMERIC type required), apply <code>value &larr; value + (-delta)</code>.</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Recompute the expected MLSC root from the mutated rung (leaf-centric or fallback) and compare against the spending output's MLSC root. Equal &rarr; <span class="eval-result-sat">SATISFIED</span>; any mismatch (incl. non-MLSC output, missing slot, non-NUMERIC target) &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
