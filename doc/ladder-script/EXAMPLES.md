@@ -142,51 +142,57 @@ Rung 0: HTLC block (Bob claims with preimage + sig)
 Rung 1: TIMELOCKED_SIG block (Alice reclaims after timeout)
 ```
 
-### Conditions structure
+### Conditions structure (v0.7+ two-path HTLC, single block — refund baked in)
+
+The v0.7 HTLC block has two paths in *one* block, switched by a
+`NUMERIC(path)` indicator in the witness. A separate refund rung is
+not required &mdash; a one-rung HTLC ladder is sufficient.
 
 ```
 Ladder:
-  Rung 0: (claim path)
+  Rung 0:
     Block 0: HTLC (0x0702)
-      Conditions fields: [HASH256(payment_hash), NUMERIC(0), SCHEME(0x01)]
-      Witness fields:    [PUBKEY(32), SIGNATURE(64), PUBKEY(32), PREIMAGE(32), NUMERIC]
-  Rung 1: (refund path)
-    Block 0: TIMELOCKED_SIG (0x0701)
-      Conditions fields: [SCHEME(0x01), NUMERIC(144)]          -- 144 blocks (~24h)
-      Witness fields:    [PUBKEY(32), SIGNATURE(64)]
+      Conditions fields: [HASH256(payment_hash), NUMERIC(csv=144), SCHEME(0x01)]
+      Witness fields:    [PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE, NUMERIC(path)]
+                         -- strict 5-field order, both pubkeys always revealed
+                            (PubkeyCountForBlock = 2 — leaf reconstruction)
   Coil: UNLOCK(0x01), INLINE(0x01), SCHNORR(0x01)
 ```
 
-### Evaluation (Rung 0: Bob claims)
+### Evaluation — `path == 0` (Bob claims with preimage)
 
-1. `EvalHTLCBlock` is called.
-2. Step 1: Hash preimage check.
-   - Finds HASH256 field (payment_hash, 32 bytes from conditions).
-   - Finds PREIMAGE field (32 bytes from witness).
-   - Computes `SHA256(preimage)` and compares to payment_hash.
-   - Must match to proceed.
-3. Step 2: CSV check.
-   - Reads NUMERIC(0). With the locktime disable flag not set and value 0, the
-     sequence check passes immediately.
-4. Step 3: Signature check.
-   - Finds PUBKEY (Bob's key, bound by Merkle proof).
-   - Finds SIGNATURE (Bob's Schnorr sig).
-   - Verifies signature via `CheckSchnorrSignature`.
-5. All three sub-checks pass: returns SATISFIED.
+1. `EvalHTLCBlock` reads the witness `NUMERIC(path) == 0`.
+2. PREIMAGE must be non-empty; computes `SHA256(PREIMAGE)` and compares
+   byte-for-byte to the conditions `HASH256(payment_hash)`. Mismatch
+   &rarr; UNSATISFIED.
+3. Dispatches `VerifySigWithScheme(receiver_pubkey, sig, scheme)`.
+4. **CSV is not enforced on this path** &mdash; the receiver claims
+   immediately after the preimage is revealed.
+5. Sig valid &rarr; SATISFIED.
 
-### Evaluation (Rung 1: Alice refunds)
+### Evaluation — `path == 1` (Alice refunds after timeout)
 
-1. `EvalTimelockedSigBlock` is called.
-2. Verifies Alice's Schnorr signature.
-3. Checks `CheckSequence(144)`: the UTXO must be at least 144 blocks old.
-4. Both pass: returns SATISFIED.
+1. `EvalHTLCBlock` reads `NUMERIC(path) == 1`.
+2. PREIMAGE **must be empty** (anti-data-embedding); else ERROR.
+3. Reads conditions NUMERIC `csv = 144`. SEQUENCE_LOCKTIME_DISABLE_FLAG
+   set &rarr; ERROR (would defeat the refund timer). Range guard:
+   `csv > 0xFFFFFFFF` &rarr; UNSATISFIED.
+4. `CheckSequence(uint32_t(csv))` must pass; else UNSATISFIED.
+5. Dispatches `VerifySigWithScheme(sender_pubkey, sig, scheme)`. Sig
+   valid &rarr; SATISFIED.
 
-### Wire format size (claim path via Rung 0)
+On UNSATISFIED, `ctx.error_message_out` (if non-null) carries the
+specific check that fired ("HTLC: path=0 preimage hash mismatch",
+"HTLC: path=1 CSV not elapsed", etc.) so mempool reject reasons are
+diagnostic.
 
-**MLSC proof**: ~75 bytes (rung 0 blocks + rung 1 leaf hash; no separate coil leaf)
+### Wire format size (claim path)
 
-**Witness**: HTLC micro-header(1) + HASH256(32) + PREIMAGE(1+32) + NUMERIC(1+1)
-+ PUBKEY(1+32) + SIGNATURE(1+64) + coil(6) = ~172 bytes
+**Conditions side (in the rung leaf)**: HTLC escape header(3) +
+HASH256(32) + NUMERIC(3) + SCHEME(1) = ~40 bytes.
+
+**Witness side**: HTLC escape header(3) + 2&times;PUBKEY(35 each) +
+SIGNATURE(66) + PREIMAGE(33) + NUMERIC(2) + coil(6) = ~210 bytes.
 
 ---
 
@@ -558,8 +564,12 @@ Ladder:
 
 ### Field sizes
 
-- PUBKEY: 897 bytes (FALCON-512 public key)
-- SIGNATURE: 666 bytes (FALCON-512 signature — exact, fixed size)
+- PUBKEY: 897 bytes (FALCON-512 public key, canonical fixed size)
+- SIGNATURE: variable, **up to 666 bytes** (FALCON-512 sigs are
+  variable-length; the encoded length is validated internally by
+  `OQS_SIG_verify`). Pre-v0.14 the wire format required exactly
+  666 B and short sigs were zero-padded — that opened a 0-66 B/tx
+  silent embedding channel (audit #9 F4), now closed.
 - SCHEME: 1 byte (`0x10`)
 
 `FieldMaxSize(PUBKEY) = 2,048` and `FieldMaxSize(SIGNATURE) = 50,000`
@@ -575,9 +585,10 @@ This is significantly larger than a Schnorr spend (~109 vB) but provides
 quantum resistance. A hybrid approach could use two rungs: Rung 0 with Schnorr
 (compact, pre-quantum), Rung 1 with FALCON-512 (quantum-safe fallback). For
 **batched** PQ spends (multiple inputs gated by the same FALCON key), see
-the `PQ_BATCH` block — amortises to ~55 vB per input by revealing the pubkey
-+ signature once per tx via an anchor input. See
-[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) and [`SIZING.md`](SIZING.md).
+the `PQ_BATCH` block — amortises to **~17.8 vB per input at N=100**
+(anchor ~392 vB, non-anchors ~14 vB each), about 22&times; cheaper than
+per-input FALCON-512. See [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) and
+[`SIZING.md`](SIZING.md).
 
 ---
 
