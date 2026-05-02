@@ -2499,6 +2499,21 @@ their named bars.
   permitted; libbitcoinkernel-style stateless verifier qualifies)
   written from this BIP alone, producing byte-identical output on
   every test vector. (Activation gate component 7.)
+- **APO-equivalent for v4 (`SigVersion::LADDER`).** This proposal
+  rejects the BIP-118 ANYPREVOUT hash-type byte family
+  (`0x40..0x43`, `0xC0..0xC3`) at the deserialiser, on the reasoning
+  given in Rationale Q15: BIP 118 mitigates ANYPREVOUT replay risk
+  via a script-prefixed pubkey form (`0x01` for `ANYPREVOUT`,
+  `0x02` for `ANYPREVOUTANYSCRIPT`) that this proposal does not
+  introduce, and accepting the bytes without the mitigation would
+  let a signer's signature be replayed against any v4 UTXO
+  reachable from the same internal key. An APO-equivalent for v4
+  that defines the prefixed-pubkey scheme for `SigVersion::LADDER`
+  is a candidate future BIP. The author considers the LN `eltoo`
+  family of constructions a worthwhile target and will not oppose
+  such a BIP, but the design work is out of scope for this
+  proposal and the prefixed-pubkey form needs its own dedicated
+  review cycle.
 
 ## Acknowledgements
 
