@@ -205,19 +205,17 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 <span class="comment">// Try rung 0 first: hot key signs, but must wait 144 blocks.</span>
 <span class="comment">// If rung 0 fails, try rung 1: any 2 of 3 recovery keys, no delay.</span></div>
     <p>Ladder Script introduces a new transaction type, <strong>v4 RUNG_TX</strong>, which uses the TX_MLSC wire format. Outputs are 8 bytes each (value only, no script). One conditions_root per transaction defines a shared condition tree across every output, so an attacker writing arbitrary data can only choose 32 bytes per transaction (not 32 per output). The actual condition structure is only revealed at spend time in the witness — unrevealed rungs stay private. Structural anti-spam: per-tx caps (16 rungs, 8 blocks per rung, 16 fields per block), implicit field layouts on every block type, and a default-deny on raw HASH256 fields at the RPC layer.</p>
-    <p>You can describe conditions in a compact notation. The <code>output()</code> wrapper maps outputs to the shared condition tree:</p>
-    <div class="code-block"><span class="value">ladder(output(0,
-  or(
-    and(sig(@hot_key), csv(144)),
-    multisig(2, @key_a, @key_b, @key_c)
-  )
+    <p>You can describe conditions in a compact notation. <code>or()</code> emits one rung per branch; <code>and()</code> conjoins blocks within a rung; each rung's coil binds it to its target output:</p>
+    <div class="code-block"><span class="value">ladder(or(
+  and(sig(@hot_key), csv(144)),
+  multisig(2, @key_a, @key_b, @key_c)
 ))</span></div>
   </div>
 
   <!-- SIZING CALLOUT -->
   <div class="section">
     <blockquote style="border-left:3px solid var(--accent);padding:14px 20px;margin:8px 0 0;background:rgba(230,126,34,0.04);border-radius:0 6px 6px 0;font-size:15px;color:var(--text-body);line-height:1.7;">
-      Up to <strong>12&times; smaller per coin</strong> in chainstate, <strong>3.5&times; smaller</strong> 100-output batch transactions, <strong>no regression</strong> at single-payment size. Post-quantum sigs amortise to ~55 vB per input via PQ_BATCH. <a href="docs/#SIZING" style="color:var(--accent);font-weight:500;">See the sizing breakdown &rarr;</a>
+      Up to <strong>12&times; smaller per coin</strong> in chainstate, <strong>3.5&times; smaller</strong> 100-output batch transactions, <strong>no regression</strong> at single-payment size. Post-quantum sigs amortise to ~17.8 vB per input via PQ_BATCH at N=100. <a href="docs/#SIZING" style="color:var(--accent);font-weight:500;">See the sizing breakdown &rarr;</a>
     </blockquote>
   </div>
 
@@ -232,19 +230,18 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <p><strong style="color:var(--accent)">Per-output governance.</strong> OUTPUT_CHECK verifies that a specific output has the right value and script. Enforce that treasury spends route funds to the correct address.</p>
       <p><strong style="color:var(--accent)">Cross-input dependencies.</strong> COSIGN requires that another UTXO (identified by its script hash) is spent in the same transaction. Creates physical "key" UTXOs that must be present to authorise spending.</p>
       <p><strong style="color:var(--accent)">Post-quantum migration.</strong> Any signature block works with Schnorr, ECDSA, FALCON-512, FALCON-1024, Dilithium3, or SPHINCS+ by changing a single SCHEME byte. No new opcodes needed.</p>
-      <p><strong style="color:var(--accent)">Post-quantum batch consolidation.</strong> PQ_BATCH commits SHA256(falcon_pubkey) per output. One "anchor" input in the spend tx reveals the pubkey + signature once; every other input gated by the same hash short-circuits via a tx-local cache. ~55 vB per input amortised — about 8&times; cheaper than per-input FALCON signatures. No coordinator, no priming round. Built for exchange sweeps, co-owned UTXO pools, recurring subscription drains.</p>
-      <p><strong style="color:var(--accent)">N-party atomic batches.</strong> QABIO commits a coordinator FALCON-512 pubkey, the full participant set, and the output set at fund time. Each participant primes their UTXO independently; the coordinator then signs a single FALCON aggregate covering every input. One verify per transaction, on-chain output-set binding, ~52 vB per input amortised. Built for exchange settlement, atomic issuance, pooled custody.</p>
-      <p><strong style="color:var(--accent)">Next-generation payment channels.</strong> ANYPREVOUT sighash support enables payment channels where any state can replace any earlier state, removing the need for penalty transactions.</p>
+      <p><strong style="color:var(--accent)">Post-quantum batch consolidation.</strong> PQ_BATCH commits SHA256(falcon_pubkey) per output. One "anchor" input in the spend tx reveals the pubkey + signature once; every other input gated by the same hash short-circuits via a tx-local cache. ~17.8 vB per input amortised at N=100 — about 22&times; cheaper than per-input FALCON-512 signatures (~400 vB each). No coordinator, no priming round. Built for exchange sweeps, co-owned UTXO pools, recurring subscription drains.</p>
+      <p><strong style="color:var(--accent)">N-party atomic batches.</strong> QABIO commits a coordinator FALCON-512 pubkey, the full participant set, and the output set at fund time. Each participant primes their UTXO independently; the coordinator then signs a single FALCON aggregate covering every input. One verify per transaction, on-chain output-set binding, ~143 vB per participant at N=100. Built for exchange settlement, atomic issuance, pooled custody.</p>
     </div>
   </div>
 
   <!-- HOW SMALL IS THE CHANGE -->
   <div class="section">
     <div class="section-head">How small is the change</div>
-    <p>Ladder Script adds <strong>961 lines</strong> of changes to existing Bitcoin Core code across 33 modified files. Everything else is a self-contained library of 21,251 lines in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header). The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
+    <p>Ladder Script adds <strong>961 lines</strong> of changes to existing Bitcoin Core code across 33 modified files. Everything else is a self-contained library of 21,247 lines in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header). The patch does not modify any existing Bitcoin Script evaluation, signature verification, or consensus logic.</p>
     <div class="stats-row">
       <div class="stat"><span class="stat-val">961</span><span class="stat-key">Lines patched</span></div>
-      <div class="stat"><span class="stat-val">21,251</span><span class="stat-key">New lines</span></div>
+      <div class="stat"><span class="stat-val">21,247</span><span class="stat-key">New lines</span></div>
       <div class="stat"><span class="stat-val">65</span><span class="stat-key">Block types</span></div>
       <div class="stat"><span class="stat-val">655</span><span class="stat-key">Unit tests</span></div>
       <div class="stat"><span class="stat-val">52</span><span class="stat-key">Functional tests</span></div>
@@ -265,7 +262,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       </a>
       <a href="get-started.html" class="link-item">
         <div class="link-label">Run a Node</div>
-        <div class="link-desc">Download the 18 MB binary, connect to signet, create transactions from the command line.</div>
+        <div class="link-desc">Download the ~14 MB tarball, connect to signet, create transactions from the command line.</div>
       </a>
       <a href="patch-overview.html" class="link-item">
         <div class="link-label">Review the Patch</div>
