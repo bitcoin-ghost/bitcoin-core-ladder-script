@@ -64,11 +64,11 @@ key-path outputs in Bitcoin today.
 
 When `createrungtx` detects a single-SIG rung, it automatically tweaks the
 output to enable key-path spending:
-`conditions_root = internal_pubkey + H("LadderTweak", pubkey || merkle_root) × G`
+`conditions_root = internal_pubkey + H("LadderTweak/v1", pubkey || merkle_root) × G`
 
 For PQ schemes, the pubkey is larger than 32 bytes (e.g. 897 bytes for
 FALCON-512). The tweak function requires exactly 32 bytes and rejects PQ
-keys — the auto-tweak **silently falls back** to using the raw Merkle root
+keys — the auto-tweak **falls back** to using the raw Merkle root
 as the conditions_root. This means:
 
 - **PQ outputs are never auto-tweaked.** The conditions_root is always a
@@ -79,16 +79,19 @@ as the conditions_root. This means:
 
 ## Supported PQ Schemes
 
-| Scheme | Code | Pubkey | Signature | Security Level |
-|--------|------|--------|-----------|----------------|
-| FALCON-512 | `0x10` | 897 B | ~690 B | 128-bit PQ |
-| FALCON-1024 | `0x11` | 1,793 B | ~1,330 B | 256-bit PQ |
-| Dilithium3 | `0x12` | 1,952 B | 3,293 B | 192-bit PQ |
-| SPHINCS+-SHA2-256f | `0x13` | 64 B | 49,216 B | 256-bit PQ |
+| Scheme | Code | Pubkey | Signature (max) | Security Level |
+|--------|------|--------|-----------------|----------------|
+| FALCON-512 | `0x10` | 897 B | variable, up to 666 B | 128-bit PQ |
+| FALCON-1024 | `0x11` | 1,793 B | variable, up to 1,280 B | 256-bit PQ |
+| Dilithium3 | `0x12` | 1,952 B | 3,293 B (fixed) | 192-bit PQ |
+| SPHINCS+-SHA2-256f | `0x13` | 64 B | 49,216 B (fixed) | 256-bit PQ |
 
-All schemes are verified via liboqs. If liboqs is not compiled in
-(`HasPQSupport()` returns false), PQ signature verification returns ERROR
-(fail-closed).
+FALCON signatures are variable-length up to the per-scheme maximum
+(the upper bound is enforced by `signrungtx` and the evaluator);
+Dilithium3 and SPHINCS+ are fixed-length. All schemes are verified
+via liboqs, which is a **hard build dependency** — `find_package(liboqs
+REQUIRED)` in `src/rung/CMakeLists.txt` — to keep every node on the
+same consensus rules. A node built without liboqs would fail to link.
 
 Set the SCHEME field to any PQ code and the same SIG block handles
 verification. Works with SIG, MULTISIG, TIMELOCKED_SIG, CLTV_SIG,
@@ -132,8 +135,10 @@ The migration from classical to post-quantum is straightforward:
    (quantum-safe fallback).
 
 3. **Post-quantum (quantum computers operational):** all outputs use PQ
-   schemes. Key-path spending is abandoned. Script-path at 140 vB + PQ
-   signature overhead (~690-49,216 bytes depending on scheme).
+   schemes. Key-path spending is abandoned. Script-path overhead at the
+   per-scheme upper bound: FALCON-512 ~666 B sig + 897 B pubkey;
+   FALCON-1024 ~1,280 B + 1,793 B; Dilithium3 3,293 B + 1,952 B;
+   SPHINCS+-SHA2-256f 49,216 B + 64 B.
 
 No consensus change is needed for any of these transitions. The SCHEME
 field routes to the correct verifier at evaluation time. All 6 schemes
@@ -152,8 +157,9 @@ ladder(or(
 
 - **Rung 0:** Schnorr signature. Cheap (110 vB key-path or 124 vB script-path).
   Use this while quantum computers don't exist.
-- **Rung 1:** FALCON-512 signature. Quantum-safe. Larger witness (~690 bytes)
-  but protects against quantum attack.
+- **Rung 1:** FALCON-512 signature. Quantum-safe. Larger witness
+  (variable, up to 666 B sig + 897 B pubkey) but protects against
+  quantum attack.
 
 If quantum computers become a threat, stop using rung 0 and spend via rung 1.
 The output is protected from day one — the PQ key is committed in the Merkle
