@@ -160,10 +160,10 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="byte-bar">
       <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 bytes</div><div class="seg-hex">04000000</div></div>
-      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div><div class="seg-hex">0001</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div><div class="seg-hex">0002</div></div>
       <div class="byte-seg" style="background:var(--c-inputs);flex:4"><div class="seg-label">Input (P2PKH)</div><div class="seg-size">~148 bytes</div><div class="seg-hex">txid + vout + scriptSig + sequence</div></div>
       <div class="byte-seg" style="background:var(--c-mlsc);flex:1"><div class="seg-label">Output</div><div class="seg-size">8 bytes</div><div class="seg-hex">value only</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.5"><div class="seg-label">Conditions Root</div><div class="seg-size">33 bytes</div><div class="seg-hex">df + root</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.5"><div class="seg-label">Conditions Root</div><div class="seg-size">32 bytes</div><div class="seg-hex">root only on the wire</div></div>
       <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 bytes</div><div class="seg-hex">00000000</div></div>
     </div>
 
@@ -184,7 +184,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-mlsc)"></div><div class="detail-title">Conditions Root</div><div class="detail-bytes">32 bytes on the wire, one per transaction</div></div>
-      <p>A 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where outputs are mapped to conditions via the <code>output()</code> wrapper. On deserialisation, each <code>vout[i].scriptPubKey</code> is reconstructed as <code>0xDF || conditions_root</code> (33 bytes) so all downstream code that touches scriptPubKeys sees a normal-looking SPK. The root is also written to a synthetic UTXO entry at <code>(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)</code> so per-coin chainstate cost drops to <strong>3 bytes</strong> &mdash; the root is recovered from the synthetic entry at spend time.</p>
+      <p>A 32-byte Merkle root shared across all outputs. The root defines a condition tree (PLC model) where each rung's coil carries an <code>output_index</code> declaring which output it governs — the binding is committed in the leaf hash, not a separate wrapper. On deserialisation, each <code>vout[i].scriptPubKey</code> is reconstructed as <code>0xDF || conditions_root</code> (33 bytes) so all downstream code that touches scriptPubKeys sees a normal-looking SPK. The root is also written to a synthetic UTXO entry at <code>(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)</code> so per-coin chainstate cost drops to <strong>3 bytes</strong> &mdash; the root is recovered from the synthetic entry at spend time.</p>
       <table>
         <tr><td>0xDF</td><td>MLSC SPK prefix (1 byte, reconstructed per output on deserialisation)</td></tr>
         <tr><td>root</td><td>SHA-256 Merkle root of leaves: <code>TaggedHash("LadderLeaf/v1", ...)</code> per leaf, sorted-pair interior with <code>TaggedHash("LadderInternal/v1", ...)</code> (32 bytes)</td></tr>
@@ -198,24 +198,29 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="byte-bar">
       <div class="byte-seg" style="background:var(--c-version);flex:1"><div class="seg-label">Version</div><div class="seg-size">4 B</div><div class="seg-hex">04000000</div></div>
-      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div></div>
+      <div class="byte-seg" style="background:var(--c-marker);flex:0.5"><div class="seg-label">Marker</div><div class="seg-size">2 B</div><div class="seg-hex">0002</div></div>
       <div class="byte-seg" style="background:var(--c-inputs);flex:2"><div class="seg-label">Input</div><div class="seg-size">41 B</div><div class="seg-hex">txid + vout + empty scriptSig + seq</div></div>
       <div class="byte-seg" style="background:var(--c-mlsc);flex:0.8"><div class="seg-label">Output</div><div class="seg-size">8 B</div><div class="seg-hex">value</div></div>
-      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.2"><div class="seg-label">Conditions Root</div><div class="seg-size">33 B</div><div class="seg-hex">df + root</div></div>
+      <div class="byte-seg" style="background:var(--c-mlsc);flex:1.2"><div class="seg-label">Conditions Root</div><div class="seg-size">32 B</div><div class="seg-hex">root only on the wire</div></div>
       <div class="byte-seg" style="background:var(--c-witness);flex:4"><div class="seg-label">Witness</div><div class="seg-size">variable</div><div class="seg-hex">ladder witness + MLSC proof</div></div>
       <div class="byte-seg" style="background:var(--c-locktime);flex:1"><div class="seg-label">Locktime</div><div class="seg-size">4 B</div></div>
     </div>
 
-    <p>The per-input witness stack has exactly 2 elements:</p>
+    <p>The per-input witness stack has 1, 2, or 3 elements — the count discriminates the spend mode:</p>
 
     <div class="detail">
-      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-witness)"></div><div class="detail-title">Witness Stack[0]: Ladder Witness</div></div>
-      <p>The serialised rung with all blocks and their witness fields (signatures, pubkeys, preimages), plus coil metadata and relay definitions.</p>
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-witness)"></div><div class="detail-title">1 element &mdash; key-path spend</div></div>
+      <p>A single 64-byte Schnorr signature against the conditions_root interpreted as an x-only public key. No conditions revealed. The smallest spend Ladder Script supports — same shape as a Taproot key-path spend.</p>
     </div>
 
     <div class="detail">
-      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-proof)"></div><div class="detail-title">Witness Stack[1]: MLSC Proof</div></div>
-      <p>The Merkle proof linking the revealed conditions to the conditions_root. Contains the rung index, revealed conditions, and sibling hashes.</p>
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-witness)"></div><div class="detail-title">2 elements &mdash; script-path, no tweak</div></div>
+      <p><code>[LadderWitness, MLSCProof]</code>. <strong>LadderWitness</strong> = the serialised rung with all blocks and their witness fields (signatures, pubkeys, preimages), plus coil metadata and relay definitions. <strong>MLSCProof</strong> = the Merkle proof linking the revealed conditions to the conditions_root: rung index, revealed conditions, sibling hashes. Used when the conditions_root was committed without an internal-pubkey tweak.</p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-proof)"></div><div class="detail-title">3 elements &mdash; script-path with tweak</div></div>
+      <p><code>[LadderWitness, MLSCProof, internal_pubkey (32 bytes)]</code>. The third element is the x-only internal pubkey used to tweak the merkle_root into the conditions_root via <code>TaggedHash("LadderTweak/v1", P || merkle_root)</code>. The verifier reconstructs the raw merkle_root from the proof, re-applies the tweak, and asserts equality with the spent output's conditions_root.</p>
     </div>
 
     <p style="margin-top:12px">After the per-input witness stacks, the TX_MLSC wire format (flag byte <code>0x02</code>) carries two tx-level fields: <strong><code>qabi_block</code></strong> (empty for non-QABIO txs; the serialised QABIO batch state otherwise) and <strong><code>aggregated_sig</code></strong> (empty for non-QABIO txs; the coordinator's FALCON-512 signature, exactly 666 bytes, for QABIO batches). These let a single FALCON sig authorise an N-input batch — see <a href="docs/#QABIO">QABIO</a>.</p>
@@ -230,7 +235,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <div class="byte-seg" style="background:var(--c-inputs);flex:0.5"><div class="seg-label">Blocks</div><div class="seg-size">1 B</div><div class="seg-hex">02</div></div>
       <div class="byte-seg" style="background:var(--c-micro);flex:1"><div class="seg-label">Block 1</div><div class="seg-size">header + fields</div></div>
       <div class="byte-seg" style="background:var(--c-fields);flex:1.5"><div class="seg-label">Block 2</div><div class="seg-size">header + fields</div></div>
-      <div class="byte-seg" style="background:var(--c-coil);flex:2"><div class="seg-label">Coil</div><div class="seg-size">type + scheme + address + destinations</div></div>
+      <div class="byte-seg" style="background:var(--c-coil);flex:2"><div class="seg-label">Coil</div><div class="seg-size">4 B: type + attestation + scheme + output_index</div></div>
     </div>
 
     <div class="detail">
@@ -262,14 +267,13 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
     </div>
 
     <div class="detail">
-      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-coil)"></div><div class="detail-title">Coil</div></div>
-      <p>Defines what happens when a rung is satisfied.</p>
+      <div class="detail-head"><div class="detail-swatch" style="background:var(--c-coil)"></div><div class="detail-title">Coil &mdash; 4 bytes total</div></div>
+      <p>Defines what happens when a rung is satisfied. The wire form is exactly 4 bytes; the structural template that goes into each rung's leaf hash commits all four. (Two earlier fields, <code>address_hash</code> and <code>rung_destinations</code>, were dropped pre-v1 as unbound spender channels &mdash; wallets that need destination metadata track it locally.)</p>
       <table>
         <tr><td>coil_type</td><td>UNLOCK (0x01) or UNLOCK_TO (0x02). All other values rejected.</td></tr>
         <tr><td>attestation</td><td>INLINE (0x01). All other values rejected.</td></tr>
-        <tr><td>scheme</td><td>SCHNORR, ECDSA, or PQ scheme</td></tr>
-        <tr><td>address_hash</td><td>0 or 32 bytes (destination for UNLOCK_TO)</td></tr>
-        <tr><td>rung_destinations</td><td>Per-rung destination overrides</td></tr>
+        <tr><td>scheme</td><td>SCHNORR (0x01), ECDSA (0x02), FALCON-512/1024, Dilithium3, SPHINCS+</td></tr>
+        <tr><td>output_index</td><td>1 byte &mdash; which output of the spending tx this rung governs</td></tr>
       </table>
     </div>
   </div>
