@@ -16,9 +16,14 @@ budget. Invertible (inverted ACCUMULATOR = blocklist, "NOT in set"). Closes the
 v0.5 audit #2 finding E-001 (legacy v1 shape allowed ~2 KB/spend).
 
 ### ADAPTOR_SIG
-Block type 0x0003 (Signature family). Adaptor signature verification. Key-consuming with
-2 pubkeys. Has no implicit conditions layout (no condition fields at all in conditions
-context). Used for atomic swap and PTLC protocols.
+Block type 0x0003 (Signature family). Adaptor signature verification.
+Key-consuming with **1 pubkey** (the single signing key — v0.7 removed
+the unused on-chain adaptor-point slot from v0.6). The adaptor
+mechanics (encrypt/decrypt against adaptor point T) are entirely
+off-chain; on-chain the spend reveals a normal Schnorr signature that
+the counterparty extracts the adaptor secret from. Witness:
+implicit `[PUBKEY, SIGNATURE]` (= `SIG_WITNESS`). No conditions-side
+fields. Used for atomic swap and PTLC protocols.
 
 ### AMOUNT_LOCK
 Block type 0x0303 (Covenant family). Constrains the output amount to a range defined by
@@ -35,8 +40,15 @@ SCHEME(1), NUMERIC(min_fee_rate), NUMERIC(max_fee_rate), NUMERIC(max_weight),
 NUMERIC(commitment). Not invertible.
 
 ### ANCHOR_CHANNEL
-Block type 0x0502 (Anchor family). Lightning channel anchor. Key-consuming with 2 pubkeys
-(local and remote). Conditions: NUMERIC(commitment_number). Not invertible (key-consuming).
+Block type 0x0502 (Anchor family). v0.7+ pure-marker channel anchor.
+Carries an optional `NUMERIC(commitment_number)` and nothing else;
+**PubkeyCountForBlock = 0**. The v0.6 design embedded local/remote
+channel pubkeys but no consumer ever validated them — they were a
+66 B/spend silent data channel (audit finding E-002), removed in
+v0.7. Not invertible. Future Lightning consumers needing channel keys
+should compose ANCHOR_CHANNEL with a SIG/MULTISIG block, or extend
+the spec with an `ANCHOR_CHANNEL_KEYED` variant whose keys are
+sig-validated.
 
 ### ANCHOR_ORACLE
 Block type 0x0506 (Anchor family). Oracle anchor. Key-consuming with 1 pubkey (oracle key).
@@ -101,9 +113,11 @@ NUMERIC(operator), NUMERIC(value_b), NUMERIC(value_c). Invertible.
 ### Conditions
 See RungConditions. The locking side of a v4 output. In a RUNG_TX, conditions are committed
 via a shared conditions_root per transaction (MLSC `0xDF` prefix); each output is 8 bytes
-(value only). Contains rungs (with blocks), a coil, and optionally relays. Only condition
-data types are allowed: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA. Never
-PUBKEY, SIGNATURE, PREIMAGE, or SCRIPT_BODY.
+(value only). Contains rungs (with blocks), a coil, and optionally relays. Allowed
+conditions data types: HASH256, HASH160, NUMERIC, SCHEME, DATA, MERKLE_PROOF, plus
+PUBKEY_COMMIT for the single consensus role of `QABI_SPEND.owner_pubkey_hash`. Never
+PUBKEY, SIGNATURE, PREIMAGE, or SCRIPT_BODY in conditions context. Slot `0x07`
+(formerly SPEND_INDEX) is reserved and never used in any block layout.
 
 ### ComputeTxMLSCLeaf
 Function in `conditions.cpp`. Computes a TX_MLSC Merkle leaf from a `CreationProofRung`:
@@ -188,9 +202,15 @@ Data type 0x04. RIPEMD160(SHA256()) hash, exactly 20 bytes.
 Data type 0x03. SHA-256 hash, exactly 32 bytes.
 
 ### HTLC
-Block type 0x0702 (Compound family). Hash + timelock + sig: standard Lightning HTLC.
-Key-consuming with 2 pubkeys. Conditions: HASH256(payment_hash), NUMERIC(csv_timeout).
-Witness: PUBKEY, SIGNATURE, PUBKEY, PREIMAGE, NUMERIC.
+Block type 0x0702 (Compound family). v0.7+ true two-path HTLC.
+Key-consuming with 2 pubkeys (both revealed for leaf reconstruction).
+Conditions: `HASH256(payment_hash), NUMERIC(csv), SCHEME` (3 fields).
+Witness: `PUBKEY(receiver), PUBKEY(sender), SIGNATURE, PREIMAGE,
+NUMERIC(path)` (5 fields, strict order). `path == 0` is the receiver
+hashlock claim (CSV not enforced); `path == 1` is the sender refund
+(PREIMAGE must be empty, CSV must elapse). Closes audit E-002 by
+making both pubkeys structurally consumed across the two paths. Not
+invertible.
 
 ### HYSTERESIS_FEE
 Block type 0x0601 (PLC family). Fee hysteresis band. Conditions: NUMERIC(high_sat_vb),
@@ -405,22 +425,26 @@ Block type `0x0A03` (QABI / PQ family). Lightweight post-quantum batch gate. Con
 commit a `HASH256` of `SHA256(canonical_falcon_pubkey)`. One **anchor** input in the
 spending tx reveals the pubkey + signature once; every other input gated by the same
 hash carries an empty witness and short-circuits via the per-tx `PQBatchCache`. No
-coordinator, no priming round. Amortised cost ~55 vB per input — about an order of
-magnitude cheaper than per-input FALCON. Anchor must be at the lowest-index input per
-commit group. See [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
+coordinator, no priming round. Amortised cost **~17.8 vB per input at N=100** (anchor
+~392 vB, non-anchors ~14 vB each), about 22&times; cheaper than per-input FALCON-512.
+Anchor must be at the lowest-index input per commit group. See
+[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
 
 ### PUBKEY_COMMIT
-Data type 0x02. Public key commitment, exactly 32 bytes. Removed from conditions context
-(pubkeys now folded into Merkle leaf). Still a valid wire-format data type for backward
-compatibility.
+Data type 0x02. Public key commitment, exactly 32 bytes. Used by exactly one consensus
+role: `QABI_SPEND.owner_pubkey_hash` (the participant identity tag). For every other
+block type, conditions-side pubkey material is folded into the Merkle leaf via
+`merkle_pub_key`, not written as a `PUBKEY_COMMIT` field. The deserialiser rejects
+`PUBKEY_COMMIT` in any other position.
 
 ### QABIO
-Quantum Atomic Batch I/O. A multi-party batch ceremony built on three blocks
+Quantum Atomic Batch I/O. A multi-party batch ceremony built on two blocks
 (`QABI_PRIME`, `QABI_SPEND`) plus the tx-level `qabi_block` and `aggregated_sig`
 fields. A coordinator + N participants produce a single FALCON-512 aggregate signature
-(`SIGHASH_QABO`) covering the whole tx. ~143 vB per cosigner at N=100 — roughly
-equivalent to a P2WPKH payment per participant. Per-tx `QABOSigCache` collapses N
-verifications to one. See [`QABIO.md`](QABIO.md).
+(`SIGHASH_QABO`) covering the whole tx. **~139 vB per cosigner at N=100** (converging
+value, witness-discounted) — roughly equivalent to a P2WPKH payment per participant.
+Per-tx `QABOSigCache` collapses N verifications to one. See
+[`QABIO.md`](QABIO.md) §8.
 
 ### QABI_PRIME
 Block type `0x0A01` (QABI / PQ family). Priming UTXO marker for a QABIO ceremony.
@@ -514,10 +538,13 @@ Enum in `types.h`. Two values: UNLOCK (0x01, standard spend), UNLOCK_TO (0x02, s
 specific destination).
 
 ### RungDataType
-Enum in `types.h`. 11 data types: PUBKEY (0x01), PUBKEY_COMMIT (0x02), HASH256 (0x03),
-HASH160 (0x04), PREIMAGE (0x05), SIGNATURE (0x06), SPEND_INDEX (0x07), NUMERIC (0x08),
-SCHEME (0x09), SCRIPT_BODY (0x0A), DATA (0x0B). Each has minimum and maximum size
-constraints enforced at deserialization.
+Enum in `types.h`. 11 active data types plus 1 reserved slot:
+PUBKEY (0x01), PUBKEY_COMMIT (0x02), HASH256 (0x03), HASH160 (0x04),
+PREIMAGE (0x05), SIGNATURE (0x06), 0x07 *(reserved &mdash; formerly
+SPEND_INDEX, never used in any block layout)*, NUMERIC (0x08),
+SCHEME (0x09), SCRIPT_BODY (0x0A), DATA (0x0B), MERKLE_PROOF (0x0C).
+Each has minimum and maximum size constraints enforced at
+deserialization.
 
 ### RungEvalContext
 Struct in `evaluator.h`. Extended evaluation context for blocks needing transaction data.
@@ -622,8 +649,11 @@ signature replay.
 Data type 0x06. Signature, 1 to 50000 bytes (accommodates PQ signatures up to 49216 bytes
 for SPHINCS+). Witness-only.
 
-### SPEND_INDEX
-Data type 0x07. Spend index reference, exactly 4 bytes.
+### SPEND_INDEX *(reserved)*
+Data type slot 0x07. Reserved &mdash; not used in any block layout. The
+slot is preserved for backward compatibility with the original
+`RungDataType` enum order; deserialisers reject any field carrying
+this type.
 
 ### TAGGED_HASH
 Block type 0x0203 (Hash family). BIP-340 tagged hash verification. Conditions:
