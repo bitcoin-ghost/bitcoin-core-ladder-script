@@ -97,12 +97,13 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">hot_delay</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of blocks the hot key path must wait (CSV relative timelock).</td></tr>
-      <tr><td class="field-name">signer_key</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Public key of the signer &mdash; either the recovery key or the hot key. Only the key being used is revealed; the evaluator checks which commitment it matches.</td></tr>
-      <tr><td class="field-name">signature</td><td class="field-type">SIGNATURE</td><td class="field-size">64-65 B</td><td class="field-side-w">Witness</td><td class="field-desc">Signature from the revealed key (recovery or hot).</td></tr>
+      <tr><td class="field-name">hot_delay</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of blocks the hot key path must wait (passed to <code>CheckSequence</code> as a BIP-68 sequence value, with the same uint32 range guard as CSV).</td></tr>
+      <tr><td class="field-name">recovery_pubkey</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Cold-recovery pubkey (witness PUBKEY at index 0). Must be revealed even if the spend uses the hot key, because both keys are folded into the rung leaf via <code>merkle_pub_key</code> and the leaf reconstruction needs both.</td></tr>
+      <tr><td class="field-name">hot_pubkey</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Hot-spend pubkey (witness PUBKEY at index 1). Always revealed alongside the recovery pubkey.</td></tr>
+      <tr><td class="field-name">signature</td><td class="field-type">SIGNATURE</td><td class="field-size">64-65 B</td><td class="field-side-w">Witness</td><td class="field-desc">Single Schnorr signature (size strictly enforced 64-65 B &mdash; no SCHEME field, ECDSA/PQ rejected). The evaluator tries it against the recovery key first, then the hot key, and selects the path by which key validates.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both pubkeys are revealed in the witness because <code>PubkeyCountForBlock(VAULT_LOCK)&nbsp;=&nbsp;2</code> &mdash; the rung leaf binds both keys, so spending requires presenting both to satisfy MLSC-proof-level reconstruction. No key fields appear in conditions.</p>
 </div>
 
 <!-- Wire Format -->
@@ -112,21 +113,22 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0302</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
-      <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">Conditions &asymp; 10 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 3-6B</span>
+      <span class="wire-bytes">Conditions &asymp; 7-10 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0302</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
-      <span class="wire-segment wire-field-sig">SIGNATURE &middot; 67B</span>
-      <span class="wire-bytes">Witness &asymp; 110 bytes</span>
+      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B (recovery)</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B (hot)</span>
+      <span class="wire-segment wire-field-sig">SIGNATURE &middot; 66-67B</span>
+      <span class="wire-bytes">Witness &asymp; 140 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">&asymp; 188 bytes</span>
+      <span class="wire-total-bytes">&asymp; 150 bytes</span>
     </div>
   </div>
 </div>
@@ -135,11 +137,12 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">recovery_commit</span>, <span class="eval-keyword">hot_commit</span>, <span class="eval-keyword">hot_delay</span> from conditions. Read <span class="eval-keyword">signer_key</span>, <span class="eval-keyword">signature</span> from witness. Any missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Hash <span class="eval-keyword">signer_key</span> and check which commitment it matches (recovery_commit or hot_commit). If neither &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If signer_key matches recovery_commit: verify <span class="eval-keyword">signature</span> against <span class="eval-keyword">signer_key</span>. If valid &rarr; <span class="eval-result-sat">SATISFIED</span> (no delay)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If signer_key matches hot_commit: verify <span class="eval-keyword">signature</span> against <span class="eval-keyword">signer_key</span>. If valid AND <span class="eval-keyword">CheckSequence(hot_delay)</span> passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Neither path satisfied &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect both witness <span class="eval-keyword">PUBKEY</span> fields, the <span class="eval-keyword">SIGNATURE</span>, and the conditions <span class="eval-keyword">NUMERIC</span> (<code>hot_delay</code>). If fewer than 2 PUBKEYs, or SIGNATURE/NUMERIC missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Strict-size check on the SIGNATURE: must be 64-65 B (Schnorr range). VAULT_LOCK has no SCHEME field, so ECDSA's 8-72&nbsp;B and PQ scheme sizes are rejected. Out of range &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Decode <code>hot_delay</code> from the NUMERIC. If undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Try the recovery key (witness PUBKEY index 0): call <span class="eval-keyword">VerifySigWithScheme(recovery_pk, sig, scheme=null)</span>. If valid &rarr; <span class="eval-result-sat">SATISFIED</span> immediately (cold sweep, no delay). If <span class="eval-keyword">VerifySigWithScheme</span> returns ERROR &rarr; propagate <span class="eval-result-err">ERROR</span>.</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Otherwise try the hot key (witness PUBKEY index 1) the same way. If the sig validates: range-check <code>hot_delay &isin; [0, 0xFFFFFFFF]</code> &mdash; out of range &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (regression `1a23fa32c8`: silent uint32 truncation). Then call <span class="eval-keyword">CheckSequence(uint32_t(hot_delay))</span>; fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Neither key validated the signature &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
@@ -149,12 +152,14 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields (pubkeys, signature, delay)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Pubkey does not match its commitment</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Signature invalid for both keys</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Hot key sig valid but CSV delay not met</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Recovery key signature valid</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>Hot key sig valid + CSV delay satisfied</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 PUBKEYs in witness, or SIGNATURE/NUMERIC missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SIGNATURE size outside 64-65 B (Schnorr range)</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>hot_delay</code> NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Recovery-key sig validates</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Hot-key sig validates and <code>CheckSequence(hot_delay)</code> passes</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Hot-key sig validates but <code>hot_delay</code> &gt; 0xFFFFFFFF or negative</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Hot-key sig validates but <code>CheckSequence</code> fails (delay not met)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Neither key validates the signature</td><td class="r-unsat">UNSATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -170,14 +175,16 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
   ]
 }</pre></div>
-  <div class="json-label" style="margin-top:16px">Witness (hot key spend)</div>
+  <div class="json-label" style="margin-top:16px">Witness (hot-key spend &mdash; both pubkeys revealed)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"VAULT_LOCK"</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"03ccdd...signer_pubkey..."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"value"</span>: <span class="json-str">"3045...signature..."</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"03aabb... recovery_pubkey ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"value"</span>: <span class="json-str">"03ccdd... hot_pubkey ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"value"</span>: <span class="json-str">"... 64-65 B Schnorr sig ..."</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">The witness layout is identical for a recovery-key spend &mdash; only the SIGNATURE differs. Both pubkeys must be present so the rung leaf can be reconstructed.</p>
   <p class="section-text" style="margin-top:12px">The 144-block delay (~1 day) gives the cold key holder time to detect unauthorized hot key usage and sweep funds using the recovery path before the hot spend confirms.</p>
 </div>
 
