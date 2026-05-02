@@ -111,6 +111,14 @@ jobs:
           # Ship the Ladder Script signet conf so users can `cp share/examples/bitcoin-ladder.conf ~/.bitcoin/bitcoin.conf` and just go.
           cp share/examples/bitcoin-ladder.conf "dist/${PKG}/share/examples/"
           strip "dist/${PKG}/bin/"* || true
+          # Set $ORIGIN-relative RUNPATH so the binaries find the
+          # bundled lib/liboqs.so.5 without LD_LIBRARY_PATH. Without
+          # this, `./bin/bitcoind` fails immediately on extract with
+          # "cannot open shared object file: liboqs.so.5".
+          sudo apt-get install -y --no-install-recommends patchelf
+          for b in "dist/${PKG}/bin/"*; do
+            patchelf --set-rpath '$ORIGIN/../lib' "$b"
+          done
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
 
@@ -200,6 +208,20 @@ jobs:
           cp -RP /usr/local/lib/liboqs.*dylib "dist/${PKG}/lib/"
           cp share/examples/bitcoin-ladder.conf "dist/${PKG}/share/examples/"
           strip "dist/${PKG}/bin/"* || true
+          # Add @loader_path-relative rpath and rewrite the
+          # liboqs install_name reference so each binary finds the
+          # bundled lib/liboqs.*.dylib without DYLD_LIBRARY_PATH.
+          # Without this, `./bin/bitcoind` fails on extract with
+          # "Library not loaded: /usr/local/opt/liboqs/lib/liboqs..."
+          # on machines that don't have liboqs installed system-wide.
+          OQS_INSTALL=$(otool -L "dist/${PKG}/bin/bitcoind" \
+            | awk '/liboqs/ {print $1; exit}')
+          OQS_BASENAME=$(basename "${OQS_INSTALL}")
+          for b in "dist/${PKG}/bin/"*; do
+            install_name_tool -add_rpath '@loader_path/../lib' "$b" || true
+            install_name_tool -change "${OQS_INSTALL}" \
+              "@rpath/${OQS_BASENAME}" "$b" || true
+          done
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}/"
           ls -lh "dist/${PKG}.tar.gz"
 
