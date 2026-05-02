@@ -242,7 +242,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <tbody>
         <tr><td>sig(@alias)</td><td>SIG</td><td>Key alias. Optional scheme: <code>sig(@alice, falcon512)</code></td></tr>
         <tr><td>multisig(M, @k1, @k2, ...)</td><td>MULTISIG</td><td>Threshold M, then key aliases</td></tr>
-        <tr><td>adaptor_sig(@signer, @point)</td><td>ADAPTOR_SIG</td><td>Signing key + adaptor point. Optional scheme</td></tr>
+        <tr><td>adaptor_sig(@signer)</td><td>ADAPTOR_SIG</td><td>Single signing key (v0.7+). Optional scheme: <code>adaptor_sig(@signer, schnorr)</code>. Adaptor point T is off-chain only.</td></tr>
         <tr><td>musig_threshold(M, @k1, @k2, ...)</td><td>MUSIG_THRESHOLD</td><td>MuSig2/FROST aggregate threshold</td></tr>
         <tr><td>key_ref_sig(relay, block)</td><td>KEY_REF_SIG</td><td>Relay index + block index (cross-rung key sharing)</td></tr>
       </tbody>
@@ -331,9 +331,9 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <thead><tr><th>Notation</th><th>Block type</th><th>Arguments</th></tr></thead>
       <tbody>
         <tr><td>timelocked_sig(@pk, csv)</td><td>TIMELOCKED_SIG</td><td>Signature + relative timelock</td></tr>
-        <tr><td>htlc(@sender, @receiver, preimage, csv)</td><td>HTLC</td><td>Two keys, preimage hex, CSV blocks</td></tr>
+        <tr><td>htlc(@receiver, @sender, preimage, csv)</td><td>HTLC</td><td>Receiver key first (path=0 hashlock), sender key second (path=1 refund), preimage hex, CSV blocks. The path indicator is added by the witness builder.</td></tr>
         <tr><td>hash_sig(@pk, preimage)</td><td>HASH_SIG</td><td>Key + preimage hex</td></tr>
-        <tr><td>ptlc(@pk, @point, csv)</td><td>PTLC</td><td>Key, adaptor point, CSV blocks</td></tr>
+        <tr><td>ptlc(@pk, csv)</td><td>PTLC</td><td>Single signing key (v0.7+) + CSV blocks. Adaptor point T is off-chain only.</td></tr>
         <tr><td>cltv_sig(@pk, height)</td><td>CLTV_SIG</td><td>Signature + absolute timelock</td></tr>
         <tr><td>timelocked_multisig(M, @k1, ..., csv)</td><td>TIMELOCKED_MULTISIG</td><td>Threshold, keys, CSV blocks</td></tr>
         <tr><td>anchor_fee(@local, @remote, min, max, weight, num)</td><td>ANCHOR_FEE</td><td>2-of-2 sigs + fee rate band + weight limit (anti-pinning L2 anchor)</td></tr>
@@ -480,7 +480,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <div class="example-title">PTLC payment channel</div>
       <div class="example-desc">Scriptless payment: adaptor signature + 1 block CSV.</div>
       <div class="code-block"><span class="fn">ladder</span>(<span class="fn">or</span>(
-  <span class="fn">ptlc</span>(<span class="alias">@alice</span>, <span class="alias">@adaptor</span>, <span class="num">1</span>),
+  <span class="fn">ptlc</span>(<span class="alias">@alice</span>, <span class="num">1</span>),
   <span class="fn">and</span>(<span class="fn">sig</span>(<span class="alias">@bob</span>), <span class="fn">cltv</span>(<span class="num">900000</span>))
 ))</div>
     </div>
