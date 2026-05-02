@@ -441,10 +441,10 @@ block type, conditions-side pubkey material is folded into the Merkle leaf via
 Quantum Atomic Batch I/O. A multi-party batch ceremony built on two blocks
 (`QABI_PRIME`, `QABI_SPEND`) plus the tx-level `qabi_block` and `aggregated_sig`
 fields. A coordinator + N participants produce a single FALCON-512 aggregate signature
-(`SIGHASH_QABO`) covering the whole tx. **~139 vB per cosigner at N=100** (converging
-value, witness-discounted) — roughly equivalent to a P2WPKH payment per participant.
-Per-tx `QABOSigCache` collapses N verifications to one. See
-[`QABIO.md`](QABIO.md) §8.
+(`SIGHASH_QABO`) covering the whole tx. **~143 vB per cosigner at N=100** (converges
+to ~139 vB at N=500+ as fixed-overhead amortises) — roughly in the P2WPKH ballpark
+per participant. Per-tx `QABOSigCache` collapses N verifications to one. See
+[`SIZING.md`](SIZING.md) §5 for the N-vs-vB table.
 
 ### QABI_PRIME
 Block type `0x0A01` (QABI / PQ family). Priming UTXO marker for a QABIO ceremony.

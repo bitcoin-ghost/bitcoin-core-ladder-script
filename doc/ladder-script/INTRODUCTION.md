@@ -79,10 +79,11 @@ what they contain.
   full cost table; pq-batch.html mirrors it.)
 - **QABIO** (Quantum Atomic Batch I/O) is a multi-party batch
   ceremony: a coordinator + N participants, one FALCON-512 aggregate
-  signature covers the whole tx. **~139 vB per cosigner at N=100** —
-  roughly equivalent to a P2WPKH payment, fully PQ-safe and atomically
-  settled. (See [`QABIO.md`](QABIO.md) §8 for the converging cost
-  table.)
+  signature covers the whole tx. **~143 vB per cosigner at N=100**
+  (converges to ~139 vB at N=500+) — roughly in the P2WPKH ballpark,
+  fully PQ-safe and atomically settled. (See [`SIZING.md`](SIZING.md)
+  §5 for the full N-vs-vB table; QABIO.md §8 covers the protocol
+  derivation.)
 
 **Native covenants and state machines.** CTV template verification,
 recursive covenants (`RECURSE_SAME`, `RECURSE_MODIFIED`, `RECURSE_COUNT`,

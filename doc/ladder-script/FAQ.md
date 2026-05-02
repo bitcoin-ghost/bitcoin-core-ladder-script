@@ -528,8 +528,9 @@ to 50,000 bytes, accommodating even SPHINCS+ signatures.
 - **QABIO** (`QABI_PRIME`, `QABI_SPEND`, plus the tx-level `qabi_block`
   and `aggregated_sig` fields): a coordinator + N participants
   ceremony that produces one FALCON-512 signature covering the whole
-  tx. **~139 vB per cosigner at N=100** (converging value, witness-
-  discounted). See [`QABIO.md`](QABIO.md) §8.
+  tx. **~143 vB per cosigner at N=100** (converges to ~139 vB at
+  N=500+ as fixed-overhead amortises). See [`SIZING.md`](SIZING.md)
+  §5 for the full N-vs-vB table.
 
 ---
 
