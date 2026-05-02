@@ -1,11 +1,12 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: 19,345 lines across 39 files in `src/rung/`, plus the
-353-line `src/rung_shims.h` boundary header.
+implementation: 20,888 lines across 38 files in `src/rung/`, plus the
+363-line `src/rung_shims.h` boundary header (21,251 lines across 39 new
+files in total).
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
-the 805-line patch to existing Bitcoin Core code. The patch is the
+the 961-line patch to existing Bitcoin Core code. The patch is the
 hooks; this is the engine.
 
 > **Reading order.** Part 1 is the narrative tour (how a single
@@ -19,61 +20,61 @@ hooks; this is the engine.
 
 ```
 src/
-├── rung_shims.h              353 LOC — Core ↔ library boundary (the ONE adapter)
-└── rung/                          ── 19,345 LOC, 39 files
-    ├── CMakeLists.txt          97
+├── rung_shims.h              363 LOC — Core ↔ library boundary (the ONE adapter)
+└── rung/                          ── 20,888 LOC, 38 files
+    ├── CMakeLists.txt          98
     │
-    ├── api.h                  528  — adapter types (LadderScript, LadderTxView, ...)
-    ├── types.h              1,566  — RungBlockType enum, BlockTypeInfo registry
+    ├── api.h                  560  — adapter types (LadderScript, LadderTxView, ...)
+    ├── types.h              1,696  — RungBlockType enum (65 active), BlockTypeInfo registry
     ├── types.cpp               46
     │
-    ├── conditions.h          310  — RungConditions, parsing, conditions_root
-    ├── conditions.cpp      1,078
+    ├── conditions.h          401  — RungConditions, parsing, conditions_root
+    ├── conditions.cpp      1,385
     │
     ├── descriptor.h          170  — descriptor language (sig(@k), or(...), etc.)
-    ├── descriptor.cpp      1,866
+    ├── descriptor.cpp      1,924
     │
-    ├── evaluator.h           369  — VerifyRungTx + caches (Shared/QABO/PQBatch)
-    ├── evaluator.cpp       1,301
+    ├── evaluator.h           406  — VerifyRungTx + caches (Shared/QABO/PQBatch)
+    ├── evaluator.cpp       1,704
     │
     ├── block_dispatch.h       81  — per-block-type evaluator registry
-    ├── block_helpers.h       107
-    ├── block_helpers.cpp     475
+    ├── block_helpers.h       126
+    ├── block_helpers.cpp     613
     │
-    ├── sighash.h              66  — SIGHASH_LADDER + SIGHASH_QABO
-    ├── sighash.cpp           224
+    ├── sighash.h              66  — `SignatureHashLadder` + `SignatureHashLadderKeyPath`
+    ├── sighash.cpp           265
     │
     ├── pq_verify.h            52  — FALCON / Dilithium3 / SPHINCS+ wrappers
-    ├── pq_verify.cpp         146
+    ├── pq_verify.cpp         149
     │
-    ├── qabi.h                233  — QABIO state (auth chain, batch block, sig)
-    ├── qabi.cpp              416
+    ├── qabi.h                278  — QABIO state (auth chain, batch block, sig)
+    ├── qabi.cpp              484
     │
     ├── adaptor.h              58  — adaptor sigs (PTLC)
     ├── adaptor.cpp           188
     │
-    ├── policy.h              100  — IsStandardRungTx + structural anti-spam
-    ├── policy.cpp            339
+    ├── policy.h               81  — IsStandardRungTx + structural anti-spam
+    ├── policy.cpp            341
     │
-    ├── serialize.h           129  — wire-format read/write
-    ├── serialize.cpp       1,051
+    ├── serialize.h           174  — wire-format read/write
+    ├── serialize.cpp       1,130
     │
     ├── write_helpers.h       103
     │
-    ├── rpc.cpp             4,217  — every RPC: createrungtx, signrungtx, qabi_*
+    ├── rpc.cpp             4,556  — every RPC: createrungtx, signrungtx, qabi_*
     │
-    └── blocks/                  ── 11 files, 3,649 LOC — per-family block evaluators
-        ├── sig.cpp             334  — SIG, KEY_REF_SIG, MULTISIG, MUSIG_THRESHOLD
+    └── blocks/                  ── 11 files, 3,851 LOC — per-family block evaluators
+        ├── sig.cpp             279  — SIG, KEY_REF_SIG, MULTISIG, MUSIG_THRESHOLD
         ├── timelock.cpp        161  — CSV, CLTV, CSV_TIME, CLTV_TIME
         ├── hash.cpp            121  — TAGGED_HASH, HASH_GUARDED
         ├── covenant.cpp        240  — CTV, VAULT_LOCK, AMOUNT_LOCK
         ├── recursion.cpp       351  — RECURSE_SAME / UNTIL / COUNT / SPLIT / MODIFIED / DECAY
-        ├── anchor.cpp          268  — ANCHOR family + DATA_RETURN
-        ├── plc.cpp             429  — PLC family (HYSTERESIS, TIMER, LATCH, RATE_LIMIT, COSIGN, ...)
-        ├── compound.cpp        307  — TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG
-        ├── governance.cpp      328  — EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, ACCUMULATOR, OUTPUT_CHECK
-        ├── legacy.cpp          326  — P2PK_LEGACY, P2PKH_LEGACY, P2WPKH_LEGACY, P2TR_LEGACY, ...
-        └── qabi.cpp            784  — QABI_PRIME, QABI_SPEND, PQ_BATCH evaluators
+        ├── anchor.cpp          275  — ANCHOR family + DATA_RETURN
+        ├── plc.cpp             432  — PLC family (HYSTERESIS, TIMER, LATCH, RATE_LIMIT, COSIGN, ...)
+        ├── compound.cpp        332  — TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG, ANCHOR_FEE
+        ├── governance.cpp      329  — EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, ACCUMULATOR, OUTPUT_CHECK
+        ├── legacy.cpp          349  — P2PK_LEGACY, P2PKH_LEGACY, P2WPKH_LEGACY, P2TR_LEGACY, ...
+        └── qabi.cpp            982  — QABI_PRIME, QABI_SPEND, PQ_BATCH evaluators
 ```
 
 The library has **one** dependency from outside its directory:

@@ -2,7 +2,8 @@
 
 Ladder Script (TX_MLSC / RUNG_TX v4) is a typed transaction condition system for Bitcoin,
 implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack machine with
-64 declarative function blocks, 11 typed fields, and Merkelised conditions (MLSC).
+65 declarative function blocks across 11 families, 11 typed condition data types, and
+Merkelised conditions (MLSC).
 
 ## Documentation Index
 
@@ -10,7 +11,7 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 
 | Document | Description |
 |----------|-------------|
-| [BIP-XXXX.md](BIP-XXXX.md) | Full BIP specification (64 block types, wire format, sighash, evaluation) |
+| [BIP-XXXX.md](BIP-XXXX.md) | Full BIP specification (65 block types, wire format, sighash, evaluation) |
 | [TX_MLSC_SPEC.md](TX_MLSC_SPEC.md) | TX_MLSC transaction format specification |
 | [MERKLE-UTXO-SPEC.md](MERKLE-UTXO-SPEC.md) | Merkle tree, UTXO dedup, proof verification |
 
@@ -19,7 +20,7 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 | Document | Description |
 |----------|-------------|
 | [INTRODUCTION.md](INTRODUCTION.md) | What Ladder Script is, key properties, and design rationale |
-| [BLOCK_LIBRARY.md](BLOCK_LIBRARY.md) | Complete table of all 64 block types with fields and properties |
+| [BLOCK_LIBRARY.md](BLOCK_LIBRARY.md) | Complete table of all 65 block types with fields and properties |
 | [BLOCK_LIBRARY_IMPL.md](BLOCK_LIBRARY_IMPL.md) | Detailed block reference with evaluation rules |
 | [EXAMPLES.md](EXAMPLES.md) | 12 worked examples from simple spends to recursive covenants |
 | [GLOSSARY.md](GLOSSARY.md) | Alphabetical glossary of every term and block type |
@@ -31,7 +32,7 @@ implemented as a fork of Bitcoin Core v30.0. It replaces Bitcoin Script's stack 
 |----------|-------------|
 | [INTEGRATION.md](INTEGRATION.md) | Wallet integration, RPC commands, descriptor language |
 | [REVIEW_GUIDE.md](REVIEW_GUIDE.md) | Full library walkthrough: purpose / behaviour / load-bearing invariants / optional-for-MVP, per file |
-| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Core Integration Patch (~740 LOC) walkthrough, with load-bearing vs optional summary table |
+| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Core Integration Patch walkthrough (~961 lines added across 33 modified files) |
 | [MEASUREMENTS.md](MEASUREMENTS.md) | Empirical tx / vsize / UTXO measurements vs P2WPKH and P2TR |
 
 ### Deployment
@@ -62,26 +63,25 @@ Interactive HTML pages in [`tools/`](../../tools/) (served at `ladder-script.org
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/rung/types.h` | 1,496 | 64 block types, 11 data types, implicit layouts, micro-header table |
-| `src/rung/evaluator.cpp` | 1,244 | Block dispatch + VerifyRungTx (per-block evaluators moved to `src/rung/blocks/*.cpp`) |
-| `src/rung/rpc.cpp` | 4,283 | JSON-RPC command handlers |
-| `src/rung/descriptor.cpp` | 1,841 | Descriptor language parser and formatter |
-| `src/rung/conditions.cpp` | 1,027 | MLSC proof verification, Merkle tree, creation proofs |
-| `src/rung/serialize.cpp` | 984 | Wire format, micro-headers, anti-spam validation |
-| `src/rung/sighash.cpp` | 234 | LadderSighash with ANYPREVOUT/ANYPREVOUTANYSCRIPT |
-| `src/rung/adaptor.cpp` | 187 | Adaptor signature utilities |
-| `src/rung/pq_verify.cpp` | 145 | Post-quantum signature verification |
-| `src/rung/policy.cpp` | 137 | Mempool policy checks |
-| `src/rung/aggregate.cpp` | 41 | Half-aggregated signature support |
-| **Total src/rung/** | **14,771** | **22 files (incl. CMakeLists.txt)** |
+| `src/rung/rpc.cpp` | 4,556 | JSON-RPC command handlers |
+| `src/rung/descriptor.cpp` | 1,924 | Descriptor language parser and formatter |
+| `src/rung/evaluator.cpp` | 1,704 | Block dispatch + VerifyRungTx (per-block evaluators moved to `src/rung/blocks/*.cpp`) |
+| `src/rung/types.h` | 1,696 | 65 block types across 11 families, 11 condition data types, implicit layouts, micro-header table |
+| `src/rung/conditions.cpp` | 1,385 | MLSC proof verification, Merkle tree, creation proofs |
+| `src/rung/serialize.cpp` | 1,130 | Wire format, micro-headers, anti-spam validation |
+| `src/rung/policy.cpp` | 341 | Mempool policy checks |
+| `src/rung/sighash.cpp` | 265 | `SignatureHashLadder` (script-path) and `SignatureHashLadderKeyPath` (key-path); BIP-118 ANYPREVOUT family rejected |
+| `src/rung/adaptor.cpp` | 188 | Adaptor signature utilities |
+| `src/rung/pq_verify.cpp` | 149 | Post-quantum signature verification (FALCON-512/1024, Dilithium3, SPHINCS+) via `liboqs` |
+| **Total src/rung/** | **20,888** | **37 files** (`.cpp` + `.h`, excl. `CMakeLists.txt`) |
 
 ## Test Coverage
 
 | Suite | Count |
 |-------|-------|
-| Unit tests (`rung_tests` + `qabi_tests` + `tx_mlsc_tests` boost suites in `rung_tests.cpp`) | 613 |
-| Functional tests (`feature_rung_tx`, `feature_rung_p2p`, `feature_rung_fuzz`, `feature_qabi`) | 37 |
-| TLA+ formal specs (`spec/`) | 21 specs |
+| Unit tests (BOOST cases in `src/test/rung_tests.cpp`) | 655 |
+| Functional tests (~52 test methods across `feature_rung_*.py`, `feature_qabi*.py`, `feature_deferred_vectors.py`) | 9 files |
+| TLA+ formal specs (`spec/`) | 27 specs |
 
 ## Repository
 

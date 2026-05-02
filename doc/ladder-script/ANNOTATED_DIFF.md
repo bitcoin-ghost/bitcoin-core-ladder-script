@@ -13,14 +13,14 @@ each modification.
 
 ## Overview
 
-| Category                         | Files | Lines added |
-|----------------------------------|------:|------------:|
-| Modified Bitcoin Core files      |    29 |       +805  |
-| New library code (`src/rung/`)   |    39 |    +19,345  |
-| New tests (`src/test/rung_tests.cpp`) |    1 |    +16,945  |
-| **Total surface change**         |    69 |    +37,086  |
+| Category                              | Files | Lines added |
+|---------------------------------------|------:|------------:|
+| Modified Bitcoin Core files           |    33 |        +961 |
+| New library code (`src/rung/` + `src/rung_shims.h`) | 39 |     +21,251 |
+| New tests (`src/test/rung_tests.cpp`) |     1 |     +17,658 |
+| **Total surface change**              |    73 |     +39,870 |
 
-The design principle is **minimal core intrusion**: the 805 patched lines
+The design principle is **minimal core intrusion**: the 961 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
 `src/rung/` library which Core treats as just another linked dependency
 (`bitcoin_rung`).
@@ -33,13 +33,13 @@ No existing transaction version is reinterpreted; v4 is additive.
 
 ---
 
-## Core Integration Points (29 files, +805 lines)
+## Core Integration Points (33 files, +961 lines)
 
 The sections below are ordered by impact (highest LOC first) so that a
 reviewer scanning the patch sees the architectural changes before the
 bookkeeping ones.
 
-### 1. `src/validation.cpp` (+224 / -15)
+### 1. `src/validation.cpp` (+296 / -20)
 
 The largest single Core change. Wires v4 transactions into the existing
 script-verification pipeline at four points and threads three per-tx caches
@@ -94,7 +94,7 @@ shape.
 
 ---
 
-### 2. `src/primitives/transaction.h` (+207 / -9)
+### 2. `src/primitives/transaction.h` (+210 / -9)
 
 Adds the v4 wire format and the three new transaction-level fields. The
 file's existing serialisation templates are extended — no existing v1/v2/
@@ -327,7 +327,7 @@ multi-block test run against a live signet.
 
 ---
 
-### 8. `src/coins.cpp` (+14) and `src/coins.h` (+4)
+### 8. `src/coins.cpp` (+25) and `src/coins.h` (+4)
 
 Defines and writes the **synthetic root coin entry**.
 
@@ -568,7 +568,7 @@ Returned by `rung::VerifyRungTx`. Surfaced through the standard
 
 ---
 
-### 27. `src/rpc/mempool.cpp` (+5)
+### 27. `src/rpc/mempool.cpp` (+21 / -6)
 
 `sendrawtransaction` and `submitpackage` both check `out.scriptPubKey.IsUnspendable()`
 against `max_burn_amount` to refuse accidentally large burns. MLSC
@@ -668,7 +668,7 @@ new defaulted parameters. Single test signature update.
 
 ## Tests
 
-`src/test/rung_tests.cpp` — **16,945 lines, 619 unit tests** organised
+`src/test/rung_tests.cpp` — **17,658 lines, 655 unit tests** organised
 into multiple boost test suites:
 
 - `rung_tests` — block evaluator unit tests, descriptor parser, witness
@@ -679,10 +679,11 @@ into multiple boost test suites:
 - `tx_mlsc_tests` — wire-format roundtrips for the v4 transaction
   serialiser.
 
-Plus 8 functional tests (52 distinct test methods) under `test/functional/`:
+Plus 9 functional test files (~52 distinct test methods) under `test/functional/`:
 `feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`,
 `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`,
-`feature_rung_fuzz.py`, `feature_qabi.py`, `feature_qabi_size.py`.
+`feature_rung_fuzz.py`, `feature_qabi.py`, `feature_qabi_size.py`,
+`feature_deferred_vectors.py`.
 
 ---
 
