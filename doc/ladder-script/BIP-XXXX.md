@@ -2227,6 +2227,30 @@ snapshots that include any v4 MLSC UTXO. A snapshot that drops the
 root entries leaves a downstream validator unable to spend the
 preserved MLSC outputs.
 
+The snapshot-format change required to carry the synthetic entries
+is small in absolute terms — 33 bytes per v4-creating transaction
+that has unspent outputs at snapshot time, indexed by the synthetic
+outpoint `(txid, 0xFFFFFFFF)`. The coordination cost is the larger
+item: every alternative node implementation, every snapshot
+distribution channel, and every snapshot validator MUST agree on
+the synthetic-entry layout before snapshots cross implementation
+boundaries safely. Pre-v4 snapshots remain compatible with v4
+chainstates (they contain no MLSC UTXOs to reference); post-v4
+snapshots produced by a non-conforming implementation are not safe
+to load on a conforming one. This is a one-time format coordination
+cost paid at activation, not an ongoing one — but it is real, and
+implementations MUST treat snapshot-format compatibility as part of
+their consensus contract from activation forward.
+
+The activation gate (§Open Items) addresses the cross-implementation
+coordination cost via component 7 (Independent implementation): the
+existence of at least one alternative implementation that has read
+this BIP and produces byte-identical output on every test vector is
+the strongest available signal that the synthetic-entry obligation
+is unambiguous in the spec. Reviewers concerned about silent
+chain-split risk should treat gate component 7 as the primary
+mitigation.
+
 Pruned-node spend validation works today via the standard undo-data
 retention path: the creating block is kept indefinitely while any
 spawned MLSC UTXO is unspent. Any future change to pruning behaviour
