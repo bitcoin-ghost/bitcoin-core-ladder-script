@@ -106,7 +106,7 @@ v3 path is touched.
 - Three new fields on both `CTransaction` and `CMutableTransaction`:
   - `uint256 conditions_root` — shared MLSC root for every output in the tx.
   - `std::vector<uint8_t> qabi_block` — tx-level QABIO batch block (empty for non-QABIO v4 txs).
-  - `std::vector<uint8_t> aggregated_sig` — QABIO coordinator FALCON-512 signature, exactly 666 bytes when present.
+  - `std::vector<uint8_t> aggregated_sig` — QABIO coordinator FALCON-512 signature when present, variable-length `1..QABI_AGGREGATED_SIG_MAX = 666` bytes (v0.14 / audit #9 F4 dropped fixed-666 padding to close a coordinator-side embedding channel).
 
 **Wire format (full, witness-carrying)** — triggered when
 `(allow_witness && version == 4)`, flag byte = `0x02`:
@@ -128,7 +128,7 @@ per input:
 varint    qabi_block_len
 uint8_t   qabi_block[]                    (QABIO tx-level block)
 varint    aggregated_sig_len
-uint8_t   aggregated_sig[]                (FALCON-512, exactly 666 B when present)
+uint8_t   aggregated_sig[]                (FALCON-512, variable 1..666 B when present)
 uint32_t  nLockTime
 ```
 
@@ -440,7 +440,7 @@ Two additions to support the v4 sighash domain:
   Ladder Script.
 
 **Why a new SigVersion rather than reusing TAPROOT.** Ladder uses the
-tagged hash `TaggedHash("LadderSighash")`; Taproot uses
+tagged hash `TaggedHash("LadderSighash/v1")`; Taproot uses
 `TaggedHash("TapSighash")`. If both shared a SigVersion the evaluator
 would need to inspect the tx version to choose which tag to use. Domain
 separation via SigVersion is the standard idiom — a signature valid

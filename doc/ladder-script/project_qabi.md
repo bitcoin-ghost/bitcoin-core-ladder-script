@@ -5,10 +5,18 @@
 **Branch:** QABIO
 **Goal:** Enable N independent parties to batch their rung_tx UTXOs into a single transaction authorised by ONE post-quantum signature, natively inside the rung_tx format, without anchors, escrow, commitment transactions, or pre-registration.
 
+> **Status note (2026-05):** This is the original long-form design
+> document, kept as an archival reference. For the canonical, current
+> protocol description see [`QABIO.md`](QABIO.md); for the integration
+> walkthrough see [`qabi_integrator_guide.md`](qabi_integrator_guide.md).
+> Several claims in this doc reflect the pre-v0.14 design — notably
+> `aggregated_sig` "exactly 666 B" — which were later revised (variable
+> 1..666 B per audit #9 Finding 4). Trust the canonical docs over this
+> file when they conflict.
+>
 > **Related docs:**
-> - `bip-qabio.md` — BIP-format adaptation of this spec, ready to merge into the main Ladder Script BIP (`BIP-XXXX.md`) as a subsection.
-> - Reference implementation: `src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp` (EvalQABIPrimeBlock / EvalQABISpendBlock), `src/rung/policy.cpp` (RBD helpers), `src/validation.cpp` (RBD mempool integration), `src/rung/rpc.cpp` (5 QABI JSON-RPC commands), `src/rung/descriptor.cpp` (qabi_prime() / qabi_spend() tokens).
-> - Tests: `src/test/rung_tests.cpp` (86 cases in `qabi_tests` suite), `test/functional/feature_qabi.py` (24 Python functional test cases).
+> - Reference implementation: `src/rung/qabi.{h,cpp}`, `src/rung/blocks/qabi.cpp` (`EvalQABIPrimeBlock` / `EvalQABISpendBlock` / `EvalPQBatchBlock`), `src/rung/policy.cpp` (RBD helpers), `src/validation.cpp` (RBD mempool integration), `src/rung/rpc.cpp` (5 QABI JSON-RPC commands), `src/rung/descriptor.cpp` (`qabi_prime()` / `qabi_spend()` tokens).
+> - Tests: `src/test/rung_tests.cpp` (49 Boost test cases with `qabi` in the name), `test/functional/feature_qabi.py` (24 Python functional test cases).
 
 ---
 

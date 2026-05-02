@@ -125,7 +125,7 @@ cryptographically safe — only a privacy consideration.
 
 The migration from classical to post-quantum is straightforward:
 
-1. **Today (no quantum threat):** use key-path spending (110 vB, cheapest).
+1. **Today (no quantum threat):** use key-path spending (109 vB, cheapest).
    The EC pubkey is on-chain but quantum computers don't exist yet.
 
 2. **Transition (quantum threat emerging):** switch new outputs to
@@ -155,7 +155,7 @@ ladder(or(
 ))
 ```
 
-- **Rung 0:** Schnorr signature. Cheap (110 vB key-path or 124 vB script-path).
+- **Rung 0:** Schnorr signature. Cheap (109 vB key-path or 124 vB script-path).
   Use this while quantum computers don't exist.
 - **Rung 1:** FALCON-512 signature. Quantum-safe. Larger witness
   (variable, up to 666 B sig + 897 B pubkey) but protects against

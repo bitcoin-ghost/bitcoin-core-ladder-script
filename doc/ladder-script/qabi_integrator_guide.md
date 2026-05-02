@@ -46,8 +46,8 @@ All registered under the "rung" category.
 ### `qabi_buildblock` — assemble a QABIBlock
 
 ```
-qabi_buildblock <coordinator_pubkey_hex> <prime_expiry_height>
-                <batch_id_hex> <entries_array> <outputs_array>
+qabi_buildblock <coordinator_pubkey_hex> <prime_expiry_height> [<batch_id_hex>]
+                <entries_array> <outputs_conditions_root_hex> <output_values_array>
 ```
 
 **Returns:**
@@ -55,6 +55,7 @@ qabi_buildblock <coordinator_pubkey_hex> <prime_expiry_height>
 {
   "qabi_block": "<hex serialised bytes>",
   "qabi_root":  "<hex SHA256>",
+  "batch_id":   "<hex canonical batch_id>",
   "size":       <bytes>
 }
 ```
@@ -62,12 +63,13 @@ qabi_buildblock <coordinator_pubkey_hex> <prime_expiry_height>
 **Inputs:**
 - `coordinator_pubkey_hex` — FALCON-512 public key (exactly 897 bytes hex)
 - `prime_expiry_height` — max block height at which the batch can execute
-- `batch_id_hex` — 32-byte unique batch identifier
+- `batch_id_hex` — optional placeholder. **Ignored** by the parser (v0.13 audit #9 F6 enforces canonical SHA256 derivation); the canonical value comes back in the result. Retained as a positional slot for API stability.
 - `entries` — array of `{participant_id, contribution, destination_index}`
   - `participant_id` = SHA256(participant's Rung 0 FALCON pubkey), 32 bytes hex
   - `contribution` = satoshis this participant contributes
-  - `destination_index` = index into outputs[] for this participant's destination
-- `outputs` — array of `{amount, script_pubkey}` — MUST match `tx.vout` bit-exactly at spend time
+  - `destination_index` = index into `output_values[]` for this participant's destination
+- `outputs_conditions_root` — 32-byte conditions root that the spend tx must use as `tx.conditions_root` (pins every destination structurally)
+- `output_values` — array of per-output amounts (BTC). The destination scriptPubKey is implicit (`0xDF + outputs_conditions_root` for every v4 MLSC output)
 
 ### `qabi_blockinfo` — decode a serialised QABIBlock
 
@@ -210,6 +212,13 @@ COORD_KEYS=$(bitcoin-cli generatepqkeypair "FALCON512")
 COORD_PK=$(echo "$COORD_KEYS" | jq -r .pubkey)
 COORD_SK=$(echo "$COORD_KEYS" | jq -r .privkey)
 
+# Compute outputs_conditions_root: build an MLSC condition tree covering
+# every destination spend path (e.g. one rung per destination, each
+# `output_index = destination_index, blocks = [SIG with destination
+# pubkey]`) and use the resulting `mlsc_root` from createrungtx /
+# parseladder. The root pins the destination scriptPubKeys structurally.
+OCR="<32-byte hex of tx.conditions_root the spend tx will use>"
+
 # Build the block
 BLOCK=$(bitcoin-cli qabi_buildblock \
   "$COORD_PK" \
@@ -219,10 +228,8 @@ BLOCK=$(bitcoin-cli qabi_buildblock \
     {"participant_id": "<alice_id>", "contribution": "0.001",  "destination_index": 0},
     {"participant_id": "<bob_id>",   "contribution": "0.002",  "destination_index": 1}
   ]' \
-  '[
-    {"amount": "0.00099", "script_pubkey": "<alice_destination>"},
-    {"amount": "0.00198", "script_pubkey": "<bob_destination>"}
-  ]')
+  "$OCR" \
+  '[ "0.00099", "0.00198" ]')
 
 QABI_BLOCK=$(echo "$BLOCK" | jq -r .qabi_block)
 QABI_ROOT=$(echo "$BLOCK"  | jq -r .qabi_root)
@@ -290,7 +297,7 @@ Once all participants have primed:
 
 ```bash
 # Build the batch tx — all primed inputs as vin, destinations as vout
-# (vout MUST match block.outputs bit-exactly)
+# (tx.conditions_root MUST match block.outputs_conditions_root, and per-output values MUST match block.output_values)
 BATCH_HEX=$(bitcoin-cli createrungtx \
   '[
     {"txid": "<alice_primed_txid>", "vout": 0},

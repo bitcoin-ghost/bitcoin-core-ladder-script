@@ -232,7 +232,7 @@ struct QABIEntry {
 
 The `qabi_block` is carried at the tx level in the v4 wire format
 (flag 0x02 TX_MLSC), alongside the per-input witnesses and the
-coordinator's `aggregated_sig` (FALCON-512, 666 B). Witness data is
+coordinator's `aggregated_sig` (FALCON-512, variable up to 666 B). Witness data is
 weight-discounted 4:1 under BIP-141, so `qabi_block` bytes cost 1
 weight unit each, not 4.
 
