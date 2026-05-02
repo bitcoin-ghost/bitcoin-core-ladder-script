@@ -13,7 +13,7 @@ Ladder Script ships as two distinct things:
 | Artefact | LOC | Scope | Reviewer doc |
 |----------|-----|-------|--------------|
 | **Core Integration Patch** | 961 (insertions) | 33 modified Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
-| **Ladder Library** | 21,251 | Self-contained module: 38 files under `src/rung/` plus the `src/rung_shims.h` boundary header | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
+| **Ladder Library** | 21,247 | Self-contained module: 38 files under `src/rung/` (20,884 LOC) plus the `src/rung_shims.h` boundary header (363 LOC) | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
 
 No existing Bitcoin Core function signatures change. The `CScriptCheck` constructor
 gains four defaulted parameters (block height + three per-tx cache `shared_ptr`s); every
@@ -47,7 +47,7 @@ Every file entry below uses this structure:
 
 # Part 1 — Boundary
 
-## `src/rung_shims.h` (353 LOC)
+## `src/rung_shims.h` (363 LOC)
 
 - **Purpose**: the one-way Core↔library boundary. All includes of Core headers
   (`<primitives/transaction.h>`, `<script/interpreter.h>`, `<consensus/validation.h>`)
@@ -75,7 +75,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: none. This file is the entire reason the library compiles
   against a stable public API rather than Core's entire header tree.
 
-## `src/rung/api.h` (528 LOC)
+## `src/rung/api.h` (560 LOC)
 
 - **Purpose**: the library's **public** interface. Declares span-based data views
   (`LadderTxView`, `LadderSigChecker`), the evaluator context (`LadderEvalContext`), the
@@ -92,7 +92,7 @@ Every file entry below uses this structure:
 
 # Part 2 — Central Types
 
-## `src/rung/types.h` (1566 LOC) / `types.cpp` (46 LOC)
+## `src/rung/types.h` (1693 LOC) / `types.cpp` (46 LOC)
 
 - **Purpose**: single source of truth for block types, data types, structural types, and
   metadata tables. Every other file depends on these.
@@ -145,7 +145,7 @@ Every file entry below uses this structure:
 
 # Part 3 — Consensus Surface (load-bearing)
 
-## `src/rung/evaluator.h` (369 LOC) / `evaluator.cpp` (1301 LOC)
+## `src/rung/evaluator.h` (406 LOC) / `evaluator.cpp` (1704 LOC)
 
 - **Purpose**: top-level validation. This is the entry point Bitcoin Core calls to
   validate a v4 input.
@@ -181,7 +181,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: diagnostic `LogPrintf` calls on error paths help debugging
   but are not consensus-critical. They can be removed or gated behind a category.
 
-## `src/rung/conditions.h` (310 LOC) / `conditions.cpp` (1078 LOC)
+## `src/rung/conditions.h` (401 LOC) / `conditions.cpp` (1384 LOC)
 
 - **Purpose**: MLSC (Merkle Ladder Script Conditions) — the output format and Merkle
   tree. Leaves commit to rung structure + value_commitment. `ComputeValueCommitment`
@@ -212,7 +212,7 @@ Every file entry below uses this structure:
     covenants with cross-rung mutation (RECURSE_MODIFIED pointing at non-self rungs) are
     in scope.
 
-## `src/rung/serialize.h` (129 LOC) / `serialize.cpp` (1051 LOC)
+## `src/rung/serialize.h` (174 LOC) / `serialize.cpp` (1130 LOC)
 
 - **Purpose**: wire format for `LadderWitness` (the per-input witness stream). Handles
   serialization and fail-closed deserialization of blocks, rungs, relays, and the
@@ -240,7 +240,7 @@ Every file entry below uses this structure:
   common case. Removing it costs ~2 bytes per block; consensus semantics unchanged if
   kept consistent. A minimum-viable BIP could specify explicit-only encoding.
 
-## `src/rung/sighash.h` (66 LOC) / `sighash.cpp` (224 LOC)
+## `src/rung/sighash.h` (66 LOC) / `sighash.cpp` (265 LOC)
 
 - **Purpose**: Ladder-specific signature hash. Tagged hashes
   `TaggedHash("LadderSighash/v1")` (script-path) and `TaggedHash("LadderKeyPathSighash/v1")`
@@ -261,7 +261,7 @@ Every file entry below uses this structure:
     them via the x-only tweak, so including them again is redundant and creates a
     cross-protocol signing-oracle risk.
 
-## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (107 LOC) / `block_helpers.cpp`
+## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (126 LOC) / `block_helpers.cpp` (613 LOC)
 
 - **Purpose**: registry + helpers. Every block evaluator self-registers via
   `RegisterBlock(type, fn)`; `LookupBlockEvaluator(type)` returns it. Helpers:
@@ -276,7 +276,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: none. These are the glue that makes the block registry
   work.
 
-## `src/rung/blocks/sig.cpp` (334 LOC)
+## `src/rung/blocks/sig.cpp` (279 LOC)
 
 - **Purpose**: signature-family evaluators (SIG, MULTISIG, ADAPTOR_SIG,
   MUSIG_THRESHOLD, KEY_REF_SIG).
@@ -339,7 +339,7 @@ Every file entry below uses this structure:
   sugar over MODIFIED with a convention (decrement-by-1, 2-way split, negate-delta).
   Minimum-viable: SAME + MODIFIED + UNTIL.
 
-## `src/rung/blocks/compound.cpp` (307 LOC)
+## `src/rung/blocks/compound.cpp` (332 LOC)
 
 - **Purpose**: TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG.
 - **Behaviour**: each is a composition — e.g. HTLC = PREIMAGE reveal + CSV delay + SIG
@@ -348,7 +348,7 @@ Every file entry below uses this structure:
   base blocks at larger witness cost. Compound encoding is a size optimisation with its
   own implicit layout.
 
-## `src/rung/blocks/plc.cpp` (429 LOC)
+## `src/rung/blocks/plc.cpp` (432 LOC)
 
 - **Purpose**: Programmable Logic Controller family — HYSTERESIS_FEE, HYSTERESIS_VALUE,
   TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET,
@@ -361,7 +361,7 @@ Every file entry below uses this structure:
   "counter-down DCA", etc. — the system is significantly less useful without them, but
   they are *not* consensus-critical for non-PLC tx patterns.
 
-## `src/rung/blocks/anchor.cpp` (268 LOC)
+## `src/rung/blocks/anchor.cpp` (275 LOC)
 
 - **Purpose**: ANCHOR, ANCHOR_CHANNEL, ANCHOR_POOL, ANCHOR_RESERVE, ANCHOR_SEAL,
   ANCHOR_ORACLE, DATA_RETURN.
@@ -371,7 +371,7 @@ Every file entry below uses this structure:
   valid (enforced in `IsDataEmbeddingType`). Max 40 bytes.
 - **Optional / removable**: everything except DATA_RETURN is optional.
 
-## `src/rung/blocks/governance.cpp` (328 LOC)
+## `src/rung/blocks/governance.cpp` (329 LOC)
 
 - **Purpose**: EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, OUTPUT_COUNT, RELATIVE_VALUE,
   ACCUMULATOR, OUTPUT_CHECK.
@@ -380,7 +380,7 @@ Every file entry below uses this structure:
   checks.
 - **Optional / removable**: entire family is optional.
 
-## `src/rung/blocks/legacy.cpp` (326 LOC)
+## `src/rung/blocks/legacy.cpp` (349 LOC)
 
 - **Purpose**: P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR, P2TR_SCRIPT wrappers.
 - **Behaviour**: each reproduces the respective Core script-verification semantics
@@ -391,7 +391,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: entire family is optional. Removing it drops the ability
   to embed a legacy script inside an MLSC rung.
 
-## `src/rung/blocks/qabi.cpp` (784 LOC) — `#ifdef LADDER_ENABLE_QABIO`
+## `src/rung/blocks/qabi.cpp` (982 LOC) — `#ifdef LADDER_ENABLE_QABIO`
 
 - **Purpose**: QABIO (Quantum-resistant Authenticated Batch Input Output) blocks —
   `QABI_PRIME`, `QABI_SPEND`. Enables PQ-safe batch payout patterns.
@@ -404,19 +404,19 @@ Every file entry below uses this structure:
 
 # Part 4 — Supporting Surface
 
-## `src/rung/pq_verify.h` (52 LOC) / `pq_verify.cpp` (146 LOC)
+## `src/rung/pq_verify.h` (52 LOC) / `pq_verify.cpp` (149 LOC)
 
 - **Purpose**: post-quantum signature verification wrappers for FALCON-512,
   FALCON-1024, Dilithium3, SPHINCS+.
 - **Optional / removable**: entire file. Remove to drop PQ paths; SIG/MULTISIG/etc.
   would reject PQ schemes at `ParsePQScheme` time.
 
-## `src/rung/adaptor.h` (58 LOC) / `adaptor.cpp`
+## `src/rung/adaptor.h` (58 LOC) / `adaptor.cpp` (188 LOC)
 
 - **Purpose**: adaptor signature primitives used by ADAPTOR_SIG and PTLC.
 - **Optional / removable**: remove if ADAPTOR_SIG and PTLC are dropped.
 
-## `src/rung/policy.h` (100 LOC) / `policy.cpp` (339 LOC)
+## `src/rung/policy.h` (81 LOC) / `policy.cpp` (341 LOC)
 
 - **Purpose**: mempool policy. `IsStandardRungTx` delegates structural validation to
   the consensus deserializer then checks all outputs are MLSC. Block-type
@@ -426,7 +426,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: relay-policy tightening (beyond the "all-MLSC" check) is
   implementation choice.
 
-## `src/rung/descriptor.h` (170 LOC) / `descriptor.cpp`
+## `src/rung/descriptor.h` (170 LOC) / `descriptor.cpp` (1924 LOC)
 
 - **Purpose**: human-readable descriptor parser. Grammar:
   `ladder(or(rung1, rung2, ...))` with lowercase function-style blocks and optional `!`
@@ -434,7 +434,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: entire file. Developer convenience, never runs in
   consensus. A minimum-viable BIP could ship JSON-only.
 
-## `src/rung/rpc.cpp` (4217 LOC)
+## `src/rung/rpc.cpp` (4555 LOC)
 
 - **Purpose**: 20 JSON-RPC commands across six groups: descriptor authoring
   (`parseladder`, `formatladder`, `signladder`), construction and signing
