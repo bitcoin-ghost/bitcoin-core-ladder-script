@@ -57,15 +57,33 @@ Key aliases are passed as a separate map: `{"alice": "<hex>", "bob": "<hex>"}`.
 
 ### Step 2: Compute the MLSC Root
 
-The `createrung` RPC returns the conditions root. Programmatically, use `ComputeConditionsRoot()`
-from `conditions.h`:
+The `createrung` RPC returns the conditions root. **Programmatically,
+call `ComputeTxMLSCRoot()` from `conditions.cpp` &mdash; this is the
+live consensus path.** Do *not* call the legacy `ComputeRungLeaf` /
+`ComputeCoilLeaf` / `ComputeRelayLeaf` helpers in the same file:
+they are test-only and produce different leaf hashes than consensus.
 
-1. For each rung, compute `ComputeRungLeaf(rung, rung_pubkeys)` — serializes the rung blocks
-   and appends pubkeys for key-consuming blocks.
-2. For each relay, compute `ComputeRelayLeaf(relay, relay_pubkeys)`.
-3. Compute `ComputeCoilLeaf(coil)`.
-4. Leaf order: `[rung_leaves..., relay_leaves...]` — no separate coil leaf in the consensus path; coil bytes (`coil_type`, `attestation`, `scheme`, `output_index`) are folded into each rung leaf's structural template.
-5. `BuildMerkleTree(leaves)` pads to next power of 2 with `MLSC_EMPTY_LEAF` and returns the root.
+`ComputeTxMLSCRoot` does the following internally:
+
+1. For each rung: build a `CreationProofRung` via `BuildCPRung(rung,
+   rung_pubkeys, coil)` and compute `leaves[i] =
+   ComputeTxMLSCLeaf(cp_rung)`. The leaf hash is
+   `TaggedHash("LadderLeaf/v1", structural_template ||
+   value_commitment)` &mdash; the structural template encodes block
+   types, inversion flags, **and the four coil bytes** (`coil_type`,
+   `attestation`, `scheme`, `output_index`); the value commitment
+   binds output value plus key-consuming pubkeys folded via
+   `merkle_pub_key`.
+2. For each relay: append `ComputeRelayLeaf(relay, relay_pubkeys)`
+   to the same leaf array.
+3. Leaf order: `[rung_leaves..., relay_leaves...]`. There is **no
+   separate coil leaf** in the consensus path &mdash; coil bytes live
+   inside each rung leaf's structural template (this matters for
+   Merkle proof construction).
+4. `BuildMerkleTree(leaves)` pads to the next power of 2 with
+   `MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "")`, hashes
+   pairs with `TaggedHash("LadderInternal/v1", min(a,b) || max(a,b))`,
+   and returns the root.
 
 ### Step 3: Create the Output
 
@@ -152,15 +170,23 @@ and `pqpubkeycommit` to compute the commitment. Supported schemes:
 |------|--------|-------------|---------------|
 | 0x01 | SCHNORR | 32 bytes | 64-65 bytes |
 | 0x02 | ECDSA | 33 bytes | 8-72 bytes |
-| 0x10 | FALCON512 | 897 bytes | 666 bytes (exact) |
-| 0x11 | FALCON1024 | 1,793 bytes | ~1,330 bytes |
+| 0x10 | FALCON512 | 897 bytes | up to 666 bytes (variable; OQS validates encoded length) |
+| 0x11 | FALCON1024 | 1,793 bytes | up to ~1,330 bytes (variable) |
 | 0x12 | DILITHIUM3 | 1,952 bytes | 3,293 bytes |
 | 0x13 | SPHINCS_SHA | 64 bytes | 49,216 bytes |
 
-`MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates PQ signatures. For batched
-PQ spends, see the **PQ_BATCH** primitive (one anchor input reveals pubkey + sig once;
-other inputs gated by the same `SHA256(falcon_pubkey)` short-circuit at ~55 vB amortised) —
-[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
+Pubkey sizes are canonical per scheme; FALCON sigs are variable
+(post-v0.14 audit #9 F4 &mdash; pre-v0.14 wire-required exactly 666 B
+which opened a 0-66 B/tx silent-padding embedding channel).
+`MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates the largest
+PQ signature (SPHINCS+).
+
+For batched PQ spends, see the **PQ_BATCH** primitive (one anchor
+input reveals pubkey + sig once; other inputs gated by the same
+`SHA256(falcon_pubkey)` short-circuit via a tx-local cache).
+**~17.8 vB per input at N=100** (anchor ~392 vB, non-anchors ~14 vB
+each), about 22&times; cheaper than per-input FALCON-512. See
+[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) and [`SIZING.md`](SIZING.md).
 
 ## Broadcasting
 
