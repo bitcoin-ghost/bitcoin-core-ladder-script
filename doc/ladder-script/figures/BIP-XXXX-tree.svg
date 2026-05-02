@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 540" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#1a1a1a">
+  <title>MLSC conditions-root construction</title>
+  <desc>Three rungs and one relay are folded into typed leaves under
+        TaggedHash("LadderLeaf/v1") and TaggedHash("LadderRelayLeaf/v1"),
+        then combined via byte-sorted interior hashing under
+        TaggedHash("LadderInternal/v1") to produce the transaction-level
+        conditions_root.</desc>
+
+  <style>
+    .src    { fill: #ffffff; stroke: #888; stroke-width: 1; }
+    .relay  { fill: #ffffff; stroke: #888; stroke-width: 1; stroke-dasharray: 4 3; }
+    .leaf   { fill: #ffffff; stroke: #d35400; stroke-width: 1.4; }
+    .interior { fill: #ffffff; stroke: #2980b9; stroke-width: 1.4; }
+    .root     { fill: #ffffff; stroke: #27ae60; stroke-width: 2; }
+    .label    { font-size: 11px; fill: #333; }
+    .tag      { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; fill: #2980b9; }
+    .domain   { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; fill: #d35400; }
+    .arrow    { fill: none; stroke: #555; stroke-width: 1; }
+    .relayref { fill: none; stroke: #888; stroke-width: 1; stroke-dasharray: 3 2; }
+    .title    { font-size: 13px; font-weight: 600; }
+  </style>
+
+  <!-- arrowhead -->
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="strokeWidth"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- ROW 1: source structures -->
+  <g>
+    <rect class="src"   x="20"  y="20"  width="160" height="92" rx="3"/>
+    <text x="100" y="38" text-anchor="middle" class="title">Rung 0</text>
+    <text x="30"  y="58" font-family="JetBrains Mono, monospace">SIG  (SCHNORR, @hot)</text>
+    <text x="30"  y="76" font-family="JetBrains Mono, monospace">CSV  (144)</text>
+    <text x="30"  y="100" class="label">coil.output_index = 0</text>
+
+    <rect class="src"   x="200" y="20"  width="160" height="92" rx="3"/>
+    <text x="280" y="38" text-anchor="middle" class="title">Rung 1</text>
+    <text x="210" y="58" font-family="JetBrains Mono, monospace">MULTISIG  (2-of-3)</text>
+    <text x="210" y="76" font-family="JetBrains Mono, monospace">relay_refs = [0]</text>
+    <text x="210" y="100" class="label">coil.output_index = 0</text>
+
+    <rect class="src"   x="380" y="20"  width="160" height="92" rx="3"/>
+    <text x="460" y="38" text-anchor="middle" class="title">Rung 2</text>
+    <text x="390" y="58" font-family="JetBrains Mono, monospace">!CSV  (144)</text>
+    <text x="390" y="76" font-family="JetBrains Mono, monospace">SIG  (SCHNORR, @bob)</text>
+    <text x="390" y="94" font-family="JetBrains Mono, monospace">relay_refs = [0]</text>
+
+    <rect class="relay" x="560" y="20"  width="180" height="92" rx="3"/>
+    <text x="650" y="38" text-anchor="middle" class="title">Relay 0</text>
+    <text x="570" y="58" font-family="JetBrains Mono, monospace">SIG  (SCHNORR, @audit)</text>
+    <text x="570" y="76" class="label">shared by Rungs 1 &amp; 2</text>
+  </g>
+
+  <!-- relay-ref arrows from Rung 1 and Rung 2 to Relay 0 -->
+  <path class="relayref" d="M360 70 L560 70" marker-end="url(#arr)"/>
+  <path class="relayref" d="M460 110 C 540 130, 600 130, 640 112" marker-end="url(#arr)"/>
+
+  <!-- ROW 2: leaves -->
+  <g>
+    <rect class="leaf"  x="40"  y="180" width="120" height="56" rx="3"/>
+    <text x="100" y="202" text-anchor="middle" font-weight="600">leaf₀</text>
+    <text x="100" y="220" text-anchor="middle" class="domain">LadderLeaf/v1</text>
+
+    <rect class="leaf"  x="220" y="180" width="120" height="56" rx="3"/>
+    <text x="280" y="202" text-anchor="middle" font-weight="600">leaf₁</text>
+    <text x="280" y="220" text-anchor="middle" class="domain">LadderLeaf/v1</text>
+
+    <rect class="leaf"  x="400" y="180" width="120" height="56" rx="3"/>
+    <text x="460" y="202" text-anchor="middle" font-weight="600">leaf₂</text>
+    <text x="460" y="220" text-anchor="middle" class="domain">LadderLeaf/v1</text>
+
+    <rect class="leaf"  x="580" y="180" width="140" height="56" rx="3"/>
+    <text x="650" y="202" text-anchor="middle" font-weight="600">leaf₃ (relay)</text>
+    <text x="650" y="220" text-anchor="middle" class="domain">LadderRelayLeaf/v1</text>
+  </g>
+
+  <!-- arrows: source -> leaf -->
+  <path class="arrow" d="M100 112 L100 180" marker-end="url(#arr)"/>
+  <path class="arrow" d="M280 112 L280 180" marker-end="url(#arr)"/>
+  <path class="arrow" d="M460 112 L460 180" marker-end="url(#arr)"/>
+  <path class="arrow" d="M650 112 L650 180" marker-end="url(#arr)"/>
+
+  <!-- value commitment annotations -->
+  <text x="170" y="158" class="label" text-anchor="start">leaf = TaggedHash(tag, structural_template ‖ value_commitment)</text>
+  <text x="170" y="172" class="label" text-anchor="start">value_commitment = SHA256(field_values ‖ pubkeys)</text>
+
+  <!-- ROW 3: interior nodes (byte-sorted pairing) -->
+  <g>
+    <rect class="interior" x="80"  y="320" width="240" height="48" rx="3"/>
+    <text x="200" y="340" text-anchor="middle" font-weight="600">node₀ = sort(leaf₀, leaf₁) → hash</text>
+    <text x="200" y="358" text-anchor="middle" class="tag">LadderInternal/v1</text>
+
+    <rect class="interior" x="440" y="320" width="240" height="48" rx="3"/>
+    <text x="560" y="340" text-anchor="middle" font-weight="600">node₁ = sort(leaf₂, leaf₃) → hash</text>
+    <text x="560" y="358" text-anchor="middle" class="tag">LadderInternal/v1</text>
+  </g>
+
+  <!-- arrows: leaf pairs -> interior -->
+  <path class="arrow" d="M100 236 L160 320" marker-end="url(#arr)"/>
+  <path class="arrow" d="M280 236 L240 320" marker-end="url(#arr)"/>
+  <path class="arrow" d="M460 236 L520 320" marker-end="url(#arr)"/>
+  <path class="arrow" d="M650 236 L600 320" marker-end="url(#arr)"/>
+
+  <!-- ROW 4: root -->
+  <g>
+    <rect class="root" x="240" y="430" width="280" height="58" rx="3"/>
+    <text x="380" y="452" text-anchor="middle" font-weight="700">conditions_root</text>
+    <text x="380" y="472" text-anchor="middle" class="tag">= sort(node₀, node₁) → LadderInternal/v1</text>
+  </g>
+
+  <!-- arrows: interiors -> root -->
+  <path class="arrow" d="M200 368 L320 430" marker-end="url(#arr)"/>
+  <path class="arrow" d="M560 368 L440 430" marker-end="url(#arr)"/>
+
+  <!-- footer note -->
+  <text x="380" y="515" text-anchor="middle" class="label">
+    For 4 leaves the tree is full; with N &lt; next-power-of-two leaves, missing slots are MLSC_EMPTY_LEAF.
+  </text>
+  <text x="380" y="530" text-anchor="middle" class="label">
+    If an internal_pubkey P is provided, the root is x-only-tweaked to Q = lift_x(P) + TaggedHash("LadderTweak/v1", P ‖ root) · G.
+  </text>
+</svg>

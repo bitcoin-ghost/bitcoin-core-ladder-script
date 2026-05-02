@@ -144,6 +144,42 @@ A v4 RUNG_TX uses transaction version `4`. The version field is the
 sole consensus marker — every check in this document fires for
 `tx.version == 4` and for no other version.
 
+The shape of a v4 transaction relative to BIP 141 / BIP 341 (v1/v2/v3
+SegWit + Taproot):
+
+```
+   v3 (Taproot, SegWit witness)              v4 (RUNG_TX, TX_MLSC)
+ ┌──────────────────────────────┐          ┌──────────────────────────────┐
+ │ version                  4 B │          │ version  (= 4)           4 B │
+ │ marker (0x00) flag (0x01)2 B │          │ marker (0x00) flag (0x02)2 B │ ← flag 0x02
+ │ vin[..]  (prevout, seq, ...) │          │ vin[..]  (prevout, seq, ...) │
+ │ vout[..] (value + scriptPK)  │          │ ────────────────────────────│
+ │   per output: 8B value       │          │ conditions_root (shared)32 B │ ← single
+ │   + var-len scriptPubKey     │          │ vout[..] (value only)        │   per-tx
+ │                              │          │   per output: 8 B value      │   commitment
+ │                              │          │   (DATA_RETURN: nValue == 0  │
+ │                              │          │    + 1..40 B inline data)    │
+ │ witness[..]   per-input      │          │ witness[..]   per-input      │
+ │   stack of byte-strings      │          │   stack of byte-strings      │
+ │                              │          │                              │
+ │                              │          │ qabi_block      (var; 0 if  │ ← QABIO
+ │                              │          │  not a QABIO carrier)        │   tx-level
+ │                              │          │ aggregated_sig  (var; 0 or  │   fields
+ │                              │          │  exactly 666 B for QABI)     │
+ │ locktime                 4 B │          │ locktime                 4 B │
+ └──────────────────────────────┘          └──────────────────────────────┘
+```
+
+Two structural differences. First, every output's spending conditions
+are committed to a single `conditions_root` placed once in the
+transaction body; output bytes carry only the value, and the
+scriptPubKey is reconstructed at deserialisation as
+`0xDF || conditions_root`. Second, the wire format reserves two
+tx-level fields (`qabi_block`, `aggregated_sig`) used by the QABIO
+extension; non-QABIO transactions carry both as zero-length
+`CompactSize` prefixes. Per-input witness stacks remain a stack of
+byte-strings, exactly as in BIP 141 / 341.
+
 There are two on-wire forms, matching the existing BIP 141 stripped /
 witness pair.
 
@@ -283,6 +319,13 @@ rung is anchored to a single output via its coil's `output_index`.
 Relays are shared blocks that one or more rungs may reference, so two
 or more rungs that share a common subexpression do not duplicate it on
 the wire.
+
+The diagram below shows the construction end-to-end for a worked
+three-rung-plus-one-relay example. Three tagged-hash domains (orange
+for leaves, blue for interior nodes) keep rung leaves, relay leaves,
+and interior nodes mutually unforgeable.
+
+![MLSC conditions-root construction](figures/BIP-XXXX-tree.svg)
 
 #### Leaf hashing
 
@@ -1710,6 +1753,8 @@ repository. Bitcoin Core integration is provided by the boundary
 header `src/rung_shims.h` and a 961-line patch across 33 modified
 Core files. The two-artefact split is load-bearing for review and
 long-term maintenance and is justified in Rationale Q18.
+
+![Shim / library architecture](figures/BIP-XXXX-shim.svg)
 
 The library exports a small public API in `src/rung/api.h`:
 
