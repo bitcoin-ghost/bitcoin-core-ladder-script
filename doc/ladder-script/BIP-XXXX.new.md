@@ -854,7 +854,7 @@ The coordinator's FALCON-512 signature over a QABI batch transaction
 commits to a separate digest:
 
 ```
-qabo_sighash = TaggedHash("QABOSighash",
+qabo_sighash = TaggedHash("LadderQABOSighash/v1",
                           version (4 LE)
                        || foreach input: prevout || sequence (4 LE)
                        || foreach output: serialised CTxOut
@@ -2016,6 +2016,54 @@ formats, descriptor extensions), mempool fairness for non-QABIO v4
 transactions, and block-template construction details are out of
 scope for this BIP. They are wallet- and policy-layer concerns whose
 choices do not affect consensus.
+
+## Open Items
+
+The proposal is technically complete but several items remain open
+at the time of this draft. They are listed here so that a reviewer
+can engage with the substance without having to surface them as
+gotchas.
+
+- **External review.** No external technical review has been
+  conducted on this BIP. Submission to the Bitcoin development
+  mailing list is the first invitation for review.
+- **External security audit.** No formal external security audit
+  has been performed. An independent post-quantum cryptography
+  audit is scheduled before any mainnet-activation proposal.
+- **TLA+ model checking at consensus-level constants.** 27 TLA+
+  specifications under `spec/` cover the consensus surface
+  (evaluation semantics, anti-spam, wire format, Merkle proof
+  security, sighash binding, covenant termination, cross-input
+  rules) — 80+ checked properties total. The state-space exploration
+  pass at production-sized constants (`MAX_RUNGS = 16`,
+  `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`) is in
+  progress on dedicated infrastructure; smaller-constant runs
+  verify the same properties on bounded state spaces and report
+  zero counter-examples. Full results will be published alongside
+  the activation proposal.
+- **Test vectors expansion.** The starter set in
+  `src/test/data/rung_tx_vectors.json` covers `SIG`,
+  `P2WPKH_LEGACY`, and `HTLC`. A future revision will extend the
+  fixture with vectors for QABIO priming and batch-spend, PQ_BATCH
+  spends, and one negative vector per witness-rule family.
+- **Activation parameters.** The deployment bit, start time, and
+  timeout are out of scope for this BIP. They will be specified in
+  a separate activation document at the time of mainnet proposal.
+- **Development signet decentralisation.** The signet at
+  `ladder-script.org` is currently single-operator. A second
+  independently-operated node and a public faucet are planned
+  before broader testnet usage is solicited.
+- **Pruning and `assumeutxo` stress testing.** The Security
+  Considerations section specifies the stateless-verifier
+  obligation for MLSC chainstate entries. End-to-end stress tests
+  for pruned-node spend validation and `assumeutxo` snapshot
+  loading exist in unit form; longer-running mainnet-scale
+  rehearsals are pending.
+- **Reproducible Guix builds.** Pre-built signed binaries are
+  published per release (Linux x86_64, macOS arm64, Windows
+  x86_64). Reproducible Guix builds matching upstream Bitcoin Core's
+  `contrib/guix` discipline are not yet wired in; this is required
+  for any mainnet-activation proposal.
 
 ## Acknowledgements
 

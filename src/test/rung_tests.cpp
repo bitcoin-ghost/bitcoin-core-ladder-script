@@ -338,10 +338,6 @@ BOOST_AUTO_TEST_CASE(field_validation_new_types)
     RungField pk_commit_bad{RungDataType::PUBKEY_COMMIT, std::vector<uint8_t>(31, 0xAA)};
     BOOST_CHECK(!pk_commit_bad.IsValid(reason));
 
-    // SPEND_INDEX: exactly 4 bytes
-    RungField spend_idx{RungDataType::SPEND_INDEX, MakeNumeric(0)};
-    BOOST_CHECK(spend_idx.IsValid(reason));
-
     // SCHEME: exactly 1 byte
     RungField scheme_schnorr{RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}};
     BOOST_CHECK(scheme_schnorr.IsValid(reason));
@@ -1239,7 +1235,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_structural)
 BOOST_AUTO_TEST_CASE(eval_recurse_same_carry_forward_all_field_types)
 {
     // Build conditions with ALL condition-side field types:
-    // SCHEME, NUMERIC, HASH256, HASH160, SPEND_INDEX
+    // SCHEME, NUMERIC, HASH256, HASH160
     // Then verify RECURSE_SAME accepts identical output conditions.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
@@ -2851,7 +2847,6 @@ BOOST_AUTO_TEST_CASE(conditions_data_type_check)
     BOOST_CHECK(rung::IsConditionDataType(RungDataType::HASH160));
     BOOST_CHECK(rung::IsConditionDataType(RungDataType::NUMERIC));
     BOOST_CHECK(rung::IsConditionDataType(RungDataType::SCHEME));
-    BOOST_CHECK(rung::IsConditionDataType(RungDataType::SPEND_INDEX));
     BOOST_CHECK(!rung::IsConditionDataType(RungDataType::SIGNATURE));
     BOOST_CHECK(!rung::IsConditionDataType(RungDataType::PREIMAGE));
 }

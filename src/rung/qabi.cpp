@@ -35,7 +35,7 @@
 
 namespace rung {
 
-const HashWriter HASHER_QABOSIGHASH{TaggedHash("QABOSighash")};
+const HashWriter HASHER_QABOSIGHASH{TaggedHash("LadderQABOSighash/v1")};
 
 /* ---------------- Serialise ---------------- */
 
