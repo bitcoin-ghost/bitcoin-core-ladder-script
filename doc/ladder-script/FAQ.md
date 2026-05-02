@@ -144,12 +144,20 @@ When computing a rung's Merkle leaf hash (`ComputeRungLeaf`), the function:
 3. Hashes the result with the `LadderLeaf` tagged hasher
 
 This means:
-- **Conditions on-chain** contain only `SCHEME`, `HASH256`, `HASH160`, `NUMERIC`,
-  `SPEND_INDEX`, and `DATA` fields. No `PUBKEY` or `PUBKEY_COMMIT`.
-- **Pubkeys appear only in the witness**, where they are verified against the
-  Merkle proof binding them to the commitment root.
-- The writable surface for arbitrary data in conditions is eliminated because
-  `PUBKEY_COMMIT` (32 bytes of attacker-chosen data) no longer exists there.
+- **Conditions on-chain** contain only `SCHEME`, `HASH256`, `HASH160`,
+  `NUMERIC`, `DATA`, and `MERKLE_PROOF` fields. No `PUBKEY` for any
+  block in the standard library; `PUBKEY_COMMIT` is reserved for one
+  narrow consensus role (`QABI_SPEND.owner_pubkey_hash` &mdash; the
+  participant identity tag, bound to the Merkle leaf and consumed by
+  the QABO sig). Slot `0x07` (formerly `SPEND_INDEX`) is reserved and
+  never used in any block layout.
+- **Pubkeys appear only in the witness** for every other block, where
+  they are verified against the Merkle proof binding them to the
+  commitment root.
+- The writable surface for arbitrary data in conditions is sharply
+  bounded: outside `QABI_SPEND.owner_pubkey_hash` (32 B, used by
+  consensus) every conditions byte is structurally typed and consumed
+  by an evaluator.
 
 Key-consuming block types (those returning `true` from `IsKeyConsumingBlockType()`)
 include: SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG, COSIGN,
@@ -514,12 +522,14 @@ to 50,000 bytes, accommodating even SPHINCS+ signatures.
 - **PQ_BATCH** (`0x0A03`) commits `SHA256(falcon_pubkey)` per output. One
   anchor input in a spend tx reveals the pubkey + signature; every
   other input gated by the same hash short-circuits via a tx-local
-  cache. Amortised cost ~55 vB per input (vs ~666 B for a bare
-  FALCON sig).
+  cache. Amortised cost **~17.8 vB per input at N=100** (anchor ~392 vB,
+  non-anchors ~14 vB each), about 22&times; cheaper than per-input
+  FALCON-512. See [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
 - **QABIO** (`QABI_PRIME`, `QABI_SPEND`, plus the tx-level `qabi_block`
   and `aggregated_sig` fields): a coordinator + N participants
   ceremony that produces one FALCON-512 signature covering the whole
-  tx. ~143 vB per cosigner at N=100. See [`QABIO.md`](QABIO.md).
+  tx. **~139 vB per cosigner at N=100** (converging value, witness-
+  discounted). See [`QABIO.md`](QABIO.md) §8.
 
 ---
 
@@ -752,8 +762,8 @@ transaction. The maximum data payload is 40 bytes (`FieldMaxSize(DATA)`).
 | PREIMAGE size | exactly 32 bytes | `FieldMinSize == FieldMaxSize` |
 | NUMERIC size | 1-4 bytes | `FieldMinSize(NUMERIC)` / `FieldMaxSize(NUMERIC)` |
 | SCHEME size | 1 byte | Fixed |
-| SPEND_INDEX size | 4 bytes | Fixed |
-| PUBKEY_COMMIT size | exactly 32 bytes | Fixed |
+| PUBKEY_COMMIT size | exactly 32 bytes | Fixed (used only by `QABI_SPEND.owner_pubkey_hash`) |
+| MERKLE_PROOF size | 0-128 bytes | `MAX_MULTISIG_TREE_DEPTH=4` levels &times; 32 B |
 | Max ACCUMULATOR fields | 10 | root + 8 proof nodes + leaf |
 | Legacy inner depth | 2 | `MAX_LEGACY_INNER_DEPTH` |
 | Max implicit fields per layout | 8 | `MAX_IMPLICIT_FIELDS` |
