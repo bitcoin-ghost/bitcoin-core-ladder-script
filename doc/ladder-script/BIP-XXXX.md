@@ -1319,14 +1319,42 @@ the gate that controls it.
 
 #### Option A — Phased activation
 
-A 10-block first-activation BIP covering the structural core: `SIG`,
-`MULTISIG`, `CSV`, `CLTV`, `CTV`, `HTLC`, `PTLC`, `KEY_REF_SIG`, the
-legacy wrapper family (`P2PK_LEGACY`, `P2PKH_LEGACY`, `P2SH_LEGACY`,
-`P2WPKH_LEGACY`, `P2WSH_LEGACY`, `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`),
-and the full TX_MLSC machinery (wire format, conditions root, witness
-shapes, sighash, key-path tweak). The remaining four families —
-recursion, anchor, PLC, governance — and the QABIO extension would
-each ship as follow-on BIPs with their own activation events.
+A 15-block first-activation BIP covering the structural core plus the
+complete legacy-migration story:
+
+- **Signature and timelock core** (4 blocks): `SIG`, `MULTISIG`,
+  `CSV`, `CLTV`. These give Taproot parity for sigs and timelocks.
+- **Lightning and covenant primitives** (2 blocks): `HTLC`, `CTV`.
+  These bring Lightning support and BIP-119 covenants — the latter
+  resolves a long-pending separate BIP backlog as a side-effect.
+- **Pubkey relay** (1 block): `KEY_REF_SIG`. Ships the v0.7
+  pubkey-deduplication work in the MVP rather than carrying it as a
+  loose end.
+- **OP_RETURN replacement** (1 block): `DATA_RETURN`. Almost every
+  Bitcoin app uses OP_RETURN; without DATA_RETURN, every such app
+  is pushed back to v3 transactions for data carriage.
+- **Legacy wrapper family** (7 blocks): `P2PK_LEGACY`,
+  `P2PKH_LEGACY`, `P2SH_LEGACY`, `P2WPKH_LEGACY`, `P2WSH_LEGACY`,
+  `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`. These let a v4-only wallet
+  model every existing output type within the typed-block framework,
+  so migration tooling and hardware-wallet adapters have a complete
+  target from day one.
+
+Plus the full TX_MLSC machinery (wire format, conditions root,
+witness shapes, sighash, key-path tweak). The MVP exercises five of
+the eight witness rules (`Fixed N`, `Empty`, `Triplets K`,
+`Unspendable`, `Bridging`); the framework ships with all eight rules
+intact, but the inactive rules (`Reveal P`, `Accumulator`,
+`PQ-anchor`) await their respective follow-on blocks.
+
+The remaining four families — recursion, anchor, PLC, governance —
+plus the compound family (including `PTLC`, `TIMELOCKED_SIG`,
+`CLTV_SIG`, `TIMELOCKED_MULTISIG`, `ANCHOR_FEE`) and the QABIO
+extension would each ship as follow-on BIPs with their own activation
+events. The migration-story alignment is what motivates including the
+legacy wrappers in the MVP rather than deferring them: every
+follow-on BIP can assume legacy compatibility is already solved and
+focus on its own family's design questions.
 
 **Pros.**
 
