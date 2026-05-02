@@ -129,10 +129,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">sequence_value</span> from NUMERIC field. Negative &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> is set &rarr; <span class="eval-result-sat">SATISFIED</span> (disabled)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><span class="eval-keyword">CheckSequence</span>(value). If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read the conditions <span class="eval-keyword">NUMERIC</span> field as an int64 <span class="eval-keyword">sequence_val</span>. If absent or undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> (bit 31, 0x80000000) is set in <span class="eval-keyword">sequence_val</span> &rarr; <span class="eval-result-sat">SATISFIED</span> unconditionally (this short-circuits before the range check)</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Range check: if <span class="eval-keyword">sequence_val &lt; 0</span> or <span class="eval-keyword">sequence_val &gt; 0xFFFFFFFF</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (guards the subsequent narrowing cast to uint32_t)</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Call <span class="eval-keyword">sig_checker.CheckSequence(uint32_t(sequence_val))</span>; this delegates to BIP&nbsp;68 / BIP&nbsp;112 semantics against the spending tx's input sequence and the UTXO's confirmation height. Fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -142,11 +142,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Negative sequence value</td><td class="r-err">ERROR</td></tr>
-      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG set</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>Sufficient blocks elapsed (CheckSequence passes)</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>Insufficient blocks elapsed</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>NUMERIC field missing or undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG (bit 31) set in <code>sequence_val</code></td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td><code>sequence_val</code> negative or &gt; 0xFFFFFFFF (uint32 range guard)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckSequence</code> fails (insufficient blocks elapsed since UTXO)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckSequence</code> passes (lock satisfied)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

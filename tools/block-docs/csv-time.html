@@ -56,7 +56,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0102 &middot; TIMELOCK FAMILY</div>
   <h1 class="block-title">CSV_TIME</h1>
-  <p class="block-subtitle">Relative timelock in seconds (BIP 68 time-based). Uses the type flag bit in BIP 68 sequence to specify 512-second granularity.</p>
+  <p class="block-subtitle">Relative timelock in 512-second units (BIP&nbsp;68 time-based). The evaluator implicitly OR's the BIP&nbsp;68 type flag (bit 22) into <code>sequence_val</code>, so the user does not need to set it in the conditions value &mdash; the same NUMERIC <code>N</code> in CSV means "<code>N</code> blocks", in CSV_TIME means "<code>N</code> &times; 512 seconds".</p>
   <span class="block-family-badge" style="color:#ff6d00;border-color:#ff6d0040">Timelock</span>
   <span class="invertible-badge inv-yes">Invertible</span>
 </div>
@@ -95,7 +95,7 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">sequence_value</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">BIP 68 sequence value with time flag (512-second units)</td></tr>
+      <tr><td class="field-name">sequence_value</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of 512-second units. The BIP&nbsp;68 type flag (bit 22, 0x00400000) is OR'd in by the evaluator; setting it in the value is redundant.</td></tr>
     </tbody>
   </table>
   <p class="section-text" style="margin-top:12px">No witness fields required — evaluation uses the input sequence number and median-time-past from the transaction context.</p>
@@ -129,10 +129,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">sequence_value</span> from NUMERIC field (time-based BIP 68 encoding). Negative &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> is set &rarr; <span class="eval-result-sat">SATISFIED</span> (disabled)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><span class="eval-keyword">CheckSequence</span>(value) — value interpreted as 512-second units. If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read the conditions <span class="eval-keyword">NUMERIC</span> field as an int64 <span class="eval-keyword">sequence_val</span>. If absent or undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Set <span class="eval-keyword">sequence_val |= SEQUENCE_LOCKTIME_TYPE_FLAG</span> (bit 22, 0x00400000) to force time-based BIP&nbsp;68 interpretation regardless of the encoded value.</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> (bit 31) is set in <span class="eval-keyword">sequence_val</span> &rarr; <span class="eval-result-sat">SATISFIED</span> unconditionally.</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Range check: if <span class="eval-keyword">sequence_val &lt; 0</span> or <span class="eval-keyword">sequence_val &gt; 0xFFFFFFFF</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (guards the narrowing cast to uint32_t).</span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Call <span class="eval-keyword">sig_checker.CheckSequence(uint32_t(sequence_val))</span>; with the type flag set, BIP&nbsp;68 interprets the low 16 bits as 512-second units. Fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -142,11 +143,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Negative sequence value</td><td class="r-err">ERROR</td></tr>
-      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG set</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>Sufficient time elapsed (CheckSequence passes)</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>Insufficient time elapsed</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>NUMERIC field missing or undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG (bit 31) set in <code>sequence_val</code></td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td><code>sequence_val</code> negative or &gt; 0xFFFFFFFF (uint32 range guard)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckSequence</code> fails (insufficient time elapsed since UTXO)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckSequence</code> passes (lock satisfied)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -159,10 +160,10 @@
   <span class="json-key">"type"</span>: <span class="json-str">"CSV_TIME"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">4194472</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">168</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">The value 4194472 encodes 168 units of 512 seconds (~24 hours) with the BIP 68 time flag (bit 22) set. The UTXO cannot be spent until this duration has elapsed from its creation.</p>
+  <p class="section-text" style="margin-top:12px">The value 168 is OR'd with the BIP&nbsp;68 type flag (bit 22, 0x00400000) by the evaluator, so it encodes 168&nbsp;&times;&nbsp;512&nbsp;s (~24&nbsp;h) of relative time. The UTXO cannot be spent until this duration has elapsed from its creation. (Encoding 4194472 = 0x4000A8 with the flag pre-set works too &mdash; the OR is idempotent.)</p>
 </div>
 
 <!-- Use Cases -->

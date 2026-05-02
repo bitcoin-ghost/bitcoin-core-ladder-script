@@ -56,7 +56,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0104 &middot; TIMELOCK FAMILY</div>
   <h1 class="block-title">CLTV_TIME</h1>
-  <p class="block-subtitle">Absolute timelock in Unix time (BIP 65). Transaction cannot be included until Unix timestamp reaches the specified value. Values &ge; 500,000,000 are interpreted as timestamps.</p>
+  <p class="block-subtitle">Absolute timelock in Unix time (BIP&nbsp;65). Transaction cannot be included until median-time-past reaches the specified value. The user must encode a value &ge; 500000000 (LOCKTIME_THRESHOLD) &mdash; the evaluator does <em>not</em> auto-flag the field, so a value below that threshold falls back to block-height semantics (i.e. behaves like CLTV).</p>
   <span class="block-family-badge" style="color:#ff6d00;border-color:#ff6d0040">Timelock</span>
   <span class="invertible-badge inv-yes">Invertible</span>
 </div>
@@ -95,7 +95,7 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">timestamp</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Unix timestamp (values &ge; 500000000 interpreted as time)</td></tr>
+      <tr><td class="field-name">timestamp</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Unix timestamp; must be &ge; 500000000 (LOCKTIME_THRESHOLD) for BIP&nbsp;65 to interpret it as time-based. The evaluator does not OR a flag bit &mdash; the threshold is enforced inside <code>CheckLockTime</code> only.</td></tr>
     </tbody>
   </table>
   <p class="section-text" style="margin-top:12px">No witness fields required — evaluation uses the median-time-past from the evaluation context.</p>
@@ -129,9 +129,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">timestamp</span> from NUMERIC field. Negative &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">CheckLockTime</span>(value) — value interpreted as Unix timestamp. If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Pass &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read the conditions <span class="eval-keyword">NUMERIC</span> field as an int64 <span class="eval-keyword">locktime_val</span>. If absent or undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Range check: if <span class="eval-keyword">locktime_val &lt; 0</span> or <span class="eval-keyword">locktime_val &gt; 0xFFFFFFFF</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (guards the narrowing cast to uint32_t).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Call <span class="eval-keyword">sig_checker.CheckLockTime(uint32_t(locktime_val))</span>. CLTV_TIME shares its evaluator body with CLTV; the time-vs-height switch happens inside <code>CheckLockTime</code>: values &ge; LOCKTIME_THRESHOLD (500000000) are compared against MTP, values below are compared against block height. Fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -141,10 +141,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Negative timestamp value</td><td class="r-err">ERROR</td></tr>
-      <tr><td>median_time_past &ge; timestamp</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>median_time_past &lt; timestamp</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>NUMERIC field missing or undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>locktime_val</code> negative or &gt; 0xFFFFFFFF (uint32 range guard)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckLockTime</code> fails (MTP &lt; timestamp, or input nSequence is final)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>CheckLockTime</code> passes (MTP &ge; timestamp)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
