@@ -168,7 +168,7 @@ SegWit + Taproot):
  │                              │          │ qabi_block      (var; 0 if  │ ← QABIO
  │                              │          │  not a QABIO carrier)        │   tx-level
  │                              │          │ aggregated_sig  (var; 0 or  │   fields
- │                              │          │  exactly 666 B for QABI)     │
+ │                              │          │  1..666 B for QABI)          │
  │ locktime                 4 B │          │ locktime                 4 B │
  └──────────────────────────────┘          └──────────────────────────────┘
 ```
@@ -217,7 +217,7 @@ for i in 0..n_inputs:
 CompactSize(qabi_block_len)
 bytes   qabi_block                              (zero-length unless tx contains a QABI input)
 CompactSize(aggregated_sig_len)
-bytes   aggregated_sig                          (zero-length unless tx contains a QABI_SPEND input; otherwise exactly 666)
+bytes   aggregated_sig                          (zero-length unless tx contains a QABI_SPEND input; otherwise variable 1..QABI_AGGREGATED_SIG_MAX = 666 — FALCON-512 produces a variable-length signature, see §"Per-tx checks")
 uint32  nLockTime                               (LE)
 ```
 
@@ -701,7 +701,11 @@ Run once per v4 transaction by `CheckInputScripts`:
 3. `tx.qabi_block` is non-empty IFF the transaction contains at least
    one `QABI_SPEND`, `QABI_PRIME`, or `PQ_BATCH` input. `tx.aggregated_sig`
    is non-empty IFF the transaction contains at least one `QABI_SPEND`
-   input, in which case it MUST be exactly 666 bytes (FALCON-512).
+   input, in which case `len(tx.aggregated_sig) ∈ [1,
+   QABI_AGGREGATED_SIG_MAX]` where `QABI_AGGREGATED_SIG_MAX = 666`.
+   FALCON-512 produces a variable-length signature; padding to a fixed
+   size was removed in v0.14 (audit #9 Finding 4) to close a
+   coordinator-side embedding channel.
 
 #### Per-input checks (`VerifyRungTx`)
 
@@ -736,10 +740,12 @@ For each MLSC input, after the per-tx checks pass:
    h. Read the revealed rung's coil and check `coil.output_index`
       matches the spent input's vout.
    i. Merge conditions and witness fields per block: condition fields
-      (`HASH256`, `HASH160`, `NUMERIC`, `SCHEME`, `SPEND_INDEX`)
-      come from the proof; witness fields (`PUBKEY`, `SIGNATURE`,
-      `PREIMAGE`, `SCRIPT_BODY`, `MERKLE_PROOF`) come from the
-      witness. The `inverted` flag comes from the proof.
+      (`HASH256`, `HASH160`, `NUMERIC`, `SCHEME`, `PUBKEY_COMMIT`,
+      `DATA`) come from the proof; witness fields (`PUBKEY`,
+      `SIGNATURE`, `PREIMAGE`, `SCRIPT_BODY`, `MERKLE_PROOF`) come
+      from the witness. The `inverted` flag comes from the proof.
+      (Slot `0x07`, formerly `SPEND_INDEX`, is reserved and never
+      appears in any block layout.)
    j. Evaluate the ladder. The first satisfied rung wins (OR across
       rungs). Within a rung, every block MUST satisfy (AND across
       blocks). Inversion swaps `SATISFIED` ↔ `UNSATISFIED` for
@@ -1390,8 +1396,9 @@ are bound by leaf reconstruction to the exact value committed at fund
 time. Second, it preserves the conditions side's typed-field
 invariant — `PUBKEY` is rejected at deserialisation in the conditions
 context, leaving only commitment-shaped data types (`HASH256`,
-`HASH160`, `NUMERIC`, `SCHEME`, `SPEND_INDEX`, `DATA`) on the
-conditions wire.
+`HASH160`, `NUMERIC`, `SCHEME`, `PUBKEY_COMMIT`, `DATA`) on the
+conditions wire. (Slot `0x07`, formerly `SPEND_INDEX`, is reserved
+and unused.)
 
 The cost is that the verifier needs the witness-side pubkey to
 recompute the leaf — which means a key-consuming block cannot be
@@ -1505,18 +1512,23 @@ strictly better for amortised per-input cost.
 
 | Scheme | Signature size | Pubkey size |
 |---|---:|---:|
-| FALCON-512 | 666 B | 897 B |
-| FALCON-1024 | 1,280 B | 1,793 B |
-| Dilithium3 | 3,293 B | 1,952 B |
-| SPHINCS+ | ~8 KB+ | varies |
+| Scheme | Signature size (max) | Pubkey size |
+|---|---:|---:|
+| FALCON-512 | up to 666 B (variable) | 897 B |
+| FALCON-1024 | up to 1,280 B (variable) | 1,793 B |
+| Dilithium3 | 3,293 B (fixed) | 1,952 B |
+| SPHINCS+ | 49,216 B (fixed, SHA2-256f) | 64 B |
 
-FALCON-512 has the smallest signature among NIST-standardised post-
-quantum signature schemes. For the per-tx cost driver of QABIO, that
-makes it the dominant choice. FALCON-1024 and Dilithium3 are
-available for per-input `SIG` blocks where the larger signature is
-acceptable in exchange for FALCON-1024's higher security parameter or
-Dilithium3's different lattice assumption, but they are not currently
-selectable for the QABIO coordinator slot.
+FALCON signatures are variable-length up to a per-scheme maximum;
+Dilithium3 and SPHINCS+ are fixed-length. FALCON-512 has the smallest
+signature among NIST-standardised post-quantum signature schemes (and
+the variable-length encoding makes the typical case smaller still).
+For the per-tx cost driver of QABIO, that makes it the dominant
+choice. FALCON-1024 and Dilithium3 are available for per-input `SIG`
+blocks where the larger signature is acceptable in exchange for
+FALCON-1024's higher security parameter or Dilithium3's different
+lattice assumption, but they are not currently selectable for the
+QABIO coordinator slot.
 
 ### 11. Why PQ_BATCH as a separate primitive from QABIO?
 
@@ -1698,10 +1710,11 @@ and the rest of the existing Core surface.
 does not change v1/v2/v3 validation, signature verification, or
 script evaluation" can do so by reading the 961-line patch plus
 `src/rung/api.h`. That is the consensus surface for the integration
-question. The remaining 21,251 lines under `src/rung/` are
-implementation; their consensus contract is enforced by the test
-vectors in `src/test/data/rung_tx_vectors.json`. A consensus reviewer
-who wants to audit the integration boundary can do so in an
+question. The remaining 21,247 lines (20,884 under `src/rung/` plus
+363 in `src/rung_shims.h`) are implementation; their consensus
+contract is enforced by the test vectors in
+`src/test/data/rung_tx_vectors.json`. A consensus reviewer who wants
+to audit the integration boundary can do so in an
 afternoon.
 
 **Vendoring along the BIP 340 → libsecp256k1 model.** `src/rung/`
@@ -1785,7 +1798,7 @@ exercised by the consensus path:
 | v2     | `P2WPKH_LEGACY`   | Bridging (HASH160-committed pubkey)           |
 | v3     | `HTLC`            | Triplets-K + Reveal-P (claim path: preimage + sig) |
 
-The reference implementation has 619 unit tests under
+The reference implementation has 655 Boost unit test cases under
 `src/test/rung_tests.cpp` and multiple functional tests under
 `test/functional/feature_rung_*.py`. A future revision is expected to
 extend the JSON file with vectors for QABIO priming, QABIO batch
@@ -1997,14 +2010,22 @@ settlement (by withholding the FALCON-512 signature or ordering
 participants' priming transactions arbitrarily) but cannot deviate
 from the committed payouts. Concretely: every primed input commits
 to `committed_root = SHA256(qabi_block)` via its `QABI_SPEND` block,
-and the consensus evaluator requires `tx.vout` to bit-exact match
-`qabi_block.outputs`. A coordinator who broadcasts a batch tx with
-any output change produces a transaction whose `qabi_block`
-serialisation differs from any participant's `committed_root`, and
-the evaluator rejects every primed input. The escape rung in each
-participant's conditions tree provides a unilateral exit if the
-coordinator never broadcasts. The trust model is therefore
-liveness-on-coordinator, safety-on-consensus.
+and the consensus evaluator requires (1) `tx.conditions_root ==
+parsed_qabi_block.outputs_conditions_root`, (2)
+`tx.vout.size() == parsed_qabi_block.output_values.size()`, and (3)
+`tx.vout[i].value == parsed_qabi_block.output_values[i]` for every
+output. Because every v4 MLSC output's structural scriptPubKey is
+`0xDF || tx.conditions_root` (no per-output script bytes appear on
+the wire), pinning `conditions_root` plus the per-output value list
+pins every destination — there are no scriptPubKeys to compare
+"bit-for-bit" because there are no scriptPubKeys on the wire at all.
+A coordinator who broadcasts a batch tx that changes the
+destination tree, the output count, or any value produces a
+transaction whose `qabi_block` serialisation differs from every
+participant's `committed_root`, and the evaluator rejects every
+primed input. The escape rung in each participant's conditions tree
+provides a unilateral exit if the coordinator never broadcasts. The
+trust model is therefore liveness-on-coordinator, safety-on-consensus.
 
 **Audit status.** The implementation has been internally reviewed
 across multiple iterations and runs end-to-end on a private signet
