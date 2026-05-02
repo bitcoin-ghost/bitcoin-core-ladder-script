@@ -155,23 +155,31 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Both pubkeys are bound to the rung leaf at MLSC-proof level (merkle_pub_key); a different pubkey produces a different leaf and the proof rejects before this evaluator runs.</span>
+      <span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 2)</span>: both PUBKEYs must be present in the merged block; else &rarr; <span class="eval-result-err">ERROR</span>. Identity bound at MLSC-proof level via merkle_pub_key.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify both <span class="eval-keyword">SIGNATURE</span>s against the per-input ladder sighash (with <code>scheme</code>). If either fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span>s. Fewer than 4 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> all four (<code>min_fee_rate</code>, <code>max_fee_rate</code>, <code>max_weight</code>, <code>commitment_num</code>); any undecodable &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Compute the spending tx fee rate <code>(sum_in - sum_out) / vsize</code>. If outside <code>[min_fee_rate, max_fee_rate]</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Sign/range guards: <code>min_fee_rate &lt; 0</code>, <code>max_fee_rate &lt; 0</code>, <code>max_weight &le; 0</code>, or <code>commitment_num &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span>. <code>min_fee_rate &gt; max_fee_rate</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Compute the spending tx weight. If <code>tx_weight &gt; max_weight</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Witness must contain &ge; 2 PUBKEYs and &ge; 2 SIGNATUREs (else &rarr; <span class="eval-result-unsat">UNSATISFIED</span>). 2-of-2 verification: greedy pairing &mdash; for each SIGNATURE, try each unused PUBKEY via <span class="eval-keyword">VerifySigWithScheme(pk, sig, scheme=null)</span>; on SATISFIED, mark that pubkey used and move to the next sig. ERROR &rarr; propagate ERROR. Final <code>valid_count &lt; 2</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">All four checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Require <code>ctx.tx</code>, <code>ctx.spent_outputs</code>, <code>ctx.tx_weight &gt; 0</code>; missing &rarr; <span class="eval-result-err">ERROR</span> (fail-closed). Compute <code>fee = &Sigma;(spent.value) - &Sigma;(out.value)</code>; <code>fee &lt; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">6.</span>
+      <span class="eval-step-text"><code>vsize = (tx_weight + 3) / 4</code> (BIP&nbsp;141); <code>vsize &le; 0</code> &rarr; <span class="eval-result-err">ERROR</span>. <code>fee_rate = fee / vsize</code> (truncating; consensus uses the floor). <code>fee_rate</code> outside <code>[min_fee_rate, max_fee_rate]</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">7.</span>
+      <span class="eval-step-text">Weight cap: <code>tx_weight &gt; max_weight</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. All checks pass &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -182,11 +190,13 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>min_fee_rate &gt; max_fee_rate</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Either signature invalid</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Fee rate outside [min, max] band</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Spending tx exceeds max_weight</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Fewer than 2 PUBKEYs, fewer than 4 NUMERICs, any NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Negative fee/weight/commitment values, <code>max_weight &le; 0</code>, missing tx context, or <code>vsize &le; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>min_fee_rate &gt; max_fee_rate</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Witness has fewer than 2 SIGNATUREs, or fewer than 2 valid sig/pubkey pairings</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>fee &lt; 0</code> (outputs exceed inputs)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>fee_rate</code> floor outside <code>[min_fee_rate, max_fee_rate]</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>tx_weight &gt; max_weight</code></td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>All checks pass</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>

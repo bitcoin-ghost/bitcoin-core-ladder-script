@@ -134,15 +134,15 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0701</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-count">2</span>
       <span class="wire-segment wire-field-sig" style="min-width:80px">SCHEME &middot; 1B</span>
       <span class="wire-segment wire-field-num" style="min-width:100px">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">= 12 bytes</span>
+      <span class="wire-bytes">&asymp; 11 bytes</span>
     </div>
   </div>
 
@@ -172,27 +172,31 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text">Locate the witness <span class="eval-keyword">PUBKEY</span>, <span class="eval-keyword">SIGNATURE</span>, and conditions <span class="eval-keyword">NUMERIC</span> (<code>timelock</code>); any missing &rarr; <span class="eval-result-err">ERROR</span>. PUBKEY identity is bound at MLSC-proof level via merkle_pub_key &mdash; no leaf check here.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Check for <span class="eval-keyword">SCHEME</span> field. If PQ scheme, route to post-quantum verifier.</span>
+      <span class="eval-step-text">Read the optional <span class="eval-keyword">SCHEME</span> conditions field; if absent, default to Schnorr.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY using Schnorr (64-65B) or ECDSA (8-72B). If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(PUBKEY, SIGNATURE, scheme, ...)</span>. Sig size checks fire here (Schnorr 64-65 B, ECDSA 8-72 B, PQ scheme-specific). Invalid &rarr; the underlying result (UNSATISFIED for verification failure, ERROR for malformed inputs).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> is set in timelock &rarr; <span class="eval-result-sat">SATISFIED</span> (no CSV check)</span>
+      <span class="eval-step-text">Then run the CSV check (mirroring CSV block): <span class="eval-keyword">ReadNumeric</span> the timelock; undecodable &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">CheckSequence</span>(timelock). If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> (bit 31) is set in <code>timelock</code> &rarr; <span class="eval-result-sat">SATISFIED</span> immediately (no further check).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">6.</span>
-      <span class="eval-step-text">Both checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Range guard: <code>timelock &lt; 0</code> or <code>&gt; 0xFFFFFFFF</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (protects the narrowing cast).</span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">7.</span>
+      <span class="eval-step-text"><span class="eval-keyword">CheckSequence(uint32_t(timelock))</span>; fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -203,13 +207,13 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Negative timelock value</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Signature size out of range</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>PUBKEY, SIGNATURE, or NUMERIC missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Signature size out of range for the resolved scheme</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Timelock NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
       <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>CSV sequence check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Signature valid AND timelock elapsed</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG set after a valid signature</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Timelock out of uint32 range, or <code>CheckSequence</code> fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature valid AND timelock satisfied</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

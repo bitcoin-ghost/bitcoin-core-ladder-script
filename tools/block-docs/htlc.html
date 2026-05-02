@@ -100,61 +100,76 @@
         <td class="field-type">HASH256</td>
         <td class="field-size">32 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">SHA-256 hash that the preimage must match. <strong>Node-computed</strong> &mdash; the user provides PREIMAGE and the node computes this field automatically. Raw hash input is rejected.</td>
+        <td class="field-desc">SHA-256 hash that the receiver-path preimage must match.</td>
       </tr>
       <tr>
-        <td class="field-name">timelock</td>
+        <td class="field-name">csv</td>
         <td class="field-type">NUMERIC</td>
         <td class="field-size">1-4 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Relative timelock in blocks (BIP 68 sequence value)</td>
+        <td class="field-desc">Relative timelock in blocks (BIP-68 sequence value) for the refund path.</td>
       </tr>
       <tr>
-        <td class="field-name">pubkey</td>
+        <td class="field-name">scheme</td>
+        <td class="field-type">SCHEME</td>
+        <td class="field-size">1 B</td>
+        <td class="field-side-c">Conditions</td>
+        <td class="field-desc">Signature scheme byte routed into <code>VerifySigWithScheme</code> on either path.</td>
+      </tr>
+      <tr>
+        <td class="field-name">receiver_pubkey</td>
         <td class="field-type">PUBKEY</td>
         <td class="field-size">32-33 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Public key matching the commitment</td>
+        <td class="field-desc">Receiver pubkey (witness PUBKEY index 0). Used by the receiver/early path.</td>
+      </tr>
+      <tr>
+        <td class="field-name">sender_pubkey</td>
+        <td class="field-type">PUBKEY</td>
+        <td class="field-size">32-33 B</td>
+        <td class="field-side-w">Witness</td>
+        <td class="field-desc">Sender pubkey (witness PUBKEY index 1). Used by the sender/refund path. Both keys are revealed even if only one is consumed by the sig &mdash; the rung leaf reconstruction at MLSC-proof level needs both.</td>
       </tr>
       <tr>
         <td class="field-name">signature</td>
         <td class="field-type">SIGNATURE</td>
-        <td class="field-size">64-65 B</td>
+        <td class="field-size">var</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Schnorr signature over the transaction</td>
+        <td class="field-desc">Single signature; verified against <code>receiver_pubkey</code> on path 0 or <code>sender_pubkey</code> on path 1.</td>
       </tr>
       <tr>
         <td class="field-name">preimage</td>
         <td class="field-type">PREIMAGE</td>
-        <td class="field-size">32 B</td>
+        <td class="field-size">var</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Preimage whose SHA-256 hash must equal the hash field &mdash; provided by the user. The node derives HASH256 from this data at creation time.</td>
+        <td class="field-desc">On path 0 (receiver): non-empty preimage whose SHA-256 must equal <code>hash</code>. On path 1 (refund): <em>must be empty</em> &mdash; closes the embedding channel.</td>
       </tr>
       <tr>
-        <td class="field-name">timelock_witness</td>
+        <td class="field-name">path</td>
         <td class="field-type">NUMERIC</td>
-        <td class="field-size">1-4 B</td>
+        <td class="field-size">1 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Timelock value echoed in witness for sequence verification</td>
+        <td class="field-desc">Path indicator: <code>0</code> = receiver (hashlock claim, no CSV), <code>1</code> = sender (CSV refund, no preimage). Any other value &rarr; ERROR.</td>
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;2; both pubkeys revealed in the witness for leaf reconstruction (closes audit finding E-002 by ensuring both keys are consumed across the two paths). The implicit witness layout has a strict 5-field shape; the evaluator rejects anything that does not match exactly.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side:</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0702</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">4</span>
+      <span class="wire-segment wire-count">3</span>
       <span class="wire-segment wire-field-hash" style="min-width:120px">HASH256 &middot; 32B</span>
       <span class="wire-segment wire-field-num" style="min-width:90px">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">= 45 bytes</span>
+      <span class="wire-segment wire-field-sig" style="min-width:80px">SCHEME &middot; 1B</span>
+      <span class="wire-bytes">&asymp; 40 bytes</span>
     </div>
   </div>
 
@@ -163,17 +178,18 @@
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0702</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">4</span>
-      <span class="wire-segment wire-field-pubkey" style="min-width:100px">PUBKEY &middot; 32B</span>
-      <span class="wire-segment wire-field-sig" style="min-width:120px">SIGNATURE &middot; 64B</span>
-      <span class="wire-segment wire-field-pre" style="min-width:110px">PREIMAGE &middot; 32B</span>
-      <span class="wire-segment wire-field-num" style="min-width:90px">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">= 141 bytes</span>
+      <span class="wire-segment wire-count">5</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">PUBKEY &middot; 35B (rcv)</span>
+      <span class="wire-segment wire-field-pubkey" style="min-width:130px">PUBKEY &middot; 35B (snd)</span>
+      <span class="wire-segment wire-field-sig" style="min-width:130px">SIGNATURE &middot; 66B</span>
+      <span class="wire-segment wire-field-pre" style="min-width:110px">PREIMAGE &middot; var</span>
+      <span class="wire-segment wire-field-num" style="min-width:90px">NUMERIC &middot; 1B (path)</span>
+      <span class="wire-bytes">&asymp; 175 + len bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness)</span>
-      <span class="wire-total-bytes">250 bytes</span>
+      <span class="wire-total-bytes">&asymp; 215 + len bytes</span>
     </div>
   </div>
 
@@ -187,23 +203,23 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Compute SHA256(<span class="eval-keyword">PREIMAGE</span>). Compare to <span class="eval-keyword">HASH256</span>. If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Strict shape check: the merged conditions+witness block must have exactly <code>3 + 5 = 8</code> fields with the exact type sequence <code>HASH256, NUMERIC, SCHEME, PUBKEY, PUBKEY, SIGNATURE, PREIMAGE, NUMERIC</code>. Anything else &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">If timelock <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> not set, verify <span class="eval-keyword">CheckSequence</span>(timelock). If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Verify the conditions HASH256 is exactly 32&nbsp;B. <span class="eval-keyword">ReadNumeric</span> the path indicator (witness NUMERIC); undecodable &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text"><strong>path&nbsp;== 0 (receiver/early):</strong> PREIMAGE must be non-empty (else <span class="eval-result-unsat">UNSATISFIED</span>). Compute <code>SHA256(PREIMAGE)</code>; mismatch with conditions HASH256 &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Then dispatch <span class="eval-keyword">VerifySigWithScheme(receiver_pubkey, sig, scheme, ...)</span>; the sig result is the block result. <strong>CSV is not enforced on this path.</strong></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY (Schnorr or ECDSA). If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><strong>path&nbsp;== 1 (sender/refund):</strong> PREIMAGE must be empty (anti-data-embedding); else &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the conditions CSV; undecodable &rarr; <span class="eval-result-err">ERROR</span>. SEQUENCE_LOCKTIME_DISABLE_FLAG set &rarr; <span class="eval-result-err">ERROR</span> (defeats the refund timer). Range guard: out of uint32 &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. <span class="eval-keyword">CheckSequence(uint32_t(csv))</span> fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Then dispatch <span class="eval-keyword">VerifySigWithScheme(sender_pubkey, sig, scheme, ...)</span>; the sig result is the block result.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">All three checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Any other path value &rarr; <span class="eval-result-err">ERROR</span>. On UNSATISFIED, <code>ctx.error_message_out</code> (if non-null) is populated with the specific check that fired (<code>"HTLC: path=0 preimage hash mismatch"</code>, etc.) so mempool reject reasons carry the diagnostic.</span>
     </div>
   </div>
 </div>
@@ -214,13 +230,15 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing HASH256, PREIMAGE, PUBKEY, SIGNATURE, or NUMERIC</td><td class="r-err">ERROR</td></tr>
-      <tr><td>HASH256 field not exactly 32 bytes</td><td class="r-err">ERROR</td></tr>
-      <tr><td>SHA256(preimage) != hash</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>CSV sequence check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Pubkey commitment mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Hash matches, timelock elapsed, signature valid</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Field count or type sequence does not match the strict 8-field shape</td><td class="r-err">ERROR</td></tr>
+      <tr><td>HASH256 not exactly 32 B; or path NUMERIC undecodable; or path not in {0,1}</td><td class="r-err">ERROR</td></tr>
+      <tr><td>path&nbsp;==&nbsp;0 (receiver): PREIMAGE empty</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>path&nbsp;==&nbsp;0: <code>SHA256(preimage) &ne; hash</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>path&nbsp;==&nbsp;1 (refund): PREIMAGE non-empty (anti-embedding)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>path&nbsp;==&nbsp;1: SEQUENCE_LOCKTIME_DISABLE_FLAG set, or CSV undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>path&nbsp;==&nbsp;1: CSV out of uint32 range, or <code>CheckSequence</code> fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>SIG verification fails on the selected pubkey</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Selected path's checks all pass</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -229,25 +247,38 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"HTLC"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e3b0c44298fc1c...32 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e3b0c44298fc1c... preimage hash 32 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> }
   ]
 }</pre></div>
 
-  <div class="json-label" style="margin-top:16px">Witness</div>
+  <div class="json-label" style="margin-top:16px">Witness &mdash; receiver path (path = 0, hashlock claim)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"HTLC"</span>,
-  <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef...32 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"02aabb... receiver pubkey"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"02ccdd... sender pubkey (still revealed)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... receiver Schnorr sig ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>,  <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef... preimage hashing to the conditions HASH256"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>,   <span class="json-key">"value"</span>: <span class="json-num">0</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness &mdash; refund path (path = 1, CSV must be elapsed)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"HTLC"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"02aabb... receiver pubkey (still revealed)"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"02ccdd... sender pubkey"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... sender Schnorr sig ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>,  <span class="json-key">"hex"</span>: <span class="json-str">""</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>,   <span class="json-key">"value"</span>: <span class="json-num">1</span> }
   ]
 }</pre></div>
 </div>

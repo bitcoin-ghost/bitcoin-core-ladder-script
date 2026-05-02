@@ -136,23 +136,27 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text">Locate the witness <span class="eval-keyword">PUBKEY</span>, <span class="eval-keyword">SIGNATURE</span>, and conditions <span class="eval-keyword">NUMERIC</span> (<code>locktime</code>); any missing &rarr; <span class="eval-result-err">ERROR</span>. PUBKEY identity is bound at MLSC-proof level via merkle_pub_key.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Check for <span class="eval-keyword">SCHEME</span> field. If PQ scheme, route to post-quantum verifier.</span>
+      <span class="eval-step-text">Read the optional conditions <span class="eval-keyword">SCHEME</span>; if absent, default to Schnorr.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(PUBKEY, SIGNATURE, scheme, ...)</span>. Sig size checks fire here. Invalid &rarr; the underlying result.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">CheckLockTime</span>(locktime). If nLockTime < committed value &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Then run the CLTV check (mirrors CLTV block): <span class="eval-keyword">ReadNumeric</span> the locktime; undecodable &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">5.</span>
-      <span class="eval-step-text">Both checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Range guard: <code>locktime &lt; 0</code> or <code>&gt; 0xFFFFFFFF</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">6.</span>
+      <span class="eval-step-text"><span class="eval-keyword">CheckLockTime(uint32_t(locktime))</span>; BIP-65 height/MTP discrimination fires inside (value &lt; LOCKTIME_THRESHOLD = 500000000 is height, &ge; is MTP). Fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -163,10 +167,9 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>PUBKEY, SIGNATURE, or NUMERIC missing; or NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
       <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>CLTV locktime check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Locktime out of uint32 range, or <code>CheckLockTime</code> fails</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Signature valid AND locktime reached</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>

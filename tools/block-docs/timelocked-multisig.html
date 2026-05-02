@@ -206,17 +206,28 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (committed in the rung leaf)</div>
+  <div class="json-label">Conditions (v2 inner-Merkle layout, committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"TIMELOCKED_MULTISIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02789a...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">2</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"value"</span>: <span class="json-num">1</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... pubkey_root over the N pubkeys, tagged-hash domain LadderMultisigPubkey/v1 ..."</span> }
+  ]
+}</pre></div>
+
+  <div class="json-label" style="margin-top:16px">Witness (K signer triplets, strict-ascending pubkey order)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"TIMELOCKED_MULTISIG"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"02abc1... signer 1 pubkey"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... inclusion proof against pubkey_root ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"... signer 1 signature ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"03def2... signer 2 pubkey"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... inclusion proof ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"... signer 2 signature ..."</span> }
   ]
 }</pre></div>
 </div>

@@ -105,23 +105,23 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0703</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-count">2</span>
       <span class="wire-segment wire-field-hash">HASH256 &middot; 32B</span>
       <span class="wire-segment wire-field-sig">SCHEME &middot; 1B</span>
-      <span class="wire-bytes">Conditions = 73 bytes</span>
+      <span class="wire-bytes">Conditions &asymp; 40 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0703</span>
       <span class="wire-segment wire-inv">0</span>
       <span class="wire-segment wire-count">3</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 32B</span>
-      <span class="wire-segment wire-field-sig">SIGNATURE &middot; 64B</span>
-      <span class="wire-segment wire-field-pre">PREIMAGE &middot; 32B</span>
-      <span class="wire-bytes">Witness = 138 bytes</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-segment wire-field-sig">SIGNATURE &middot; 66B</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">Witness &asymp; 105 + len bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">213 bytes (saves 8B vs separate blocks)</span>
+      <span class="wire-total-bytes">&asymp; 145 + len bytes</span>
     </div>
   </div>
 </div>
@@ -130,10 +130,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Compute SHA256(<span class="eval-keyword">PREIMAGE</span>). If != <span class="eval-keyword">HASH256</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Both passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">HASH256</span> and witness <span class="eval-keyword">PREIMAGE</span>. Either missing &rarr; <span class="eval-result-err">ERROR</span>. HASH256 not exactly 32 B &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Compute <code>SHA256(PREIMAGE)</code> and <code>memcmp</code> against the conditions HASH256. Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (returns immediately; signature is not even checked).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Locate witness <span class="eval-keyword">PUBKEY</span> and <span class="eval-keyword">SIGNATURE</span>. Either missing &rarr; <span class="eval-result-err">ERROR</span>. PUBKEY identity is bound at MLSC-proof level via merkle_pub_key.</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Read the optional conditions <span class="eval-keyword">SCHEME</span> (defaults to Schnorr). Dispatch <span class="eval-keyword">VerifySigWithScheme(pubkey, sig, scheme, ...)</span>; the result is the block result. Sig size checks fire here per the resolved scheme.</span></div>
   </div>
 </div>
 

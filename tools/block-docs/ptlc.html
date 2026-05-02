@@ -57,7 +57,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0704 &middot; COMPOUND FAMILY</div>
   <h1 class="block-title">PTLC</h1>
-  <p class="block-subtitle">Point Time Locked Contract. Combines an adaptor signature verification with a relative timelock (CSV) in a single block. Collapses the ADAPTOR_SIG + CSV two-block pattern for payment channel constructions.</p>
+  <p class="block-subtitle">Point Time Locked Contract. Combines a Schnorr signature against a single signing key with a relative timelock (CSV) in a single block. Collapses the ADAPTOR_SIG + CSV two-block pattern for payment-channel constructions. The "adaptor" mechanics &mdash; encrypting and decrypting the signature against the adaptor point <code>T</code> &mdash; are entirely off-chain (v0.7+); on-chain the spend reveals a normal Schnorr signature that the counterparty extracts the adaptor secret from. There is no on-chain adaptor point and no PREIMAGE field.</p>
   <span class="block-family-badge badge-compound">Compound</span>
   <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
@@ -105,32 +105,25 @@
         <td class="field-type">NUMERIC</td>
         <td class="field-size">1-4 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Relative timelock in blocks (BIP 68 sequence value)</td>
+        <td class="field-desc">Relative timelock in blocks (BIP 68 sequence value).</td>
       </tr>
       <tr>
         <td class="field-name">pubkey</td>
         <td class="field-type">PUBKEY</td>
         <td class="field-size">32-33 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Public key (verified via Merkle leaf)</td>
+        <td class="field-desc">Single signing pubkey. Identity is bound at MLSC-proof level via merkle_pub_key.</td>
       </tr>
       <tr>
         <td class="field-name">signature</td>
         <td class="field-type">SIGNATURE</td>
         <td class="field-size">64-65 B</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Adapted Schnorr signature</td>
-      </tr>
-      <tr>
-        <td class="field-name">preimage</td>
-        <td class="field-type">PREIMAGE</td>
-        <td class="field-size">32 B</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">Adaptor secret (scalar preimage of the adaptor point)</td>
+        <td class="field-desc">Schnorr signature (size strictly enforced 64-65 B). The adaptor decryption happens off-chain before broadcast; on-chain this verifies as a plain Schnorr sig against <code>pubkey</code>.</td>
       </tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;1 (single signing key). The witness layout is <code>SIG_WITNESS</code> &mdash; <code>[PUBKEY, SIGNATURE]</code>; there is no PREIMAGE field on PTLC.</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -139,19 +132,23 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
+      <span class="eval-step-text"><span class="eval-keyword">ResolvePubkeyCommitments(block)</span>: must yield exactly 1 PUBKEY. Also locate the witness SIGNATURE and conditions NUMERIC. Fewer than 1 PUBKEY, or SIGNATURE/NUMERIC missing &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify adaptor <span class="eval-keyword">SIGNATURE</span> against PUBKEY and adaptor point. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Strict size check on the SIGNATURE: must be 64-65 B (Schnorr range). PTLC has no SCHEME field, so ECDSA's 8-72 B and PQ scheme sizes are rejected. Out of range &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">CheckSequence</span>(timelock). If fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Dispatch <span class="eval-keyword">VerifySigWithScheme(pubkey, sig, scheme=null, ...)</span>. ERROR &rarr; propagate <span class="eval-result-err">ERROR</span>; not SATISFIED &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">All checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Then run the CSV check: <span class="eval-keyword">ReadNumeric</span> the timelock; undecodable &rarr; <span class="eval-result-err">ERROR</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">5.</span>
+      <span class="eval-step-text">If <span class="eval-keyword">SEQUENCE_LOCKTIME_DISABLE_FLAG</span> is set &rarr; <span class="eval-result-sat">SATISFIED</span> immediately. Range guard: out of uint32 &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. <span class="eval-keyword">CheckSequence</span> fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; passes &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -162,11 +159,12 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Adaptor signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>CSV sequence check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Adaptor sig valid AND timelock elapsed</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>PUBKEY, SIGNATURE, or NUMERIC missing; or NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SIGNATURE size outside 64-65 B (Schnorr range)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>SEQUENCE_LOCKTIME_DISABLE_FLAG set after a valid signature</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Timelock out of uint32 range, or <code>CheckSequence</code> fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Signature valid AND timelock satisfied</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -189,9 +187,8 @@
   <span class="json-key">"type"</span>: <span class="json-str">"PTLC"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e4f2a1...64 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"b7c8d9...32 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1... 33-byte signing pubkey"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e4f2a1... 64-65 B Schnorr sig (already adaptor-decrypted)"</span> }
   ]
 }</pre></div>
 </div>
