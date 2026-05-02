@@ -294,7 +294,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
     <div class="block-grid">
       <a href="qabi-prime.html" class="block-card"><div class="block-code">0x0A01</div><div class="block-name">QABI_PRIME</div><div class="block-desc">Priming state transition: reveal next auth-chain preimage, covenant-mutate committed_root / depth / expiry. Participant-authorised only &mdash; no coordinator signature needed.</div></a>
       <a href="qabi-spend.html" class="block-card"><div class="block-code">0x0A02</div><div class="block-name">QABI_SPEND</div><div class="block-desc">Batch spend: verifies primed state, expiry window, spend preimage, and a single tx-level FALCON-512 aggregated signature that authorises the whole batch atomically.</div></a>
-      <a href="pq-batch.html" class="block-card"><div class="block-code">0x0A03</div><div class="block-name">PQ_BATCH</div><div class="block-desc">Lightweight PQ key-sharing pool. Commits SHA256(falcon_pubkey); one anchor input reveals pubkey + sig, every other input gated by the same hash short-circuits via a tx-local cache. ~55 vB amortised per input.</div></a>
+      <a href="pq-batch.html" class="block-card"><div class="block-code">0x0A03</div><div class="block-name">PQ_BATCH</div><div class="block-desc">Lightweight PQ key-sharing pool. Commits SHA256(falcon_pubkey); one anchor input reveals pubkey + sig, every other input gated by the same hash short-circuits via a tx-local cache. ~17.8 vB amortised per input at N=100.</div></a>
     </div>
   </div>
 

@@ -210,18 +210,18 @@
 <!-- Cost amortisation -->
 <div class="doc-section">
   <div class="section-label">Cost Amortisation</div>
-  <p class="section-text" style="margin-bottom:12px">For the typical "drain N UTXOs to one sink" shape (FALCON-512):</p>
+  <p class="section-text" style="margin-bottom:12px">For the typical "drain N UTXOs to one sink" shape (FALCON-512). Per <code>doc/ladder-script/PQ_BATCH_SPEC.md</code>: anchor input ~392 vB (FALCON-512 witness, SegWit-discounted), non-anchor input ~14 vB (just the MLSC proof path).</p>
   <table class="result-table">
-    <thead><tr><th>N</th><th>Total vsize</th><th>Per-input vsize</th><th>vs N &times; SIG(FALCON-512)</th></tr></thead>
+    <thead><tr><th>N</th><th>Total vsize</th><th>Per-input vsize</th><th>vs N &times; SIG(FALCON-512) at ~400 vB</th></tr></thead>
     <tbody>
-      <tr><td>1</td><td>~1,610 vB</td><td>1,610 vB</td><td>parity</td></tr>
-      <tr><td>10</td><td>~2,160 vB</td><td>216 vB</td><td>~7&times; cheaper</td></tr>
-      <tr><td>100</td><td>~6,890 vB</td><td>69 vB</td><td>~10&times; cheaper</td></tr>
-      <tr><td>500</td><td>~30,070 vB</td><td>60 vB</td><td>~11&times; cheaper</td></tr>
-      <tr><td>1,000</td><td>~58,900 vB</td><td>59 vB</td><td>~11&times; cheaper</td></tr>
+      <tr><td>1</td><td>~392 vB</td><td>392 vB</td><td>parity</td></tr>
+      <tr><td>10</td><td>~518 vB</td><td>~52 vB</td><td>~8&times; cheaper</td></tr>
+      <tr><td>100</td><td>~1,778 vB</td><td>~17.8 vB</td><td>~22&times; cheaper</td></tr>
+      <tr><td>500</td><td>~7,378 vB</td><td>~15 vB</td><td>~27&times; cheaper</td></tr>
+      <tr><td>1,000</td><td>~14,378 vB</td><td>~14 vB</td><td>~28&times; cheaper</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">Asymptote: <strong>~55 vB per non-anchor input</strong>. The anchor input pays the full ~1,575 vB FALCON cost, every cache-read input pays only the PQ_BATCH micro-header + witness scaffolding.</p>
+  <p class="section-text" style="margin-top:12px">Asymptote: <strong>~14 vB per non-anchor input</strong>. The anchor input pays the FALCON witness cost once (~392 vB after the SegWit 4&times; discount on 666 B sig + 897 B pubkey + scaffolding); every cache-read input pays only the PQ_BATCH micro-header + the rung's MLSC proof scaffolding (~14 vB). At <strong>N=100 the per-input mean is 17.8 vB</strong>; the BIP cites this figure (§Q11). Both numbers measure pure witness cost; the per-input tx-input baseline (32&nbsp;B prevout + 4&nbsp;B vout + 4&nbsp;B sequence + 1&nbsp;B scriptsig-length = 41 vB) sits on top, identical to every other input type.</p>
 </div>
 
 <!-- Use Cases -->
