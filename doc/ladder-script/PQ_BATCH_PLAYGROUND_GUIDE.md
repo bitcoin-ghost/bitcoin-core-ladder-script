@@ -18,9 +18,10 @@ without paying a per-input PQ verification cost. In the spending tx:
   once, populates a tx-local `PQBatchCache` keyed by the commit.
 - **Inputs 1..N-1 = cache reads.** Empty witness. The evaluator looks
   up the commit, finds the cached "anchor verified" verdict, and
-  short-circuits at **~55 vB amortised** per input — about an order of
-  magnitude cheaper than a per-input FALCON sig (~666 B sig + ~897 B
-  pubkey).
+  short-circuits at **~14 vB per non-anchor input**. At N=100 the
+  per-input mean is **~17.8 vB** &mdash; about **22&times; cheaper**
+  than a per-input FALCON-512 sig (~666 B sig + ~897 B pubkey ≈ 392 vB
+  per input even with SegWit witness discount).
 
 No coordinator, no priming round. The simple "key-sharing pool"
 complement to QABIO.
@@ -49,11 +50,12 @@ JSON for offline inspection.
 
 ## What to look for
 
-- **Witness size per input.** The anchor input is ~1,575 vB
-  (PUBKEY 897 + SIGNATURE 666 + framing). Non-anchor inputs are
-  ~30-50 vB each (just the PQ_BATCH micro-header + scaffolding).
-  The total **anchor cost amortises** across N — at N=10 you're
-  already saving ~5,500 vB vs N independent FALCON sigs.
+- **Witness size per input.** The anchor input witness is ~1,567
+  bytes (PUBKEY 897 + SIGNATURE 666 + ~4 framing) which is **~392 vB**
+  after the SegWit witness discount (BIP-141 weight / 4). Non-anchor
+  inputs are **~14 vB each** (just the MLSC proof scaffolding). The
+  total **anchor cost amortises** across N &mdash; at N=10 you save
+  ~3,500 vB vs N independent FALCON sigs; at N=100 you save ~38,200 vB.
 - **One verify call.** The proxy log shows exactly one
   `VerifyPQSignature` call per spend tx, regardless of N. Compare to
   N independent SIG(FALCON-512) inputs which cost N verifies.
@@ -65,18 +67,24 @@ JSON for offline inspection.
 
 ## Comparison numbers
 
-For the typical "drain N UTXOs to one sink" shape:
+For the typical "drain N UTXOs to one sink" shape (FALCON-512). Per
+[`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md): anchor input ~392 vB
+(witness, SegWit-discounted), non-anchor input ~14 vB.
 
-| N    | PQ_BATCH total (vB) | per-input (vB) | vs N × SIG(FALCON-512) |
-|-----:|--------------------:|---------------:|------------------------|
-| 1    |             ~1,610  |          1,610 | parity                 |
-| 10   |             ~2,160  |            216 | ~7× cheaper            |
-| 100  |             ~6,890  |             69 | ~10× cheaper           |
-| 500  |            ~30,070  |             60 | ~11× cheaper           |
-| 1000 |            ~58,900  |             59 | ~11× cheaper           |
+| N     | PQ_BATCH total (vB) | per-input (vB) | vs N &times; SIG(FALCON-512) at ~400 vB |
+|------:|--------------------:|---------------:|------------------------------------------|
+| 1     |             ~392    |           392  | parity                                   |
+| 10    |             ~518    |          ~52   | ~8&times; cheaper                        |
+| 100   |             ~1,778  |          ~17.8 | **~22&times; cheaper**                   |
+| 500   |             ~7,378  |          ~15   | ~27&times; cheaper                       |
+| 1,000 |            ~14,378  |          ~14   | ~28&times; cheaper                       |
 
-Asymptote: ~55 vB per non-anchor input. (Per-input figures from
-`mlsc_spend_path_sweep` — see [`SIZING.md`](SIZING.md).)
+Asymptote: **~14 vB per non-anchor input**. The anchor input pays
+the FALCON witness cost once (~392 vB after the SegWit 4&times;
+discount on 666 B sig + 897 B pubkey + scaffolding); every cache-
+read input pays only the PQ_BATCH micro-header + the rung's MLSC
+proof scaffolding (~14 vB). (Per-input figures from PQ_BATCH_SPEC.md
+&mdash; mirrors the audited `pq-batch.html` block doc.)
 
 ## When to use it
 
