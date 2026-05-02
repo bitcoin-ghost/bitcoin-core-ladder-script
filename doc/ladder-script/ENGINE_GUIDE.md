@@ -334,18 +334,25 @@ when hosted.
 | `/api/ladder/faucet`                    | POST   | Request test coins |
 | `/api/ladder/createrungtx`              | POST   | Create unsigned v4 RUNG_TX |
 | `/api/ladder/sign`                      | POST   | Sign transaction (raw signrungtx path) |
-| `/api/ladder/signladder`                | POST   | Sign via descriptor notation (one-call) |
+| `/api/ladder/serialiseconditions`       | POST   | Serialise a LadderWitness in CONDITIONS context |
 | `/api/ladder/broadcast`                 | POST   | Broadcast signed transaction |
 | `/api/ladder/tx/{txid}`                 | GET    | Look up transaction |
 | `/api/ladder/decode`                    | POST   | Decode ladder witness hex |
 | `/api/ladder/decode-tx`                 | POST   | Decode raw transaction hex |
 | `/api/ladder/validate`                  | POST   | Validate ladder witness |
 | `/api/ladder/ctv-hash`                  | POST   | Compute BIP-119 CTV hash |
-| `/api/ladder/pq/keypair`               | POST   | Generate PQ keypair |
+| `/api/ladder/pq/keypair`                | POST   | Generate PQ keypair |
 | `/api/ladder/preimage`                  | GET    | Generate random preimage + hashes |
 | `/api/ladder/mempool`                   | GET    | Mempool info |
 | `/api/ladder/blocks/recent`             | GET    | Recent blocks |
+| `/api/ladder/wallet/sendtoaddress`      | POST   | Wallet-funded send (helper for fund-then-spend flows) |
 | `/api/ladder/mine`                      | POST   | Mine a block (regtest) |
+
+The engine also POSTs `/api/ladder/analytics/visit` on page load for
+anonymous usage telemetry; the proxy stores nothing personally
+identifying. The `signladder` RPC is reachable via `ghost-cli signladder`
+but the engine doesn't currently invoke it over HTTP — Send-tab signing
+goes through `/api/ladder/sign` (raw `signrungtx` path).
 
 ### Wallet features
 
