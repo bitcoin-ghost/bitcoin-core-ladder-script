@@ -147,6 +147,38 @@ little-endian on the wire.
 | 0x0A02 | QABI_SPEND | no | no | 0 | HASH256(32)+HASH256(32)+NUMERIC+NUMERIC+PUBKEY_COMMIT(32) | Coordinator-governed batch spend with single FALCON-512 aggregated sig. See [QABIO.md](QABIO.md). |
 | 0x0A03 | PQ_BATCH | no | no | 0 | HASH256(32) | PQ key-sharing pool --commits SHA256(falcon_pubkey); anchor input reveals pubkey + PQ sig, siblings short-circuit via tx-local cache. See [PQ_BATCH_SPEC.md](PQ_BATCH_SPEC.md). |
 
+## Inverted Blocks — Normally Closed Contacts
+
+In PLC ladder logic, a normally closed contact `[/]` passes current when
+the underlying condition is FALSE. Ladder Script's `inverted` flag (wire
+format: see Notes below) creates the same primitive on Bitcoin: the
+evaluator runs the block's native logic, then flips `SATISFIED` &harr;
+`UNSATISFIED` (with `ERROR` left untouched). This unlocks spending
+conditions that have no direct equivalent in legacy Script.
+
+| Inverted Block | Semantics | New Primitive Enabled |
+|---|---|---|
+| `[/CSV: N]` | Passes BEFORE N blocks elapsed | Dead man's switch, breach-remedy window |
+| `[/CSV_TIME: T]` | Passes BEFORE relative time T elapses | Time-bounded response window |
+| `[/CLTV: H]` | Passes BEFORE block height H | Spend deadline — must act before this date |
+| `[/CLTV_TIME: T]` | Passes BEFORE absolute time T | Calendar-bound deadline |
+| `[/COMPARE: GT N]` | Passes when amount &le; N | Small-amount fast path; large amounts require extra auth |
+| `[/TIMER_CONTINUOUS: N]` | Passes when liveness proof broken | Inheritance — unlocks only if owner has gone silent |
+| `[/AMOUNT_LOCK: lo, hi]` | Passes when output amount OUTSIDE `[lo, hi]` | Value-exclusion zone (privacy) |
+| `[/CTV: H]` | Passes when output template differs | "Not this template" guard |
+
+**Key-consuming blocks are NOT invertible** &mdash; the deserialiser rejects
+the inverted bit on `SIG`, `MULTISIG`, `MUSIG_THRESHOLD`, `ADAPTOR_SIG`,
+`PTLC`, `HTLC`, `HASH_SIG`, `TIMELOCKED_SIG`, `CLTV_SIG`,
+`TIMELOCKED_MULTISIG`, `KEY_REF_SIG`, `VAULT_LOCK`, `ANCHOR_FEE`,
+`COSIGN`, and the `*_LEGACY` family. Inverting a key-consuming block
+would let a spender provide a garbage pubkey that fails verification,
+flip the result to `SATISFIED`, and embed up to 33 bytes of arbitrary
+data per block. To express "anyone EXCEPT key K can spend" or "n-of-m
+have NOT signed", compose with non-key-consuming gating blocks (e.g.
+`[CSV: N] AND [/COSIGN: hash(other_input_spk)]` for a key-exclusion
+window) or use a different rung as the alternative path.
+
 ## Notes
 
 - **Invertible** blocks may have their evaluation result flipped using the `inverted` flag

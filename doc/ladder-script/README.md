@@ -21,7 +21,7 @@ Merkelised conditions (MLSC).
 |----------|-------------|
 | [INTRODUCTION.md](INTRODUCTION.md) | What Ladder Script is, key properties, and design rationale |
 | [BLOCK_LIBRARY.md](BLOCK_LIBRARY.md) | Complete table of all 65 block types with fields and properties |
-| [BLOCK_LIBRARY_IMPL.md](BLOCK_LIBRARY_IMPL.md) | Detailed block reference with evaluation rules |
+| [/block-docs/](https://ladder-script.org/block-docs/) | Per-block reference pages (one HTML page per block, byte-perfect to code) |
 | [EXAMPLES.md](EXAMPLES.md) | 12 worked examples from simple spends to recursive covenants |
 | [GLOSSARY.md](GLOSSARY.md) | Alphabetical glossary of every term and block type |
 | [FAQ.md](FAQ.md) | 23 detailed Q&A covering all aspects of the system |
