@@ -119,7 +119,7 @@ little-endian on the wire.
 
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
-| 0x0801 | EPOCH_GATE | no | no | 0 | NUMERIC(period), NUMERIC(offset) | Periodic spending window |
+| 0x0801 | EPOCH_GATE | no | no | 0 | NUMERIC(epoch_size), NUMERIC(window_size) | Periodic spending window: open when `block_height % epoch_size < window_size` |
 | 0x0802 | WEIGHT_LIMIT | yes | no | 0 | NUMERIC(max_weight) | Maximum transaction weight |
 | 0x0803 | INPUT_COUNT | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Input count bounds |
 | 0x0804 | OUTPUT_COUNT | yes | no | 0 | NUMERIC(min), NUMERIC(max) | Output count bounds |
