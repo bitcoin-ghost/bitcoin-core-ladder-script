@@ -27,7 +27,10 @@ variants for per-input signatures, a key-path tweak distinct from BIP
 341, native post-quantum signature schemes (FALCON-512 and -1024,
 Dilithium3, SPHINCS+), and an N-party batched-PQ extension (`QABIO`).
 Activation deploys all 65 blocks together using BIP 9 version-bits
-signalling; pre-activation nodes treat v4 as anyone-can-spend.
+signalling; pre-activation nodes treat v4 as anyone-can-spend. A
+reference implementation, a live development signet, and browser-
+based exploratory tools for transaction construction and batch-
+ceremony walkthrough are available at <https://ladder-script.org>.
 
 ## Copyright
 
@@ -318,7 +321,10 @@ relays. A rung is a list of typed condition blocks plus a coil; every
 rung is anchored to a single output via its coil's `output_index`.
 Relays are shared blocks that one or more rungs may reference, so two
 or more rungs that share a common subexpression do not duplicate it on
-the wire.
+the wire. A rung references one or more relays through `relay_refs`, a
+list of relay indices added to the rung's AND-conjunction at evaluation
+time; the same `relay_refs` mechanism lets one relay depend on
+another.
 
 The diagram below shows the construction end-to-end for a worked
 three-rung-plus-one-relay example. Three tagged-hash domains (orange
@@ -1155,8 +1161,56 @@ them and compare against this example.
 5. `coil.output_index == 0` matches the spent input's vout (0).
 6. `MergeConditionsAndWitness` produces a SIG block with `[SCHEME,
    PUBKEY, SIGNATURE]`.
-7. `EvalSigBlock` computes `SignatureHashLadder` and Schnorr-verifies
-   the signature against the pubkey and the sighash.
+7. `EvalSigBlock` computes `SignatureHashLadder` over the eleven
+   inputs enumerated in §Sighash and Schnorr-verifies the witness
+   signature against the witness pubkey and the resulting digest.
+   The cached BIP-143-style sub-hashes for this transaction are:
+   ```
+   hash_prevouts        = SHA256(prevout.hash || prevout.n)
+                        = 28e8f152d98d417b5a48613704d596e0
+                          3796aeaf20bb775eee15d05b1d420d3b
+   hash_spent_amounts   = SHA256(spent_value_LE)            (49.9999 BTC)
+                        = 7df74b9d456baca766f9d3bfb27c11c0
+                          fb2d98480a08ca3c15847f6482a07c52
+   hash_sequences       = SHA256(nSequence_LE)             (0xfeffffff)
+                        = b4248c210a2905b94345e1a8414d0e12
+                          efcfb2f4f0f2397159a71283397a0ccd
+   hash_outputs         = SHA256(value_LE || CompactSize(spk_len) || spk)
+                        = 235f0b327e3c8ad4a0b8024d760c73c3
+                          870ff7be515ddf7c5fc80b731cfaccab
+   ```
+   The QABI section binding (both `qabi_block` and `aggregated_sig`
+   are zero-length on this non-QABI transaction):
+   ```
+   qabi_section_hash    = TaggedHash("LadderQABISection/v1",
+                                     CompactSize(0) || CompactSize(0))
+                        = 313dd3bd68bb68532cd21a21cbe30baa
+                          1ae5cfd654c20f16fc4d86b521c33ce0
+   ```
+   The 207-byte sighash pre-image, in field order:
+   ```
+   00                                                    epoch
+   00                                                    hash_type (DEFAULT)
+   04 00 00 00                                           tx.version (LE)
+   00 00 00 00                                           tx.lock_time (LE)
+   28e8f152...d420d3b                  (32 B)            hash_prevouts
+   7df74b9d...82a07c52                 (32 B)            hash_spent_amounts
+   b4248c21...397a0ccd                 (32 B)            hash_sequences
+   235f0b32...1cfaccab                 (32 B)            hash_outputs
+   00                                                    spend_type (no annex)
+   00 00 00 00                                           input_index (LE)
+   f9a95d1a...b7cdcce                  (32 B)            conditions hash
+                                                         (= spent output's
+                                                            conditions_root)
+   313dd3bd...521c33ce0                (32 B)            qabi_section_hash
+   ```
+   ```
+   sighash              = TaggedHash("LadderSighash/v1", pre-image)
+                        = 46e7a525aa23770f697fbc8fe49eae8b
+                          d1a6bd3172031294bef3448f2527bac7
+   ```
+   `secp256k1_schnorrsig_verify(pk_xonly = b049bddb...26eb, sig =
+   f877653f...64b283b, sighash) → True`. The signature accepts.
 8. The rung satisfies. The input is spent.
 
 ### Activation
@@ -1786,6 +1840,24 @@ The library directory `src/rung/` builds standalone via
 `cmake --build build --target bitcoin_rung` and links against
 `crypto`, `util`, `secp256k1`, and `liboqs`.
 
+A live development signet at <https://ladder-script.org> hosts a node
+built from this repository. Reviewers may exercise the consensus
+implementation end-to-end without a local build via three browser-
+based tools: the Ladder Engine (build, simulate, sign, and broadcast
+v4 transactions through a guided UI), the QABIO Playground (multi-
+party batch ceremony with priming, coordinator signing, and the
+escape-rung flow), and the block reference (visual documentation of
+every block type with field schemata and worked spend examples).
+Pre-built signed binaries for Linux x86_64, macOS arm64, and Windows
+x86_64 are published per release with PGP-signed `SHA256SUMS`; the
+release-signing key fingerprint is
+`777FE81F8CC077FD3D08055E852C2B3190F5B928`. End-to-end documentation,
+the annotated 961-line Core patch, the annotated library walkthrough,
+and the soft-fork activation guide are at
+<https://ladder-script.org/docs>. The website is a verification aid;
+this BIP is self-contained and implementable from the document
+alone.
+
 ## Security Considerations
 
 **Fail-closed deserialisation.** Every wire-format check in
@@ -1947,23 +2019,24 @@ choices do not affect consensus.
 
 ## Acknowledgements
 
+This work was developed by the author. No external review has been
+conducted at the time of this draft; no individual reviewer is named
+because none has reviewed it. Influences include the Bitcoin Core
+script-verification design tradition, the Taproot soft-fork design,
+and prior iterations of post-quantum BIP discussion on the Bitcoin
+mailing lists.
+
 Ladder Script's typed-block model draws on the programmable logic
 controller (PLC) tradition, particularly the IEC 61131-3 Ladder
 Diagram language, in which spending paths and rungs translate
 directly to PLC programs and their evaluation discipline.
 
-The post-quantum signature schemes used are the work of the original
-designers and the broader NIST post-quantum cryptography
-standardisation process:
-
-- FALCON, CRYSTALS-Dilithium, and SPHINCS+ are the work of their
-  respective NIST Post-Quantum Cryptography submission teams. This
-  BIP adopts the schemes as standardised; the authoritative
-  author lists are those carried in the submission packages
-  archived by NIST.
-
-The Open Quantum Safe project's `liboqs` library provides the
-reference implementations of the PQ schemes used at consensus level.
+FALCON, CRYSTALS-Dilithium, and SPHINCS+ are the work of their
+respective NIST Post-Quantum Cryptography submission teams. This
+BIP adopts the schemes as standardised; the authoritative author
+lists are carried in the submission packages archived by NIST. The
+Open Quantum Safe project's `liboqs` library provides the reference
+implementations of the PQ schemes used at consensus level.
 
 This BIP follows the structural model of BIP 141 (SegWit), the
 precision-and-numbered-rationale model of BIP 340 (Schnorr), the
@@ -1995,6 +2068,10 @@ BIP 341.
   <https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki>
 - `libladder` reference implementation:
   <https://github.com/defenwycke/bitcoin-core-ladder-script>
+- Live development signet, Ladder Engine, QABIO Playground, block
+  reference, and signed binaries: <https://ladder-script.org>
+- Documentation hub (annotated patch, annotated library, soft-fork
+  guide, sizing measurements): <https://ladder-script.org/docs>
 - In-repository spec files: `doc/ladder-script/INTRODUCTION.md`,
   `doc/ladder-script/TX_MLSC_SPEC.md`,
   `doc/ladder-script/MERKLE-UTXO-SPEC.md`,
