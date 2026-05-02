@@ -180,7 +180,7 @@ enum class RungDataType : uint8_t {
     HASH160       = 0x04, //!< RIPEMD160(SHA256()) hash: exactly 20 bytes
     PREIMAGE      = 0x05, //!< Hash preimage: exactly 32 bytes (SHA256 payment hash preimage)
     SIGNATURE     = 0x06, //!< Signature: 1-50000 bytes (Schnorr 64-65, ECDSA 8-72, PQ up to 49216)
-    SPEND_INDEX   = 0x07, //!< Spend index reference: 4 bytes
+    // 0x07 reserved (formerly SPEND_INDEX; never used in any block layout)
     NUMERIC       = 0x08, //!< Numeric value (threshold, locktime, etc.): 1-8 bytes
     SCHEME        = 0x09, //!< Signature scheme selector: 1 byte
     SCRIPT_BODY   = 0x0A, //!< Serialized inner conditions: 1-80 bytes (witness-only; node computes hash for conditions)
@@ -291,8 +291,8 @@ inline bool IsKnownFieldType(uint8_t b) { return IsKnownDataType(b); }
 /** Consensus: data types that carry high-bandwidth unvalidated data.
  *  Blocked in blocks without implicit layouts (any context) to prevent
  *  data embedding via extra unvalidated fields.
- *  NUMERIC (4 bytes max) and SPEND_INDEX (4 bytes) are too small to be
- *  meaningful data channels and are legitimately needed. */
+ *  NUMERIC (4 bytes max) is too small to be a meaningful data channel
+ *  and is legitimately needed. */
 inline bool IsDataEmbeddingType(RungDataType type)
 {
     switch (type) {
@@ -317,7 +317,6 @@ inline size_t FieldMinSize(RungDataType type)
     case RungDataType::PREIMAGE:      return 0;  // v0.7: 0 allowed (HTLC refund path uses empty PREIMAGE as the "no preimage revealed" sentinel; empty PREIMAGE carries no data so it's not an embedding channel)
     case RungDataType::SCRIPT_BODY:   return 1;
     case RungDataType::SIGNATURE:     return 1;
-    case RungDataType::SPEND_INDEX:   return 4;
     case RungDataType::NUMERIC:       return 1;
     case RungDataType::SCHEME:        return 1;
     case RungDataType::DATA:          return 1;
@@ -337,7 +336,6 @@ inline size_t FieldMaxSize(RungDataType type)
     case RungDataType::PREIMAGE:      return 32;
     case RungDataType::SCRIPT_BODY:   return 80;
     case RungDataType::SIGNATURE:     return 50000;
-    case RungDataType::SPEND_INDEX:   return 4;
     // NUMERIC: in-memory data buffer is canonicalised to 4-byte LE at
     // deserialise (caps at 0xFFFFFFFF); the wire format is a CompactSize
     // varint up to 9 bytes for the value cell itself. FieldMaxSize bounds
@@ -439,7 +437,6 @@ inline std::string DataTypeName(RungDataType type)
     case RungDataType::PREIMAGE:      return "PREIMAGE";
     case RungDataType::SCRIPT_BODY:   return "SCRIPT_BODY";
     case RungDataType::SIGNATURE:     return "SIGNATURE";
-    case RungDataType::SPEND_INDEX:   return "SPEND_INDEX";
     case RungDataType::NUMERIC:       return "NUMERIC";
     case RungDataType::SCHEME:        return "SCHEME";
     case RungDataType::DATA:          return "DATA";

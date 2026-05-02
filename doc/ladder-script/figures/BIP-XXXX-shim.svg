@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#1a1a1a">
+  <title>Ladder Script: shim / library architecture</title>
+  <desc>Existing Bitcoin Core code interacts with the Ladder Script
+        library exclusively through src/rung_shims.h. The library
+        (src/rung/) depends only on liboqs and secp256k1 below it; it
+        never includes Core headers. Patch sizes annotated.</desc>
+
+  <style>
+    .core    { fill: #ffffff; stroke: #888; stroke-width: 1.2; }
+    .shim    { fill: #fff5e6; stroke: #d35400; stroke-width: 1.6; }
+    .lib     { fill: #ffffff; stroke: #2980b9; stroke-width: 1.4; }
+    .libfile { fill: #ffffff; stroke: #999; stroke-width: 0.8; }
+    .ext     { fill: #ffffff; stroke: #666; stroke-width: 1; stroke-dasharray: 4 3; }
+    .arrow   { fill: none; stroke: #444; stroke-width: 1.2; }
+    .twoway  { fill: none; stroke: #444; stroke-width: 1.2; }
+    .label   { font-size: 11px; fill: #333; }
+    .stat    { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; fill: #d35400; font-weight: 700; }
+    .libstat { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; fill: #2980b9; font-weight: 700; }
+    .corestat{ font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; fill: #555; font-weight: 600; }
+    .title   { font-size: 13px; font-weight: 700; }
+    .mono    { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  </style>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="strokeWidth"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+    <marker id="arr-rev" viewBox="0 0 10 10" refX="1" refY="5" markerUnits="strokeWidth"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- Bitcoin Core (left) -->
+  <g>
+    <rect class="core" x="20" y="40" width="220" height="280" rx="4"/>
+    <text x="130" y="62" text-anchor="middle" class="title">Bitcoin Core (existing)</text>
+    <text x="130" y="80" text-anchor="middle" class="corestat">33 modified files · +961 lines</text>
+
+    <text x="34" y="108" class="mono">src/validation.cpp</text>
+    <text x="34" y="126" class="mono">src/primitives/transaction.h</text>
+    <text x="34" y="144" class="mono">src/compressor.cpp</text>
+    <text x="34" y="162" class="mono">src/coins.cpp</text>
+    <text x="34" y="180" class="mono">src/script/{interpreter,</text>
+    <text x="34" y="194" class="mono">             script, script_error}</text>
+    <text x="34" y="212" class="mono">src/policy/policy.cpp</text>
+    <text x="34" y="230" class="mono">src/pubkey.{h,cpp}</text>
+    <text x="34" y="248" class="mono">src/key.{h,cpp}</text>
+    <text x="34" y="266" class="mono">src/core_write.cpp</text>
+    <text x="34" y="284" class="mono">src/rpc/{client,mempool,</text>
+    <text x="34" y="298" class="mono">          mining,util,register}</text>
+    <text x="34" y="314" class="mono">… plus build wiring</text>
+  </g>
+
+  <!-- Shim (middle) -->
+  <g>
+    <rect class="shim" x="280" y="120" width="180" height="120" rx="4"/>
+    <text x="370" y="144" text-anchor="middle" class="title">Boundary header</text>
+    <text x="370" y="166" text-anchor="middle" class="mono" font-weight="600">src/rung_shims.h</text>
+    <text x="370" y="186" text-anchor="middle" class="stat">1 file · 363 lines</text>
+    <text x="370" y="210" text-anchor="middle" class="label">Adapts Core types ↔</text>
+    <text x="370" y="226" text-anchor="middle" class="label">library types.</text>
+  </g>
+
+  <!-- Library (right) -->
+  <g>
+    <rect class="lib" x="500" y="40" width="260" height="280" rx="4"/>
+    <text x="630" y="62" text-anchor="middle" class="title">Ladder library (new)</text>
+    <text x="630" y="80" text-anchor="middle" class="libstat">39 new files · 21,251 lines</text>
+
+    <rect class="libfile" x="514" y="98" width="232" height="34" rx="3"/>
+    <text x="630" y="118" text-anchor="middle" class="mono" font-weight="600">src/rung/api.h</text>
+
+    <text x="514" y="152" class="label" font-style="italic">internals (Core never includes):</text>
+    <text x="514" y="172" class="mono">src/rung/conditions.{h,cpp}</text>
+    <text x="514" y="188" class="mono">src/rung/serialize.{h,cpp}</text>
+    <text x="514" y="204" class="mono">src/rung/evaluator.{h,cpp}</text>
+    <text x="514" y="220" class="mono">src/rung/sighash.{h,cpp}</text>
+    <text x="514" y="236" class="mono">src/rung/policy.{h,cpp}</text>
+    <text x="514" y="252" class="mono">src/rung/qabi.{h,cpp}</text>
+    <text x="514" y="268" class="mono">src/rung/descriptor.{h,cpp}</text>
+    <text x="514" y="284" class="mono">src/rung/rpc.cpp</text>
+    <text x="514" y="300" class="mono">src/rung/blocks/&lt;family&gt;.cpp ×11</text>
+    <text x="514" y="316" class="mono">src/rung/{adaptor,pq_verify,…}</text>
+  </g>
+
+  <!-- Arrows: Core ↔ shim, shim ↔ library/api.h -->
+  <line class="twoway" x1="240" y1="180" x2="280" y2="180"
+        marker-start="url(#arr-rev)" marker-end="url(#arr)"/>
+  <text x="260" y="172" text-anchor="middle" class="label">includes</text>
+
+  <line class="twoway" x1="460" y1="180" x2="500" y2="115"
+        marker-start="url(#arr-rev)" marker-end="url(#arr)"/>
+  <text x="488" y="148" class="label">api.h</text>
+
+  <!-- External deps below -->
+  <g>
+    <rect class="ext" x="500" y="350" width="120" height="50" rx="4"/>
+    <text x="560" y="372" text-anchor="middle" font-weight="600">liboqs</text>
+    <text x="560" y="388" text-anchor="middle" class="label">FALCON / Dilithium / SPHINCS+</text>
+
+    <rect class="ext" x="640" y="350" width="120" height="50" rx="4"/>
+    <text x="700" y="372" text-anchor="middle" font-weight="600">libsecp256k1</text>
+    <text x="700" y="388" text-anchor="middle" class="label">Schnorr / ECDSA</text>
+  </g>
+
+  <line class="arrow" x1="560" y1="320" x2="560" y2="350" marker-end="url(#arr)"/>
+  <line class="arrow" x1="700" y1="320" x2="700" y2="350" marker-end="url(#arr)"/>
+
+  <!-- Legend / takeaway box -->
+  <g>
+    <text x="20" y="370" class="label" font-weight="600">Reviewer audit surface for "this BIP doesn't change v1/v2/v3 validation":</text>
+    <text x="20" y="388" class="label">  the 961-line patch (left) plus <tspan class="mono">src/rung/api.h</tspan> (right).</text>
+    <text x="20" y="406" class="label">  Everything else under <tspan class="mono">src/rung/</tspan> is implementation; conformance is enforced by the test vectors.</text>
+  </g>
+</svg>

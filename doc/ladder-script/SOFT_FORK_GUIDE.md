@@ -22,8 +22,8 @@ timestamps.
 ### Phase 2: External Review
 
 Bitcoin Core developers and the broader community review:
-- The 805-line integration patch to existing Bitcoin Core code (29 files)
-- The 19,345-line self-contained `src/rung/` library (39 files)
+- The 961-line integration patch to existing Bitcoin Core code (33 modified files; insertions only)
+- The 21,251-line self-contained library (38 files in `src/rung/` plus the `src/rung_shims.h` boundary header)
 - The 27 TLA+ formal specifications under `spec/`
 - The anti-spam hardening and evaluation semantics
 

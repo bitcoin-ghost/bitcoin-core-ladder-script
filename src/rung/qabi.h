@@ -44,10 +44,11 @@
 
 namespace rung {
 
-/** Tagged hash writer for QABO sighash, pre-fed with TaggedHash("QABOSighash").
+/** Tagged hash writer for QABO sighash, pre-fed with TaggedHash("LadderQABOSighash/v1").
  *  Same pattern as HASHER_LADDERSIGHASH / HASHER_LADDERKEYPATH in rung/sighash.h —
  *  every sighash in the project uses a domain-separated tagged hash so that a
- *  digest from one context can never collide with a digest from another. */
+ *  digest from one context can never collide with a digest from another. The
+ *  /v1 suffix matches the convention used by every other Ladder Script tag. */
 extern const HashWriter HASHER_QABOSIGHASH;
 
 //! Current QABIBlock wire format version.

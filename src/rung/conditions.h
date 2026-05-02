@@ -49,7 +49,7 @@ struct TemplateReference {
 /** Rung conditions = the "locking" side of a v4 output.
  *  Stored in scriptPubKey with the same wire format as a LadderWitness
  *  but containing only condition data types (HASH256, HASH160, NUMERIC,
- *  SCHEME, SPEND_INDEX) — never PUBKEY, PUBKEY_COMMIT, SIGNATURE,
+ *  SCHEME) — never PUBKEY, PUBKEY_COMMIT, SIGNATURE,
  *  or PREIMAGE. Public keys are folded into the Merkle leaf hash
  *  (merkle_pub_key) to prevent arbitrary data embedding.
  *

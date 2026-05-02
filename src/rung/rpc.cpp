@@ -281,7 +281,6 @@ static bool ParseDataType(const std::string& name, RungDataType& out)
     if (name == "HASH160")       { out = RungDataType::HASH160; return true; }
     if (name == "PREIMAGE")      { out = RungDataType::PREIMAGE; return true; }
     if (name == "SIGNATURE")     { out = RungDataType::SIGNATURE; return true; }
-    if (name == "SPEND_INDEX")   { out = RungDataType::SPEND_INDEX; return true; }
     if (name == "NUMERIC")       { out = RungDataType::NUMERIC; return true; }
     if (name == "SCHEME")        { out = RungDataType::SCHEME; return true; }
     if (name == "SCRIPT_BODY")   { out = RungDataType::SCRIPT_BODY; return true; }

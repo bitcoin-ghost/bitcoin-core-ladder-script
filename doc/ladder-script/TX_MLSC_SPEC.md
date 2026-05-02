@@ -253,7 +253,7 @@ Depth = ceil(log2(total_rungs)).
    (same TaggedHash as creation proof leaf computation).
 5. Walk proof_hashes to compute root. Verify == conditions_root.
 6. Merge conditions with witness (same as current).
-7. Evaluate rung blocks (same as current — all 61 block types unchanged).
+7. Evaluate rung blocks (same as current — all 65 block types unchanged).
 8. If satisfied: spend authorized.
 
 ### Proof path reconstruction
@@ -449,7 +449,7 @@ controls the funds — remains private until spend time.
 
 ### Block types and evaluator
 
-**No change.** All 61 block types, evaluation semantics, rung AND/OR logic,
+**No change.** All 65 block types, evaluation semantics, rung AND/OR logic,
 coil processing, inversion — all identical. The evaluator receives merged
 conditions + witness and evaluates exactly as today.
 
