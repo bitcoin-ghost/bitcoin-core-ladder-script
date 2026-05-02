@@ -192,9 +192,14 @@ surface.
 bool IsConditionDataType(RungDataType type)  // conditions.cpp:18-37
 ```
 
-Allowed in conditions: `HASH256`, `HASH160`, `NUMERIC`, `SCHEME`, `SPEND_INDEX`, `DATA`.
+Allowed in conditions: `HASH256`, `HASH160`, `NUMERIC`, `SCHEME`, `DATA`, `MERKLE_PROOF`.
 
-Rejected in conditions: `PUBKEY_COMMIT`, `PUBKEY`, `SIGNATURE`, `PREIMAGE`, `SCRIPT_BODY`.
+Restricted: `PUBKEY_COMMIT` is allowed only as
+`QABI_SPEND.owner_pubkey_hash` (the participant identity tag); the
+deserialiser rejects it in any other position. Slot `0x07` (formerly
+`SPEND_INDEX`) is reserved and never used in any block layout.
+
+Rejected in conditions: `PUBKEY`, `SIGNATURE`, `PREIMAGE`, `SCRIPT_BODY`.
 
 ### `PubkeyCountForBlock(type, block)`
 
@@ -202,12 +207,14 @@ Determines how many pubkeys each block type contributes to the Merkle leaf:
 
 | Count | Block Types |
 |-------|-------------|
-| 0 | `P2PKH_LEGACY`, `P2WPKH_LEGACY`, all non-key blocks (timelocks, hashes, covenants, anchors, etc.) |
-| 1 | `SIG`, `TIMELOCKED_SIG`, `HASH_SIG`, `CLTV_SIG`, `MUSIG_THRESHOLD`, `P2PK_LEGACY`, `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`, `ANCHOR_ORACLE`, `LATCH_SET`, `LATCH_RESET`, `COUNTER_DOWN`, `COUNTER_UP` |
-| 2 | `HTLC`, `ANCHOR_CHANNEL`, `VAULT_LOCK`, `ADAPTOR_SIG`, `PTLC` |
-| N (dynamic) | `MULTISIG`, `TIMELOCKED_MULTISIG` — counts actual `PUBKEY` fields in the witness block |
+| 0 | `P2PKH_LEGACY`, `P2WPKH_LEGACY`, `KEY_REF_SIG` (pubkey resolved from referenced relay block, not present in this block's witness), `ANCHOR_CHANNEL` (v0.7+ pure marker), `COSIGN` (cross-input check, no per-input pubkey), `MULTISIG`, `TIMELOCKED_MULTISIG` (inner-Merkle pubkey commit; pubkeys revealed via `MERKLE_PROOF` triplets, not folded into the outer leaf), and all non-key blocks (timelocks, hashes, covenants, recursion, governance, most anchors, all PLC except the four below). |
+| 1 | `SIG`, `TIMELOCKED_SIG`, `HASH_SIG`, `CLTV_SIG`, `MUSIG_THRESHOLD`, `ADAPTOR_SIG` (single signing key &mdash; v0.7 dropped the v0.6 second pubkey), `PTLC` (single signing key, same v0.7 reduction), `P2PK_LEGACY`, `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`, `ANCHOR_ORACLE`, `LATCH_SET`, `LATCH_RESET`, `COUNTER_DOWN`, `COUNTER_UP` |
+| 2 | `HTLC` (receiver + sender), `VAULT_LOCK` (recovery + hot), `ANCHOR_FEE` (2-of-2 channel close) |
 
-**Source**: `types.h:595-643`.
+**Source**: `types.h:595-643` (`PubkeyCountForBlock`). Both v0.7
+ADAPTOR_SIG/PTLC reductions and the v0.7 ANCHOR_CHANNEL pubkey
+removal landed before the v1.0 freeze; counts above match the live
+`BlockTypeInfo` table.
 
 ### `ExtractBlockPubkeys(blocks)`
 
@@ -502,9 +509,11 @@ MergeConditionsAndWitness(conditions, witness_ladder, eval_ladder, merge_error);
 ```
 
 For each rung/block pair, condition fields (HASH256, HASH160, NUMERIC,
-SCHEME, SPEND\_INDEX) come from the proof, and witness fields (PUBKEY,
-SIGNATURE, PREIMAGE) come from the witness. Merged result goes to the
-evaluator. The `inverted` flag is taken from conditions, not witness.
+SCHEME, DATA, MERKLE_PROOF, plus PUBKEY_COMMIT for
+`QABI_SPEND.owner_pubkey_hash`) come from the proof, and witness
+fields (PUBKEY, SIGNATURE, PREIMAGE, SCRIPT_BODY) come from the
+witness. Merged result goes to the evaluator. The `inverted` flag is
+taken from conditions, not witness.
 
 ### Step 12: Evaluate Ladder
 
@@ -603,13 +612,17 @@ require (beyond the `total_rungs` and `total_relays` counts in the proof).
 By folding pubkeys into the Merkle leaf hash rather than storing them in
 condition fields:
 
-- **PUBKEY\_COMMIT is eliminated** from conditions entirely. There is no
-  field type in conditions that can carry arbitrary 33-byte blobs.
-- **Data embedding via pubkey fields is impossible** because pubkeys are
-  never serialized into condition blocks — they exist only in the witness
-  at spend time and are bound to the leaf hash.
+- **PUBKEY\_COMMIT is structurally restricted** to the single
+  consensus role of `QABI_SPEND.owner_pubkey_hash` (the participant
+  identity tag, bound to the Merkle leaf and consumed by the QABO
+  sig). The deserialiser rejects PUBKEY\_COMMIT in any other position,
+  so 33-byte attacker-chosen blobs cannot ride in conditions.
+- **Data embedding via pubkey fields is impossible** for every other
+  block: pubkeys are never serialized into condition blocks &mdash;
+  they exist only in the witness at spend time and are bound to the
+  leaf hash via `merkle_pub_key`.
 - The allowed condition data types (`HASH256`, `HASH160`, `NUMERIC`,
-  `SCHEME`, `SPEND_INDEX`, `DATA`) are all validated for semantic
+  `SCHEME`, `DATA`, `MERKLE_PROOF`) are all validated for semantic
   correctness and bounded in size.
 
 ### Sorted Interior Nodes
