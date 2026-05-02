@@ -1311,31 +1311,112 @@ paying the cost of permanent embedding, and that cost is too high.
 
 ### 3. Why activate sixty-five block types in a single soft fork?
 
-The 65 blocks are not 65 independent features. They share the wire
-format, the leaf hashing, the witness merging, and the evaluator
-dispatch — every block's correctness depends on the others' field-
-type and inversion semantics being fixed. A staged activation that
-introduced blocks one at a time would carry one of two costs:
+This is the most contested architectural question in the proposal,
+and it deserves to be presented alongside the alternative for which
+it might reasonably be exchanged. This rationale lays out both paths
+with their trade-offs and closes with the author's recommendation and
+the gate that controls it.
 
-- Maintaining N parallel verification codepaths so that each
-  activation point has a self-consistent rule set, OR
-- Introducing inter-block invariants that change with each
-  activation, requiring every consumer (wallet, indexer, explorer)
-  to track which subset is currently active.
+#### Option A — Phased activation
 
-Both options require an inductive correctness proof at every
-activation step: at activation `n`, the implementer must show that
-the union of blocks `{1..n}` is sound under the wire and evaluator
-rules current at activation `n`. The all-in-one path discharges that
-proof once for the union `{1..65}` and is done. The phased path
-discharges it 65 times, each over a strictly smaller set, with the
-review surface compounding at each step.
+A 10-block first-activation BIP covering the structural core: `SIG`,
+`MULTISIG`, `CSV`, `CLTV`, `CTV`, `HTLC`, `PTLC`, `KEY_REF_SIG`, the
+legacy wrapper family (`P2PK_LEGACY`, `P2PKH_LEGACY`, `P2SH_LEGACY`,
+`P2WPKH_LEGACY`, `P2WSH_LEGACY`, `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`),
+and the full TX_MLSC machinery (wire format, conditions root, witness
+shapes, sighash, key-path tweak). The remaining four families —
+recursion, anchor, PLC, governance — and the QABIO extension would
+each ship as follow-on BIPs with their own activation events.
 
-The block registry is modular at the implementation level (each block
-in its own translation unit, registered at process start). A future
-soft fork CAN add new blocks at unused type codes; the registry
-mechanism does not preclude it. What this BIP rejects is a phased
-rollout of the initial 65.
+**Pros.**
+
+- Smaller per-activation review surface, in line with the SegWit /
+  Taproot / CTV scoping tradition.
+- Each block family becomes its own dedicated mailing-list discussion,
+  which is the unit of attention the Bitcoin development culture is
+  structured around.
+- A flaw discovered in any of the deferred families does not delay
+  activation of the core.
+- Lower one-shot reviewer burden; easier to recruit independent eyes
+  per family than across the full 65.
+
+**Cons.**
+
+- Subset semantics must be defined and tested for every intermediate
+  state. A v4 transaction using only the 10-core blocks must remain
+  valid under the rules current at every subsequent activation,
+  producing N parallel test matrices instead of one.
+- Wallet, indexer, and explorer implementations chase a moving target
+  over a 5–10 year horizon to full Ladder Script. Each follow-on
+  activation forces another implementation pass across the ecosystem.
+- Each follow-on BIP re-litigates "is Ladder Script the right
+  framework". The strongest novelty pitches — PLC, recursion,
+  governance, QABIO — are precisely the families most likely to be
+  deferred indefinitely by a community that finds the core sufficient.
+- The Q18 library architecture is overbuilt for a 10-block first
+  phase. Reviewers may reasonably ask why so much code ships for so
+  few blocks, weakening Q18's self-contained-library defence.
+- Total elapsed time to full Ladder Script is multi-year and
+  contingent on each follow-on BIP's independent reception.
+
+#### Option B — All-in activation (this proposal)
+
+All 65 blocks plus the QABIO extension activate together at a single
+deployment-bit event.
+
+**Pros.**
+
+- The 65 blocks are not 65 independent features. They share the wire
+  format, the leaf hashing, the witness merging, and the evaluator
+  dispatch — every block's correctness depends on the others'
+  field-type and inversion semantics being fixed. Activating once
+  discharges the union's correctness proof once. A staged activation
+  would either maintain N parallel verification codepaths (one per
+  active subset) or introduce inter-block invariants that change at
+  each activation, requiring every consumer to track which subset is
+  currently active.
+- Wallet, indexer, and explorer implementations write the v4 path
+  once and are done.
+- Coherent narrative: Ladder Script ships as a typed-blocks language,
+  not as a collection of features. Reviewers evaluate it against that
+  thesis end-to-end rather than against a partial sketch.
+- The block registry is modular at the implementation level; future
+  soft forks can still add blocks at unused type codes (the 65 used
+  codes leave 65,471 free). What Option B rejects is *staging the
+  initial 65*, not future additions.
+
+**Cons.**
+
+- Larger one-shot review surface than any prior Bitcoin soft fork:
+  ~13,000 lines of new consensus code plus 65 distinct block
+  evaluators.
+- "Big bang" activation has historically met cultural resistance in
+  Bitcoin development, regardless of architectural merit.
+- A flaw discovered post-activation in any of 65 blocks is its own
+  soft-fork-to-fix scenario. Phasing defers that risk per-family.
+- Reviewer fatigue: many reviewers will not engage with all 65 in
+  equal depth, leaving some blocks under-scrutinised at activation.
+
+#### Recommendation
+
+The author's judgement is **all-in activation, conditional on the
+testing programme detailed in §Open Items "Activation gate"
+completing to its named bars before any mainnet-activation proposal
+is filed**. The reasoning: the architectural arguments under Option
+B are load-bearing — the 65 blocks genuinely do share their
+consensus framework, and a phased path pays the inductive-
+correctness-proof cost N times over for an aesthetic preference
+rather than a structural gain. The cultural resistance to "big bang"
+activation is a real concern, but it is properly answered by the
+depth and completeness of the testing programme, not by reducing the
+scope of what is being tested.
+
+If any component of the activation gate fails to complete to the
+named bar, **Option A is the agreed fallback** and a separate phased
+BIP will be prepared from this proposal's text. This contingency is
+announced upfront so that no party — author, reviewer, or
+activation-time community — is surprised by the path the proposal
+takes.
 
 ### 4. Why MLSC (transaction-level Merkle commitment) rather than per-output script commitments?
 
@@ -2045,14 +2126,62 @@ choices do not affect consensus.
 The proposal is technically complete but several items remain open
 at the time of this draft. They are listed here so that a reviewer
 can engage with the substance without having to surface them as
-gotchas.
+gotchas. The first item — the activation gate — ties the rest into a
+single conditional commitment: the all-in activation recommended in
+Rationale Q3 is contingent on the gate's components completing to
+their named bars.
+
+- **Activation gate.** Per Rationale Q3, the all-in activation
+  recommendation is conditional on the following testing programme
+  completing before any mainnet-activation proposal is filed. If any
+  component fails to complete to the named bar, the phased
+  activation option (Q3 Option A) is the agreed fallback and a
+  separate phased BIP will be prepared from this proposal's text.
+
+  1. **External security audit.** Two independent reviewers,
+     comprising at least one post-quantum cryptography reviewer and
+     at least one Bitcoin consensus reviewer, sign off on the
+     consensus surface (the 961-line integration patch, the library
+     under `src/rung/`, the wire format, and the QABIO and PQ_BATCH
+     evaluators).
+  2. **TLA+ pass at production constants.** State-space exploration
+     of the 27 specifications under `spec/` completes at the
+     production constants `MAX_RUNGS = 16`,
+     `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`. Counter-
+     examples (if any) close to zero or are explained in a published
+     gap analysis.
+  3. **Test vectors.** At minimum one positive and one negative
+     vector per witness-rule family (`Fixed N`, `Empty`, `Reveal P`,
+     `Triplets K`, `Accumulator`, `Bridging`, `PQ-anchor`,
+     `Unspendable`) — 16+ vectors total. Negative vectors close
+     cross-implementation malleability surfaces by demonstrating that
+     conforming implementations reject identically.
+  4. **Live signet exposure.** Three or more independently-operated
+     nodes on the `ladder-script.org` signet running for at least
+     six months without a consensus disagreement.
+  5. **Mailing-list review.** Every substantive objection raised on
+     the Bitcoin development mailing list is addressed in this BIP —
+     incorporated, refuted in the relevant Rationale Q, or deferred
+     with an explicit reason. The BIP is iterated until no
+     substantive objection remains unaddressed.
+  6. **Named reviewer sign-offs.** Following the BIP 340 / 341
+     model, named reviewers are listed in §Acknowledgements.
+     Sign-off implies the reviewer has read the consensus surface
+     and judges it sound; it does not imply blanket endorsement of
+     activation.
+
+  Each numbered component is also tracked as its own Open Item below
+  with its current state.
 
 - **External review.** No external technical review has been
   conducted on this BIP. Submission to the Bitcoin development
-  mailing list is the first invitation for review.
+  mailing list is the first invitation for review. (Activation gate
+  components 5 and 6.)
 - **External security audit.** No formal external security audit
   has been performed. An independent post-quantum cryptography
-  audit is scheduled before any mainnet-activation proposal.
+  audit and an independent Bitcoin consensus review are scheduled
+  before any mainnet-activation proposal. (Activation gate component
+  1.)
 - **TLA+ model checking at consensus-level constants.** 27 TLA+
   specifications under `spec/` cover the consensus surface
   (evaluation semantics, anti-spam, wire format, Merkle proof
@@ -2063,19 +2192,25 @@ gotchas.
   progress on dedicated infrastructure; smaller-constant runs
   verify the same properties on bounded state spaces and report
   zero counter-examples. Full results will be published alongside
-  the activation proposal.
+  the activation proposal. (Activation gate component 2.)
 - **Test vectors expansion.** The starter set in
   `src/test/data/rung_tx_vectors.json` covers `SIG`,
-  `P2WPKH_LEGACY`, and `HTLC`. A future revision will extend the
-  fixture with vectors for QABIO priming and batch-spend, PQ_BATCH
-  spends, and one negative vector per witness-rule family.
+  `P2WPKH_LEGACY`, and `HTLC` — three of eight witness-rule
+  families. The activation gate requires at least one positive and
+  one negative vector per family (16+ vectors total). A future
+  revision will extend the fixture toward that bar with vectors for
+  QABIO priming and batch-spend, PQ_BATCH spends, and the negative
+  cases per family. (Activation gate component 3.)
 - **Activation parameters.** The deployment bit, start time, and
   timeout are out of scope for this BIP. They will be specified in
   a separate activation document at the time of mainnet proposal.
 - **Development signet decentralisation.** The signet at
-  `ladder-script.org` is currently single-operator. A second
+  `ladder-script.org` is currently single-operator. The activation
+  gate requires three or more independently-operated nodes for at
+  least six months without a consensus disagreement; a second
   independently-operated node and a public faucet are planned
-  before broader testnet usage is solicited.
+  immediately, with the third node sourced from the mailing-list
+  review cycle. (Activation gate component 4.)
 - **Pruning and `assumeutxo` stress testing.** The Security
   Considerations section specifies the stateless-verifier
   obligation for MLSC chainstate entries. End-to-end stress tests
