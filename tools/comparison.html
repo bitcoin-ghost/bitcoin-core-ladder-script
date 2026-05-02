@@ -512,10 +512,11 @@ Exceeds standard relay (100,000 vB cap soon)</div>
 Subsequent inputs reference the anchor
   with H(falcon_pubkey) only.
 
-Anchor:     ~700 vB
-Per input:  ~55 vB amortised
-100 inputs &rarr; ~6,000 vB total
-&approx; 12&times; cheaper than per-input sigs</div>
+Anchor:        ~392 vB (FALCON witness, SegWit-discounted)
+Non-anchor:    ~14 vB per input
+100 inputs &rarr; ~1,778 vB total
+&asymp; 17.8 vB per input (mean)
+&asymp; 22&times; cheaper than per-input FALCON sigs</div>
         <div class="comp-note"><span class="tag-native">Native</span> One signature, N spends. Anchor ordering enforced at consensus.</div>
       </div>
     </div>
@@ -549,7 +550,7 @@ At settlement: one tx with N QABI_SPEND
   inputs, all bound to the same batch_id.
 
 Atomicity: enforced at consensus
-~143 vB per cosigner at N=100
+~139 vB per cosigner at N=100
 Drop-outs cannot block the rest of the batch</div>
         <div class="comp-note"><span class="tag-native">Native</span> Batch atomicity is a consensus rule, not a coordination protocol.</div>
       </div>
@@ -855,7 +856,7 @@ DLC settlement, atomic swaps,
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Governance treasury</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Multisig only</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">multisig + output_check + weight_limit</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Batch payment (N=100)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">3,179 vB</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">911 vB (3.5&times;)</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Chainstate per coin</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">24&ndash;36 B</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">3 B (8&ndash;12&times;)</span></td></tr>
-        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PQ batch (N inputs)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">pq_batch (~55 vB/in)</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PQ batch (N inputs)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">pq_batch (~17.8 vB/in)</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Multi-party batch settlement</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">CoinJoin / FROST</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">qabi_prime + qabi_spend</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">LN anchor anti-pinning</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Policy only</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">anchor_fee</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PTLC (route privacy)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">HTLC (linkable)</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">ptlc</span></td></tr>
