@@ -109,9 +109,9 @@
       <tr>
         <td class="field-name">preimage</td>
         <td class="field-type">PREIMAGE</td>
-        <td class="field-size">32 B</td>
+        <td class="field-size">var</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Data whose SHA-256 must equal committed_hash</td>
+        <td class="field-desc">Data whose SHA-256 must equal <code>committed_hash</code>. Length is unconstrained &mdash; the full byte run is consumed.</td>
       </tr>
     </tbody>
   </table>
@@ -121,28 +121,33 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
-      <span class="wire-segment wire-type">0x3D</span>
+      <span class="wire-segment wire-type">0x0204</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256 &middot; 32B</span>
-      <span class="wire-bytes">= 33 bytes (micro-header)</span>
+      <span class="wire-bytes">= 38 bytes</span>
     </div>
   </div>
 
   <p class="section-text" style="margin-bottom:16px">Witness side (in input witness):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
-      <span class="wire-segment wire-type">0x3D</span>
-      <span class="wire-segment wire-field-pre" style="min-width:140px">PREIMAGE &middot; 32B</span>
-      <span class="wire-bytes">= 33 bytes (micro-header)</span>
+      <span class="wire-segment wire-type">0x0204</span>
+      <span class="wire-segment wire-inv">0</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pre" style="min-width:140px">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">&asymp; 4 + 1 + len bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness)</span>
-      <span class="wire-total-bytes">~66 bytes</span>
+      <span class="wire-total-bytes">&asymp; 43 + len bytes</span>
     </div>
   </div>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">The "inverted" byte is rejected at deserialization for HASH_GUARDED (non-invertible). PubkeyCountForBlock&nbsp;=&nbsp;0.</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -151,19 +156,19 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Require 1 <span class="eval-keyword">HASH256</span> field + 1 <span class="eval-keyword">PREIMAGE</span>. Any missing &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Locate the <span class="eval-keyword">HASH256</span> and <span class="eval-keyword">PREIMAGE</span> fields in the merged conditions+witness block. If either is missing &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Compute SHA256(<span class="eval-keyword">PREIMAGE</span>)</span>
+      <span class="eval-step-text"><span class="eval-keyword">committed_hash</span> must be exactly 32&nbsp;B; otherwise &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Compare result to <span class="eval-keyword">committed_hash</span>. If match &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">SHA256(PREIMAGE)</span> using <code>CSHA256</code>. The PREIMAGE length is unconstrained &mdash; the full byte run is consumed.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><code>memcmp</code> the 32-byte result against <span class="eval-keyword">committed_hash</span>. Equal &rarr; <span class="eval-result-sat">SATISFIED</span>; differs &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -174,10 +179,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing HASH256 field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing PREIMAGE field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>SHA256(preimage) does not match committed_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>SHA256(preimage) matches committed_hash</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>HASH256 or PREIMAGE field missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>committed_hash</code> not exactly 32 B</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SHA256(preimage) &ne; committed_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>SHA256(preimage) = committed_hash</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -200,7 +205,7 @@
   <span class="json-key">"type"</span>: <span class="json-str">"HASH_GUARDED"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef...exactly 32 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef... (variable-length preimage)"</span> }
   ]
 }</pre></div>
 </div>

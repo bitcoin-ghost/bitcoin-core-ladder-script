@@ -119,35 +119,22 @@
         <td class="field-desc">Expected tagged hash result</td>
       </tr>
       <tr>
-        <td class="field-name">witness_tag_hash</td>
-        <td class="field-type">HASH256</td>
-        <td class="field-size">32 B</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">Copy of tag_hash, echoed in the witness for implicit layout matching</td>
-      </tr>
-      <tr>
-        <td class="field-name">witness_expected_hash</td>
-        <td class="field-type">HASH256</td>
-        <td class="field-size">32 B</td>
-        <td class="field-side-w">Witness</td>
-        <td class="field-desc">Copy of expected_hash, echoed in the witness for implicit layout matching</td>
-      </tr>
-      <tr>
         <td class="field-name">preimage</td>
         <td class="field-type">PREIMAGE</td>
-        <td class="field-size">32 B</td>
+        <td class="field-size">var</td>
         <td class="field-side-w">Witness</td>
-        <td class="field-desc">Data to hash with the tag</td>
+        <td class="field-desc">Data to hash with the tag. Length is unconstrained &mdash; <code>CSHA256</code> consumes the field's full byte length.</td>
       </tr>
     </tbody>
   </table>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;0. The pre-E-022 layout also echoed <code>tag_hash</code> and <code>expected_hash</code> in the witness; both were unused by the evaluator (a 64&nbsp;B silent embedding channel) and have been removed. <code>TAGGED_HASH_WITNESS = {1, [PREIMAGE]}</code>.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0203</span>
@@ -164,20 +151,18 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0203</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
-      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[0] &middot; 32B</span>
-      <span class="wire-segment wire-field-hash" style="min-width:150px">HASH256[1] &middot; 32B</span>
-      <span class="wire-segment wire-field-pre" style="min-width:140px">PREIMAGE &middot; 32B</span>
-      <span class="wire-bytes">= 102 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pre" style="min-width:140px">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">&asymp; 4 + 1 + len bytes</span>
     </div>
 
     <div class="wire-total">
       <span class="wire-total-label">Total (conditions + witness)</span>
-      <span class="wire-total-bytes">~174 bytes</span>
+      <span class="wire-total-bytes">&asymp; 77 + len bytes</span>
     </div>
   </div>
 
-  <p class="section-text">Two condition HASH256 fields: one for the tag hash, one for the expected result.</p>
+  <p class="section-text">Two condition HASH256 fields: <code>tag_hash</code> (= <code>SHA256(tag)</code>) and <code>expected_hash</code> (the BIP-340 result to match). The witness carries only the <code>PREIMAGE</code>.</p>
 </div>
 
 <!-- Evaluation Logic -->
@@ -186,19 +171,19 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Require 2 <span class="eval-keyword">HASH256</span> fields + <span class="eval-keyword">PREIMAGE</span>. Any missing &rarr; <span class="eval-result-err">ERROR</span></span>
+      <span class="eval-step-text">Collect all <span class="eval-keyword">HASH256</span> fields from the merged conditions+witness block, and locate the <span class="eval-keyword">PREIMAGE</span> field. If fewer than 2 HASH256 fields, or PREIMAGE missing &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Compute SHA256(<span class="eval-keyword">tag_hash</span> || <span class="eval-keyword">tag_hash</span> || <span class="eval-keyword">PREIMAGE</span>)</span>
+      <span class="eval-step-text">The first HASH256 (in field order) is <span class="eval-keyword">tag_hash</span>; the second is <span class="eval-keyword">expected_hash</span>. Both must be exactly 32&nbsp;B; otherwise &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Compare result to <span class="eval-keyword">expected_hash</span>. If match &rarr; <span class="eval-result-sat">SATISFIED</span></span>
+      <span class="eval-step-text">Compute <span class="eval-keyword">SHA256(tag_hash || tag_hash || PREIMAGE)</span> using <code>CSHA256</code> with three sequential <code>Write</code> calls. The PREIMAGE length is unconstrained &mdash; the full byte run is consumed.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">Mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text"><code>memcmp</code> the 32-byte result against <span class="eval-keyword">expected_hash</span>. Equal &rarr; <span class="eval-result-sat">SATISFIED</span>; differs &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -209,10 +194,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing HASH256 fields (need 2)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing PREIMAGE field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Tagged hash does not match expected_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Tagged hash matches expected_hash</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 HASH256 fields, or PREIMAGE missing</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Either HASH256 field not exactly 32 B</td><td class="r-err">ERROR</td></tr>
+      <tr><td>SHA256(tag_hash || tag_hash || PREIMAGE) &ne; expected_hash</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>SHA256(tag_hash || tag_hash || PREIMAGE) = expected_hash</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -236,9 +221,7 @@
   <span class="json-key">"type"</span>: <span class="json-str">"TAGGED_HASH"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3...32 bytes (tag_hash)"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"d4e5f6...32 bytes (expected)"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef...exactly 32 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"deadbeef... (variable-length preimage)"</span> }
   ]
 }</pre></div>
 </div>
