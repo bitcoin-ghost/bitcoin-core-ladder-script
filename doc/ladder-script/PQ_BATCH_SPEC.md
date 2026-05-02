@@ -81,7 +81,11 @@ The PQ scheme is derived from witness `PUBKEY` size at evaluation time (pk_size 
 
 ## Scope & constraints
 
-- **One anchor per `HASH256` value per tx.** Multiple anchors for the same commit would waste witness bytes but are not consensus-invalid — evaluator uses first-seen.
+- **One anchor per `HASH256` value per tx.** The anchor must be the
+  lowest-index `PQ_BATCH` input for that commit (`EvalPQBatchBlock`
+  in `src/rung/blocks/qabi.cpp` documents the ordering requirement);
+  later anchors for the same commit waste witness bytes but are not
+  consensus-invalid — the evaluator uses the cached verdict.
 - **Multiple distinct `HASH256` values in one tx are allowed.** Each commit group has its own anchor. Evaluator caches per `(commit, sighash)` key.
 - **PQ_BATCH and QABI_SPEND can coexist** in the same tx provided they don't fight over the tx-level signature slot. QABI_SPEND uses `tx.aggregated_sig` (666B dedicated slot). PQ_BATCH uses input-level witness fields — no conflict.
 - **No signature aggregation across distinct keys.** If 3 pubkey groups appear, 3 signatures are needed. This is a proto-level aggregation, not crypto-level.
@@ -107,33 +111,50 @@ Compare:
 - QABIO batch: ~52 vB per input = 5,200 vB (2.9× worse).
 - PQ_BATCH: 17.8 vB per input (best).
 
-## Open design questions
+## Resolved design questions
 
-1. **Anchor input election.** First-seen in evaluation order? Or require an explicit "anchor" flag? First-seen is simpler; explicit flag is safer if block ordering ever changes.
+1. **Anchor input election.** Resolved: lowest-index `PQ_BATCH` input
+   per commit is the anchor. Implicit, no flag — script verification
+   already runs in input order. The signer is responsible for placing
+   the anchor first.
 
-2. **Cache scope.** Should the cache survive across `PQ_BATCH` blocks in different rungs of the same input? Probably yes — one input could have multiple `PQ_BATCH` blocks with the same hash (pointless but legal).
+2. **Cache scope.** Resolved: the cache is keyed per-tx by
+   `(commit, sighash)`. Multiple `PQ_BATCH` blocks with the same
+   commit across different rungs of the same input share the verdict.
 
-3. **Replay protection.** The tx sighash is part of the signature, so a valid sig is bound to this specific tx. No replay risk.
+3. **Replay protection.** Resolved: the tx sighash is part of the
+   signature, so a valid sig is bound to this specific tx. No replay
+   risk.
 
-4. **PQ scheme heterogeneity.** Can `PQ_BATCH(F512)` and `PQ_BATCH(F1024)` coexist in the same tx? Yes — they have distinct `HASH256` commits and distinct anchors. Evaluator just processes them separately.
+4. **PQ scheme heterogeneity.** Resolved: `PQ_BATCH(F512)` and
+   `PQ_BATCH(F1024)` can coexist in the same tx — they have distinct
+   `HASH256` commits and distinct anchors. The scheme is derived
+   from the anchor's `PUBKEY` size (897 / 1793 / 1952), and the
+   committed hash binds the exact pubkey bytes.
 
-5. **Soft-fork deployment.** Since this is a new block type in an unused wire slot (0x0301), it's a clean soft-fork addition. No existing clients would accept `PQ_BATCH` blocks; new clients reject if the block evaluator rejects.
+5. **Soft-fork deployment.** Resolved: shipped 2026-04-24 as a new
+   block type at wire ID **0x0A03** in the QABI family. Clean
+   soft-fork addition — pre-v4 clients never see RUNG_TX outputs at
+   all; v4 clients without `PQ_BATCH` support reject the block.
 
-6. **Pubkey size limits.** The `PREIMAGE` field type currently has no fixed upper bound. We should cap at `MAX_PQ_PUBKEY_SIZE = 2048 bytes` to prevent abuse. Anything larger than 1793 (FALCON-1024) is a waste.
+6. **Pubkey size limits.** Resolved by audit #3 / E-020 / E-021: the
+   evaluator pins `PQ_BATCH` to one of two exact field shapes
+   (`[HASH256]` non-anchor or `[HASH256, PUBKEY, SIGNATURE]` anchor)
+   and then derives the scheme from the canonical PUBKEY length. A
+   pubkey that doesn't match a known scheme size fails verification,
+   so no separate `MAX_PQ_PUBKEY_SIZE` constant is needed.
 
-## Implementation plan
+## Implementation status (shipped 2026-04-24)
 
-| Step | File(s) | Est. effort |
-|------|---------|-------------|
-| 1. Wire ID + enum + layout | `src/rung/types.h` | 15 min |
-| 2. Block evaluator + cache | `src/rung/blocks/pq_batch.cpp` (new) | 2-3 hours |
-| 3. Block registration + dispatch | `src/rung/blocks/*.cpp` registrars | 10 min |
-| 4. Sighash/serialization updates | `src/rung/serialize.cpp`, `src/rung/rpc.cpp` (ParseBlockSpec) | 1 hour |
-| 5. Engine block def + preset | `tools/ladder-engine/index.html` | 1 hour |
-| 6. Functional test | `test/functional/feature_rung_pq_batch.py` (new) | 2 hours |
-| 7. Documentation | `doc/ladder-script/BLOCK_LIBRARY.md`, `RUNG_TX_SPEC.md` | 30 min |
-
-Total: ~7 hours across a full day with review + rebuild cycles.
+| Step | File(s) | Status |
+|------|---------|--------|
+| 1. Wire ID + enum + layout | `src/rung/types.h` | shipped |
+| 2. Block evaluator + cache | `src/rung/blocks/qabi.cpp::EvalPQBatchBlock` | shipped |
+| 3. Block registration + dispatch | `src/rung/blocks/qabi.cpp` registrar | shipped |
+| 4. Sighash/serialization updates | `src/rung/serialize.cpp`, `src/rung/rpc.cpp` | shipped |
+| 5. Engine block def + preset | `tools/ladder-engine/index.html` | shipped |
+| 6. Functional test | `test/functional/feature_rung_pq_batch.py` + `feature_rung_pq_batch_stress.py` | shipped |
+| 7. Documentation | `doc/ladder-script/BLOCK_LIBRARY.md`, `RUNG_TX_SPEC.md`, this spec | shipped |
 
 ## Comparison with existing primitives
 
