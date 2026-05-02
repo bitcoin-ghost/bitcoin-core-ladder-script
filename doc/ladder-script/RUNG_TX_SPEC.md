@@ -74,21 +74,21 @@ Distinct tagged-hash domain so a relay leaf can never alias a rung leaf at the
 same block layout.
 
 **Functions**: `ComputeTxMLSCLeaf()`, `ComputeTxMLSCRelayLeaf()`,
-`ComputeValueCommitment()` in `conditions.cpp`.
-
-**Relay leaf**: `TaggedHash("LadderLeaf", SerializeRelayBlocks(relay, CONDITIONS) || pubkeys)`
-
-**Coil leaf**: `TaggedHash("LadderLeaf", SerializeCoilData(coil))`
+`ComputeValueCommitment()` in `conditions.cpp`. (The legacy
+`ComputeRungLeaf` / `ComputeCoilLeaf` / `ComputeRelayLeaf` helpers in
+the same file are test-only and produce different leaf hashes than
+consensus &mdash; they MUST NOT be called by integration code.)
 
 ### Interior Nodes
 
 Sorted child ordering for a canonical tree:
 
 ```
-MerkleInterior(a, b) = TaggedHash("LadderInternal", min(a,b) || max(a,b))
+MerkleInterior(a, b) = TaggedHash("LadderInternal/v1", min(a,b) || max(a,b))
 ```
 
-Padded to next power of 2 with `MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf", "")`.
+Padded to next power of 2 with
+`MLSC_EMPTY_LEAF = TaggedHash("LadderLeaf/v1", "")`.
 
 **Source**: `conditions.cpp:154-314`.
 
@@ -98,12 +98,20 @@ Public keys are **not** stored in conditions. They are folded into the Merkle le
 at creation time and extracted from the witness at spend time via `ExtractBlockPubkeys()`.
 This eliminates PUBKEY_COMMIT as a data-embedding surface.
 
-Allowed condition data types: HASH256, HASH160, NUMERIC, SCHEME, SPEND_INDEX, DATA.
-Rejected: PUBKEY, PUBKEY_COMMIT, SIGNATURE, PREIMAGE, SCRIPT_BODY.
+Allowed condition data types: HASH256, HASH160, NUMERIC, SCHEME, DATA, MERKLE_PROOF.
+Restricted: PUBKEY_COMMIT is allowed only as `QABI_SPEND.owner_pubkey_hash`
+(the participant identity tag). Slot `0x07` (formerly `SPEND_INDEX`) is
+reserved and never used in any block layout.
+Rejected in conditions: PUBKEY, SIGNATURE, PREIMAGE, SCRIPT_BODY.
 
 `PubkeyCountForBlock()` determines how many pubkeys each block type contributes:
-0 (non-key blocks), 1 (SIG, TIMELOCKED_SIG, etc.), 2 (HTLC, VAULT_LOCK, ADAPTOR_SIG),
-or N (MULTISIG, TIMELOCKED_MULTISIG — counted dynamically).
+0 (non-key blocks plus `MULTISIG` / `TIMELOCKED_MULTISIG` &mdash; inner-Merkle
+pubkey commit; `KEY_REF_SIG` &mdash; relay-resolved; `COSIGN` &mdash;
+cross-input; v0.7 `ANCHOR_CHANNEL` &mdash; pure marker), 1 (SIG,
+TIMELOCKED_SIG, HASH_SIG, CLTV_SIG, MUSIG_THRESHOLD, ADAPTOR_SIG (single
+signing key per v0.7), PTLC (single signing key per v0.7), P2PK_LEGACY,
+P2TR_LEGACY, P2TR_SCRIPT_LEGACY, ANCHOR_ORACLE, LATCH_SET, LATCH_RESET,
+COUNTER_DOWN, COUNTER_UP), 2 (HTLC, VAULT_LOCK, ANCHOR_FEE).
 
 **Source**: `types.h:595-643`, `evaluator.cpp:3292-3307`.
 
@@ -114,7 +122,7 @@ or N (MULTISIG, TIMELOCKED_MULTISIG — counted dynamically).
 When `createrungtx` detects a single-SIG ladder, it automatically tweaks the output:
 
 ```
-conditions_root = internal_pubkey + H("LadderTweak", internal_pubkey || merkle_root) × G
+conditions_root = internal_pubkey + H("LadderTweak/v1", internal_pubkey || merkle_root) × G
 ```
 
 This enables both key-path and script-path spending from the same output. Without the
@@ -130,8 +138,8 @@ in `pubkey.cpp`. `SignSchnorrLadder()` in `key.cpp`.
 ### Key-path (1-element witness): `[signature(64)]`
 
 The `conditions_root` is treated as an x-only public key. Schnorr signature verified
-using `SignatureHashLadderKeyPath` (tagged hash `"LadderKeyPathSighash"`). No conditions
-revealed. This is the 110 vB path (1-in, 1-out) or 118 vB for a standard 2-output payment.
+using `SignatureHashLadderKeyPath` (tagged hash `"LadderKeyPathSighash/v1"`). No conditions
+revealed. This is the **109 vB** path (1-in, 1-out) or **118 vB** for a standard 2-output payment.
 
 ### Script-path (2 or 3 element witness): `[LadderWitness, MLSCProof, (internal_pubkey)]`
 
@@ -249,7 +257,7 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 | P2PKH | 192 | 1,920 sats |
 | P2WPKH | 110 | 1,100 sats |
 | P2TR key-path | 111 | 1,110 sats |
-| **RUNG_TX key-path** | **110** | **1,100 sats** |
+| **RUNG_TX key-path** | **109** | **1,090 sats** |
 
 ### Simple payment (1 input, 2 outputs)
 
@@ -266,7 +274,7 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 | Outputs | P2WPKH | P2TR | **RUNG_TX key** | Saving vs P2WPKH |
 |---------|--------|------|-----------------|------------------|
 | 2 | 143 vB | 167 vB | **118 vB** | 17% |
-| 10 | 391 vB | 511 vB | **194 vB** | 50% |
+| 10 | 389 vB | 499 vB | **191 vB** | 51% |
 | 100 | 3,181 vB | 4,381 vB | **914 vB** | 71% |
 | 1000 | 31,081 vB | 43,081 vB | **8,114 vB** | 74% |
 
@@ -276,7 +284,7 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 |------|-------|-----------|
 | P2WPKH | 255 vB | baseline |
 | P2TR key-path | 281 vB | -10% |
-| **RUNG_TX key-path** | **241 vB** | **+6% cheaper** |
+| **RUNG_TX key-path** | **240 vB** | **+6% cheaper** |
 
 ---
 
