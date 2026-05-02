@@ -112,11 +112,14 @@ input in the spend tx reveals the pubkey + signature once; every
 other input gated by the same hash short-circuits via a tx-local
 verify cache.
 
-- Anchor input: ~666 B sig + ~897 B pubkey = full PQ cost paid once.
-- Subsequent inputs: ~55 vB amortised — about **12&times; cheaper**
-  than per-input FALCON.
+- Anchor input: ~392 vB witness (FALCON sig + pubkey, SegWit-discounted) &mdash;
+  full PQ cost paid once.
+- Non-anchor inputs: ~14 vB each (just the MLSC proof scaffolding).
+- **At N=100: ~17.8 vB per input mean** (1,778 vB total) &mdash; about
+  **22&times; cheaper** than per-input FALCON-512.
 - No coordinator, no priming round. Built for exchange sweeps,
-  co-owned UTXO pools, recurring subscription drains.
+  co-owned UTXO pools, recurring subscription drains. See
+  [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) for the full table.
 
 **QABIO** commits a coordinator FALCON-512 pubkey, the full
 participant set, and the output set at fund time. Each participant
@@ -132,8 +135,9 @@ single FALCON aggregate covering every input. One verify per tx.
 | 500      |  69,707  |       139    |
 | 1,000    | 139,082  |       139    |
 
-At N=100, **~143 vB per cosigner** — roughly equivalent to a
-P2WPKH payment, fully PQ-safe and atomically settled.
+**At N=100: ~143 vB per cosigner**; converges to **~139 vB at N=500+**
+as fixed-overhead amortises across more participants. Both roughly in
+the P2WPKH ballpark (~110 vB), fully PQ-safe and atomically settled.
 
 ## 6. Fee economics
 
@@ -146,9 +150,9 @@ P2WPKH payment, fully PQ-safe and atomically settled.
 **Batch payout (N=100 outputs):** MLSC 911 vB vs P2WPKH 3,179 vB =
 **71.3% smaller**. At 10 sat/vB, saves 22,680 sats per batch.
 
-**QABIO batch (N=100 inputs):** ~143 vB per participant. Each
-participant pays ~143 sats at 1 sat/vB — roughly equivalent to a
-P2WPKH payment, amortised across cosigners.
+**QABIO batch (N=100 inputs):** ~143 vB per participant (~139 vB at
+N=500+). Each participant pays ~143 sats at 1 sat/vB &mdash; roughly
+in the P2WPKH ballpark, amortised across cosigners.
 
 ## 7. How to reproduce
 
