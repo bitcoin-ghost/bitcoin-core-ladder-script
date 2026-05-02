@@ -194,13 +194,13 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
         <span><span class="s-key">UNIT_TESTS=</span><span class="s-val">655</span></span>
         <span><span class="s-key">FUNC_TESTS=</span><span class="s-val">52</span></span>
         <span><span class="s-key">PATCH_LINES=</span><span class="s-val">961</span></span>
-        <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">21,251</span></span>
+        <span><span class="s-key">LIBRARY_LINES=</span><span class="s-val">21,247</span></span>
       </div>
       <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases" class="download-btn">Releases</a>
       <a href="https://github.com/defenwycke/bitcoin-core-ladder-script" class="download-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:8px;">View on GitHub</a>
     </div>
 
-    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64, macOS arm64, and Windows x86_64. Reproducible Guix builds are not yet wired in. The 961 lines of integration code are in 33 modified Core files; the 21,251-line library lives in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header).</div>
+    <div class="note">Reviewer / playground binaries only &mdash; not for production. Linux x86_64, macOS arm64, and Windows x86_64. Reproducible Guix builds are not yet wired in. The 961 lines of integration code are in 33 modified Core files; the 21,247-line library lives in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header).</div>
   </div>
 
   <!-- -- VERIFY -- -->
@@ -218,21 +218,9 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
 <span class="comment"># 3. Verify the binary archive matches.</span>
 <span class="cmd">sha256sum -c SHA256SUMS --ignore-missing</span>
-<span class="output">bitcoin-core-ladder-v30.0-ladder-0.8-x86_64-linux-gnu.tar.gz: OK</span></div>
+<span class="output">bitcoin-core-ladder-v30.0-ladder-0.21-x86_64-linux-gnu.tar.gz: OK</span></div>
 
     <div class="note"><strong>Release-signing key fingerprint:</strong> <code>777FE81F8CC077FD3D08055E852C2B3190F5B928</code> &mdash; this page is the canonical publication. If <code>gpg --verify</code> reports any other key, do not trust the binary. Cross-check against the same fingerprint in the repo&apos;s <code>README.md</code>.</div>
-  </div>
-
-  <!-- -- BUILD FROM SOURCE -- -->
-  <div class="section" id="build-from-source">
-    <div class="section-head">Build from Source</div>
-
-    <p>If you would rather build it yourself (any platform, full test suite):</p>
-    <div class="code-block"><span class="cmd">git clone https://github.com/defenwycke/bitcoin-core-ladder-script.git</span>
-<span class="cmd">cd bitcoin-core-ladder-script</span>
-<span class="cmd">cmake -B build -DCMAKE_BUILD_TYPE=Release</span>
-<span class="cmd">cmake --build build -j2  </span><span class="comment"># -j2 keeps WSL2 happy; on a real box use -j$(nproc)</span></div>
-    <p><code>liboqs</code> is a hard build dependency for the post-quantum signature schemes &mdash; install via your package manager or build from <a href="https://github.com/open-quantum-safe/liboqs" target="_blank" rel="noopener">github.com/open-quantum-safe/liboqs</a>.</p>
   </div>
 
   <!-- -- QUICK START -- -->
@@ -247,8 +235,9 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 <span class="cmd">mkdir -p ~/.bitcoin</span>
 <span class="cmd">cp share/examples/bitcoin-ladder.conf ~/.bitcoin/bitcoin.conf</span>
 
-<span class="comment"># Start the node (liboqs.so is bundled in lib/ — point the loader at it).</span>
-<span class="cmd">LD_LIBRARY_PATH=$PWD/lib ./bin/bitcoind -daemon</span>
+<span class="comment"># Start the node. The bundled liboqs.so is found via the binary's</span>
+<span class="comment"># own RUNPATH ($ORIGIN/../lib), so no LD_LIBRARY_PATH needed.</span>
+<span class="cmd">./bin/bitcoind -daemon</span>
 <span class="output">Bitcoin Core starting</span>
 
 <span class="comment"># Wait for sync (~30 seconds on the Ladder Script signet).</span>
@@ -300,6 +289,12 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 <span class="key">rpcuser</span>=<span class="val">ladder</span>
 <span class="key">rpcpassword</span>=<span class="val">CHANGE_ME_BEFORE_USING</span>
 
+<span class="comment"># Don't customise `rpcport` to one of {38332, 38333, 38334} &mdash; those are</span>
+<span class="comment"># bitcoind's default signet RPC, p2p, and Tor onion-bind ports respectively.</span>
+<span class="comment"># Setting `rpcport=38334` looks like it should work but fails at startup</span>
+<span class="comment"># (collides with the auto-bound onion listener). Default rpcport (38332) is</span>
+<span class="comment"># unaffected; if you must change it, pick something outside that range.</span>
+
 <span class="comment"># Force v1 p2p transport (current seed only speaks v1).</span>
 <span class="key">v2transport</span>=<span class="val">0</span></div>
     <p>If you'd rather use a different datadir, pass <code>-datadir=/path/to/dd</code> to <code>bitcoind</code> and put the conf there instead.</p>
@@ -320,7 +315,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 <span class="cmd">cmake --build build -j$(nproc)</span>
 
 <span class="comment"># Optional: -DENABLE_QABIO=OFF for the base block set without the QABIO extension</span></div>
-    <div class="note">Forked from upstream Bitcoin Core v30.0. The 961-line patch lives across 33 modified files in <code>src/</code>; the 21,251-line library in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header). A single boundary header (<code>src/rung_shims.h</code>) is the only place Core types meet library types. See <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> for the per-file walkthrough.</div>
+    <div class="note">Forked from upstream Bitcoin Core v30.0. The 961-line patch lives across 33 modified files in <code>src/</code>; the 21,247-line library in 39 new files (38 under <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header). A single boundary header (<code>src/rung_shims.h</code>) is the only place Core types meet library types. See <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> for the per-file walkthrough.</div>
   </div>
 
   <!-- -- RPC COMMANDS -- -->
