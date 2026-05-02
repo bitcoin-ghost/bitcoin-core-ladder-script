@@ -114,7 +114,12 @@ deploy_web() {
 
     echo "--- Docs SPA ---"
     if [ -d "$ROOT/tools/docs" ]; then
-        ssh "$WEB_HOST" "sudo mkdir -p $WEB_ROOT/docs/blocks"
+        # `sudo mkdir` creates docs/blocks owned by root; without the
+        # follow-on chown the next rsync into it fails "Permission
+        # denied" because the SSH user can't write to root-owned dirs.
+        # Chown immediately to the SSH user, matching the WEB_ROOT
+        # ownership set above.
+        ssh "$WEB_HOST" "sudo mkdir -p $WEB_ROOT/docs/blocks && sudo chown \$USER:\$USER $WEB_ROOT/docs/blocks"
         rsync -avz "$ROOT/tools/block-docs/" "$WEB_HOST:$WEB_ROOT/block-docs/"
         rsync -avz "$ROOT/tools/block-docs/" "$WEB_HOST:$WEB_ROOT/docs/blocks/"
         # docs/index.html fetches each *.md by bare filename (e.g.
