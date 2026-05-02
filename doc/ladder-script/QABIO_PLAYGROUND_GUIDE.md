@@ -66,10 +66,11 @@ Use **Download all** to dump the complete ceremony state.
 ## What to look for
 
 - **Per-cosigner cost asymptotes.** At small N each batch tx looks
-  expensive (the FALCON-512 aggregate signature is ~666 B fixed
-  overhead). At N=10 you're at ~184 vB/input; at N=100 it's ~143 vB
-  (matching a P2WPKH payment per cosigner). See
-  [`SIZING.md`](SIZING.md) for the full curve.
+  expensive (the FALCON-512 aggregate signature is up to ~666 B
+  fixed overhead). At N=10 you're at ~184 vB/input; at N=100 it's
+  **~143 vB** (converging to **~139 vB at N=500+** &mdash; roughly in
+  the P2WPKH (110 vB) ballpark per cosigner). See
+  [`SIZING.md`](SIZING.md) §5 for the full curve.
 - **One verify per tx.** The batch spend triggers exactly one
   FALCON-512 verify regardless of N — the QABOSigCache amortises.
 - **Replace-By-Depth.** In the RBD scenario, P1's deeper-depth prime
@@ -81,10 +82,15 @@ Use **Download all** to dump the complete ceremony state.
   every other participant's priming TX still confirms (the rungs are
   per-UTXO, not coupled), then the batch can't settle, then everyone
   falls back to Rung 0 escape. **No participant ever loses funds.**
-- **Coordinator output-set binding.** The `qabi_block` carries the
-  output set directly; the consensus check enforces tx.vout
-  bit-for-bit matches it. The coordinator can't substitute their own
-  destination after participants prime.
+- **Coordinator output-set binding.** The `qabi_block` carries
+  `outputs_conditions_root` plus the per-output value list, and
+  the consensus check enforces (1) `tx.conditions_root ==
+  parsed.outputs_conditions_root` and (2) each `tx.outputs[i].value
+  == parsed.output_values[i]`. The per-output scriptPubKey is
+  structurally `0xDF + tx.conditions_root` for any v4 MLSC tx, so
+  binding `conditions_root` pins every destination SPK without
+  storing them on the wire. The coordinator can't substitute their
+  own destination after participants prime.
 
 ## When to use it
 
