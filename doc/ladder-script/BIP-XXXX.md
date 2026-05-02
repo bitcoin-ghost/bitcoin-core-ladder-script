@@ -115,12 +115,17 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
 "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this
 document are to be interpreted as described in RFC 2119.
 
-References of the form `src/<file>.cpp::<function>` in this section
-are normative: byte-exact behaviour of the named source file in the
-reference implementation is the consensus contract. References of
-the same form in the §Rationale section are illustrative — they
-point at the implementation that informs a design choice but do not
-constrain conforming implementations.
+The consensus contract is the wire format specified in this section
+together with the test vectors at `src/test/data/rung_tx_vectors.json`.
+An alternative implementation conforms by producing byte-identical
+output on the wire and on the vectors, regardless of internal
+structure or implementation language. References of the form
+`src/<file>.cpp::<function>` throughout this document point at the
+reference implementation that realises each rule, and reviewers may
+treat those locations as authoritative for "what the reference
+implementation does today" — but an implementation that diverges
+internally while matching the wire format and the vectors still
+conforms. References in the §Rationale section are illustrative only.
 
 ### Definitions
 
