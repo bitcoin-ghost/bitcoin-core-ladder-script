@@ -463,20 +463,22 @@ revealed leaf (and any revealed relays) up to `conditions_root`.
 
 #### Witness limits
 
-| Constant | Value | Source |
+| Constant | Value | Meaning |
 |---|---:|---|
-| `MAX_RUNGS` | 16 | `src/rung/serialize.h` |
-| `MAX_BLOCKS_PER_RUNG` | 8 | `src/rung/serialize.h` |
-| `MAX_FIELDS_PER_BLOCK` | 16 | `src/rung/serialize.h` |
-| `MAX_RELAYS` | 8 | `src/rung/serialize.h` |
-| `MAX_REQUIRES` | 8 | `src/rung/serialize.h` |
-| `MAX_RELAY_DEPTH` | 4 | `src/rung/serialize.h` |
-| `MAX_LADDER_WITNESS_SIZE` | 100,000 bytes | `src/rung/serialize.h` |
-| `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | `src/rung/serialize.h` |
-| `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | `src/rung/serialize.h` (counts across all MLSC-spending inputs and any diff-witness overlays) |
-| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | `src/rung/serialize.h` |
-| `MAX_PUBKEYS_PER_MULTISIG` | 16 | `src/rung/serialize.h` |
-| `MAX_ACCUMULATOR_BLOCKS_PER_TX` | 2 | `src/rung/serialize.h` |
+| `MAX_RUNGS` | 16 | Maximum rungs per ladder (per-input). |
+| `MAX_BLOCKS_PER_RUNG` | 8 | Maximum AND-conjoined blocks within a single rung. |
+| `MAX_FIELDS_PER_BLOCK` | 16 | Deserialiser cap on explicit-field encoding for layout-less blocks. |
+| `MAX_RELAYS` | 8 | Maximum shared relay leaves committed in the conditions tree. |
+| `MAX_REQUIRES` | 8 | Maximum `relay_refs` per rung or per relay (i.e. how many relays one rung or relay may depend on). |
+| `MAX_RELAY_DEPTH` | 4 | Maximum transitive depth of relay-requires-relay chains. |
+| `MAX_LADDER_WITNESS_SIZE` | 100,000 bytes | Hard cap on the serialised `LadderWitness` element. |
+| `MAX_PREIMAGE_FIELDS_PER_WITNESS` | 2 | Per-input cap on `PREIMAGE` fields. |
+| `MAX_PREIMAGE_FIELDS_PER_TX` | 2 | Per-tx cap on `PREIMAGE` fields, counted across all MLSC-spending inputs and any diff-witness overlays. |
+| `MAX_SCRIPT_BODY_FIELDS_PER_TX` | 1 | Per-tx cap on `SCRIPT_BODY` fields (legacy bridging). |
+| `MAX_PUBKEYS_PER_MULTISIG` | 16 | Maximum pubkeys committed to via the inner pubkey-Merkle root in `MULTISIG` / `TIMELOCKED_MULTISIG`. |
+| `MAX_ACCUMULATOR_BLOCKS_PER_TX` | 2 | Per-tx cap on `ACCUMULATOR` blocks. |
+
+All values are defined in `src/rung/serialize.h`.
 
 ### Block registry
 
@@ -725,12 +727,11 @@ The digest commits to:
 8. For `ANYONECANPAY`: this input's prevout, spent output, and
    sequence directly. Otherwise the input index (4 bytes LE).
 9. For `SINGLE`: the SHA256 of the matching output.
-10. The 32-byte conditions hash. For an MLSC input this is the spent
-    output's `conditions_root` directly; for fixture inputs that
-    construct `RungConditions` outside the consensus path the digest
-    is `TaggedHash("LadderSighash/v1", serialised_conditions)` (test-
-    only fallback; consensus rejects non-MLSC v4 outputs so the path
-    is unreachable in production).
+10. The 32-byte conditions hash, taken directly from the spent
+    output's `conditions_root`. v4 transactions reject any non-MLSC
+    spent output before reaching this step, so the conditions hash
+    is always available from the spent scriptPubKey without a
+    fallback path.
 11. The 32-byte QABI section hash defined in §Sighash → QABI section
     binding below.
 
@@ -1025,9 +1026,13 @@ witness[0]        :
        e4218b1ad2c9a062d11c826d4626fe1e8eb0faae3d0fa078029d9b299
        362b24a64b283b                        ; SIGNATURE (64 bytes)
     00                                       ; n_relay_refs = 0
-    00 00                                    ; coil.{type, attestation}
-                                             ; (UNLOCK = 0x00, NONE = 0x00)
-    00                                       ; n_relays = 0
+    00                                       ; COMPACT_COIL_SENTINEL — emit
+                                             ; the default coil (UNLOCK,
+                                             ; INLINE, SCHNORR) without spending
+                                             ; three explicit bytes
+    00                                       ; coil.output_index = 0
+                                             ; (n_relays defaults to 0 at EOF
+                                             ;  per src/rung/serialize.cpp)
   elem[1] MLSCProof      (11 bytes)
     00                                       ; format prefix (versioned)
     01                                       ; proof_mode = MERKLE_PATH
@@ -1056,20 +1061,54 @@ nLockTime         : 00 00 00 00
 Wire txid:
 `3393b991ab951c61f74d237391f96a2bdb2137db59436a828045068a9e466125`
 
-Verification proceeds as:
+Verification proceeds as follows. Each step lists the bytes the
+verifier produces, so an alternative implementation can re-derive
+them and compare against this example.
 
 1. `DeserializeMLSCProof` parses elem[1]: a single-leaf MERKLE_PATH
    proof revealing one SIG block with `SCHEME = SCHNORR`.
 2. `ExtractBlockPubkeys` collects 1 PUBKEY from the witness rung's
-   SIG block (elem[0]).
+   SIG block (elem[0]):
+   ```
+   pubkey (compressed) = 02 b049bddb96cfa74d98d43951c6a81604ebea3077
+                            b87b5a61557925eadc2926eb
+   ```
 3. `ComputeTxMLSCLeaf` over `revealed_rung` produces the 32-byte
-   leaf hash. With `total_rungs = 1` and `total_relays = 0`,
-   `BuildMerkleTree` returns the leaf directly as the raw merkle_root.
+   leaf hash:
+   ```
+   structural_template = 01 0100 00 00 01 01 01 00
+                       ; n_blocks=1, block_type=0x0001 LE, inverted=0,
+                       ; n_relay_refs=0, coil={UNLOCK, INLINE,
+                       ;                       SCHNORR, output_index=0}
+   field_values        = 01            (the SCHEME byte; PUBKEY is
+                                        folded out via merkle_pub_key)
+   value_commitment    = SHA256(field_values || compressed_pubkey)
+                       = 5e3bb247fff9225f2c0902b1f55d3b1b
+                         58e7942ce1ecd9102ec87f878fc6781e
+   leaf                = TaggedHash("LadderLeaf/v1",
+                                    structural_template
+                                 || value_commitment)
+                       = 65dd1f027abaa77d6ce8db69ed51bbd8
+                         3f5bf85488cd30d0e0074cdc199966ac
+   ```
+   With `total_rungs = 1` and `total_relays = 0`, `BuildMerkleTree`
+   returns the leaf directly as the raw `merkle_root`.
 4. Because the spend witness has 3 elements, `CheckLadderTweak` is
-   invoked with elem[2] as the internal_pubkey and the merkle_root
-   from step 3. It recovers the tweaked root and asserts equality
-   against the funding tx's `conditions_root` recovered from the
-   synthetic root coin.
+   invoked with elem[2] as the internal pubkey `P` (x-only) and the
+   `merkle_root` from step 3 as the tweak input:
+   ```
+   P (x-only)          = b049bddb96cfa74d98d43951c6a81604
+                         ebea3077b87b5a61557925eadc2926eb
+   t                   = TaggedHash("LadderTweak/v1", P || merkle_root)
+                       = ef3d1694daaf8e73c07ddf2a3aec6a5d
+                         f56f9441b077e3dbbde77718e4ef9b3e
+   Q (x-only)          = lift_x(P) + t·G, x-only encoded
+                       = f9a95d1a427078c4dbcb408ce56883e7
+                         d305837dae56fca46370de6cab7cdcce
+   ```
+   The verifier asserts `Q == conditions_root` recovered from the
+   synthetic root coin. Equality holds, so the script-path proof is
+   bound to the funding output's tweaked key.
 5. `coil.output_index == 0` matches the spent input's vout (0).
 6. `MergeConditionsAndWitness` produces a SIG block with `[SCHEME,
    PUBKEY, SIGNATURE]`.
@@ -1080,10 +1119,13 @@ Verification proceeds as:
 ### Activation
 
 Activation uses the BIP 9 versionbits mechanism with a dedicated
-deployment bit. Pre-activation, v4 transactions are accepted but their
-new fields are unenforced — to legacy nodes, every v4 transaction
-appears as anyone-can-spend, matching the existing soft-fork model
-used by SegWit (BIP 141) and Taproot (BIP 341).
+deployment bit. The deployment bit, start time, and timeout are out
+of scope for this BIP and will be specified in a separate activation
+document at the time of mainnet proposal. Pre-activation, v4
+transactions are accepted but their new fields are unenforced — to
+legacy nodes, every v4 transaction appears as anyone-can-spend,
+matching the existing soft-fork model used by SegWit (BIP 141) and
+Taproot (BIP 341).
 
 Post-activation, full Ladder Script consensus rules are enforced. All
 65 block types activate together; there is no per-block staged
@@ -1535,6 +1577,64 @@ RBD into its own document; the rule itself is small (a participant
 may replace their own primed transaction with one having a strictly
 deeper `prime_depth`, evicting the original) and would not change.
 
+### 18. Why a self-contained library behind a shim, rather than scattered changes throughout Bitcoin Core?
+
+The structural answer to "this is a fork of Bitcoin Core". The
+Ladder Script implementation is split into two artefacts with sharply
+asymmetric review obligations:
+
+- A **boundary-respecting patch** to existing Bitcoin Core code (961
+  insertions across 33 modified files): type definitions, dispatch
+  routing, build wiring, RPC plumbing. Every change is either a
+  hook for v4 dispatch or a defaulted-parameter addition that
+  preserves every existing call site.
+- A **self-contained library** at `src/rung/` (38 files) plus the
+  `src/rung_shims.h` boundary header (one file). The library
+  includes Core headers via `rung_shims.h` and nothing else; Core
+  code includes only `src/rung/api.h`.
+
+Three reasons to prefer this shape over scattering Ladder Script
+logic across `src/validation.cpp`, `src/script/`, `src/policy/`,
+and the rest of the existing Core surface.
+
+**Bounded review surface.** A reviewer who wants to verify "this BIP
+does not change v1/v2/v3 validation, signature verification, or
+script evaluation" can do so by reading the 961-line patch plus
+`src/rung/api.h`. That is the consensus surface for the integration
+question. The remaining 21,251 lines under `src/rung/` are
+implementation; their consensus contract is enforced by the test
+vectors in `src/test/data/rung_tx_vectors.json`. A consensus reviewer
+who wants to audit the integration boundary can do so in an
+afternoon.
+
+**Vendoring along the BIP 340 → libsecp256k1 model.** `src/rung/`
+builds standalone via `cmake --build build --target bitcoin_rung`
+and links against `crypto`, `util`, `secp256k1`, and `liboqs`. The
+boundary header `src/rung_shims.h` is the only file where Bitcoin
+Core types meet library types. An alternative full node implementor
+can re-stub the boundary against their own type system without
+modifying any file under `src/rung/`. The library is therefore
+vendorable in the same sense `libsecp256k1` is vendored by Core —
+the consensus contract is the wire format and the test vectors,
+not the C++ class hierarchy.
+
+**Reversibility under future Core refactors.** The library does not
+take a load-bearing dependency on Core's internal data structures.
+If a future Core refactor changes `CTxOut`, `CCoinsView`, or the
+validation flow, the change lands in `src/rung_shims.h`; the
+library is unaffected. Conversely, if a post-activation bug fix in
+the library is needed, the fix is local to `src/rung/` — there is
+no `git grep` across Core to find every call site that touches
+Ladder Script logic, because there are none outside the shim. This
+property is what Core maintainers will care about most over the
+multi-year horizon, and it is the reason the integration patch is
+961 lines rather than several thousand.
+
+The cost is one extra build target (`bitcoin_rung`) and one extra
+boundary header. The benefit is that every long-term maintenance
+question about Ladder Script integration has a single answer: it
+lives in `src/rung/`.
+
 ## Backwards Compatibility
 
 Pre-activation, v4 transactions are accepted by legacy nodes as
@@ -1606,8 +1706,10 @@ against the three rule families above for satisfying spends.
 
 The reference implementation is `libladder`, a self-contained C++
 library under `src/rung/` in the `bitcoin-core-ladder-script`
-repository. Bitcoin Core integration is provided by `src/rung_shims.h`
-and approximately 805 lines of patches across 29 existing Core files.
+repository. Bitcoin Core integration is provided by the boundary
+header `src/rung_shims.h` and a 961-line patch across 33 modified
+Core files. The two-artefact split is load-bearing for review and
+long-term maintenance and is justified in Rationale Q18.
 
 The library exports a small public API in `src/rung/api.h`:
 
@@ -1627,14 +1729,11 @@ The library exports a small public API in `src/rung/api.h`:
   (`ENABLE_QABIO`) `ComputeSighashQABO` — sighash computations.
 
 Following the convention BIP 340 established with respect to
-libsecp256k1, the named source files in `src/rung/` are the
-consensus contract: byte-exact behaviour on the wire format and the
-test vectors is what conformance means. Alternative implementations
-are encouraged to produce byte-identical output on the test vectors
-and are explicitly NOT required to mirror the internal structure of
-the reference. Diverging implementations that pass the vectors
-satisfy the consensus contract; diverging implementations that fail
-any vector do not.
+libsecp256k1, the consensus contract is the wire format plus the
+test vectors. An alternative implementation that produces
+byte-identical output on the wire and on the vectors conforms,
+regardless of internal structure; an implementation that fails any
+vector does not.
 
 The canonical source is the `ladder-script` branch at
 [`https://github.com/defenwycke/bitcoin-core-ladder-script`](https://github.com/defenwycke/bitcoin-core-ladder-script).
@@ -1671,6 +1770,18 @@ attacker-controllable byte count for a specific spend depends on
 which block types are revealed — the maximum within standard relay
 limits is bounded by the witness-size cap and the per-tx preimage cap,
 not by an unstructured "padding" channel.
+
+**Diff-witness amplification is closed.** The diff-witness mode lets
+later inputs inherit the resolved witness of an earlier input plus
+optional field-level overlays. An attacker model worth naming: split
+a spend across N inputs of the same source transaction and use diff
+overlays to insert fresh `PREIMAGE` bytes per input, sneaking past
+the per-input cap. The defence is that
+`MAX_PREIMAGE_FIELDS_PER_TX = 2` and
+`MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` are enforced over the union of
+all inputs' realised witnesses *after* diff resolution, not over
+per-input witness bytes alone. The amplification path therefore
+hits the same per-tx ceiling as a direct witness.
 
 **Stateless verifier obligation.** This is the single most subtle
 correctness trap in the proposal. The chainstate compressor stores
