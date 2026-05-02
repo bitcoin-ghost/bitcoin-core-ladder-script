@@ -56,7 +56,7 @@
 <div class="block-title-section">
   <div class="block-type-code">TYPE 0x0502 &middot; ANCHOR FAMILY</div>
   <h1 class="block-title">ANCHOR_CHANNEL</h1>
-  <p class="block-subtitle">Lightning channel anchor. Verifies local and remote channel pubkeys alongside a commitment number. Used to anchor Lightning channel state on-chain for backup and verification purposes.</p>
+  <p class="block-subtitle">v0.7+ pure-marker channel anchor. Carries an optional <code>commitment_number</code> NUMERIC and nothing else. The v0.6 design also embedded local/remote channel pubkeys, but no consumer ever validated them &mdash; they were a 66&nbsp;B/spend silent data channel (closed audit finding E-002). Future Lightning consumers needing channel keys should compose ANCHOR_CHANNEL with a SIG/MULTISIG block, or extend the spec with an <code>ANCHOR_CHANNEL_KEYED</code> variant whose keys are sig-validated.</p>
   <span class="block-family-badge badge-anchor">Anchor</span>
   <span class="invertible-badge inv-yes">Invertible</span>
 </div>
@@ -91,11 +91,10 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">commitment_number</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Channel commitment number (must be &gt; 0)</td></tr>
+      <tr><td class="field-name">commitment_number</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Channel commitment number. <em>Optional</em> &mdash; the evaluator only inspects it if present, and rejects undecodable or <code>&le; 0</code> values. Omitting it makes the block a bare marker that always satisfies.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Both public keys folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 2). No key fields in conditions.</p>
-  <p class="section-text" style="margin-top:12px">No witness fields required. The commitment number is committed in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;0 (v0.7+). No PUBKEY in conditions or witness, and no witness fields at all.</p>
 </div>
 
 <!-- Wire Format -->
@@ -105,11 +104,9 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0502</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 33B</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 33B</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">Conditions = 78 bytes</span>
+      <span class="wire-bytes">Conditions &asymp; 9 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0502</span>
@@ -119,7 +116,7 @@
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">82 bytes</span>
+      <span class="wire-total-bytes">&asymp; 13 bytes</span>
     </div>
   </div>
 </div>
@@ -128,11 +125,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract <span class="eval-keyword">PUBKEY</span> fields (verified via Merkle leaf). Need exactly 2 channel keys.</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If fewer than 2 pubkeys &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Read <span class="eval-keyword">commitment_number</span> from NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If commitment_number &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Look for a NUMERIC field via <span class="eval-keyword">FindField(block, NUMERIC)</span>. If absent, fall through to step&nbsp;3.</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If present, <span class="eval-keyword">ReadNumeric</span> it. If undecodable or value <code>&le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span>. There are no pubkey, signature, or hash checks; the block is a marker.</span></div>
   </div>
 </div>
 
@@ -142,10 +137,8 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 pubkey fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>commitment_number &le; 0</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>2 pubkeys + commitment_number &gt; 0</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>NUMERIC present but undecodable, or value <code>&le; 0</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>NUMERIC absent, or NUMERIC present and <code>&gt; 0</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -158,12 +151,10 @@
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_CHANNEL"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02a1b2c3...local channel key...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03d4e5f6...remote channel key...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">42</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">Anchors commitment #42 of a Lightning channel identified by the local and remote pubkeys.</p>
+  <p class="section-text" style="margin-top:12px">Anchors a marker for commitment #42. Channel identity (local/remote keys) is not bound by this block in v0.7+; if you need binding, compose this block with a SIG/MULTISIG block whose signatures consume the channel keys.</p>
 </div>
 
 <!-- Use Cases -->

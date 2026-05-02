@@ -93,12 +93,12 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">threshold_n</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Required number of guardian signatures (first NUMERIC field)</td></tr>
-      <tr><td class="field-name">threshold_m</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Total number of guardians (second NUMERIC field)</td></tr>
-      <tr><td class="field-name">guardian_set_hash</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash committing to the full guardian pubkey set</td></tr>
+      <tr><td class="field-name">threshold_n</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Required number of guardian signatures. Must be <code>&ge; 0</code> and <code>&le; threshold_m</code>.</td></tr>
+      <tr><td class="field-name">threshold_m</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Total number of guardians. Must be <code>&ge; 0</code>.</td></tr>
+      <tr><td class="field-name">guardian_set_hash</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash committing to the full guardian pubkey set. Must equal <code>SHA256(witness PREIMAGE)</code> at spend time (hash binding via <span class="eval-keyword">VerifyHashPreimageBinding</span>).</td></tr>
+      <tr><td class="field-name">preimage</td><td class="field-type">PREIMAGE</td><td class="field-size">var</td><td class="field-side-w">Witness</td><td class="field-desc">Preimage whose SHA-256 must equal <code>guardian_set_hash</code>. Required at spend time; in practice this is a deterministic serialisation of the guardian pubkey set.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">No witness fields required. The threshold parameters and guardian set hash are committed in conditions.</p>
 </div>
 
 <!-- Wire Format -->
@@ -117,12 +117,13 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0504</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">Witness &asymp; 4 + 1 + len bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">52 bytes</span>
+      <span class="wire-total-bytes">&asymp; 53 + len bytes</span>
     </div>
   </div>
 </div>
@@ -131,12 +132,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract 2 <span class="eval-keyword">NUMERIC</span> fields: <span class="eval-keyword">threshold_n</span> (first) and <span class="eval-keyword">threshold_m</span> (second)</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Extract <span class="eval-keyword">HASH256</span> field for <span class="eval-keyword">guardian_set_hash</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If no HASH256 field present &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If threshold_n &gt; threshold_m &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect <span class="eval-keyword">NUMERIC</span> fields. Fewer than 2, or no <span class="eval-keyword">HASH256</span> present (<span class="eval-keyword">HasRequiredHashes(block, 1)</span>) &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">VerifyHashPreimageBinding(block)</span>: each conditions HASH256 must match <code>SHA256</code> of a corresponding witness PREIMAGE (in field order). Missing PREIMAGE, undersized HASH256, or mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><span class="eval-keyword">ReadNumeric</span> on the first two NUMERICs: <code>threshold_n</code> and <code>threshold_m</code>. Either undecodable &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Range/order check: <code>threshold_n &lt; 0</code>, <code>threshold_m &lt; 0</code>, or <code>threshold_n &gt; threshold_m</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">All checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -146,10 +146,12 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing HASH256 field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>threshold_n &gt; threshold_m</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>n &le; m with hash present</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or HASH256 absent</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness has no PREIMAGE, or hash binding fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>HASH256 not exactly 32 B</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Either NUMERIC undecodable</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>threshold_n &lt; 0</code>, <code>threshold_m &lt; 0</code>, or <code>threshold_n &gt; threshold_m</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Hash binding holds, <code>0 &le; n &le; m</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -158,6 +160,7 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
   <div class="json-label">Conditions (3-of-5 guardian reserve)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_RESERVE"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
@@ -167,7 +170,14 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"c7d8e9f0...guardian set hash...32 bytes"</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">Anchors a 3-of-5 threshold guardian set. The hash commits to the ordered list of all 5 guardian pubkeys.</p>
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_RESERVE"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... preimage that hashes to guardian_set_hash ..."</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">Anchors a 3-of-5 threshold guardian set. The hash commits to the ordered list of all 5 guardian pubkeys; the spend reveals a preimage equal to the canonical serialisation of that list.</p>
 </div>
 
 <!-- Use Cases -->

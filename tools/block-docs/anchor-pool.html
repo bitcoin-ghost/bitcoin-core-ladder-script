@@ -91,11 +91,11 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">vtxo_tree_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Merkle root of the VTXO pool tree</td></tr>
-      <tr><td class="field-name">participant_count</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of participants in the pool (must be &gt; 0)</td></tr>
+      <tr><td class="field-name">vtxo_tree_root</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Merkle root of the VTXO pool tree. The committed root must equal <code>SHA256(witness PREIMAGE)</code> at spend time &mdash; ANCHOR_POOL applies a hash-binding check via <span class="eval-keyword">VerifyHashPreimageBinding</span>.</td></tr>
+      <tr><td class="field-name">participant_count</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc"><em>Optional</em>. If present, must be <code>&gt; 0</code> and decodable; absent is fine.</td></tr>
+      <tr><td class="field-name">preimage</td><td class="field-type">PREIMAGE</td><td class="field-size">var</td><td class="field-side-w">Witness</td><td class="field-desc">Preimage whose SHA-256 must equal <code>vtxo_tree_root</code>. Required: the witness layout is freeform (NO_IMPLICIT) but the evaluator rejects when no PREIMAGE accompanies the conditions HASH256.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">No witness fields required. Both the tree root and participant count are committed in conditions.</p>
 </div>
 
 <!-- Wire Format -->
@@ -113,12 +113,13 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0503</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">Witness &asymp; 4 + 1 + len bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">47 bytes</span>
+      <span class="wire-total-bytes">&asymp; 48 + len bytes</span>
     </div>
   </div>
 </div>
@@ -127,11 +128,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract <span class="eval-keyword">HASH256</span> field for <span class="eval-keyword">vtxo_tree_root</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no HASH256 field present &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Read <span class="eval-keyword">participant_count</span> from NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If participant_count &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredHashes(block, 1)</span>: at least one <span class="eval-keyword">HASH256</span> must be present (the <code>vtxo_tree_root</code>); else &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">VerifyHashPreimageBinding(block)</span>: pair each HASH256 with a witness PREIMAGE in field order; require <code>SHA256(preimage) == hash256</code> for each pair. Insufficient PREIMAGEs, undersized HASH256, or any mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Look for an <em>optional</em> NUMERIC (<code>participant_count</code>). If present, <span class="eval-keyword">ReadNumeric</span> it; undecodable or value <code>&le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">All checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -141,10 +141,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing HASH256 field (no tree root)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>participant_count &le; 0</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Hash present + participant_count &gt; 0</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>HASH256 field absent</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness has no PREIMAGE, or <code>SHA256(preimage) &ne; vtxo_tree_root</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>HASH256 not exactly 32 B</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Optional <code>participant_count</code> present and undecodable, or <code>&le; 0</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Hash binding holds; <code>participant_count</code> absent or <code>&gt; 0</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -153,6 +154,7 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
   <div class="json-label">Conditions (VTXO pool with 128 participants)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_POOL"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
@@ -161,7 +163,14 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">128</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">Anchors a VTXO pool tree root with 128 participants. The root commits to all virtual transaction outputs in the pool.</p>
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_POOL"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... preimage whose SHA256 is the vtxo_tree_root ..."</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">Anchors a VTXO pool tree root with 128 participants. The root commits to all virtual transaction outputs in the pool; the spend reveals a preimage that hashes to the committed root.</p>
 </div>
 
 <!-- Use Cases -->

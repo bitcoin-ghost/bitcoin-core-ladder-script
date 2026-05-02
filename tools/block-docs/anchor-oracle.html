@@ -89,11 +89,11 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">outcome_count</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Number of possible outcomes (must be &gt; 0)</td></tr>
+      <tr><td class="field-name">outcome_count</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc"><em>Optional</em> number of possible outcomes. If present, must decode and be <code>&gt; 0</code>; absent is fine (the block then degenerates to "an oracle key is committed").</td></tr>
+      <tr><td class="field-name">oracle_key</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Oracle pubkey. Required at spend time (<span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>). Identity is bound at MLSC-proof level via merkle_pub_key &mdash; revealing a different key produces a different rung leaf and the proof rejects.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public key folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). No key field in conditions.</p>
-  <p class="section-text" style="margin-top:12px">No witness fields required. The outcome count is committed in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;1. The oracle pubkey lives in the witness (<code>ANCHOR_ORACLE_WITNESS = {1, [PUBKEY]}</code>), not conditions.</p>
 </div>
 
 <!-- Wire Format -->
@@ -103,20 +103,20 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0506</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 33B</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">Conditions = 44 bytes</span>
+      <span class="wire-bytes">Conditions &asymp; 9 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0506</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-bytes">Witness &asymp; 39 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">48 bytes</span>
+      <span class="wire-total-bytes">&asymp; 48 bytes</span>
     </div>
   </div>
 </div>
@@ -125,11 +125,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span> for <span class="eval-keyword">oracle_key</span>. Identity is already pinned by merkle_pub_key at MLSC-proof level.</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no pubkey field present &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Read <span class="eval-keyword">outcome_count</span> from NUMERIC field</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If outcome_count &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>: at least one PUBKEY must be present in the merged conditions+witness block; else &rarr; <span class="eval-result-err">ERROR</span>. The oracle pubkey's identity is enforced at MLSC-proof level via merkle_pub_key &mdash; no leaf check is performed here.</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Look for an <em>optional</em> NUMERIC (<code>outcome_count</code>). If present, <span class="eval-keyword">ReadNumeric</span> it; undecodable or value <code>&le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">All checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -139,10 +137,9 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing pubkey field (no oracle key)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>outcome_count &le; 0</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Pubkey present + outcome_count &gt; 0</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>No PUBKEY in the merged block</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Optional <code>outcome_count</code> present and undecodable, or <code>&le; 0</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>PUBKEY present; <code>outcome_count</code> absent or <code>&gt; 0</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -151,6 +148,7 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
   <div class="json-label">Conditions (oracle with 3 possible outcomes)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_ORACLE"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
@@ -158,7 +156,14 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">3</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">Anchors an oracle attestation with 3 possible outcomes (e.g., home win, draw, away win). The oracle key identifies who will sign the outcome.</p>
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_ORACLE"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02 ... oracle pubkey ... 33 bytes"</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">Anchors an oracle attestation with 3 possible outcomes (e.g., home win, draw, away win). The oracle key revealed in the witness identifies who will sign the outcome; its identity is bound to the rung leaf via merkle_pub_key.</p>
 </div>
 
 <!-- Use Cases -->

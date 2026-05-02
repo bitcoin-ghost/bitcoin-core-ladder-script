@@ -89,11 +89,13 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">asset_id</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash identifying the asset being sealed</td></tr>
-      <tr><td class="field-name">state_transition</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash of the state transition being committed</td></tr>
+      <tr><td class="field-name">asset_id</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash identifying the asset being sealed. Must equal <code>SHA256(witness PREIMAGE[0])</code> at spend time.</td></tr>
+      <tr><td class="field-name">state_transition</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Hash of the state transition being committed. Must equal <code>SHA256(witness PREIMAGE[1])</code>.</td></tr>
+      <tr><td class="field-name">preimage[0]</td><td class="field-type">PREIMAGE</td><td class="field-size">var</td><td class="field-side-w">Witness</td><td class="field-desc">Preimage for <code>asset_id</code> (paired by field order).</td></tr>
+      <tr><td class="field-name">preimage[1]</td><td class="field-type">PREIMAGE</td><td class="field-size">var</td><td class="field-side-w">Witness</td><td class="field-desc">Preimage for <code>state_transition</code>.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">No witness fields required. Both hashes are committed in conditions, binding the asset and its state transition to this output.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">PubkeyCountForBlock&nbsp;=&nbsp;0. Witness layout is freeform (NO_IMPLICIT) but the evaluator requires one PREIMAGE per HASH256, in field order, via <span class="eval-keyword">VerifyHashPreimageBinding</span>.</p>
 </div>
 
 <!-- Wire Format -->
@@ -111,12 +113,14 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0505</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">Witness &asymp; 6 + 2&times;len bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">76 bytes</span>
+      <span class="wire-total-bytes">&asymp; 78 + 2&times;len bytes</span>
     </div>
   </div>
 </div>
@@ -125,10 +129,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract all <span class="eval-keyword">HASH256</span> fields</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If fewer than 2 HASH256 fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">First hash = <span class="eval-keyword">asset_id</span>, second hash = <span class="eval-keyword">state_transition</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Both hashes present &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredHashes(block, 2)</span>: at least 2 HASH256 fields must be present (the first is <code>asset_id</code>, the second is <code>state_transition</code>); else &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">VerifyHashPreimageBinding(block)</span>: pair each HASH256 with a witness PREIMAGE in field order; require <code>SHA256(preimage[i]) == hash[i]</code> for both pairs. Insufficient PREIMAGEs, undersized HASH256, or any mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">All checks passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
 </div>
 
@@ -139,7 +142,9 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Fewer than 2 HASH256 fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>2 HASH256 fields present (asset_id + state_transition)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Either HASH256 not exactly 32 B</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Witness has fewer than 2 PREIMAGEs, or any pair fails the SHA-256 binding</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Both pairs satisfy the hash binding</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -148,6 +153,7 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
   <div class="json-label">Conditions (asset seal with state transition)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_SEAL"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
@@ -156,7 +162,15 @@
     { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"b8c9d0e1...state transition hash...32 bytes"</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">Seals a specific state transition for the identified asset to this UTXO. The seal is consumed when the UTXO is spent.</p>
+  <div class="json-label" style="margin-top:16px">Witness (input)</div>
+  <div class="json-block"><pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_SEAL"</span>,
+  <span class="json-key">"fields"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... preimage that hashes to asset_id ..."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PREIMAGE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"... preimage that hashes to state_transition ..."</span> }
+  ]
+}</pre></div>
+  <p class="section-text" style="margin-top:12px">Seals a specific state transition for the identified asset to this UTXO. The seal is consumed when the UTXO is spent; the witness reveals preimages whose SHA-256 values equal the two committed hashes.</p>
 </div>
 
 <!-- Use Cases -->

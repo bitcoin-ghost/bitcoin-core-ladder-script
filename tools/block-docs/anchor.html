@@ -85,23 +85,22 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">field[0..N]</td><td class="field-type">Any</td><td class="field-size">Variable</td><td class="field-side-c">Conditions</td><td class="field-desc">At least one typed field required. Accepts any field type (NUMERIC, HASH256, PUBKEY, etc.).</td></tr>
+      <tr><td class="field-name">anchor_id</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Application-defined anchor identifier. The implicit layout (<code>ANCHOR_CONDITIONS = {1, [NUMERIC]}</code>) accepts exactly one NUMERIC; anything else is rejected at deserialization. The evaluator only confirms the field is non-empty &mdash; the value itself is opaque to consensus.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">No witness fields required. The anchor block only validates that structured data is present in the conditions.</p>
+  <p class="section-text" style="margin-top:12px">No witness fields required. PubkeyCountForBlock&nbsp;=&nbsp;0. ANCHOR is a marker block: consensus only checks "fields present"; the application defines what <code>anchor_id</code> means.</p>
 </div>
 
 <!-- Wire Format -->
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
-  <p class="section-text" style="margin-bottom:12px">Variable size. Minimum: header + one field.</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0501</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">N</span>
-      <span class="wire-segment wire-field">FIELD &middot; var</span>
-      <span class="wire-bytes">Conditions = 4 + field bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 3-6B</span>
+      <span class="wire-bytes">Conditions &asymp; 7-10 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0501</span>
@@ -110,8 +109,8 @@
       <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
     </div>
     <div class="wire-total">
-      <span class="wire-total-label">Total (minimum)</span>
-      <span class="wire-total-bytes">~12 bytes</span>
+      <span class="wire-total-label">Total</span>
+      <span class="wire-total-bytes">&asymp; 11-14 bytes</span>
     </div>
   </div>
 </div>
@@ -120,9 +119,8 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read all typed fields from the conditions block</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <span class="eval-keyword">fields</span> is empty &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Inspect <code>block.fields</code>. If the vector is empty &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span>. The evaluator does not parse <code>anchor_id</code> or check its value &mdash; deserialization already enforced the implicit layout (exactly 1 NUMERIC).</span></div>
   </div>
 </div>
 
@@ -146,11 +144,10 @@
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"a1b2c3d4...document hash...32 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">1709856000</span> }
   ]
 }</pre></div>
-  <p class="section-text" style="margin-top:12px">This anchors a document hash alongside a Unix timestamp, committing both values on-chain.</p>
+  <p class="section-text" style="margin-top:12px">For richer attestations (document hash + timestamp + signer), compose ANCHOR with TAGGED_HASH and SIG blocks; ANCHOR alone is intentionally a single-NUMERIC marker.</p>
 </div>
 
 <!-- Use Cases -->
