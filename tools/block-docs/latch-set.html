@@ -105,21 +105,20 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0621</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-num">NUMERIC &middot; 1B</span>
-      <span class="wire-bytes">Conditions = 9 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
+      <span class="wire-bytes">Conditions &asymp; 9 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0621</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 32B</span>
-      <span class="wire-segment wire-field-sig">SIG &middot; 64B</span>
-      <span class="wire-bytes">Witness = 104 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-bytes">Witness &asymp; 39 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">145 bytes</span>
+      <span class="wire-total-bytes">&asymp; 48 bytes</span>
     </div>
   </div>
 </div>
@@ -128,10 +127,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span>. If missing &rarr; <span class="eval-result-err">ERROR</span>. (Pubkey identity is already enforced by merkle_pub_key at MLSC-proof level &mdash; a mismatched pubkey produces a different leaf and rejects before this evaluator runs.)</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">state</span> from NUMERIC fields. If no NUMERIC field &rarr; <span class="eval-result-sat">SATISFIED</span> (structural-only backward compat)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If state == 0 &rarr; <span class="eval-result-sat">SATISFIED</span> (latch can be set)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If state != 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (already set)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>: at least one PUBKEY (the setter key) must be present in the merged block; else &rarr; <span class="eval-result-err">ERROR</span>. Pubkey identity is bound at MLSC-proof level via merkle_pub_key &mdash; the evaluator does not run a signature check itself; pair LATCH_SET with a SIG/MULTISIG block in the same rung to require a signature for state changes.</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no NUMERIC field present &rarr; <span class="eval-result-sat">SATISFIED</span> (backward-compat structural-only mode &mdash; the rung is just a pubkey commitment).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><span class="eval-keyword">ReadNumeric</span> the first NUMERIC as <code>state</code>; undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>state == 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (unset; the SET rung is active &mdash; pair with RECURSE_MODIFIED to enforce 0&rarr;1 in the output); else &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (already set)</span></div>
   </div>
 </div>
 
@@ -141,9 +140,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>No NUMERIC field (structural-only mode)</td><td class="r-sat">SATISFIED</td></tr>
-      <tr><td>state != 0 (already set)</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>state == 0 (unset, can set)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>No PUBKEY in the merged block</td><td class="r-err">ERROR</td></tr>
+      <tr><td>NUMERIC present but undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>No NUMERIC field (structural-only / backward-compat)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td><code>state != 0</code> (already set)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>state == 0</code> (unset, SET rung is live)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

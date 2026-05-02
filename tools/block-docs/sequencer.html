@@ -134,10 +134,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">current_step</span> (NUMERIC[0]) and <span class="eval-keyword">total_steps</span> (NUMERIC[1]). If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Validate: total_steps &gt; 0. If total_steps &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If current_step &lt; total_steps &rarr; <span class="eval-result-sat">SATISFIED</span> (more steps remain)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If current_step &ge; total_steps &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (sequence complete)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>current_step</code> and the second as <code>total_steps</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Combined range check: <code>current_step &lt; 0</code>, <code>total_steps &le; 0</code>, or <code>current_step &ge; total_steps</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (one branch covers all "step out of range" + "sequence complete" cases).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span> (a valid step remains in the sequence). RECURSE_MODIFIED on the same rung increments <code>current_step</code> in the recursed output.</span></div>
   </div>
 </div>
 
@@ -147,10 +146,9 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>total_steps &le; 0</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>current_step &ge; total_steps</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>current_step &lt; total_steps AND total_steps &gt; 0</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or either undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>current_step &lt; 0</code>, <code>total_steps &le; 0</code>, or <code>current_step &ge; total_steps</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>0 &le; current_step &lt; total_steps</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

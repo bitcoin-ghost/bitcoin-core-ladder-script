@@ -125,10 +125,9 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">current</span> (NUMERIC[0]) and <span class="eval-keyword">preset</span> (NUMERIC[1]) from conditions fields</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If current &lt; preset &rarr; <span class="eval-result-sat">SATISFIED</span> (still accumulating)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If current &ge; preset &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (target reached)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>current</code> and the second as <code>preset</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If <code>current &lt; 0</code> or <code>preset &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>current &lt; preset</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (still accumulating); else &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (target reached)</span></div>
   </div>
 </div>
 
@@ -138,9 +137,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>current &ge; preset</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>current &lt; preset</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or either undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>current &lt; 0</code> or <code>preset &lt; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>current &ge; preset</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>current &lt; preset</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

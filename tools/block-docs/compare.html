@@ -150,12 +150,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">operator</span> (NUMERIC[0]) and <span class="eval-keyword">value_b</span> (NUMERIC[1]). If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If operator is unknown (not 0x01-0x07) &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If operator is <span class="eval-keyword">IN_RANGE</span> (0x07): read <span class="eval-keyword">value_c</span> (NUMERIC[2]). If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Apply operator to <span class="eval-keyword">input_amount</span> vs <span class="eval-keyword">value_b</span> (and value_c for IN_RANGE)</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If comparison is true &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">If comparison is false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>op</code> and the second as <code>value_b</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Operator range check: <code>op &lt; 0x01 || op &gt; 0x07</code> &rarr; <span class="eval-result-err">ERROR</span>. The check is on the int64 value before truncation, so a malformed NUMERIC like <code>0x101</code> can't alias down to <code>0x01</code> via <code>uint8</code> truncation.</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>value_b &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>op == 0x07 (IN_RANGE)</code>: require a third NUMERIC; missing &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> as <code>value_c</code>; undecodable or <code>&lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Compare <code>ctx.input_amount</code> against <code>value_b</code> (and <code>value_c</code> for IN_RANGE) per the operator. True &rarr; <span class="eval-result-sat">SATISFIED</span>; false &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
@@ -165,9 +164,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Unknown operator code</td><td class="r-err">ERROR</td></tr>
-      <tr><td>IN_RANGE operator with missing value_c</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or any undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>op</code> outside [0x01, 0x07]</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>value_b &lt; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td>IN_RANGE: <code>value_c</code> missing or <code>&lt; 0</code></td><td class="r-err">ERROR</td></tr>
       <tr><td>Comparison evaluates to false</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Comparison evaluates to true</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>

@@ -126,9 +126,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">accumulated</span> and <span class="eval-keyword">target</span> from NUMERIC fields</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If accumulated &ge; target &rarr; <span class="eval-result-sat">SATISFIED</span> (timer complete)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (still counting)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. None present &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><strong>Single-NUMERIC backward-compat:</strong> if exactly 1 NUMERIC, treat it as <code>target</code>. Undecodable or <code>&le; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; otherwise &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><strong>Modern 2-NUMERIC form:</strong> <span class="eval-keyword">ReadNumeric</span> the first as <code>accumulated</code>, the second as <code>target</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>accumulated &lt; 0</code> or <code>target &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If <code>accumulated &ge; target</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (timer complete); else &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (still counting)</span></div>
   </div>
 </div>
 
@@ -138,9 +140,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>accumulated &lt; target</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>accumulated &ge; target</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>No NUMERIC field present, or either undecodable in 2-field form, or negative <code>accumulated</code>/<code>target</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td>Single-NUMERIC backward-compat: <code>target &le; 0</code> or undecodable</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>2-NUMERIC: <code>accumulated &lt; target</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Single-NUMERIC: <code>target &gt; 0</code>; or 2-NUMERIC: <code>accumulated &ge; target</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

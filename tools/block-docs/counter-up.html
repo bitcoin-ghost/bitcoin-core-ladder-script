@@ -107,20 +107,21 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0633</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">3</span>
+      <span class="wire-segment wire-count">2</span>
       <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
       <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">Conditions = 16 bytes</span>
+      <span class="wire-bytes">Conditions &asymp; 14 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0633</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-bytes">Witness &asymp; 39 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">52 bytes</span>
+      <span class="wire-total-bytes">&asymp; 53 bytes</span>
     </div>
   </div>
 </div>
@@ -129,11 +130,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span>. If missing &rarr; <span class="eval-result-err">ERROR</span>. (Pubkey identity is already enforced by merkle_pub_key at MLSC-proof level &mdash; a mismatched pubkey produces a different leaf and rejects before this evaluator runs.)</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">current</span> (NUMERIC[0]) and <span class="eval-keyword">target</span> (NUMERIC[1]). If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If current &lt; 0 or target &lt; 0 &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If current &lt; target &rarr; <span class="eval-result-sat">SATISFIED</span> (still counting)</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If current &ge; target &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (count complete)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>: at least one PUBKEY (the event-signer key) must be present in the merged block; else &rarr; <span class="eval-result-err">ERROR</span>. Identity is bound at MLSC-proof level via merkle_pub_key.</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Collect NUMERICs. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>current</code> and the second as <code>target</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>current &lt; 0</code> or <code>target &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>current &lt; target</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (still counting; pair with RECURSE_MODIFIED to increment in the output); else &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (count complete)</span></div>
   </div>
 </div>
 
@@ -143,10 +143,11 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>current &lt; 0 or target &lt; 0</td><td class="r-err">ERROR</td></tr>
-      <tr><td>current &ge; target</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>current &lt; target</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>No PUBKEY in the merged block</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or either undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>current &lt; 0</code> or <code>target &lt; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>current &ge; target</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>current &lt; target</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

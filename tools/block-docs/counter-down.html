@@ -109,21 +109,20 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0631</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
+      <span class="wire-segment wire-count">1</span>
       <span class="wire-segment wire-field-num">NUMERIC &middot; 3B</span>
-      <span class="wire-bytes">Conditions = 11 bytes</span>
+      <span class="wire-bytes">Conditions &asymp; 9 bytes</span>
     </div>
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0631</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">2</span>
-      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 32B</span>
-      <span class="wire-segment wire-field-sig">SIG &middot; 64B</span>
-      <span class="wire-bytes">Witness = 104 bytes</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pubkey">PUBKEY &middot; 35B</span>
+      <span class="wire-bytes">Witness &asymp; 39 bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">147 bytes</span>
+      <span class="wire-total-bytes">&asymp; 48 bytes</span>
     </div>
   </div>
 </div>
@@ -132,11 +131,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span>. If missing &rarr; <span class="eval-result-err">ERROR</span>. (Pubkey identity is already enforced by merkle_pub_key at MLSC-proof level &mdash; a mismatched pubkey produces a different leaf and rejects before this evaluator runs.)</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">count</span> from NUMERIC field. If no NUMERIC field &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If count &lt; 0 &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If count &gt; 0 &rarr; <span class="eval-result-sat">SATISFIED</span> (counter active, can decrement)</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If count == 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (countdown complete)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>: at least one PUBKEY (the event-signer key) must be present in the merged block; else &rarr; <span class="eval-result-err">ERROR</span>. Identity is bound at MLSC-proof level via merkle_pub_key.</span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Collect NUMERICs. None present &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>count</code>; undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>count &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>count &gt; 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (counter active; pair with RECURSE_MODIFIED to decrement in the output); else (<code>== 0</code>) &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
@@ -146,10 +144,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>No NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>count &lt; 0</td><td class="r-err">ERROR</td></tr>
-      <tr><td>count == 0 (countdown done)</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>count &gt; 0 (counter active)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>No PUBKEY in the merged block</td><td class="r-err">ERROR</td></tr>
+      <tr><td>No NUMERIC field, or undecodable, or <code>count &lt; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>count == 0</code> (countdown done)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>count &gt; 0</code> (counter active)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

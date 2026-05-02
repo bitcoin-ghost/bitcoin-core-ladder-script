@@ -127,11 +127,10 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">HASH256</span> field. If missing or not exactly 32 bytes &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no transaction context or spent_outputs unavailable &rarr; <span class="eval-result-sat">SATISFIED</span> (structural validation only)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">For each other input in the transaction: compute <span class="eval-keyword">SHA256</span>(spent_output.scriptPubKey)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If any computed hash matches the committed HASH256 &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">No match found across all other inputs &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">HASH256</span> field. Missing or not exactly 32 bytes &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Require <code>ctx.tx</code> and <code>ctx.spent_outputs</code>; either missing &rarr; <span class="eval-result-err">ERROR</span> (fail-closed &mdash; the cross-input check cannot be performed without spending-context).</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Iterate every other input <code>i</code> (skip <code>i == ctx.input_index</code>; skip <code>i &ge; ctx.spent_output_count</code>). Compute <span class="eval-keyword">SHA256</span> of <code>spent_outputs[i].script_pub_key</code> using a single <code>CSHA256().Write(spk).Finalize</code>.</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text"><code>memcmp</code> against the committed HASH256. First match &rarr; <span class="eval-result-sat">SATISFIED</span> (returns immediately). Loop completes with no match &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
@@ -141,9 +140,8 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>HASH256 field missing</td><td class="r-err">ERROR</td></tr>
-      <tr><td>HASH256 field not exactly 32 bytes</td><td class="r-err">ERROR</td></tr>
-      <tr><td>No transaction context (structural check)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>HASH256 field missing or not exactly 32 bytes</td><td class="r-err">ERROR</td></tr>
+      <tr><td>No <code>ctx.tx</code> or <code>ctx.spent_outputs</code> (cross-input check needs spend context)</td><td class="r-err">ERROR</td></tr>
       <tr><td>No other input's spent scriptPubKey hash matches</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>At least one other input's spent scriptPubKey hash matches</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
@@ -173,7 +171,7 @@
     <div class="eval-step"><span class="eval-step-text">TX has 3 inputs. Input[2].spent_output.scriptPubKey matches &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
     <div class="eval-step"><span class="eval-step-text">TX has 1 input (only self). No other inputs to check &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
     <div class="eval-step"><span class="eval-step-text">TX has 2 inputs. No scriptPubKey hash matches &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-text">No tx context (structural only) &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-text">No tx context or spent_outputs available &rarr; <span class="eval-result-err">ERROR</span> (fail-closed)</span></div>
   </div>
 </div>
 

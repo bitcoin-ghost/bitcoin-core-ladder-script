@@ -128,12 +128,12 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">high_sat_vb</span> and <span class="eval-keyword">low_sat_vb</span> from NUMERIC fields</span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no transaction context available &rarr; <span class="eval-result-err">ERROR</span> (fail-safe)</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Compute <span class="eval-keyword">fee</span> = sum(inputs) - sum(outputs)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Compute <span class="eval-keyword">fee_rate</span> = fee / vsize</span></div>
-    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If low_sat_vb &le; fee_rate &le; high_sat_vb &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (fee rate outside band)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>high</code> and the second as <code>low</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Range/order check: <code>high &lt; 0</code>, <code>low &lt; 0</code>, or <code>low &gt; high</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Require <code>ctx.tx</code>, <code>ctx.spent_outputs</code>, and <code>ctx.tx_weight &gt; 0</code>; missing &rarr; <span class="eval-result-err">ERROR</span> (fail-closed).</span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Compute <code>fee = &Sigma;(spent_outputs[i].value) - &Sigma;(tx.outputs[i].value)</code>. <code>fee &lt; 0</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">Compute <code>vsize = (tx_weight + 3) / 4</code> (BIP&nbsp;141 WITNESS_SCALE_FACTOR). <code>vsize &le; 0</code> &rarr; <span class="eval-result-err">ERROR</span>. Then <code>fee_rate = fee / vsize</code> &mdash; truncating integer division, so the consensus check uses the floor (sub-sat/vB precision is intentionally not enforced).</span></div>
+    <div class="eval-step"><span class="eval-step-num">6.</span><span class="eval-step-text">If <code>low &le; fee_rate &le; high</code> &rarr; <span class="eval-result-sat">SATISFIED</span>; else &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
   </div>
 </div>
 
@@ -143,11 +143,12 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>No transaction context (fail-safe)</td><td class="r-err">ERROR</td></tr>
-      <tr><td>fee_rate &lt; low_sat_vb</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>fee_rate &gt; high_sat_vb</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>low_sat_vb &le; fee_rate &le; high_sat_vb</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 2 NUMERIC fields, or either undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Missing tx / spent_outputs / tx_weight context, or vsize&nbsp;&le;&nbsp;0</td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>high &lt; 0</code>, <code>low &lt; 0</code>, or <code>low &gt; high</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>fee &lt; 0</code> (outputs exceed inputs)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>fee_rate</code> below <code>low</code> or above <code>high</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>low &le; fee_rate &le; high</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

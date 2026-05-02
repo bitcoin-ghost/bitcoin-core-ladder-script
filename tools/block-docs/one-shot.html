@@ -92,10 +92,10 @@
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td class="field-name">state</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Trigger state: 0 = armed (can fire), nonzero = fired (permanently used)</td></tr>
-      <tr><td class="field-name">commitment</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Commitment hash binding the trigger to a specific action or context</td></tr>
+      <tr><td class="field-name">commitment</td><td class="field-type">HASH256</td><td class="field-size">32 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Commitment hash binding the trigger to a specific action or context. Must equal <code>SHA256(witness PREIMAGE)</code> at spend time (hash binding via <span class="eval-keyword">VerifyHashPreimageBinding</span>).</td></tr>
+      <tr><td class="field-name">preimage</td><td class="field-type">PREIMAGE</td><td class="field-size">var</td><td class="field-side-w">Witness</td><td class="field-desc">Preimage whose SHA-256 must equal <code>commitment</code>. Required at spend time.</td></tr>
     </tbody>
   </table>
-  <p class="section-text" style="margin-top:12px">No witness fields required. The HASH256 commitment binds the one-shot to a specific purpose, preventing reuse across different contexts.</p>
 </div>
 
 <!-- Wire Format -->
@@ -113,12 +113,13 @@
     <div class="wire-row">
       <span class="wire-segment wire-type">0x0661</span>
       <span class="wire-segment wire-inv">0</span>
-      <span class="wire-segment wire-count">0</span>
-      <span class="wire-bytes">Witness = 4 bytes (empty block)</span>
+      <span class="wire-segment wire-count">1</span>
+      <span class="wire-segment wire-field-pre">PREIMAGE &middot; var</span>
+      <span class="wire-bytes">Witness &asymp; 4 + 1 + len bytes</span>
     </div>
     <div class="wire-total">
       <span class="wire-total-label">Total</span>
-      <span class="wire-total-bytes">47 bytes</span>
+      <span class="wire-total-bytes">&asymp; 48 + len bytes</span>
     </div>
   </div>
 </div>
@@ -127,10 +128,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">state</span> from NUMERIC field. If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">commitment</span> from HASH256 field. If missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If state == 0 &rarr; <span class="eval-result-sat">SATISFIED</span> (trigger is armed, can fire)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If state != 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (trigger already fired, permanently used)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Locate the conditions <span class="eval-keyword">NUMERIC</span> (<code>state</code>). Missing &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredHashes(block, 1)</span>: at least one HASH256 (<code>commitment</code>) must be present; else &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text"><span class="eval-keyword">VerifyHashPreimageBinding(block)</span>: pair the conditions HASH256 with a witness PREIMAGE; require <code>SHA256(preimage) == commitment</code>. Missing PREIMAGE, undersized HASH256, or mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text"><span class="eval-keyword">ReadNumeric</span> the state; undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">5.</span><span class="eval-step-text">If <code>state == 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (trigger is armed, can fire); else (any nonzero) &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (trigger already fired)</span></div>
   </div>
 </div>
 
@@ -140,10 +142,10 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC field</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Missing HASH256 commitment</td><td class="r-err">ERROR</td></tr>
-      <tr><td>state != 0 (already fired)</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>state == 0 (armed)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Missing NUMERIC, missing HASH256, or NUMERIC undecodable</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness has no PREIMAGE, or hash binding fails</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>state != 0</code> (already fired)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>state == 0</code> with valid hash binding</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>

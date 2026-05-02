@@ -132,12 +132,11 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read <span class="eval-keyword">max_per_block</span> (NUMERIC[0]), <span class="eval-keyword">accumulation_cap</span> (NUMERIC[1]), <span class="eval-keyword">refill_blocks</span> (NUMERIC[2]). If fewer than 3 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">output_amount</span> from the evaluation context</span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If output_amount &gt; max_per_block &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (exceeds per-transaction limit)</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Otherwise &rarr; <span class="eval-result-sat">SATISFIED</span> (within allowed rate)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Collect conditions <span class="eval-keyword">NUMERIC</span> fields. Fewer than 3 &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text"><span class="eval-keyword">ReadNumeric</span> the first as <code>max_per_block</code>; undecodable &rarr; <span class="eval-result-err">ERROR</span>. <code>max_per_block &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>ctx.output_amount &gt; max_per_block</code> &rarr; <span class="eval-result-unsat">UNSATISFIED</span>; else &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
-  <p class="section-text" style="margin-top:12px"><strong>Note:</strong> Full accumulation tracking (cap enforcement across multiple transactions, refill period management) requires UTXO chain state and is handled at a higher protocol layer.</p>
+  <p class="section-text" style="margin-top:12px"><strong>Note:</strong> The L1 evaluator only enforces the per-tx limit. <code>accumulation_cap</code> and <code>refill_blocks</code> are reserved for L2 protocols that track UTXO chain state &mdash; consensus parses them but does not validate or use them. A UTXO holder can drain <code>max_per_block</code> per transaction (potentially multiple txs per block); compose with <code>RECURSE_SAME</code> to enforce a single spend path per output.</p>
 </div>
 
 <!-- Results -->
@@ -146,9 +145,9 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Fewer than 3 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>output_amount &gt; max_per_block</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>output_amount &le; max_per_block</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Fewer than 3 NUMERIC fields, <code>max_per_block</code> undecodable, or <code>&lt; 0</code></td><td class="r-err">ERROR</td></tr>
+      <tr><td><code>output_amount &gt; max_per_block</code></td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>output_amount &le; max_per_block</code></td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
