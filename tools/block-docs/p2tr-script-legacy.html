@@ -185,7 +185,6 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Missing HASH256 or PREIMAGE</td><td class="r-err">ERROR</td></tr>
-      <tr><td>HASH256 wrong size or Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
       <tr><td>SHA256(PREIMAGE) != HASH256 (Merkle root)</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>PREIMAGE fails to deserialize as Ladder conditions</td><td class="r-err">ERROR</td></tr>
       <tr><td>Inner conditions evaluation fails</td><td class="r-unsat">UNSATISFIED</td></tr>
@@ -199,13 +198,12 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"P2TR_SCRIPT_LEGACY"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e3b0c4...32 bytes (Merkle root)"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes (internal key)"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e3b0c4...32 bytes (Merkle root)"</span> }
   ]
 }</pre></div>
 

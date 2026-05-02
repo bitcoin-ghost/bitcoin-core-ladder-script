@@ -158,7 +158,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Verify both witness pubkeys (signing_key and adaptor_point) against Merkle leaf (merkle_pub_key). If either mismatches &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Both pubkeys are bound to the rung leaf at MLSC-proof level (merkle_pub_key); a different pubkey produces a different leaf and the proof rejects before this evaluator runs.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
@@ -182,7 +182,6 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Missing PUBKEY or SIGNATURE in witness</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Fewer than 2 pubkeys in Merkle leaf (PubkeyCountForBlock = 2)</td><td class="r-err">ERROR</td></tr>
       <tr><td>Adaptor point not valid x-only point</td><td class="r-err">ERROR</td></tr>
       <tr><td>Signing key commitment mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Adaptor point commitment mismatch</td><td class="r-unsat">UNSATISFIED</td></tr>
@@ -196,13 +195,11 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"ADAPTOR_SIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes (signing key)"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes (adaptor point)"</span> }
   ]
 }</pre></div>
 

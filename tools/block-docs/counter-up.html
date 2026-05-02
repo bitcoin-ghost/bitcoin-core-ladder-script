@@ -129,7 +129,7 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If missing or mismatch &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span>. If missing &rarr; <span class="eval-result-err">ERROR</span>. (Pubkey identity is already enforced by merkle_pub_key at MLSC-proof level &mdash; a mismatched pubkey produces a different leaf and rejects before this evaluator runs.)</span></div>
     <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Read <span class="eval-keyword">current</span> (NUMERIC[0]) and <span class="eval-keyword">target</span> (NUMERIC[1]). If fewer than 2 NUMERIC fields &rarr; <span class="eval-result-err">ERROR</span></span></div>
     <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If current &lt; 0 or target &lt; 0 &rarr; <span class="eval-result-err">ERROR</span></span></div>
     <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If current &lt; target &rarr; <span class="eval-result-sat">SATISFIED</span> (still counting)</span></div>
@@ -143,7 +143,6 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
       <tr><td>Fewer than 2 NUMERIC fields</td><td class="r-err">ERROR</td></tr>
       <tr><td>current &lt; 0 or target &lt; 0</td><td class="r-err">ERROR</td></tr>
       <tr><td>current &ge; target</td><td class="r-unsat">UNSATISFIED</td></tr>
@@ -160,7 +159,6 @@
   <span class="json-key">"type"</span>: <span class="json-str">"COUNTER_UP"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">3</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">10</span> }
   ]

@@ -172,7 +172,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
@@ -204,7 +204,6 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
       <tr><td>Negative timelock value</td><td class="r-err">ERROR</td></tr>
       <tr><td>Signature size out of range</td><td class="r-err">ERROR</td></tr>
       <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
@@ -219,12 +218,11 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-label">Conditions (committed in the rung leaf)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"TIMELOCKED_SIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
   ]

@@ -153,7 +153,7 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (example 2-of-3 &mdash; size independent of N):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf; size independent of N because the N pubkeys are folded into a single 32-byte inner Merkle root):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0002</span>
@@ -196,19 +196,23 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Read threshold <span class="eval-keyword">M</span> from NUMERIC field. If M &lt; 1 or M &gt; N &rarr; <span class="eval-result-unsat">ERROR</span></span>
+      <span class="eval-step-text">Read threshold <span class="eval-keyword">K</span> from the conditions NUMERIC field. If K &lt; 1 &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Verify each witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If any key fails verification &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Witness must contain exactly K triplets <code>(PUBKEY, MERKLE_PROOF, SIGNATURE)</code> in strict ascending pubkey-lex order. Otherwise &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">For each <span class="eval-keyword">SIGNATURE</span>, try each unused pubkey. On valid match, increment valid_count and mark pubkey used.</span>
+      <span class="eval-step-text">For each triplet: verify the <span class="eval-keyword">MERKLE_PROOF</span> against <span class="eval-keyword">pubkey_root</span> (the conditions HASH256) using the inner pubkey-Merkle scheme &mdash; tagged hash <code>LadderMultisigPubkey/v1</code> for leaves, <code>LadderMultisigInternal/v1</code> for interior nodes, <code>LadderMultisigPadding/v1</code> for empty-leaf padding. Proof failure &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
-      <span class="eval-step-text">If <span class="eval-keyword">valid_count</span> &ge; M &rarr; <span class="eval-result-sat">SATISFIED</span>. Otherwise &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">For each triplet: verify the <span class="eval-keyword">SIGNATURE</span> against the revealed <span class="eval-keyword">PUBKEY</span> using the conditions <span class="eval-keyword">SCHEME</span>. Any signature fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+    </div>
+    <div class="eval-step">
+      <span class="eval-step-num">5.</span>
+      <span class="eval-step-text">All K Merkle proofs and K signatures valid &rarr; <span class="eval-result-sat">SATISFIED</span></span>
     </div>
   </div>
 </div>
@@ -219,12 +223,12 @@
   <table class="result-table">
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
-      <tr><td>Missing NUMERIC field or Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Threshold M &lt; 1 or M &gt; N</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Fewer than N pubkeys in witness</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf verification fails for any key</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>Fewer than M valid signatures</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td>M or more valid signatures from distinct keys</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td>Conditions missing NUMERIC(K), SCHEME, or HASH256(pubkey_root)</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Threshold K &lt; 1</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Witness triplet count != K, or triplets not strict-ascending by pubkey</td><td class="r-err">ERROR</td></tr>
+      <tr><td>Any inner-pubkey-Merkle proof fails to reconstruct pubkey_root</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>Any signature fails verification against its pubkey</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td>All K Merkle proofs and K signatures valid</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
@@ -233,30 +237,32 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (scriptPubKey, 2-of-3 example)</div>
+  <div class="json-label">Conditions (committed in the rung leaf, 2-of-3 example)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"MULTISIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">2</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02789a...33 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"&lt;pubkey_root, 32 bytes&gt;"</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:6px;font-size:12px;color:#888">The N pubkeys themselves never appear in the conditions — only the root binds them. <code>createrungtx</code> / <code>signrungtx</code> accept the N-pubkey list as a side hint and compute the root automatically.</p>
 
-  <div class="json-label" style="margin-top:16px">Witness (input, 2-of-3 example)</div>
+  <div class="json-label" style="margin-top:16px">Witness (input, 2-of-3 example &mdash; K=2 ordered triplets)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"MULTISIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02789a...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e5f71...64 bytes"</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"&lt;sibling hashes, 0&ndash;128 bytes&gt;"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"&lt;sig under pubkey #1&gt;"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>,       <span class="json-key">"hex"</span>: <span class="json-str">"03def2...33 bytes"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"MERKLE_PROOF"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"&lt;sibling hashes, 0&ndash;128 bytes&gt;"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>,    <span class="json-key">"hex"</span>: <span class="json-str">"&lt;sig under pubkey #2&gt;"</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:6px;font-size:12px;color:#888">Triplet ordering is strict-ascending by pubkey lex; reordering triplets changes the wtxid and is rejected at deserialisation.</p>
 </div>
 
 <!-- Use Cases -->

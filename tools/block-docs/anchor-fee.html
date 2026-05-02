@@ -155,7 +155,7 @@
   <div class="eval-box">
     <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Verify both witness <span class="eval-keyword">PUBKEY</span>s against the Merkle leaf (merkle_pub_key). If either mismatches &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Both pubkeys are bound to the rung leaf at MLSC-proof level (merkle_pub_key); a different pubkey produces a different leaf and the proof rejects before this evaluator runs.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
@@ -184,7 +184,6 @@
     <tbody>
       <tr><td>Missing required fields</td><td class="r-err">ERROR</td></tr>
       <tr><td>min_fee_rate &gt; max_fee_rate</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Either Merkle leaf check fails</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Either signature invalid</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Fee rate outside [min, max] band</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Spending tx exceeds max_weight</td><td class="r-unsat">UNSATISFIED</td></tr>

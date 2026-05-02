@@ -131,7 +131,7 @@
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
     <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Compute SHA256(<span class="eval-keyword">PREIMAGE</span>). If != <span class="eval-keyword">HASH256</span> &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Pubkey integrity already enforced at MLSC-proof level (merkle_pub_key binds the witness <span class="eval-keyword">PUBKEY</span> into the rung leaf; a mismatched pubkey produces a different leaf and the proof rejects before any block runs).</span></div>
     <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
     <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">Both passed &rarr; <span class="eval-result-sat">SATISFIED</span></span></div>
   </div>
@@ -144,7 +144,6 @@
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"HASH_SIG"</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"HASH256"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"e3b0c442...32 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> }
   ]

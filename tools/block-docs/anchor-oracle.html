@@ -125,7 +125,7 @@
 <div class="doc-section">
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
-    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Extract <span class="eval-keyword">PUBKEY</span> field for <span class="eval-keyword">oracle_key</span> (verified via Merkle leaf)</span></div>
+    <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text">Read witness <span class="eval-keyword">PUBKEY</span> for <span class="eval-keyword">oracle_key</span>. Identity is already pinned by merkle_pub_key at MLSC-proof level.</span></div>
     <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">If no pubkey field present &rarr; <span class="eval-result-err">ERROR</span></span></div>
     <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">Read <span class="eval-keyword">outcome_count</span> from NUMERIC field</span></div>
     <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If outcome_count &le; 0 &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span></div>
@@ -155,7 +155,6 @@
   <span class="json-key">"type"</span>: <span class="json-str">"ANCHOR_ORACLE"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02f1a2b3...oracle public key...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">3</span> }
   ]
 }</pre></div>

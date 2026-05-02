@@ -124,7 +124,7 @@
 <div class="doc-section">
   <div class="section-label">Wire Format Breakdown</div>
 
-  <p class="section-text" style="margin-bottom:16px">Conditions side (in scriptPubKey):</p>
+  <p class="section-text" style="margin-bottom:16px">Conditions side (committed in the rung leaf via the structural template + value commitment; recovered at spend time inside the MLSC proof):</p>
   <div class="wire-breakdown">
     <div class="wire-row">
       <span class="wire-segment wire-type" style="min-width:60px">0x0001</span>
@@ -160,16 +160,20 @@
   <div class="section-label">Evaluation Logic</div>
   <div class="eval-box">
     <div class="eval-step">
+      <span class="eval-step-num">0.</span>
+      <span class="eval-step-text"><em>Pre-eval (MLSC proof verification, not EvalSigBlock):</em> the witness PUBKEY is folded into the rung leaf via merkle_pub_key during proof reconstruction. If the revealed pubkey doesn't match what was committed at fund time, leaf reconstruction yields a different root and the proof rejects before block evaluation runs.</span>
+    </div>
+    <div class="eval-step">
       <span class="eval-step-num">1.</span>
-      <span class="eval-step-text">Verify witness <span class="eval-keyword">PUBKEY</span> against Merkle leaf (merkle_pub_key). If mismatch &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Locate <span class="eval-keyword">PUBKEY</span> and <span class="eval-keyword">SIGNATURE</span> witness fields. If either missing &rarr; <span class="eval-result-err">ERROR</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">2.</span>
-      <span class="eval-step-text">Check for <span class="eval-keyword">SCHEME</span> field. If PQ scheme identifier present, route to post-quantum verifier.</span>
+      <span class="eval-step-text">Read <span class="eval-keyword">SCHEME</span> field. If PQ scheme (FALCON-512/1024, Dilithium3, SPHINCS+), route to <code>EvalPQSig</code>. If SCHNORR/ECDSA, dispatch by signature size below.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">3.</span>
-      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. Schnorr if 64-65B, ECDSA if 8-72B. If invalid &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
+      <span class="eval-step-text">Verify <span class="eval-keyword">SIGNATURE</span> against PUBKEY. Schnorr if 64-65 B, ECDSA if 8-72 B; sizes outside both ranges &rarr; <span class="eval-result-err">ERROR</span>. Verification fails &rarr; <span class="eval-result-unsat">UNSATISFIED</span></span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">4.</span>
@@ -185,7 +189,6 @@
     <thead><tr><th>Condition</th><th>Result</th></tr></thead>
     <tbody>
       <tr><td>Missing PUBKEY or SIGNATURE</td><td class="r-err">ERROR</td></tr>
-      <tr><td>Merkle leaf pubkey count mismatch</td><td class="r-err">ERROR</td></tr>
       <tr><td>Signature size out of range</td><td class="r-err">ERROR</td></tr>
       <tr><td>Merkle leaf verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
       <tr><td>Signature verification fails</td><td class="r-unsat">UNSATISFIED</td></tr>
@@ -198,15 +201,15 @@
 <div class="doc-section">
   <div class="section-label">JSON Wire Format</div>
 
-  <div class="json-label">Conditions (scriptPubKey)</div>
+  <div class="json-label">Conditions (committed in the rung leaf; PUBKEY is folded out via merkle_pub_key, not stored as a field)</div>
   <div class="json-block"><pre>{
   <span class="json-key">"type"</span>: <span class="json-str">"SIG"</span>,
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
     { <span class="json-key">"type"</span>: <span class="json-str">"SCHEME"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"01"</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:6px;font-size:12px;color:#888">When passing this block to <code>createrungtx</code> or <code>signrungtx</code>, pass the pubkey via the rung-level <code>"pubkeys"</code> array (singular SCHNORR case) or via a <code>PUBKEY</code> field that the parser folds into the leaf — either way the wire-format conditions block carries only SCHEME.</p>
 
   <div class="json-label" style="margin-top:16px">Witness (input)</div>
   <div class="json-block"><pre>{
