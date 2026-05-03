@@ -6185,6 +6185,26 @@ util::Result<void> ChainstateManager::PopulateAndValidateSnapshot(
                 outpoint.n = static_cast<uint32_t>(ReadCompactSize(coins_file));
                 outpoint.hash = txid;
                 coins_file >> coin;
+                // Ladder Script (audit 2026-05-03 F3): emit a v4-specific
+                // diagnostic when the snapshot contains a synthetic MLSC root
+                // entry (outpoint.n == MLSC_ROOT_VOUT == 0xFFFFFFFF). The
+                // existing anti-overflow guard below already fails the load,
+                // but with the generic "Bad snapshot data" message; this
+                // makes the actual cause visible to operators. The BIP's
+                // §Security "Stateless verifier obligation" requires
+                // snapshots to either carry the synthetic entries or be
+                // rejected; this proposal does the latter until a snapshot-
+                // format extension is specified.
+                if (outpoint.n == MLSC_ROOT_VOUT) {
+                    return util::Error{Untranslated(strprintf(
+                        "Snapshot contains a Ladder Script v4 MLSC synthetic root entry "
+                        "at (txid=%s, n=0x%x). The current snapshot format does not "
+                        "carry the conditions_root data needed to validate v4 spends. "
+                        "Snapshots from v4-bearing chains are not loadable until the "
+                        "snapshot format is extended (see BIP-XXXX §Security, "
+                        "Stateless verifier obligation).",
+                        outpoint.hash.ToString(), outpoint.n))};
+                }
                 if (coin.nHeight > base_height ||
                     outpoint.n >= std::numeric_limits<decltype(outpoint.n)>::max() // Avoid integer wrap-around in coinstats.cpp:ApplyHash
                 ) {
