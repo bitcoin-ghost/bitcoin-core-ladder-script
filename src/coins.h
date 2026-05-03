@@ -491,6 +491,31 @@ private:
 //! once per transaction, enabling UTXO deduplication (~8 bytes/output vs ~48 bytes).
 static constexpr uint32_t MLSC_ROOT_VOUT = 0xFFFFFFFF;
 
+//! TX_MLSC synthetic root entry payload format:
+//!   v0.13+ (current): 0xDE || conditions_root[32] || refcount_LE_u16  (35 bytes)
+//!   v0.12 (legacy):   0xDE || conditions_root[32]                     (33 bytes)
+//! The refcount tracks the number of unspent non-DATA_RETURN MLSC outputs from
+//! the creating tx. When it drops to zero on the forward path, the synthetic
+//! entry is deleted. Legacy 33-byte entries (created by pre-v0.13 nodes) are
+//! treated as "infinite refcount" for backward compatibility — they leak on
+//! the forward path until the chainstate is rebuilt with -reindex.
+static constexpr size_t MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY = 33;
+static constexpr size_t MLSC_SYNTHETIC_PAYLOAD_SIZE = 35;
+
+//! Decrement the refcount on the synthetic root entry for `creating_txid`.
+//! Called from UpdateCoins after each MLSC input spend. If the refcount drops
+//! to zero, the synthetic entry is deleted (releasing ~35 B of chainstate).
+//! Legacy 33-byte entries are not modified (no refcount field; leak as before).
+//! Audit 2026-05-03 F2.
+void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid);
+
+//! Increment the refcount on the synthetic root entry for `creating_txid`.
+//! Called from DisconnectBlock when an MLSC input is restored from undo.
+//! Returns false if the synthetic entry is missing (deep reorg crossed a
+//! GC point); the caller must then fail the disconnect cleanly. Audit
+//! 2026-05-03 F2.
+bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid);
+
 //! Utility function to add all of a transaction's outputs to a cache.
 //! When check is false, this assumes that overwrites are only possible for coinbase transactions.
 //! When check is true, the underlying view may be queried to determine whether an addition is

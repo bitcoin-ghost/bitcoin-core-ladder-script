@@ -2162,6 +2162,16 @@ void UpdateCoins(const CTransaction& tx, CCoinsViewCache& inputs, CTxUndo &txund
             txundo.vprevout.emplace_back();
             bool is_spent = inputs.SpendCoin(txin.prevout, &txundo.vprevout.back());
             assert(is_spent);
+
+            // TX_MLSC (audit 2026-05-03 F2): if the spent input is an MLSC
+            // coin, decrement the synthetic root entry's refcount on its
+            // creating tx. When the refcount reaches zero the entry is
+            // deleted, releasing ~35 B of chainstate per v4 tx that has
+            // been fully spent.
+            const auto& spent_spk = txundo.vprevout.back().out.scriptPubKey;
+            if (rung::IsCompactMLSC(spent_spk) || rung::IsMLSCScript(spent_spk)) {
+                DecrementMLSCSyntheticRefcount(inputs, txin.prevout.hash);
+            }
         }
     }
     // add outputs
@@ -2385,9 +2395,15 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     if (cached != root_cache.end()) {
                         root = cached->second;
                     } else {
-                        // Look up the synthetic root entry from the UTXO cache
+                        // Look up the synthetic root entry from the UTXO cache.
+                        // Accept either 33-byte legacy (pre-v0.13) or 35-byte
+                        // current-format (audit 2026-05-03 F2: refcount appended)
+                        // payloads. The conditions_root sits at bytes [1..33] in
+                        // both formats.
                         const Coin& root_coin = inputs.AccessCoin(COutPoint(source_txid, MLSC_ROOT_VOUT));
-                        if (!root_coin.IsSpent() && root_coin.out.scriptPubKey.size() == 33 &&
+                        if (!root_coin.IsSpent() &&
+                            (root_coin.out.scriptPubKey.size() == MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY ||
+                             root_coin.out.scriptPubKey.size() == MLSC_SYNTHETIC_PAYLOAD_SIZE) &&
                             root_coin.out.scriptPubKey[0] == rung::MLSC_SYNTHETIC_MARKER) {
                             memcpy(root.data(), &root_coin.out.scriptPubKey[1], 32);
                             root_cache[source_txid] = root;
@@ -2592,9 +2608,32 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
             for (unsigned int j = tx.vin.size(); j > 0;) {
                 --j;
                 const COutPoint& out = tx.vin[j].prevout;
+                // TX_MLSC (audit 2026-05-03 F2): capture whether this input
+                // is an MLSC coin BEFORE ApplyTxInUndo moves it into the
+                // cache. We need the increment after the restore so the
+                // synthetic entry refcount stays in sync with the live MLSC
+                // coins from the creating tx.
+                const bool restoring_mlsc =
+                    rung::IsCompactMLSC(txundo.vprevout[j].out.scriptPubKey) ||
+                    rung::IsMLSCScript(txundo.vprevout[j].out.scriptPubKey);
                 int res = ApplyTxInUndo(std::move(txundo.vprevout[j]), view, out);
                 if (res == DISCONNECT_FAILED) return DISCONNECT_FAILED;
                 fClean = fClean && res != DISCONNECT_UNCLEAN;
+                if (restoring_mlsc && !IncrementMLSCSyntheticRefcount(view, out.hash)) {
+                    // Deep reorg crossed a GC point — the synthetic entry
+                    // for this MLSC coin's creating tx was deleted on the
+                    // forward path and cannot be reconstructed from the
+                    // chainstate alone. Mark unclean; subsequent re-spend
+                    // of any output from this creating tx will fail loudly
+                    // at FetchConditionsRoot. Operators encountering this
+                    // can recover with -reindex.
+                    LogWarning("DisconnectBlock(): MLSC synthetic entry missing for "
+                               "restored input %s:%u (creating tx=%s). Deep reorg "
+                               "crossed a refcount GC point; chainstate may need "
+                               "-reindex to fully recover.",
+                               out.hash.ToString(), out.n, out.hash.ToString());
+                    fClean = false;
+                }
             }
             // At this point, all of txundo.vprevout should have been moved out.
         }

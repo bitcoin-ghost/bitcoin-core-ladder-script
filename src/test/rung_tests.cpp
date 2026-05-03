@@ -18,6 +18,7 @@
 #include <rung/sighash.h>
 #include <rung/types.h>
 
+#include <coins.h>
 #include <compressor.h>
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
@@ -13192,6 +13193,110 @@ BOOST_AUTO_TEST_CASE(synthetic_not_compressed)
     CScript syn; syn.resize(33); syn[0] = 0xDE;
     CompressedScript c;
     BOOST_CHECK(!CompressScript(syn, c));
+}
+
+// Audit 2026-05-03 F2 regression: synthetic root entry should be deleted on
+// the forward path once every spendable MLSC output of the creating tx has
+// been spent. The refcount in the synthetic entry's payload (bytes 33-34, LE
+// uint16) is decremented per spend; entry is GC'd when it reaches zero.
+BOOST_AUTO_TEST_CASE(synthetic_refcount_lifecycle)
+{
+    // Build a creating tx with 3 spendable MLSC outputs.
+    CMutableTransaction creating;
+    creating.version = CTransaction::RUNG_TX_VERSION;
+    creating.conditions_root = *uint256::FromHex(
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    for (int i = 0; i < 3; ++i) {
+        CTxOut out;
+        out.nValue = 100000;
+        out.scriptPubKey = CreateMLSCScript(creating.conditions_root);
+        creating.vout.push_back(out);
+    }
+    Txid creating_txid = CTransaction(creating).GetHash();
+
+    // Set up an empty CCoinsViewCache backed by an in-memory dummy view.
+    CCoinsView base;
+    CCoinsViewCache cache(&base);
+
+    // AddCoins should write the synthetic entry with refcount = 3.
+    AddCoins(cache, CTransaction(creating), 1, false);
+    {
+        const Coin& synth = cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT));
+        BOOST_REQUIRE(!synth.IsSpent());
+        BOOST_REQUIRE_EQUAL(synth.out.scriptPubKey.size(), MLSC_SYNTHETIC_PAYLOAD_SIZE);
+        BOOST_CHECK_EQUAL(synth.out.scriptPubKey[0], rung::MLSC_SYNTHETIC_MARKER);
+        const uint16_t refcount = static_cast<uint16_t>(synth.out.scriptPubKey[33]) |
+                                  (static_cast<uint16_t>(synth.out.scriptPubKey[34]) << 8);
+        BOOST_CHECK_EQUAL(refcount, 3u);
+    }
+
+    // Two decrements: refcount drops to 1, entry still present.
+    DecrementMLSCSyntheticRefcount(cache, creating_txid);
+    DecrementMLSCSyntheticRefcount(cache, creating_txid);
+    {
+        const Coin& synth = cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT));
+        BOOST_REQUIRE(!synth.IsSpent());
+        const uint16_t refcount = static_cast<uint16_t>(synth.out.scriptPubKey[33]) |
+                                  (static_cast<uint16_t>(synth.out.scriptPubKey[34]) << 8);
+        BOOST_CHECK_EQUAL(refcount, 1u);
+    }
+
+    // Third decrement: refcount hits zero, entry deleted.
+    DecrementMLSCSyntheticRefcount(cache, creating_txid);
+    {
+        const Coin& synth = cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT));
+        BOOST_CHECK(synth.IsSpent());
+    }
+
+    // Increment after deletion: returns false (deep-reorg-crossed-GC case).
+    BOOST_CHECK(!IncrementMLSCSyntheticRefcount(cache, creating_txid));
+}
+
+// Audit 2026-05-03 F2: pure-DATA_RETURN tx (every output has nValue == 0)
+// has no spendable MLSC coins; no synthetic entry should be written.
+BOOST_AUTO_TEST_CASE(synthetic_refcount_skips_data_return_only_tx)
+{
+    CMutableTransaction creating;
+    creating.version = CTransaction::RUNG_TX_VERSION;
+    creating.conditions_root = *uint256::FromHex(
+        "0101010101010101010101010101010101010101010101010101010101010101");
+    CTxOut out;
+    out.nValue = 0;
+    out.scriptPubKey = CreateMLSCScript(creating.conditions_root);
+    creating.vout.push_back(out);
+    Txid creating_txid = CTransaction(creating).GetHash();
+
+    CCoinsView base;
+    CCoinsViewCache cache(&base);
+    AddCoins(cache, CTransaction(creating), 1, false);
+
+    BOOST_CHECK(cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT)).IsSpent());
+}
+
+// Audit 2026-05-03 F2: legacy 33-byte synthetic entries (pre-v0.13
+// chainstate) have no refcount field. Decrement should leave them unchanged
+// rather than misinterpreting payload bytes as a refcount.
+BOOST_AUTO_TEST_CASE(synthetic_refcount_preserves_legacy_format)
+{
+    CCoinsView base;
+    CCoinsViewCache cache(&base);
+    Txid creating_txid = Txid::FromUint256(*uint256::FromHex(
+        "0202020202020202020202020202020202020202020202020202020202020202"));
+
+    // Manually write a legacy 33-byte synthetic entry.
+    CTxOut legacy;
+    legacy.nValue = 0;
+    legacy.scriptPubKey.resize(MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY);
+    legacy.scriptPubKey[0] = rung::MLSC_SYNTHETIC_MARKER;
+    for (int i = 0; i < 32; ++i) legacy.scriptPubKey[1 + i] = static_cast<uint8_t>(i);
+    cache.AddCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT), Coin(std::move(legacy), 1, false), false);
+
+    // Decrement: should preserve the legacy entry unchanged.
+    DecrementMLSCSyntheticRefcount(cache, creating_txid);
+    const Coin& after = cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT));
+    BOOST_REQUIRE(!after.IsSpent());
+    BOOST_CHECK_EQUAL(after.out.scriptPubKey.size(), MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY);
+    BOOST_CHECK_EQUAL(after.out.scriptPubKey[0], rung::MLSC_SYNTHETIC_MARKER);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

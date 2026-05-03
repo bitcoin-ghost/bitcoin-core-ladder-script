@@ -134,22 +134,99 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
     // time. The synthetic-root marker is distinct from MLSC_MARKER so the
     // compressor does not strip the root.
     //
-    // KNOWN DESIGN GAP (audit #7 #6, v0.12 deferred): the synthetic entry is
-    // only removed in DisconnectBlock — never on the forward path when the
-    // last real MLSC output of the tx is spent. UTXO bloat is ~33 B + Coin
-    // overhead per v4 tx, permanent past finality. ~9 MB/year at 100 v4 tx/
-    // block sustained. Fixing this requires a per-tx live-output count
-    // (ref-count) or migrating the conditions_root store out of the UTXO set
-    // entirely (separate index). Both are on-disk-format changes that need
-    // a dedicated release; tracked for v0.13+.
+    // v0.13+ (audit 2026-05-03 F2): payload is 35 bytes —
+    //   0xDE || conditions_root[32] || refcount_LE_u16
+    // The refcount counts unspent non-DATA_RETURN MLSC outputs from this
+    // creating tx. Decremented in UpdateCoins on each MLSC input spend;
+    // deleted when refcount reaches zero. DATA_RETURN outputs (nValue == 0)
+    // are unspendable and not counted; if every output is DATA_RETURN
+    // (refcount == 0), no synthetic entry is written.
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
+        uint16_t refcount = 0;
+        for (const auto& out : tx.vout) {
+            if (out.nValue > 0) refcount++;
+        }
+        if (refcount == 0) return; // pure-DATA_RETURN tx; no spendable MLSC coins
         CTxOut root_out;
         root_out.nValue = 0; // sentinel: not a real output, not spendable
-        root_out.scriptPubKey.resize(33);
+        root_out.scriptPubKey.resize(MLSC_SYNTHETIC_PAYLOAD_SIZE);
         root_out.scriptPubKey[0] = rung::MLSC_SYNTHETIC_MARKER;
         memcpy(&root_out.scriptPubKey[1], tx.conditions_root.data(), 32);
+        root_out.scriptPubKey[33] = static_cast<uint8_t>(refcount & 0xFF);
+        root_out.scriptPubKey[34] = static_cast<uint8_t>((refcount >> 8) & 0xFF);
         cache.AddCoin(COutPoint(txid, MLSC_ROOT_VOUT), Coin(std::move(root_out), nHeight, false), false);
     }
+}
+
+void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid)
+{
+    const COutPoint synth(creating_txid, MLSC_ROOT_VOUT);
+    Coin synth_coin;
+    if (!cache.SpendCoin(synth, &synth_coin)) {
+        // Entry missing — would indicate prior consensus bug or a tx that
+        // somehow had no spendable outputs at AddCoins time. Either way, no
+        // refcount to decrement.
+        return;
+    }
+    const auto& spk = synth_coin.out.scriptPubKey;
+    if (spk.empty() || spk[0] != rung::MLSC_SYNTHETIC_MARKER) {
+        // Not a synthetic entry — should never happen at MLSC_ROOT_VOUT.
+        // SpendCoin already removed it; do not re-add a corrupted entry.
+        return;
+    }
+    if (spk.size() == MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY) {
+        // Legacy 33-byte entry (pre-v0.13 chainstate) — no refcount field.
+        // Re-add unchanged so it persists like before. Operators on chains
+        // with legacy entries should -reindex to upgrade to refcount form.
+        cache.AddCoin(synth, std::move(synth_coin), /*possible_overwrite=*/true);
+        return;
+    }
+    if (spk.size() != MLSC_SYNTHETIC_PAYLOAD_SIZE) {
+        // Unknown payload size — leave deleted, do not re-add.
+        return;
+    }
+    uint16_t refcount = static_cast<uint16_t>(spk[33]) |
+                        (static_cast<uint16_t>(spk[34]) << 8);
+    if (refcount <= 1) {
+        // Last spend — leave the entry deleted. Chainstate cost recovered.
+        return;
+    }
+    refcount--;
+    synth_coin.out.scriptPubKey[33] = static_cast<uint8_t>(refcount & 0xFF);
+    synth_coin.out.scriptPubKey[34] = static_cast<uint8_t>((refcount >> 8) & 0xFF);
+    cache.AddCoin(synth, std::move(synth_coin), /*possible_overwrite=*/true);
+}
+
+bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid)
+{
+    const COutPoint synth(creating_txid, MLSC_ROOT_VOUT);
+    Coin synth_coin;
+    if (!cache.SpendCoin(synth, &synth_coin)) {
+        // Entry missing — deep reorg crossed a GC point. The conditions_root
+        // is unrecoverable from the chainstate alone (would require reading
+        // the creating tx from block storage, which is intentionally avoided
+        // on the validation hot path). Caller must fail the disconnect.
+        return false;
+    }
+    const auto& spk = synth_coin.out.scriptPubKey;
+    if (spk.empty() || spk[0] != rung::MLSC_SYNTHETIC_MARKER) {
+        return false;
+    }
+    if (spk.size() == MLSC_SYNTHETIC_PAYLOAD_SIZE_LEGACY) {
+        // Legacy 33-byte entry — no refcount, leave unchanged.
+        cache.AddCoin(synth, std::move(synth_coin), /*possible_overwrite=*/true);
+        return true;
+    }
+    if (spk.size() != MLSC_SYNTHETIC_PAYLOAD_SIZE) {
+        return false;
+    }
+    uint16_t refcount = static_cast<uint16_t>(spk[33]) |
+                        (static_cast<uint16_t>(spk[34]) << 8);
+    refcount++;
+    synth_coin.out.scriptPubKey[33] = static_cast<uint8_t>(refcount & 0xFF);
+    synth_coin.out.scriptPubKey[34] = static_cast<uint8_t>((refcount >> 8) & 0xFF);
+    cache.AddCoin(synth, std::move(synth_coin), /*possible_overwrite=*/true);
+    return true;
 }
 
 bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, Coin* moveout) {
