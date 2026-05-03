@@ -176,7 +176,7 @@ and `pqpubkeycommit` to compute the commitment. Supported schemes:
 | 0x13 | SPHINCS_SHA | 64 bytes | 49,216 bytes |
 
 Pubkey sizes are canonical per scheme; FALCON sigs are variable
-(post-v0.14 &mdash; pre-v0.14 wire-required exactly 666 B
+(post-v0.14 &mdash; pre-v0.14 wire-required variable up to 666 B
 which opened a 0-66 B/tx silent-padding embedding channel).
 `MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates the largest
 PQ signature (SPHINCS+).

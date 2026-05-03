@@ -488,7 +488,7 @@ the bitcoin-core-ladder repository.
 
 Test coverage includes:
 
-- 86 unit tests in the `qabi_tests` boost suite covering all 9
+- ~50 unit test cases under the `qabi_tests` Boost suite covering all 9
   consensus checks, the QABO sig cache amortisation, multi-party
   scale testing up to N=3,000, and the SIG escape rung end-to-end.
 - Functional regression tests in `test/functional/feature_qabi.py`

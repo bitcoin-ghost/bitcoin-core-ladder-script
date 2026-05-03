@@ -223,7 +223,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <p><code>[LadderWitness, MLSCProof, internal_pubkey (32 bytes)]</code>. The third element is the x-only internal pubkey used to tweak the merkle_root into the conditions_root via <code>TaggedHash("LadderTweak/v1", P || merkle_root)</code>. The verifier reconstructs the raw merkle_root from the proof, re-applies the tweak, and asserts equality with the spent output's conditions_root.</p>
     </div>
 
-    <p style="margin-top:12px">After the per-input witness stacks, the TX_MLSC wire format (flag byte <code>0x02</code>) carries two tx-level fields: <strong><code>qabi_block</code></strong> (empty for non-QABIO txs; the serialised QABIO batch state otherwise) and <strong><code>aggregated_sig</code></strong> (empty for non-QABIO txs; the coordinator's FALCON-512 signature, exactly 666 bytes, for QABIO batches). These let a single FALCON sig authorise an N-input batch — see <a href="docs/#QABIO">QABIO</a>.</p>
+    <p style="margin-top:12px">After the per-input witness stacks, the TX_MLSC wire format (flag byte <code>0x02</code>) carries two tx-level fields: <strong><code>qabi_block</code></strong> (empty for non-QABIO txs; the serialised QABIO batch state otherwise) and <strong><code>aggregated_sig</code></strong> (empty for non-QABIO txs; the coordinator's FALCON-512 signature, variable up to 666 bytes, for QABIO batches). These let a single FALCON sig authorise an N-input batch — see <a href="docs/#QABIO">QABIO</a>.</p>
   </div>
 
   <div class="section">

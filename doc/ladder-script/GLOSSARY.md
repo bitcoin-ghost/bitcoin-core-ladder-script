@@ -565,7 +565,7 @@ flag byte `0x02` (distinct from SegWit's `0x01`). Layout: nVersion(4) + dummy(0x
 flag(0x02) + vin[] + conditions_root(32) + vout[](8 bytes each, or `nValue==0` +
 data_len + data for DATA_RETURN) + per-input witness[] + qabi_block + aggregated_sig +
 nLockTime(4). The `qabi_block` and `aggregated_sig` fields are non-empty only for QABIO
-transactions; the latter carries the coordinator's FALCON-512 signature (exactly 666 B
+transactions; the latter carries the coordinator's FALCON-512 signature (variable up to 666 B
 when present). On deserialisation, outputs are inflated to `CTxOut(value, 0xDF + root)`
 (plus the data tail for DATA_RETURN) for compatibility with existing Bitcoin Core code.
 

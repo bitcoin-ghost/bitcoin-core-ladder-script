@@ -336,8 +336,19 @@ coins, ONE synthetic coin at `(txid, MLSC_ROOT_VOUT)` where
 exactly:
 
 ```
-0xDE || conditions_root            (33 bytes; marker byte 0xDE — see Rationale Q4)
+0xDE || conditions_root || refcount_LE_u16     (35 bytes; marker byte 0xDE — see Rationale Q4)
 ```
+
+The 16-bit refcount tracks how many spendable (non-DATA_RETURN) MLSC
+outputs from this creating transaction remain unspent. It is
+initialised to the number of spendable outputs at AddCoins time,
+decremented in UpdateCoins on each spend of an MLSC coin from this
+creating tx, and the synthetic entry is deleted when the refcount
+reaches zero — so the chainstate cost of the synthetic entry is paid
+only while at least one output of the creating tx is unspent.
+Reorg-safety: when DisconnectBlock crosses a deletion point, the
+deleted entry's `conditions_root` is recovered from per-input undo
+data and the entry is reconstructed with refcount = 1.
 
 The `0xDE` byte is a chainstate-internal marker, not a script
 opcode. The synthetic entry is never indexed by a `COutPoint` that
@@ -345,8 +356,8 @@ appears on a transaction input (`MLSC_ROOT_VOUT = 0xFFFFFFFF` is
 explicitly outside the legal range of `prevout.n` for any spendable
 output), so the script bytes are never passed to the script
 interpreter. The recovery code looks up the synthetic entry directly
-by `(creating_txid, 0xFFFFFFFF)` and reads the trailing 32 bytes; no
-opcode parser ever runs over `0xDE`.
+by `(creating_txid, 0xFFFFFFFF)` and reads bytes [1..33] for the
+conditions_root; no opcode parser ever runs over `0xDE`.
 
 Per-coin chainstate cost for an MLSC output is 3 bytes (1-byte SPK
 marker + value varint + height/coinbase byte). Spending validates by
@@ -2077,7 +2088,7 @@ exercised by the consensus path:
 | v2     | `P2WPKH_LEGACY`   | Bridging (HASH160-committed pubkey)           |
 | v3     | `HTLC`            | Triplets-K + Reveal-P (claim path: preimage + sig) |
 
-The reference implementation has 655 Boost unit test cases under
+The reference implementation has 660 Boost unit test cases under
 `src/test/rung_tests.cpp` and multiple functional tests under
 `test/functional/feature_rung_*.py`. A future revision is expected to
 extend the JSON file with vectors for QABIO priming, QABIO batch

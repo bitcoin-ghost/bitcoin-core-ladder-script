@@ -488,7 +488,7 @@ consider:
 - `rpc.cpp` (developer convenience)
 
 Dropping all droppable components yields approximately **~5,000–6,000 LOC** of library
-code versus the full 21,251 — the same 961-LOC Core Integration Patch in both cases.
+code versus the full 21,247 — the same 961-LOC Core Integration Patch in both cases.
 
 ---
 
@@ -569,7 +569,7 @@ constants that drive the run cost).
 Reviewers can re-run:
 
 - **Boost unit tests**: `build/bin/test_bitcoin --run_test=rung_tests` plus
-  `qabi_tests` and `tx_mlsc_tests` — **619 cases total** across the three
+  `qabi_tests` and `tx_mlsc_tests` — **660 cases total** across the three
   suites.
 - **Functional tests**: `test/functional/feature_rung_tx.py`,
   `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`,

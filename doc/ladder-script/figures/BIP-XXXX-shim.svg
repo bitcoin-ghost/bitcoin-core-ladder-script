@@ -68,7 +68,7 @@
   <g>
     <rect class="lib" x="500" y="40" width="260" height="280" rx="4"/>
     <text x="630" y="62" text-anchor="middle" class="title">Ladder library (new)</text>
-    <text x="630" y="80" text-anchor="middle" class="libstat">39 new files · 21,251 lines</text>
+    <text x="630" y="80" text-anchor="middle" class="libstat">39 new files · 21,247 lines</text>
 
     <rect class="libfile" x="514" y="98" width="232" height="34" rx="3"/>
     <text x="630" y="118" text-anchor="middle" class="mono" font-weight="600">src/rung/api.h</text>
