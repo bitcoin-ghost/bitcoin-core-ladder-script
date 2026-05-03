@@ -9454,6 +9454,44 @@ BOOST_AUTO_TEST_CASE(merkle_path_proof_serialization_roundtrip)
     }
 }
 
+// Audit 2026-05-03 F1 regression: the deser depth check used to allow
+// one extra sibling hash than the verifier expected (when total_leaves
+// was a power of 2). Padding a 4-leaf MERKLE_PATH proof with a third
+// sibling hash MUST now be rejected at deser, matching the verifier's
+// max_depth = log2(4) = 2.
+BOOST_AUTO_TEST_CASE(merkle_path_deser_rejects_extra_sibling_hash)
+{
+    // Build a valid 4-leaf MERKLE_PATH proof first.
+    MLSCProof proof;
+    proof.total_rungs = 4;
+    proof.total_relays = 0;
+    proof.rung_index = 1;
+    proof.proof_mode = MLSCProofMode::MERKLE_PATH;
+    std::vector<uint256> leaves;
+    for (int i = 0; i < 4; ++i) {
+        RungBlock block;
+        block.type = RungBlockType::SIG;
+        block.fields.push_back({RungDataType::SCHEME, {0x01}});
+        leaves.push_back(ComputeRungLeaf(Rung{{block}}, {}));
+    }
+    proof.proof_hashes = BuildMerklePath(leaves, 1);
+    BOOST_REQUIRE_EQUAL(proof.proof_hashes.size(), 2u);
+
+    RungBlock sig_block;
+    sig_block.type = RungBlockType::SIG;
+    sig_block.fields.push_back({RungDataType::SCHEME, {0x01}});
+    proof.revealed_rung.blocks.push_back(sig_block);
+
+    // Add a third sibling hash beyond the legitimate depth.
+    proof.proof_hashes.push_back(uint256::ZERO);
+
+    auto bytes = SerializeMLSCProof(proof);
+    MLSCProof decoded;
+    std::string error;
+    BOOST_CHECK(!DeserializeMLSCProof(bytes, decoded, error));
+    BOOST_CHECK(error.find("MLSC Merkle path too long") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(compact_coil_roundtrip_default)
 {
     // Default coil should use compact encoding (2 bytes)

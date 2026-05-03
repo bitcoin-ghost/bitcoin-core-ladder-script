@@ -953,8 +953,13 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
         // Read proof hashes
         uint64_t n_proofs = ReadCompactSize(ss);
         if (proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
-            // Merkle path: ceil(log2(padded_size)) sibling hashes
-            size_t total_leaves = total_rungs + total_relays + 1;
+            // Merkle path: ceil(log2(padded_size)) sibling hashes.
+            // total_leaves matches the verifier (conditions.cpp:1174/1191,
+            // evaluator.cpp:1222/1283) — no +1 padding allowance. A spurious
+            // +1 here used to permit an extra sibling hash for power-of-2
+            // leaf counts; the verifier rejected it on root mismatch but the
+            // deser tolerated the wasted bytes (audit 2026-05-03 F1).
+            size_t total_leaves = total_rungs + total_relays;
             size_t padded = 1;
             while (padded < total_leaves) padded <<= 1;
             size_t max_depth = 0;
