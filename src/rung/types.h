@@ -1661,7 +1661,7 @@ inline bool VerifyImplicitLayoutPairing()
         RungBlockType::ACCUMULATOR,
         RungBlockType::ANCHOR, RungBlockType::COMPARE,
         RungBlockType::OUTPUT_CHECK,
-        // E-022 (audit #3): timelock + COSIGN witness layouts dropped — the
+        // E-022: timelock + COSIGN witness layouts dropped — the
         // pre-fix layouts echoed conditions and the evaluator never read the
         // witness copy (FindField returned the conditions match first).
         RungBlockType::CSV, RungBlockType::CSV_TIME,

@@ -743,7 +743,7 @@ Run once per v4 transaction by `CheckInputScripts`:
    input, in which case `len(tx.aggregated_sig) ∈ [1,
    QABI_AGGREGATED_SIG_MAX]` where `QABI_AGGREGATED_SIG_MAX = 666`.
    FALCON-512 produces a variable-length signature; padding to a fixed
-   size was removed in v0.14 (audit #9 Finding 4) to close a
+   size was removed in v0.14 to close a
    coordinator-side embedding channel.
 
 #### Per-input checks (`VerifyRungTx`)

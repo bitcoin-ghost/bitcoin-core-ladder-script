@@ -63,7 +63,7 @@ qabi_buildblock <coordinator_pubkey_hex> <prime_expiry_height> [<batch_id_hex>]
 **Inputs:**
 - `coordinator_pubkey_hex` — FALCON-512 public key (exactly 897 bytes hex)
 - `prime_expiry_height` — max block height at which the batch can execute
-- `batch_id_hex` — optional placeholder. **Ignored** by the parser (v0.13 audit #9 F6 enforces canonical SHA256 derivation); the canonical value comes back in the result. Retained as a positional slot for API stability.
+- `batch_id_hex` — optional placeholder. **Ignored** by the parser (v0.13 enforces canonical SHA256 derivation); the canonical value comes back in the result. Retained as a positional slot for API stability.
 - `entries` — array of `{participant_id, contribution, destination_index}`
   - `participant_id` = SHA256(participant's Rung 0 FALCON pubkey), 32 bytes hex
   - `contribution` = satoshis this participant contributes
@@ -120,7 +120,7 @@ qabi_signqabo <tx_hex> <coordinator_privkey_hex>
 }
 ```
 
-Computes SIGHASH_QABO, signs it with the FALCON-512 private key, and re-serialises the tx with `aggregated_sig` populated by the actual variable-length signature (consensus accepts `1..QABI_AGGREGATED_SIG_MAX = 666` bytes). Rejects txs without a `qabi_block` (not a QABIO batch). v0.14 dropped the previous fixed-666 padding after audit #9 Finding 4 closed a coordinator-side embedding channel.
+Computes SIGHASH_QABO, signs it with the FALCON-512 private key, and re-serialises the tx with `aggregated_sig` populated by the actual variable-length signature (consensus accepts `1..QABI_AGGREGATED_SIG_MAX = 666` bytes). Rejects txs without a `qabi_block` (not a QABIO batch). v0.14 dropped the previous fixed-666 padding after 4 closed a coordinator-side embedding channel.
 
 ---
 

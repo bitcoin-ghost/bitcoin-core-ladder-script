@@ -162,8 +162,7 @@ Every file entry below uses this structure:
     safety net inside the evaluator on `input_index == 0`):
     `ValidateRungOutputs` (all outputs must be MLSC, max 1 DATA_RETURN, dust
     threshold), creation proof (3+ outputs), PREIMAGE / SCRIPT_BODY count
-    (anti-spam cap, summed across MLSC-spending inputs only since v0.10
-    audit #6 F-2).
+    (anti-spam cap, summed across MLSC-spending inputs only since v0.10).
   - Merkle proof verification via `VerifyMerklePath` or `BuildMerkleTree` +
     `CheckLadderTweakRaw` (the latter for key-path spends using libsecp256k1's
     `xonly_pubkey_tweak_add_check`).

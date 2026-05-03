@@ -224,7 +224,7 @@ EvalResult EvalAccumulatorBlock(const RungBlock& block)
     // NOT free attacker bytes. Sibling hashes are 32 B opaque each but bound
     // by depth ≤ MAX_ACCUMULATOR_PROOF_DEPTH and by must-reach-root.
     //
-    // Closes audit #2 finding E-001 (legacy v1 shape allowed up to 9 × 32 =
+    // Closes E-001 (legacy v1 shape allowed up to 9 × 32 =
     // 288 B of attacker-chosen bytes per spend × 8 blocks/rung = ~2 KB).
     if (block.fields.size() != 3) return EvalResult::ERROR;
     if (block.fields[0].type != RungDataType::HASH256 ||

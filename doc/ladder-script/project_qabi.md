@@ -11,7 +11,7 @@
 > walkthrough see [`qabi_integrator_guide.md`](qabi_integrator_guide.md).
 > Several claims in this doc reflect the pre-v0.14 design — notably
 > `aggregated_sig` "exactly 666 B" — which were later revised (variable
-> 1..666 B per audit #9 Finding 4). Trust the canonical docs over this
+> 1..666 B per consensus rules). Trust the canonical docs over this
 > file when they conflict.
 >
 > **Related docs:**

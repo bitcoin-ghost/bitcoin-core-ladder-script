@@ -569,7 +569,7 @@ Ladder:
   variable-length; the encoded length is validated internally by
   `OQS_SIG_verify`). Pre-v0.14 the wire format required exactly
   666 B and short sigs were zero-padded — that opened a 0-66 B/tx
-  silent embedding channel (audit #9 F4), now closed.
+  silent embedding channel, now closed.
 - SCHEME: 1 byte (`0x10`)
 
 `FieldMaxSize(PUBKEY) = 2,048` and `FieldMaxSize(SIGNATURE) = 50,000`
@@ -627,7 +627,7 @@ The leaf hash for member i is `TaggedHash("LadderAccumulatorLeaf/v1", i_LE)`
    for each 32-byte sibling in MERKLE_PROOF (max depth = 4), and SATISFIED
    iff the final `current` equals `set_root`.
 
-Caps: 1 ACCUMULATOR per rung; 2 ACCUMULATOR blocks per tx (across all MLSC-spending inputs; bootstrap inputs excluded — see audit #6 F-2).
+Caps: 1 ACCUMULATOR per rung; 2 ACCUMULATOR blocks per tx (across all MLSC-spending inputs; bootstrap inputs excluded).
 
 ### Inverted accumulator (blocklist)
 

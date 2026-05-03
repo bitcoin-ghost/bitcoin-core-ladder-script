@@ -516,7 +516,7 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
         }
     }
 
-    // E-023 (audit #4): post-loop type whitelist for `conditions_only` block
+    // E-023: post-loop type whitelist for `conditions_only` block
     // witnesses. Pre-fix the wire-format rejected any non-empty witness for
     // these block types, but several legitimately need the witness to reveal
     // a PUBKEY (for Merkle-leaf reconstruction via `merkle_pub_key`) or a
@@ -925,7 +925,7 @@ bool DeserializeLadderWitness(const std::vector<uint8_t>& witness_bytes,
 
         // Consensus (v0.6): bound ACCUMULATOR blocks per rung. Per-tx cap is
         // enforced separately in evaluator.cpp alongside the PREIMAGE per-tx
-        // counter. Closes audit #2 finding E-001 second half — without this
+        // counter. Closes E-001 second half — without this
         // cap a single rung could hold 8 ACCUMULATORs ≈ 1 KB of payload.
         for (const auto& rung : ladder_out.rungs) {
             size_t acc_count = 0;

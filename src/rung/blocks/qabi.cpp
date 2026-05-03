@@ -471,7 +471,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
     const std::unordered_set<uint256, QABIUint256Hasher>* entries_set_ptr = nullptr;
     std::unordered_set<uint256, QABIUint256Hasher> fresh_entries_set;
 
-    // v0.14 (audit #10 F2): mutex-direct access to a shared QABO sig cache,
+    // v0.14: mutex-direct access to a shared QABO sig cache,
     // replacing the v0.13-era snapshot/merge in CScriptCheck::operator()().
     // Reads and writes both lock against ctx.qabo_sig_cache_mutex when
     // non-null. Borrowed pointers (parsed_ptr, qabi_root_hash_ptr,
@@ -590,7 +590,7 @@ static EvalResult EvalQABISpendBlock(const RungBlock& block,
 
         // Check 9: FALCON verify.
         //
-        // v0.14 (audit #9 Finding 4): aggregated_sig is variable-length
+        // v0.14: aggregated_sig is variable-length
         // (1..QABI_AGGREGATED_SIG_MAX = 666). Pre-v0.14 required exactly
         // 666 B (signers padded shorter sigs with zeros), which created a
         // 0-66 B/tx coordinator-side channel via the trailing padding.
@@ -735,7 +735,7 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     const RungField* pubkey_field = FindField(block, RungDataType::PUBKEY);
     const RungField* sig_field = FindField(block, RungDataType::SIGNATURE);
 
-    // E-020 / E-021 (audit #3): pin PQ_BATCH to one of two exact field
+    // E-020 / E-021: pin PQ_BATCH to one of two exact field
     // shapes. The cardinality check alone (E-020) was bypassable —
     // witness=[SIG, SIG] gives a 3-field merged block with no PUBKEY,
     // falling through to the non-anchor cache-lookup branch with up to
@@ -767,7 +767,7 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     std::memcpy(commit_key.data(), hash_field->data.data(), 32);
 
     // Non-anchor path: no PUBKEY / SIGNATURE in witness → check cache.
-    // v0.13 (audit #9 F1-real): cache reads/writes are mutex-protected when
+    // v0.13: cache reads/writes are mutex-protected when
     // the host (validation.cpp) provides a mutex. This eliminates the
     // parallel-snapshot race v0.12's pre-pass tried and failed to fix —
     // anchor writes are immediately visible to other workers.
@@ -835,7 +835,7 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     // already have merkle_pub_key for hash-committed gating via SIG).
 
     if (verified && ctx.pq_batch_cache != nullptr) {
-        // v0.13 (audit #9 F1-real): mutex-protected write so the cache
+        // v0.13: mutex-protected write so the cache
         // entry is visible to all other workers immediately, not after
         // a snapshot/merge cycle.
         std::optional<std::unique_lock<std::mutex>> cache_lock;

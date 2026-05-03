@@ -2164,13 +2164,13 @@ void UpdateCoins(const CTransaction& tx, CCoinsViewCache& inputs, CTxUndo &txund
             bool is_spent = inputs.SpendCoin(txin.prevout, &txundo.vprevout.back());
             assert(is_spent);
 
-            // TX_MLSC (audit 2026-05-03 F2): if the spent input is an MLSC
+            // TX_MLSC: if the spent input is an MLSC
             // coin, decrement the synthetic root entry's refcount on its
             // creating tx. When the refcount reaches zero the entry is
             // deleted, releasing ~35 B of chainstate per v4 tx that has
             // been fully spent.
             //
-            // v2 (audit 2026-05-03 F2 v2): when a deletion happens, capture
+            // v2: when a deletion happens, capture
             // the deleted entry's conditions_root in undo data so a later
             // DisconnectBlock that crosses this spend can recreate the
             // synthetic entry deterministically. Without this, deep reorgs
@@ -2200,7 +2200,7 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
     // P2TR, etc.) in v4 txs fall through to VerifyScript for bootstrap funding.
     if (ptxTo->version == CTransaction::RUNG_TX_VERSION && rung::IsMLSCScript(m_tx_out.scriptPubKey)) {
         CachingTransactionSignatureChecker checker(ptxTo, nIn, m_tx_out.nValue, cacheStore, *m_signature_cache, *txdata);
-        // v0.13 (audit #9 Finding 2): pass the shared cache + mutex directly,
+        // v0.13: pass the shared cache + mutex directly,
         // not a per-worker snapshot. Anchor (FULL/MERKLE_PATH-proof) writes
         // are immediately visible to other workers' SHARED-proof reads —
         // eliminates the parallel-snapshot race that allowed mempool to
@@ -2214,7 +2214,7 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         // QABIO: per-tx FALCON sig verify cache. All primed inputs of a
         // QABIO tx share the same (sighash, sig, pubkey), so the verify
         // only needs to run once.
-        // v0.14 (audit #10 F2): pass the shared cache + mutex directly,
+        // v0.14: pass the shared cache + mutex directly,
         // mirroring the v0.13 migration of pq_batch_cache and
         // shared_tree_cache. Pre-v0.14 this used snapshot/merge — not
         // exploitable (the cache memoises a deterministic function so
@@ -2236,7 +2236,7 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         std::mutex* qabo_sig_cache_mutex_ptr = nullptr;
 #endif
         // PQ_BATCH: per-tx anchor verification cache.
-        // v0.13 (audit #9 F1-real): pass the shared cache + mutex directly,
+        // v0.13: pass the shared cache + mutex directly,
         // not a per-worker snapshot. Anchor writes (mutex-protected inside
         // EvalPQBatchBlock) are immediately visible to all other workers,
         // eliminating the parallel-snapshot race that v0.12's pre-pass
@@ -2251,7 +2251,7 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         }
         std::string ladder_err_msg;
         bool ok = rung::VerifyRungTx(*ptxTo, nIn, m_tx_out, nFlags, checker, *txdata, &error, m_block_height, cache_ptr, qabo_cache_ptr, pq_batch_cache_ptr, pq_batch_cache_mutex_ptr, shared_cache_mutex_ptr, qabo_sig_cache_mutex_ptr, &ladder_err_msg);
-        // v0.14 (audit #10 F2): no merge-back for qabo_sig_cache — writes
+        // v0.14: no merge-back for qabo_sig_cache — writes
         // go through the shared mutex inside EvalQABISpendBlock and are
         // already in place.
         // v0.13: no merge-back for shared_tree_cache or pq_batch_cache —
@@ -2336,7 +2336,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        int32_t block_height)
 {
     if (tx.IsCoinBase()) {
-        // v0.13 (audit #9 Finding 3): v4 coinbases must satisfy the
+        // v0.13: v4 coinbases must satisfy the
         // output-format and tx-level-field gating rules — pre-v0.13 they
         // skipped CheckRungTxLevel entirely, leaving an attacker-miner
         // ~256 KB / coinbase / forever channel via tx.qabi_block,
@@ -2409,7 +2409,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                     } else {
                         // Look up the synthetic root entry from the UTXO cache.
                         // Accept either 33-byte legacy (pre-v0.13) or 35-byte
-                        // current-format (audit 2026-05-03 F2: refcount appended)
+                        // current-format (refcount appended)
                         // payloads. The conditions_root sits at bytes [1..33] in
                         // both formats.
                         const Coin& root_coin = inputs.AccessCoin(COutPoint(source_txid, MLSC_ROOT_VOUT));
@@ -2618,7 +2618,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
                 return DISCONNECT_FAILED;
             }
             // Build a per-input lookup of MLSC recovery roots from undo data
-            // (audit 2026-05-03 F2 v2). The recovery vector is sparse —
+            //. The recovery vector is sparse —
             // typically empty; populated only for the specific inputs whose
             // spend triggered MLSC synthetic entry deletion at ConnectBlock
             // time.
@@ -2629,7 +2629,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
             for (unsigned int j = tx.vin.size(); j > 0;) {
                 --j;
                 const COutPoint& out = tx.vin[j].prevout;
-                // TX_MLSC (audit 2026-05-03 F2): capture whether this input
+                // TX_MLSC: capture whether this input
                 // is an MLSC coin BEFORE ApplyTxInUndo moves it into the
                 // cache. We need the increment after the restore so the
                 // synthetic entry refcount stays in sync with the live MLSC
@@ -2641,7 +2641,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
                 if (res == DISCONNECT_FAILED) return DISCONNECT_FAILED;
                 fClean = fClean && res != DISCONNECT_UNCLEAN;
                 if (restoring_mlsc) {
-                    // v2 (audit 2026-05-03 F2 v2): pass the recovery root
+                    // v2: pass the recovery root
                     // from undo data when present, so the increment can
                     // recreate a GC'd synthetic entry deterministically.
                     auto recovery_it = mlsc_recovery_by_input.find(j);
@@ -6257,7 +6257,7 @@ util::Result<void> ChainstateManager::PopulateAndValidateSnapshot(
                 outpoint.n = static_cast<uint32_t>(ReadCompactSize(coins_file));
                 outpoint.hash = txid;
                 coins_file >> coin;
-                // Ladder Script (audit 2026-05-03 F3): emit a v4-specific
+                // Ladder Script: emit a v4-specific
                 // diagnostic when the snapshot contains a synthetic MLSC root
                 // entry (outpoint.n == MLSC_ROOT_VOUT == 0xFFFFFFFF). The
                 // existing anti-overflow guard below already fails the load,

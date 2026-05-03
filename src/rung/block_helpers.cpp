@@ -257,7 +257,7 @@ EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
     // produce sorted triplets; relayed witnesses fail this check at consensus.
     std::vector<uint8_t> prev_pk;
     uint32_t valid_count = 0;
-    // v0.14 (audit #10 A2): all K Merkle proofs in a single multisig spend
+    // v0.14: all K Merkle proofs in a single multisig spend
     // descend from the same pubkey_root, so they MUST share the same depth.
     // Sorted-pair Merkle with distinct leaf/interior tagged-hash domains
     // already makes shorter-than-expected proofs rely on a 256-bit preimage
@@ -294,7 +294,7 @@ EvalResult VerifyMultisigInnerMerkle(const RungBlock& block,
         if (depth > MAX_MULTISIG_TREE_DEPTH) {
             return EvalResult::ERROR;
         }
-        // v0.14 (audit #10 A2): enforce uniform depth across all K proofs.
+        // v0.14: enforce uniform depth across all K proofs.
         if (i == 0) {
             expected_depth = depth;
         } else if (depth != expected_depth) {

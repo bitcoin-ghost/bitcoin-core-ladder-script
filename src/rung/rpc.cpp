@@ -2596,7 +2596,7 @@ static RPCHelpMan signrungtx()
                 // only leaves[0] = revealed leaf). Switch to FULL_LEAVES when
                 // QABI_PRIME is the spending block so all sibling leaves
                 // become available to the consensus check. Closes a multi-
-                // version regression (test_mine_qabi_prime_lifecycle, audit #10).
+                // version regression (see test_mine_qabi_prime_lifecycle).
                 bool target_has_qabi_prime_check = false;
 #ifdef ENABLE_QABIO
                 if (target_rung < conditions.rungs.size()) {
@@ -4178,7 +4178,7 @@ static RPCHelpMan qabi_buildblock()
              "Max block height at which the QABIO tx may execute"},
             {"batch_id", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED,
              "Optional 32-byte hex. Ignored — always overridden by the canonical "
-             "SHA256 derivation that the parser enforces (v0.13 audit #9 Finding 6 / "
+             "SHA256 derivation that the parser enforces (v0.13 6 / "
              "v0.12 F8). Retained as a positional placeholder for API stability; "
              "the result includes the actual canonical batch_id."},
             {"entries", RPCArg::Type::ARR, RPCArg::Optional::NO, "Participant list",
@@ -4229,7 +4229,7 @@ static RPCHelpMan qabi_buildblock()
         block.prime_expiry_height = self.Arg<uint64_t>("prime_expiry_height");
 
         // batch_id parameter is ignored — auto-derive the canonical SHA256
-        // (v0.13 audit #9 Finding 6 closed the embedding channel by enforcing
+        // (v0.13 6 closed the embedding channel by enforcing
         // canonical batch_id at parse). Any user-provided value would be
         // rejected by ParseQABIBlock, so derive the correct one here.
 
@@ -4286,7 +4286,7 @@ static RPCHelpMan qabi_buildblock()
             }
         }
 
-        // Apply canonical batch_id (v0.13 audit #9 Finding 6 enforcement). Any
+        // Apply canonical batch_id (v0.13 6 enforcement). Any
         // user-supplied batch_id is overridden — the parser only accepts the
         // canonical value so emitting anything else would produce a qabi_block
         // that fails to parse.
@@ -4513,7 +4513,7 @@ static RPCHelpMan qabi_signqabo()
             throw JSONRPCError(RPC_INTERNAL_ERROR, "FALCON-512 signing failed");
         }
 
-        // v0.14 (audit #9 Finding 4): write the actual FALCON sig bytes
+        // v0.14: write the actual FALCON sig bytes
         // without padding. Pre-v0.14 padded to exactly 666 B, which left
         // the trailing (666 - actual_len) bytes as a coordinator-side
         // ~0-66 B/tx channel. v0.14 wire-format carries the actual sig

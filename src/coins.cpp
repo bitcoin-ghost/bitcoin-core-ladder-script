@@ -134,7 +134,7 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
     // time. The synthetic-root marker is distinct from MLSC_MARKER so the
     // compressor does not strip the root.
     //
-    // v0.13+ (audit 2026-05-03 F2): payload is 35 bytes —
+    // v0.13+: payload is 35 bytes —
     //   0xDE || conditions_root[32] || refcount_LE_u16
     // The refcount counts unspent non-DATA_RETURN MLSC outputs from this
     // creating tx. Decremented in UpdateCoins on each MLSC input spend;
@@ -192,7 +192,7 @@ void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache,
     if (refcount <= 1) {
         // Last spend — leave the entry deleted. Chainstate cost recovered.
         // v2: surface the deleted root so the caller can persist it in undo
-        // data for reorg recovery (audit 2026-05-03 F2 v2).
+        // data for reorg recovery.
         if (deleted_root_out) {
             std::memcpy(deleted_root_out->data(), &spk[1], 32);
         }

@@ -762,7 +762,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
 
             // SHARED mode: compact format — just source_input + rung_index + revealed rung
             if (proof.proof_mode == MLSCProofMode::SHARED) {
-                // v0.14 (audit #10 F4): cap shared_source_input at uint16 max
+                // v0.14: cap shared_source_input at uint16 max
                 // before truncating. Pre-v0.14 this silently truncated wider
                 // CompactSize values to uint16, so two distinct wire encodings
                 // (e.g. 0x00 and 0xFE 0x00 0x00 0x01 0x00) decoded to the same
@@ -807,7 +807,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC shared proof too many relay_refs";
                     return false;
                 }
-                // v0.11 (audit #7 #1): strict ascending unique. Same canonical
+                // v0.11: strict ascending unique. Same canonical
                 // encoding requirement as the wire-format witness (v0.10 F-4).
                 // Without this check the proof side re-opens the relay_refs
                 // permutation channel since the merge step takes relay_refs
@@ -879,7 +879,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             error = "MLSC proof too many rung relay_refs";
             return false;
         }
-        // v0.11 (audit #7 #1): strict ascending unique on the proof-side
+        // v0.11: strict ascending unique on the proof-side
         // relay_refs. Wire format already enforces this (v0.10 F-4), but the
         // merge step takes relay_refs from the proof, not the wire — so a
         // permuted proof re-opens the F-4 channel without this check.
@@ -933,7 +933,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                 error = "MLSC proof relay too many relay_refs";
                 return false;
             }
-            // v0.11 (audit #7 #1): strict ascending unique — same canonical
+            // v0.11: strict ascending unique — same canonical
             // encoding requirement as the wire-format relay deserialise.
             relay.relay_refs.resize(n_rrefs);
             {
@@ -958,7 +958,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
             // evaluator.cpp:1222/1283) — no +1 padding allowance. A spurious
             // +1 here used to permit an extra sibling hash for power-of-2
             // leaf counts; the verifier rejected it on root mismatch but the
-            // deser tolerated the wasted bytes (audit 2026-05-03 F1).
+            // deser tolerated the wasted bytes.
             size_t total_leaves = total_rungs + total_relays;
             size_t padded = 1;
             while (padded < total_leaves) padded <<= 1;
@@ -1022,7 +1022,7 @@ bool DeserializeMLSCProof(const std::vector<uint8_t>& data, MLSCProof& proof, st
                     error = "MLSC proof mutation target too many relay_refs";
                     return false;
                 }
-                // v0.11 (audit #7 #1): strict ascending unique — mutation
+                // v0.11: strict ascending unique — mutation
                 // targets feed into BuildCPRung at evaluator.cpp via
                 // VerifyMutatedLeaves; same canonical encoding required.
                 target.rung.relay_refs.resize(mt_refs);

@@ -169,14 +169,14 @@ struct RungEvalContext {
     const MLSCProof* mlsc_proof{nullptr}; //!< MLSC proof (for cross-rung mutation target access)
     QABOSigCache* qabo_sig_cache{nullptr}; //!< Optional per-tx cache: caches the FALCON QABO sig verify result so subsequent inputs of the same QABIO tx skip the expensive verify call
     PQBatchCache* pq_batch_cache{nullptr}; //!< Optional per-tx cache for PQ_BATCH commits: anchor inputs populate it, non-anchor inputs read to skip per-input verification. See PQBatchCache comment for ordering rules.
-    //! v0.13 (audit #9 F1-real + Finding 2): per-cache mutexes. When
-    //! non-null, the evaluator locks for both reads and writes,
-    //! eliminating parallel-snapshot races. v0.12's PQ_BATCH pre-pass
+    //! v0.13: per-cache mutexes. When non-null, the evaluator locks for
+    //! both reads and writes, eliminating parallel-snapshot races.
+    //! v0.12's PQ_BATCH pre-pass
     //! tried and failed to fix the same race shape; this mutex-direct
     //! approach is the correct fix for both PQ_BATCH and SharedTreeCache.
     std::mutex* shared_tree_cache_mutex{nullptr};
     std::mutex* pq_batch_cache_mutex{nullptr};
-    //! v0.14 (audit #10 F2): final cache to migrate off snapshot/merge.
+    //! v0.14: final cache to migrate off snapshot/merge.
     //! Not exploitable (QABO cache memoises a deterministic function so
     //! workers reach the same answer regardless of cache visibility),
     //! but cuts ~12.5 KB of per-input snapshot copy on busy QABIO txs and

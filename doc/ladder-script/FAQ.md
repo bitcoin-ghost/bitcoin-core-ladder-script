@@ -335,7 +335,7 @@ Ladder Script enforces multiple layers of anti-spam protection:
    fields per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS = 2`, fast reject).
    The binding constraint is per-transaction: `MAX_PREIMAGE_FIELDS_PER_TX = 2`
    sums across all MLSC-spending inputs, preventing multi-input data
-   embedding via cooperating MLSC inputs. v0.10 (audit #6 F-2) tightened
+   embedding via cooperating MLSC inputs. v0.10 tightened
    the cap to MLSC-spending inputs only — bootstrap inputs (P2WPKH/P2WSH/
    P2TR etc) are excluded since their witness bytes are not Ladder Script.
    The same scoping applies to v0.10's diff-witness count addition (F-3).

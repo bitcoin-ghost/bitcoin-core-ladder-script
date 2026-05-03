@@ -151,7 +151,7 @@
     </div>
     <div class="eval-step">
       <span class="eval-step-num">6.</span>
-      <span class="eval-step-text">If <code>IsPQScheme(scheme)</code>: <span class="eval-keyword">VerifyPQSignature(scheme, sig, sighash, pubkey)</span> &rarr; verified flag. Schnorr/ECDSA carve-out: <code>verified</code> stays false &mdash; PQ_BATCH's value-add is PQ-specific (use SIG with merkle_pub_key for classical paths). On <code>verified</code>: take the mutex and write <code>(*ctx.pq_batch_cache)[commit_key] = true</code> so subsequent non-anchor inputs (and concurrent workers) see the verification immediately. v0.13 audit #9 F1-real fix.</span>
+      <span class="eval-step-text">If <code>IsPQScheme(scheme)</code>: <span class="eval-keyword">VerifyPQSignature(scheme, sig, sighash, pubkey)</span> &rarr; verified flag. Schnorr/ECDSA carve-out: <code>verified</code> stays false &mdash; PQ_BATCH's value-add is PQ-specific (use SIG with merkle_pub_key for classical paths). On <code>verified</code>: take the mutex and write <code>(*ctx.pq_batch_cache)[commit_key] = true</code> so subsequent non-anchor inputs (and concurrent workers) see the verification immediately. v0.13 fix.</span>
     </div>
     <div class="eval-step">
       <span class="eval-step-num">7.</span>

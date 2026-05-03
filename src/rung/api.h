@@ -349,7 +349,7 @@ struct LadderEvalContext {
     void* shared_tree_cache{nullptr};
     void* qabo_sig_cache{nullptr};
     void* pq_batch_cache{nullptr};
-    //! v0.13 (audit #9 F1-real / Finding 2): per-cache mutexes (typed as
+    //! v0.13: per-cache mutexes (typed as
     //! void* / cast to std::mutex* so api.h stays free of <mutex>). When
     //! non-null, the corresponding evaluator locks for both reads and
     //! writes, eliminating the parallel-snapshot races that the v0.12
@@ -359,7 +359,7 @@ struct LadderEvalContext {
     //! cache write yet. v0.13 closes both.
     void* shared_tree_cache_mutex{nullptr};
     void* pq_batch_cache_mutex{nullptr};
-    //! v0.14 (audit #10 F2): QABO sig cache mutex (typed std::mutex* on
+    //! v0.14: QABO sig cache mutex (typed std::mutex* on
     //! the library side). When non-null, qabi.cpp locks reads and writes
     //! against the host-owned shared cache directly, replacing the
     //! v0.13-era snapshot/merge pattern.

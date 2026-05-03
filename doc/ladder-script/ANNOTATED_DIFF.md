@@ -106,7 +106,7 @@ v3 path is touched.
 - Three new fields on both `CTransaction` and `CMutableTransaction`:
   - `uint256 conditions_root` — shared MLSC root for every output in the tx.
   - `std::vector<uint8_t> qabi_block` — tx-level QABIO batch block (empty for non-QABIO v4 txs).
-  - `std::vector<uint8_t> aggregated_sig` — QABIO coordinator FALCON-512 signature when present, variable-length `1..QABI_AGGREGATED_SIG_MAX = 666` bytes (v0.14 / audit #9 F4 dropped fixed-666 padding to close a coordinator-side embedding channel).
+  - `std::vector<uint8_t> aggregated_sig` — QABIO coordinator FALCON-512 signature when present, variable-length `1..QABI_AGGREGATED_SIG_MAX = 666` bytes (v0.14 dropped fixed-666 padding to close a coordinator-side embedding channel).
 
 **Wire format (full, witness-carrying)** — triggered when
 `(allow_witness && version == 4)`, flag byte = `0x02`:

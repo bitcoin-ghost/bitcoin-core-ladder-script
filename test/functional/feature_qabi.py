@@ -178,7 +178,7 @@ class QabiTest(BitcoinTestFramework):
 
         coordinator_pubkey = "ab" * QABI_COORDINATOR_PUBKEY_SIZE
         # batch_id is canonically derived by qabi_buildblock and returned in
-        # the result. v0.13 audit #9 Finding 6 enforces canonical batch_id at
+        # the result. v0.13 6 enforces canonical batch_id at
         # parse; v0.14 makes the RPC parameter cosmetic — auto-overridden.
         # Pass any value here (it's ignored); read the canonical from result.
         batch_id_in = "cd" * 32
@@ -337,7 +337,7 @@ class QabiTest(BitcoinTestFramework):
         generate FALCON keypair → build QABIBlock → construct raw v4 tx with
         qabi_block populated → qabi_signqabo → verify the signed tx carries
         a FALCON-512 aggregated_sig of valid length (1..666 — variable per
-        BIP-FALCON, v0.14 audit #9 Finding 4 removed pre-v0.14 zero-padding
+        BIP-FALCON, v0.14 4 removed pre-v0.14 zero-padding
         to exactly 666 B which left the trailing bytes as a coordinator-side
         channel) and a consistent sighash."""
         self.log.info("Testing qabi_signqabo full signing flow...")
@@ -375,7 +375,7 @@ class QabiTest(BitcoinTestFramework):
         assert "hex" in signed
         assert "sighash" in signed
         assert "sig_size" in signed
-        # v0.14 audit #9 Finding 4: FALCON-512 sigs are variable-length
+        # v0.14 4: FALCON-512 sigs are variable-length
         # 1..666 B. Pre-v0.14 padded with zeros to exactly 666; v0.14 carries
         # the actual sig length to close the trailing-padding channel.
         assert 1 <= signed["sig_size"] <= 666, f"sig_size out of range: {signed['sig_size']}"
@@ -881,7 +881,7 @@ class QabiTest(BitcoinTestFramework):
         batch_tx_hex = batch_tx["hex"]
 
         # Sign the batch via the coordinator RPC and verify success.
-        # v0.14 audit #9 Finding 4: variable-length FALCON sig (1..666).
+        # v0.14 4: variable-length FALCON sig (1..666).
         signed = self.node.qabi_signqabo(batch_tx_hex, kp["privkey"])
         assert 1 <= signed["sig_size"] <= 666, f"sig_size out of range: {signed['sig_size']}"
         self.log.info(f"  Step 3: QABIO batch tx signed by coordinator, "
@@ -2056,7 +2056,7 @@ class QabiTest(BitcoinTestFramework):
         # attempted.
         # ------------------------------------------------------------------
         falcon_signed = self.node.qabi_signqabo(witnessed_hex, coord_privkey)
-        # v0.14 audit #9 Finding 4: variable-length FALCON sig (1..666).
+        # v0.14 4: variable-length FALCON sig (1..666).
         assert 1 <= falcon_signed["sig_size"] <= 666, \
             f"sig_size out of range: {falcon_signed['sig_size']}"
         falcon_signed_hex = falcon_signed["hex"]

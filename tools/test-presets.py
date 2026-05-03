@@ -150,8 +150,8 @@ def sorted_pair_hash(a_hex, b_hex):
 # ── ACCUMULATOR v2 helpers (post-`843c91e7e0` rewrite) ───────────────
 # Leaves are H_tag("LadderAccumulatorLeaf/v1", element_id_LE_4B) — NOT
 # attacker-chosen 32-byte blobs. Interiors are H_tag("LadderAccumulatorInterior/v1",
-# sorted_pair). Closes audit #2 E-001 (legacy v1 allowed ~288 B/spend
-# of attacker bytes via merkle siblings).
+# sorted_pair). Closes E-001 (legacy v1 allowed ~288 B/spend of
+# attacker bytes via merkle siblings).
 def _tagged_hash(tag, data):
     th = sha256(tag.encode("utf-8"))
     return sha256(th + th + data)
@@ -1526,7 +1526,7 @@ def fund_preset(preset, verbose=True):
 
             block["values"] = vals
 
-    # 6. Compute ACCUMULATOR merkle roots — v2 (audit #2 E-001 fix).
+    # 6. Compute ACCUMULATOR merkle roots — v2 (E-001 fix).
     # The preset's `merkle_leaves` field is interpreted as the COUNT of
     # element_ids in the allowlist (0..N-1). Driver will spend element_id=0.
     for ri, bi in accumulator_locations:
@@ -2050,7 +2050,7 @@ def spend_preset(record, spend_rung_idx=0, verbose=True, dry_run=False):
                 signer_blocks.append(entry)
 
         elif btype == "ACCUMULATOR":
-            # v2 (audit #2 E-001 fix): element_id (NUMERIC) + proof (siblings).
+            # v2 (E-001 fix): element_id (NUMERIC) + proof (siblings).
             # Spend element_id=0 — driver always allowlists positions 0..N-1.
             n_str = vals.get("_accumulator_size") or str(len([
                 s for s in vals.get("merkle_leaves", "").split(",") if s.strip()

@@ -59,7 +59,7 @@ constexpr uint8_t LADDER_SIGHASH_INPUT_MASK    = 0x80;
 
 const HashWriter HASHER_LADDERSIGHASH{TaggedHash("LadderSighash/v1")};
 const HashWriter HASHER_LADDERKEYPATH{TaggedHash("LadderKeyPathSighash/v1")};
-// v0.14 (audit #10 A3): tag the QABI section hasher. Pre-v0.14 used an
+// v0.14: tag the QABI section hasher. Pre-v0.14 used an
 // untagged HashWriter — not exploitable today (length-prefixed inputs
 // prevent practical collisions, and the output is folded into the
 // tagged sighash one level up), but the tag is a one-line hardening
@@ -97,7 +97,7 @@ static uint256 HashRungConditions(const RungConditions& conditions)
     return ss.GetSHA256();
 }
 
-/** v0.10 (F-6) + v0.11 (audit #7 #2): bind tx.qabi_block and tx.aggregated_sig
+/** v0.10 + v0.11: bind tx.qabi_block and tx.aggregated_sig
  *  into the sighash so signatures lock them down as defence-in-depth.
  *
  *  v0.11 fix: each field is length-prefixed via CompactSize, so two
@@ -131,7 +131,7 @@ bool SignatureHashLadder(const LadderPrecomputedTxData& cache,
 {
     if (nIn >= tx.input_count) return false;
 
-    // v0.12 (audit #7 #5): ANYPREVOUT (0x40..0x43) and ANYPREVOUTANYSCRIPT
+    // v0.12: ANYPREVOUT (0x40..0x43) and ANYPREVOUTANYSCRIPT
     // (0xC0..0xC3) hash types are rejected unconditionally. Both let a
     // signer's signature be replayed against UTXOs the signer didn't intend
     // to spend (BIP-118 mitigates with a dedicated pubkey prefix; Ladder

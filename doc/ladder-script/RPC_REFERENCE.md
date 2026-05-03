@@ -268,7 +268,7 @@ qabi_buildblock coordinator_pubkey prime_expiry_height [batch_id]
 |---------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------|
 | `coordinator_pubkey`      | string  | Coordinator's FALCON-512 pubkey (897 bytes hex)                                                                                   |
 | `prime_expiry_height`     | integer | Block height after which the priming expires                                                                                      |
-| `batch_id`                | string  | Optional placeholder — ignored by the parser (v0.13 audit #9 F6 enforces canonical SHA256 derivation). Returned in the result     |
+| `batch_id`                | string  | Optional placeholder — ignored by the parser (v0.13 enforces canonical SHA256 derivation). Returned in the result     |
 | `entries`                 | array   | Per-participant entries `[{participant_id, contribution, destination_index}, ...]`                                                |
 | `outputs_conditions_root` | string  | 32-byte conditions root that the spend tx must use as `tx.conditions_root`. Pins every destination scriptPubKey structurally     |
 | `output_values`           | array   | Per-output amounts (BTC). The destination scriptPubKey is implicit (`0xDF + outputs_conditions_root` for every v4 MLSC output)    |
@@ -303,7 +303,7 @@ goes into the tx-level `aggregated_sig` field.
 
 **Returns:** `{ "hex": "<signed tx>", "sighash": "<hex>", "sig_size": <1..666> }`.
 
-Since v0.14 / audit #9 F4 the signature is written without padding —
+Since v0.14 the signature is written without padding —
 `sig_size` is the actual FALCON sig length (consensus accepts
 `1..QABI_AGGREGATED_SIG_MAX = 666`). Pre-v0.14 behaviour padded to a
 fixed 666 B and was changed to close a coordinator-side embedding

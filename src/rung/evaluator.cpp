@@ -560,7 +560,7 @@ static std::vector<std::vector<uint8_t>> ExtractBlockPubkeys(const std::vector<R
 /** Count PREIMAGE/SCRIPT_BODY fields across MLSC-spending inputs in a tx.
  *  Deserialises each MLSC input's ladder witness to count preimage-bearing
  *  fields. Bootstrap inputs (P2WPKH/P2WSH/P2TR etc) are excluded —
- *  v0.10 (audit #6 F-2) tightened from "all inputs" so a crafted bootstrap
+ *  v0.10 tightened from "all inputs" so a crafted bootstrap
  *  witness can't fake-deserialise as a fake QABI ladder and bypass caps.
  *  Returns total count; callers reject if > MAX_PREIMAGE_FIELDS_PER_TX. */
 /** Count PREIMAGE/SCRIPT_BODY fields in a single deserialized witness. */
@@ -782,7 +782,7 @@ bool CheckRungTxLevel(const LadderTxView& tx,
                       size_t spent_output_count,
                       std::string& error)
 {
-    // v0.11 (audit #7 #4): require spent_outputs to be present whenever the
+    // v0.11: require spent_outputs to be present whenever the
     // tx has any inputs. The per-tx counters silently treat inputs as
     // non-MLSC when spent_outputs is null, which would skip every per-tx
     // cap. Production callers (validation.cpp:2406, evaluator's input-0
@@ -790,7 +790,7 @@ bool CheckRungTxLevel(const LadderTxView& tx,
     // hit this branch is a future code path that forgets to wire it up,
     // and we want that to fail loud instead of silently zeroing the caps.
     //
-    // v0.13 (audit #9 Finding 3): coinbase exception — coinbase has a
+    // v0.13: coinbase exception — coinbase has a
     // single null-prevout input and no real spent_outputs; the per-tx
     // counters trivially see zero MLSC inputs and validate nothing
     // beyond the output format and qabi_block / aggregated_sig gating.
@@ -823,7 +823,7 @@ bool CheckRungTxLevel(const LadderTxView& tx,
     }
 
     // Consensus (v0.7): SCRIPT_BODY-only sub-cap inside the combined limit.
-    // Closes E-003 from audit #3 (2 × 80 B SCRIPT_BODY > 112 B/tx claim).
+    // Closes E-003 (2 × 80 B SCRIPT_BODY > 112 B/tx claim).
     if (CountTxScriptBodyFields(tx, spent_outputs, spent_output_count) > MAX_SCRIPT_BODY_FIELDS_PER_TX) {
         error = "TX_MLSC: per-tx SCRIPT_BODY field count exceeds limit";
         return false;
@@ -858,7 +858,7 @@ bool CheckRungTxLevel(const LadderTxView& tx,
             return false;
         }
     } else if (qabi.has_qabi_spend) {
-        // v0.14 (audit #9 Finding 4): aggregated_sig is now variable-length
+        // v0.14: aggregated_sig is now variable-length
         // (1..QABI_AGGREGATED_SIG_MAX). Pre-v0.14 required exactly 666 B
         // and signers padded with zeros — the trailing padding was a
         // 0-66 B/tx coordinator-side channel. v0.14 wire-format carries
@@ -1119,7 +1119,7 @@ bool VerifyRungTx(
                 return fail(LadderScriptError::UNKNOWN_ERROR);
             }
             // Look up the verified root from the source input.
-            // v0.13 (audit #9 Finding 2): mutex-protected — anchor writes
+            // v0.13: mutex-protected — anchor writes
             // by other workers are immediately visible.
             uint256 cached_root;
             bool cached_found = false;
@@ -1189,7 +1189,7 @@ bool VerifyRungTx(
 
         // SHARED proofs: root was validated via cache. Now verify leaf membership —
         // the revealed rung's leaf must exist in the cached tree's leaf set.
-        // v0.13 (audit #9 Finding 2): mutex-protected cache access.
+        // v0.13: mutex-protected cache access.
         if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) {
             std::vector<uint256> cached_leaves;
             {
@@ -1383,7 +1383,7 @@ bool VerifyRungTx(
             SharedTreeEntry entry;
             entry.root = conditions_root;
             entry.leaves = verified_leaves_data.leaves;
-            // v0.13 (audit #9 Finding 2): mutex-protected write so anchor
+            // v0.13: mutex-protected write so anchor
             // entries are immediately visible to other workers' SHARED-proof
             // reads — eliminates the parallel-snapshot race.
             std::optional<std::unique_lock<std::mutex>> lk;
@@ -1426,7 +1426,7 @@ bool VerifyRungTx(
     // v0.10 (F-7): coil.output_index must address a real output. Pre-v0.10
     // an out-of-range index silently fell back to outputs[0], which masked
     // creator errors and could feed a covenant evaluator the wrong output.
-    // The leaf binds output_index (audit #5 O-1) so honest creators commit
+    // The leaf binds output_index (per O-1) so honest creators commit
     // to a valid value at fund time; tampered/oversized values fail-closed.
     {
         uint32_t coil_out_idx = witness_ladder.coil.output_index;
@@ -1456,12 +1456,12 @@ bool VerifyRungTx(
     // Plumb the PQ_BATCH cache so non-anchor inputs with matching HASH256
     // commits can validate from cache after the anchor has verified once.
     eval_ctx.pq_batch_cache = pq_batch_cache;
-    // v0.13 (audit #9 F1-real + Finding 2): plumb cache mutexes so the
-    // evaluator can lock for both reads and writes — eliminates the
-    // parallel snapshot races for both PQ_BATCH and SharedTreeCache.
+    // v0.13: plumb cache mutexes so the evaluator can lock for both
+    // reads and writes — eliminates parallel-snapshot races for both
+    // PQ_BATCH and SharedTreeCache.
     eval_ctx.pq_batch_cache_mutex = pq_batch_cache_mutex;
     eval_ctx.shared_tree_cache_mutex = shared_cache_mutex;
-    // v0.14 (audit #10 F2): plumb QABO sig cache mutex too — last cache
+    // v0.14: plumb QABO sig cache mutex too — last cache
     // to migrate off the snapshot/merge pattern. Reads/writes inside
     // EvalQABISpendBlock now lock against this directly.
     eval_ctx.qabo_sig_cache_mutex = qabo_sig_cache_mutex;

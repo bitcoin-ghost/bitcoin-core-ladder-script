@@ -381,8 +381,8 @@ in a single QABIO batch:
   transaction cannot exceed the weight of an entire block. In practice
   the qabi_block cap binds first.
 
-The coordinator signature (up to 666 bytes &mdash; variable post-v0.14
-audit #9 F4; OQS validates the encoded length internally) and pubkey
+The coordinator signature (up to 666 bytes &mdash; variable post-v0.14;
+OQS validates the encoded length internally) and pubkey
 (897 bytes, canonical FALCON-512 size) are roughly fixed overheads
 amortised across every participant. The combined ~1,563 B share drops
 from **~75% of the tx at N=1** to **~3.7% at N=100**, **~0.8% at N=500**,

@@ -137,7 +137,7 @@ Compare:
    soft-fork addition — pre-v4 clients never see RUNG_TX outputs at
    all; v4 clients without `PQ_BATCH` support reject the block.
 
-6. **Pubkey size limits.** Resolved by audit #3 / E-020 / E-021: the
+6. **Pubkey size limits.** Resolved by E-020 / E-021: the
    evaluator pins `PQ_BATCH` to one of two exact field shapes
    (`[HASH256]` non-anchor or `[HASH256, PUBKEY, SIGNATURE]` anchor)
    and then derives the scheme from the canonical PUBKEY length. A

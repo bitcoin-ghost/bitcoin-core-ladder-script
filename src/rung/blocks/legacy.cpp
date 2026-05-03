@@ -94,7 +94,7 @@ static EvalResult EvalInnerConditions(const std::vector<uint8_t>& preimage_data,
         }
     }
 
-    // E-020 (audit #2): bound the outer's witness-side stack-push fields to
+    // E-020: bound the outer's witness-side stack-push fields to
     // exactly what at least one inner rung legitimately consumes. Pre-fix,
     // FindField inside the inner evaluators silently ignored extras — up to
     // ~98 KB of attacker-chosen PUBKEY/SIGNATURE/NUMERIC/SCHEME bytes per

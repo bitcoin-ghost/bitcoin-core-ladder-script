@@ -7978,7 +7978,7 @@ BOOST_AUTO_TEST_CASE(diff_witness_fresh_coil)
                       static_cast<uint8_t>(RungScheme::FALCON512));
 }
 
-// E-D-1 regression (audit #5): two diffs targeting the same
+// E-D-1 regression: two diffs targeting the same
 // (rung_index, block_index, field_index) triple must be rejected at
 // deserialise. Without this, a spender can pad the witness with N copies of
 // the same diff (~6 B each) for ~12 KB of witness inflation per input
@@ -8928,8 +8928,8 @@ BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_revealed_relay_refs)
                         "expected 'strict ascending' in error, got: " + error);
 }
 
-// v0.14 (audit #9 Finding 5): regression for the mutation_target site of
-// v0.11 #1 / audit #7 #1. revealed_mutation_targets[*].rung.relay_refs
+// v0.14: regression for the mutation_target site of
+// v0.11 . revealed_mutation_targets[*].rung.relay_refs
 // must be strict-ascending unique. Reverting the conditions.cpp:1010-1024
 // fix would make this test fail.
 BOOST_AUTO_TEST_CASE(mlsc_proof_rejects_unsorted_mutation_target_relay_refs)
@@ -12417,7 +12417,7 @@ BOOST_AUTO_TEST_CASE(wrapper_root_verifies_via_tx_mlsc_path)
         "ComputeConditionsRoot must produce a root that verifies the TX_MLSC leaf");
 }
 
-// E-R-1 regression (audit #5): a rung's relay_refs MUST be folded into the
+// E-R-1 regression: a rung's relay_refs MUST be folded into the
 // structural template, so a spender cannot drop relay dependencies at spend
 // time and skip the relay enforcement check. v0.8 omitted this — pre-v0.9
 // the same leaf hash would fall out for both [0] and [] relay_refs.
@@ -12435,7 +12435,7 @@ BOOST_AUTO_TEST_CASE(rung_leaf_binds_relay_refs)
     BOOST_CHECK(ComputeTxMLSCLeaf(cp_with_ref) != ComputeTxMLSCLeaf(cp_without_ref));
 }
 
-// F-1 regression (audit #6): BuildCPRung — used by every recursive-covenant
+// F-1 regression: BuildCPRung — used by every recursive-covenant
 // transition (RECURSE_DECAY/RECURSE_SPLIT/RECURSE_MODIFIED) — must propagate
 // rung.relay_refs into the leaf. v0.9 missed this build site, re-opening R-1
 // across covenant transitions: the spend-input verifier hashed relay_refs
@@ -12891,7 +12891,7 @@ BOOST_AUTO_TEST_CASE(deserialize_rejects_accumulator_witness_wrong_field_order)
         "should reject; got err=" + err);
 }
 
-// E-020 (audit #2 finding 2): PQ_BATCH evaluator must reject any field shape
+// E-020: PQ_BATCH evaluator must reject any field shape
 // other than 1 (non-anchor) or 3 (anchor). Pre-fix, FindField inside the
 // evaluator silently ignored extras and the descriptor's promised "0-or-2
 // field rule" wasn't enforced anywhere — up to ~98 KB attacker-chosen bytes
@@ -12923,7 +12923,7 @@ BOOST_AUTO_TEST_CASE(pq_batch_rejects_extra_fields_e020)
                 == EvalResult::ERROR);
 }
 
-// E-021 (audit #3 finding 1): the E-020 cardinality-only check (size 1 or 3)
+// E-021: the E-020 cardinality-only check (size 1 or 3)
 // was bypassable. An attacker can craft witness=[SIG, SIG] which gives a
 // 3-field merged block with no PUBKEY. The cardinality check passes; the
 // non-anchor cache-lookup branch (`!pubkey_field` is true) returns SATISFIED
@@ -13440,7 +13440,7 @@ static QABIBlock MakeValidQABIBlock()
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xB2);
     block.prime_expiry_height = 12345;
     std::memset(block.outputs_conditions_root.begin(), 0xD4, 32);
-    // v0.13 (audit #9 Finding 6): canonical batch_id derived from already-
+    // v0.13: canonical batch_id derived from already-
     // committed fields. Pre-v0.13 tests memset arbitrary bytes.
     ApplyCanonicalBatchId(block);
 
@@ -13555,7 +13555,7 @@ BOOST_AUTO_TEST_CASE(qabi_root_mutation_sensitivity)
     b2.prime_expiry_height += 1;
     BOOST_CHECK(ComputeQABIRoot(b2) != r_orig);
 
-    // v0.13 (audit #9 Finding 6): batch_id is now canonically derived from
+    // v0.13: batch_id is now canonically derived from
     // coordinator_pubkey + outputs_conditions_root + prime_expiry_height,
     // so it can't be mutated independently. The b2 (expiry change) and
     // b4/b5 (entries/output_values change) cases already cover the
@@ -13728,7 +13728,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_end_to_end_happy_path)
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
     block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root below
-    ApplyCanonicalBatchId(block);             // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);             // v0.13
     {
         QABIEntry e;
         e.participant_id = owner_id;
@@ -13886,7 +13886,7 @@ BOOST_AUTO_TEST_CASE(qabi_spend_rejects_expired_batch)
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = EXPIRY_HEIGHT;
     block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
     QABIEntry e;
     e.participant_id = owner_id;
     e.contribution = 50000;
@@ -14019,7 +14019,7 @@ static bool BuildQABISpendHappyPath(QABISpendSetup& s)
     s.block.coordinator_pubkey = s.coord_pk;
     s.block.prime_expiry_height = QABISpendSetup::EXPIRY_HEIGHT;
     s.block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(s.block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(s.block);  // v0.13
     {
         QABIEntry e;
         e.participant_id = s.owner_id;
@@ -15331,7 +15331,7 @@ static QABIBlock BuildScaleQABIBlock(
     block.coordinator_pubkey = coord_pk;
     block.prime_expiry_height = expiry;
     block.outputs_conditions_root.SetNull();  // matches mtx.conditions_root in caller
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     for (size_t p = 0; p < participants.size(); ++p) {
         QABIEntry e;
@@ -15877,7 +15877,7 @@ BOOST_AUTO_TEST_CASE(adversarial_duplicate_participant_id_rejected_by_parse)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xAA);
     block.prime_expiry_height = 1000;
     block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     uint256 shared_id;
     std::memset(shared_id.data(), 0xCC, 32);
@@ -15987,7 +15987,7 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_soft_cap_parses)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x22);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0xEE, 32);
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     constexpr size_t TARGET_FILL = 63000;
     size_t running = 966;  // 934 header + 32 outputs_conditions_root
@@ -16041,7 +16041,7 @@ BOOST_AUTO_TEST_CASE(qabi_block_over_soft_cap_rejected_by_policy)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0xCD);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0x99, 32);
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     // Aim for ~70 KB (above 64 KB soft, below 256 KB hard).
     constexpr size_t TARGET_FILL = 70000;
@@ -16112,7 +16112,7 @@ BOOST_AUTO_TEST_CASE(qabi_block_at_hard_cap_parses)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 100;
     std::memset(block.outputs_conditions_root.begin(), 0x55, 32);
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     // Target: ~260000 bytes (just under 262144 hard cap).
     // Post-output-dedup: ~54 B per participant (entry ~41 + 8 value + ~5 varint margin).
@@ -16176,7 +16176,7 @@ BOOST_AUTO_TEST_CASE(adversarial_committed_expiry_overflow_rejected_or_handled)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x44);
     block.prime_expiry_height = 0xFFFFFFFFu;  // u32 max
     block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x55, 32);
@@ -16229,7 +16229,7 @@ BOOST_AUTO_TEST_CASE(adversarial_reordered_witness_detected_by_sighash)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x77);
     block.prime_expiry_height = 100;
     block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
     QABIEntry e1, e2;
     std::memset(e1.participant_id.data(), 0xA1, 32);
     std::memset(e2.participant_id.data(), 0xA2, 32);
@@ -17486,7 +17486,7 @@ BOOST_AUTO_TEST_CASE(adversarial_wrong_destination_index_rejected)
     block.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, 0x2F);
     block.prime_expiry_height = 100;
     block.outputs_conditions_root.SetNull();
-    ApplyCanonicalBatchId(block);  // v0.13 (audit #9 Finding 6)
+    ApplyCanonicalBatchId(block);  // v0.13
 
     QABIEntry e;
     std::memset(e.participant_id.data(), 0x3F, 32);
@@ -17547,7 +17547,7 @@ std::vector<uint8_t> MutatedQABIBlock(StressRNG& r) {
     b.coordinator_pubkey.assign(QABI_COORDINATOR_PUBKEY_SIZE, r.byte());
     b.prime_expiry_height = static_cast<uint32_t>(r.next());
     std::memset(b.outputs_conditions_root.begin(), r.byte(), 32);
-    // v0.13 (audit #9 Finding 6): canonical batch_id. Stress test mutates
+    // v0.13: canonical batch_id. Stress test mutates
     // other fields to exercise the parser; canonical derivation locks
     // batch_id to those fields.
     ApplyCanonicalBatchId(b);
@@ -17723,7 +17723,7 @@ BOOST_AUTO_TEST_CASE(stress_is_standard_rung_tx_random)
                         << " accepted, " << rejected << " rejected (of " << N << ")");
 }
 
-// v0.14 (audit #9 A3 / audit #10 F1): parallel cache determinism regression.
+// v0.14: parallel cache determinism regression.
 // v0.13's mutex-direct fix (F1-real + Finding 2) replaced the snapshot/merge
 // cache pattern with shared-cache + mutex access. Test design — exercises
 // BOTH the anchor (write) path and the non-anchor (read) path concurrently:

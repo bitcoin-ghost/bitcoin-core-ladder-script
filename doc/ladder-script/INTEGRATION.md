@@ -176,7 +176,7 @@ and `pqpubkeycommit` to compute the commitment. Supported schemes:
 | 0x13 | SPHINCS_SHA | 64 bytes | 49,216 bytes |
 
 Pubkey sizes are canonical per scheme; FALCON sigs are variable
-(post-v0.14 audit #9 F4 &mdash; pre-v0.14 wire-required exactly 666 B
+(post-v0.14 &mdash; pre-v0.14 wire-required exactly 666 B
 which opened a 0-66 B/tx silent-padding embedding channel).
 `MAX_LADDER_WITNESS_SIZE = 100,000` bytes accommodates the largest
 PQ signature (SPHINCS+).
@@ -297,7 +297,7 @@ The full validation pipeline for a v4 RUNG_TX:
 
 1. `ValidateRungOutputs()`: every output must be MLSC (`0xDF`), max 1 DATA_RETURN,
    non-DATA_RETURN outputs ≥ `MIN_RUNG_OUTPUT_VALUE` (546 sats).
-2. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). v0.10 (audit #6 F-2) excluded bootstrap inputs from the cap — only MLSC-bearing witnesses count.
+2. PREIMAGE/SCRIPT_BODY count across all MLSC-spending inputs ≤ `MAX_PREIMAGE_FIELDS_PER_TX` (2). v0.10 excluded bootstrap inputs from the cap — only MLSC-bearing witnesses count.
 3. Cross-input invariants when applicable: PQ_BATCH cache consistency, QABIO output-set
    binding.
 

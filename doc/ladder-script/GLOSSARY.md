@@ -13,7 +13,7 @@ attacker bytes. Sibling hashes are 32 B each, depth ≤ `MAX_ACCUMULATOR_PROOF_D
 so MERKLE_PROOF is ≤ 128 B. `MAX_ACCUMULATOR_BLOCKS_PER_RUNG = 1` and
 `MAX_ACCUMULATOR_BLOCKS_PER_TX = 2` bound the per-spend and per-tx attacker
 budget. Invertible (inverted ACCUMULATOR = blocklist, "NOT in set"). Closes the
-v0.5 audit #2 finding E-001 (legacy v1 shape allowed ~2 KB/spend).
+v0.5 E-001 (legacy v1 shape allowed ~2 KB/spend).
 
 ### ADAPTOR_SIG
 Block type 0x0003 (Signature family). Adaptor signature verification.

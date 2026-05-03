@@ -154,7 +154,7 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
         // participant_id with no duplicates. Closes both:
         //   - duplicate participant_id channel (~44 B/duplicate)
         //   - log2(N!) permutation channel from coordinator-chosen order
-        // v0.14 (audit #10 F3): bound reserve by remaining bytes / minimum
+        // v0.14: bound reserve by remaining bytes / minimum
         // entry size (32 participant_id + 8 contribution + 1 CompactSize = 41).
         // Pre-v0.14 reserve(n_entries) trusted the wire-format n_entries up
         // to QABI_BLOCK_MAX_HARD (262144), allowing a ≤256 KB tx to allocate
@@ -196,7 +196,7 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             error_out = "qabi_block has zero outputs";
             return std::nullopt;
         }
-        // v0.14 (audit #10 F3): bound by remaining bytes (each output_value
+        // v0.14: bound by remaining bytes (each output_value
         // is a fixed 8-byte int64).
         const size_t safe_outputs = std::min<uint64_t>(n_outputs, s.size() / 8);
         block.output_values.reserve(safe_outputs);
@@ -224,7 +224,7 @@ std::optional<QABIBlock> ParseQABIBlock(const std::vector<uint8_t>& bytes, std::
             }
         }
 
-        // v0.13 (audit #9 Finding 6 / v0.12 F8 enforcement landed):
+        // v0.13 (canonical batch_id enforcement landed):
         // batch_id MUST be the canonical SHA256 derivation. Closes the
         // last QABI coordinator-side embedding channel (32 B/batch).
         // Wallets / signers should call ApplyCanonicalBatchId(block)
@@ -275,7 +275,7 @@ uint256 ComputeCanonicalBatchId(std::span<const uint8_t> coordinator_pubkey,
     // batch_id would have to collide on all three inputs — every QABI batch
     // commits the same three fields, so derived equality means functional
     // equality.
-    // v0.14 (audit #10 A3): domain-tagged HashWriter. Pre-v0.14 was untagged;
+    // v0.14: domain-tagged HashWriter. Pre-v0.14 was untagged;
     // not exploitable (each input is length-prefixed by the writer's
     // structured serialisation), but the tag is one-line hardening that
     // follows the same pattern v0.12 A1 applied to HashRungConditions.
