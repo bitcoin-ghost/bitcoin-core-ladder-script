@@ -13273,6 +13273,65 @@ BOOST_AUTO_TEST_CASE(synthetic_refcount_skips_data_return_only_tx)
     BOOST_CHECK(cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT)).IsSpent());
 }
 
+// Audit 2026-05-03 F2 v2 regression: when the forward path deletes the
+// synthetic entry (refcount → 0), DecrementMLSCSyntheticRefcount returns
+// the deleted conditions_root via the optional output parameter so the
+// caller can persist it in undo data. IncrementMLSCSyntheticRefcount with
+// a recovery_root then recreates the entry with refcount = 1, restoring
+// the chainstate to a state where subsequent re-spends of any output from
+// the same creating tx find a valid root. Without this, a deep reorg
+// crossing the deletion would diverge from fresh-synced nodes (chain-
+// split risk on re-spend in the new chain).
+BOOST_AUTO_TEST_CASE(synthetic_refcount_deep_reorg_recovery)
+{
+    CCoinsView base;
+    CCoinsViewCache cache(&base);
+    Txid creating_txid = Txid::FromUint256(*uint256::FromHex(
+        "0303030303030303030303030303030303030303030303030303030303030303"));
+    uint256 conditions_root = *uint256::FromHex(
+        "abadcafeabadcafeabadcafeabadcafeabadcafeabadcafeabadcafeabadcafe");
+
+    // Manually write a 35-byte synthetic entry with refcount = 1.
+    {
+        CTxOut synth;
+        synth.nValue = 0;
+        synth.scriptPubKey.resize(MLSC_SYNTHETIC_PAYLOAD_SIZE);
+        synth.scriptPubKey[0] = rung::MLSC_SYNTHETIC_MARKER;
+        std::memcpy(&synth.scriptPubKey[1], conditions_root.data(), 32);
+        synth.scriptPubKey[33] = 0x01; // refcount = 1
+        synth.scriptPubKey[34] = 0x00;
+        cache.AddCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT),
+                      Coin(std::move(synth), 100, false), false);
+    }
+
+    // Forward path: decrement to zero, capturing the deleted root.
+    uint256 deleted_root;
+    DecrementMLSCSyntheticRefcount(cache, creating_txid, &deleted_root);
+    BOOST_CHECK_EQUAL(deleted_root.GetHex(), conditions_root.GetHex());
+    BOOST_CHECK(cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT)).IsSpent());
+
+    // Reorg path: increment with the recovery root recreates the entry.
+    BOOST_CHECK(IncrementMLSCSyntheticRefcount(cache, creating_txid, &deleted_root, 100));
+    {
+        const Coin& restored = cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT));
+        BOOST_REQUIRE(!restored.IsSpent());
+        BOOST_REQUIRE_EQUAL(restored.out.scriptPubKey.size(), MLSC_SYNTHETIC_PAYLOAD_SIZE);
+        BOOST_CHECK_EQUAL(restored.out.scriptPubKey[0], rung::MLSC_SYNTHETIC_MARKER);
+        // conditions_root preserved
+        for (int i = 0; i < 32; ++i) {
+            BOOST_CHECK_EQUAL(restored.out.scriptPubKey[1 + i], conditions_root.data()[i]);
+        }
+        // refcount = 1
+        BOOST_CHECK_EQUAL(restored.out.scriptPubKey[33], 0x01);
+        BOOST_CHECK_EQUAL(restored.out.scriptPubKey[34], 0x00);
+    }
+
+    // Without recovery root, increment on missing entry still returns false.
+    DecrementMLSCSyntheticRefcount(cache, creating_txid); // → 0, deleted
+    BOOST_CHECK(cache.AccessCoin(COutPoint(creating_txid, MLSC_ROOT_VOUT)).IsSpent());
+    BOOST_CHECK(!IncrementMLSCSyntheticRefcount(cache, creating_txid)); // no recovery root
+}
+
 // Audit 2026-05-03 F2: legacy 33-byte synthetic entries (pre-v0.13
 // chainstate) have no refcount field. Decrement should leave them unchanged
 // rather than misinterpreting payload bytes as a refcount.

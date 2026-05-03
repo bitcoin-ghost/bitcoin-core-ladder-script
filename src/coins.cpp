@@ -158,7 +158,9 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
     }
 }
 
-void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid)
+void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache,
+                                     const Txid& creating_txid,
+                                     uint256* deleted_root_out)
 {
     const COutPoint synth(creating_txid, MLSC_ROOT_VOUT);
     Coin synth_coin;
@@ -189,6 +191,11 @@ void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating
                         (static_cast<uint16_t>(spk[34]) << 8);
     if (refcount <= 1) {
         // Last spend — leave the entry deleted. Chainstate cost recovered.
+        // v2: surface the deleted root so the caller can persist it in undo
+        // data for reorg recovery (audit 2026-05-03 F2 v2).
+        if (deleted_root_out) {
+            std::memcpy(deleted_root_out->data(), &spk[1], 32);
+        }
         return;
     }
     refcount--;
@@ -197,15 +204,33 @@ void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating
     cache.AddCoin(synth, std::move(synth_coin), /*possible_overwrite=*/true);
 }
 
-bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid)
+bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache,
+                                     const Txid& creating_txid,
+                                     const uint256* recovery_root,
+                                     int recovery_height)
 {
     const COutPoint synth(creating_txid, MLSC_ROOT_VOUT);
     Coin synth_coin;
     if (!cache.SpendCoin(synth, &synth_coin)) {
-        // Entry missing — deep reorg crossed a GC point. The conditions_root
-        // is unrecoverable from the chainstate alone (would require reading
-        // the creating tx from block storage, which is intentionally avoided
-        // on the validation hot path). Caller must fail the disconnect.
+        // Entry missing — deep reorg crossed a GC point. v2 (audit
+        // 2026-05-03 F2): if a recovery root was provided (from undo
+        // data), recreate the entry with refcount = 1 so subsequent
+        // spends of any output from this creating tx find a valid root.
+        // Without recovery, the disconnect would leave the chainstate
+        // diverging from fresh-synced nodes (chain-split risk on
+        // re-spend).
+        if (recovery_root != nullptr) {
+            CTxOut root_out;
+            root_out.nValue = 0;
+            root_out.scriptPubKey.resize(MLSC_SYNTHETIC_PAYLOAD_SIZE);
+            root_out.scriptPubKey[0] = rung::MLSC_SYNTHETIC_MARKER;
+            std::memcpy(&root_out.scriptPubKey[1], recovery_root->data(), 32);
+            root_out.scriptPubKey[33] = 0x01; // refcount = 1, LE low byte
+            root_out.scriptPubKey[34] = 0x00; // refcount = 1, LE high byte
+            cache.AddCoin(synth, Coin(std::move(root_out), recovery_height, false),
+                          /*possible_overwrite=*/true);
+            return true;
+        }
         return false;
     }
     const auto& spk = synth_coin.out.scriptPubKey;

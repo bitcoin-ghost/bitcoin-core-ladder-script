@@ -55,7 +55,26 @@ public:
     // undo information for all txins
     std::vector<Coin> vprevout;
 
-    SERIALIZE_METHODS(CTxUndo, obj) { READWRITE(Using<VectorFormatter<TxInUndoFormatter>>(obj.vprevout)); }
+    // Audit 2026-05-03 F2 v2: per-input MLSC synthetic-entry recovery data.
+    // For each input index whose spend triggered MLSC synthetic root entry
+    // deletion (refcount went to 0), this carries the creating tx's
+    // conditions_root so DisconnectBlock can recreate the entry
+    // deterministically without a block-storage read on the disconnect hot
+    // path. Empty for blocks whose v4 spends didn't trigger any deletion
+    // (the common case). Format: vector<pair<input_index, conditions_root>>.
+    //
+    // The presence of this field is a rev*.dat on-disk format change. Old
+    // undo files (pre-v0.14) lack it and will fail to deserialize under
+    // the new code. Operators upgrading must -reindex; this is acceptable
+    // because v4 RUNG_TX has not activated on mainnet at the time of this
+    // change. See validation.cpp UpdateCoins / DisconnectBlock for the
+    // populate / consume sites.
+    std::vector<std::pair<uint32_t, uint256>> mlsc_recovery;
+
+    SERIALIZE_METHODS(CTxUndo, obj) {
+        READWRITE(Using<VectorFormatter<TxInUndoFormatter>>(obj.vprevout));
+        READWRITE(obj.mlsc_recovery);
+    }
 };
 
 /** Undo information for a CBlock */

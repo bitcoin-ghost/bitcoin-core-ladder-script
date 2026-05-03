@@ -504,17 +504,32 @@ static constexpr size_t MLSC_SYNTHETIC_PAYLOAD_SIZE = 35;
 
 //! Decrement the refcount on the synthetic root entry for `creating_txid`.
 //! Called from UpdateCoins after each MLSC input spend. If the refcount drops
-//! to zero, the synthetic entry is deleted (releasing ~35 B of chainstate).
-//! Legacy 33-byte entries are not modified (no refcount field; leak as before).
-//! Audit 2026-05-03 F2.
-void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid);
+//! to zero, the synthetic entry is deleted (releasing ~35 B of chainstate)
+//! and `deleted_root_out` (when non-null) receives the deleted entry's
+//! conditions_root so the caller can persist it in undo data for reorg
+//! recovery. Legacy 33-byte entries are not modified (no refcount field;
+//! leak as before). Audit 2026-05-03 F2 (v2: deletion-root output).
+void DecrementMLSCSyntheticRefcount(CCoinsViewCache& cache,
+                                     const Txid& creating_txid,
+                                     uint256* deleted_root_out = nullptr);
 
 //! Increment the refcount on the synthetic root entry for `creating_txid`.
 //! Called from DisconnectBlock when an MLSC input is restored from undo.
-//! Returns false if the synthetic entry is missing (deep reorg crossed a
-//! GC point); the caller must then fail the disconnect cleanly. Audit
-//! 2026-05-03 F2.
-bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache, const Txid& creating_txid);
+//! Returns true on success.
+//!
+//! If the synthetic entry is missing (forward-path GC deleted it before the
+//! reorg point) and `recovery_root` is non-null, the entry is RECREATED with
+//! refcount = 1 and `recovery_height` as the entry's nHeight. This is the
+//! deep-reorg recovery path; without it the disconnect would leave the
+//! chainstate divergent from fresh-synced nodes.
+//!
+//! Returns false only when the entry is missing AND no recovery root was
+//! supplied. The caller must then fail the disconnect cleanly. Audit
+//! 2026-05-03 F2 (v2: recovery-from-undo path).
+bool IncrementMLSCSyntheticRefcount(CCoinsViewCache& cache,
+                                     const Txid& creating_txid,
+                                     const uint256* recovery_root = nullptr,
+                                     int recovery_height = 0);
 
 //! Utility function to add all of a transaction's outputs to a cache.
 //! When check is false, this assumes that overwrites are only possible for coinbase transactions.

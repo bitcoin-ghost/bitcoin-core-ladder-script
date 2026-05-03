@@ -2158,7 +2158,8 @@ void UpdateCoins(const CTransaction& tx, CCoinsViewCache& inputs, CTxUndo &txund
     // mark inputs spent
     if (!tx.IsCoinBase()) {
         txundo.vprevout.reserve(tx.vin.size());
-        for (const CTxIn &txin : tx.vin) {
+        for (uint32_t i = 0; i < tx.vin.size(); ++i) {
+            const CTxIn &txin = tx.vin[i];
             txundo.vprevout.emplace_back();
             bool is_spent = inputs.SpendCoin(txin.prevout, &txundo.vprevout.back());
             assert(is_spent);
@@ -2168,9 +2169,20 @@ void UpdateCoins(const CTransaction& tx, CCoinsViewCache& inputs, CTxUndo &txund
             // creating tx. When the refcount reaches zero the entry is
             // deleted, releasing ~35 B of chainstate per v4 tx that has
             // been fully spent.
+            //
+            // v2 (audit 2026-05-03 F2 v2): when a deletion happens, capture
+            // the deleted entry's conditions_root in undo data so a later
+            // DisconnectBlock that crosses this spend can recreate the
+            // synthetic entry deterministically. Without this, deep reorgs
+            // would diverge from fresh-synced nodes (chain-split risk on
+            // re-spend).
             const auto& spent_spk = txundo.vprevout.back().out.scriptPubKey;
             if (rung::IsCompactMLSC(spent_spk) || rung::IsMLSCScript(spent_spk)) {
-                DecrementMLSCSyntheticRefcount(inputs, txin.prevout.hash);
+                uint256 deleted_root;
+                DecrementMLSCSyntheticRefcount(inputs, txin.prevout.hash, &deleted_root);
+                if (!deleted_root.IsNull()) {
+                    txundo.mlsc_recovery.emplace_back(i, deleted_root);
+                }
             }
         }
     }
@@ -2605,6 +2617,15 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
                 LogError("DisconnectBlock(): transaction and undo data inconsistent\n");
                 return DISCONNECT_FAILED;
             }
+            // Build a per-input lookup of MLSC recovery roots from undo data
+            // (audit 2026-05-03 F2 v2). The recovery vector is sparse —
+            // typically empty; populated only for the specific inputs whose
+            // spend triggered MLSC synthetic entry deletion at ConnectBlock
+            // time.
+            std::map<uint32_t, uint256> mlsc_recovery_by_input;
+            for (const auto& [idx, root] : txundo.mlsc_recovery) {
+                mlsc_recovery_by_input.emplace(idx, root);
+            }
             for (unsigned int j = tx.vin.size(); j > 0;) {
                 --j;
                 const COutPoint& out = tx.vin[j].prevout;
@@ -2619,20 +2640,32 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
                 int res = ApplyTxInUndo(std::move(txundo.vprevout[j]), view, out);
                 if (res == DISCONNECT_FAILED) return DISCONNECT_FAILED;
                 fClean = fClean && res != DISCONNECT_UNCLEAN;
-                if (restoring_mlsc && !IncrementMLSCSyntheticRefcount(view, out.hash)) {
-                    // Deep reorg crossed a GC point — the synthetic entry
-                    // for this MLSC coin's creating tx was deleted on the
-                    // forward path and cannot be reconstructed from the
-                    // chainstate alone. Mark unclean; subsequent re-spend
-                    // of any output from this creating tx will fail loudly
-                    // at FetchConditionsRoot. Operators encountering this
-                    // can recover with -reindex.
-                    LogWarning("DisconnectBlock(): MLSC synthetic entry missing for "
-                               "restored input %s:%u (creating tx=%s). Deep reorg "
-                               "crossed a refcount GC point; chainstate may need "
-                               "-reindex to fully recover.",
-                               out.hash.ToString(), out.n, out.hash.ToString());
-                    fClean = false;
+                if (restoring_mlsc) {
+                    // v2 (audit 2026-05-03 F2 v2): pass the recovery root
+                    // from undo data when present, so the increment can
+                    // recreate a GC'd synthetic entry deterministically.
+                    auto recovery_it = mlsc_recovery_by_input.find(j);
+                    const uint256* recovery_root =
+                        recovery_it != mlsc_recovery_by_input.end()
+                            ? &recovery_it->second
+                            : nullptr;
+                    const bool ok = IncrementMLSCSyntheticRefcount(
+                        view, out.hash, recovery_root, pindex->nHeight);
+                    if (!ok) {
+                        // Reachable only if the synthetic entry is missing
+                        // AND the undo data has no recovery root for this
+                        // input. With the v2 fix in place, this should never
+                        // happen for blocks whose undo data was written by
+                        // v0.14+ code. Nodes upgrading from v0.13 with
+                        // pre-v2 undo data on disk may hit this path on a
+                        // deep reorg; -reindex is the recovery.
+                        LogWarning("DisconnectBlock(): MLSC synthetic entry missing for "
+                                   "restored input %s:%u (creating tx=%s) and undo data "
+                                   "has no recovery root. Pre-v2 undo data on a deep "
+                                   "reorg path; -reindex required.",
+                                   out.hash.ToString(), out.n, out.hash.ToString());
+                        fClean = false;
+                    }
                 }
             }
             // At this point, all of txundo.vprevout should have been moved out.
