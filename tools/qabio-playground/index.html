@@ -8,8 +8,8 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="../shared/ladder-api.js?v=2"></script>
-<script src="../shared/qabi-helpers.js?v=2"></script>
+<script src="../shared/ladder-api.js?v=3"></script>
+<script src="../shared/qabi-helpers.js?v=3"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -497,11 +497,7 @@ body {
 }
 </style>
 </head>
-<body><div id="legacy-tool-banner" role="alert" style="background:#b91c1c;color:#fff;padding:10px 16px;text-align:center;font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:500;position:sticky;top:0;z-index:9999;border-bottom:2px solid #7f1d1d;line-height:1.4;">
-  <strong>⚠ Interactive tool — last updated at v0.7.</strong>
-  Consensus has moved on (v0.8 through <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/tag/v30.0-ladder-0.22" style="color:#fde047;text-decoration:underline;">v0.22</a>) — wire format, witness shapes and several RPC signatures have changed since this page was written. Transactions built here will be rejected by the current signet. Refresh in progress.
-  <button onclick="document.getElementById(&quot;legacy-tool-banner&quot;).remove()" style="margin-left:12px;background:transparent;color:#fde047;border:1px solid #fde047;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;">dismiss</button>
-</div>
+<body>
 
 <div id="root"></div>
 
@@ -1280,7 +1276,9 @@ function StagePanel({ apiCall }) {
     }});
     dispatch({ type: 'COORD_UPDATE', patch: { signMs } });
     dispatch({ type: 'SET_PHASE', phase: 'batch_signed' });
-    log('Signed in ' + signMs.toFixed(1) + ' ms, sig=' + FALCON512_SIG_SIZE + ' bytes', 'ok');
+    // FALCON sigs are variable-length up to FALCON512_SIG_SIZE_MAX (=666);
+    // signqabo returns the actual byte length in sig.sig_size.
+    log('Signed in ' + signMs.toFixed(1) + ' ms, sig=' + (sig.sig_size ?? '?') + ' bytes', 'ok');
   };
 
   const handleBroadcastBatch = async () => {
@@ -1714,7 +1712,7 @@ function StagePanel({ apiCall }) {
     storeJson('signqabo', 'qabi_signqabo resp', sigRes);
     dispatch({ type: 'BATCH_UPDATE', patch: { signedHex: sigRes.hex, sighash: shRes.sighash, totalBytes: sigRes.hex.length / 2 } });
     dispatch({ type: 'COORD_UPDATE', patch: { signMs } });
-    log('Signed in ' + signMs.toFixed(1) + ' ms, sig=' + FALCON512_SIG_SIZE + ' bytes', 'ok');
+    log('Signed in ' + signMs.toFixed(1) + ' ms, sig=' + (sigRes.sig_size ?? '?') + ' bytes', 'ok');
 
     // ── 9. Broadcast ──
     addModalStep('Broadcasting batch tx…', 'active');
@@ -2139,7 +2137,7 @@ const SCENARIOS = [
   { id: 'happy3', name: '3-of-3 Happy Path', n: 3, fail: [], desc: '3 participants, all sign, clean batch broadcast.' },
   { id: 'escape5', name: '5 Users, 1 Fails', n: 5, fail: [2], desc: '5 participants, P2 flagged failing → escape sweep after batch.' },
   { id: 'real10', name: '10-User Realistic', n: 10, fail: [], desc: 'Realistic batch, varied contributions, all sign.' },
-  { id: 'mega20', name: '20-User Mega Batch', n: 20, fail: [], desc: 'Max playground size — amortised cost approaches asymptote (~162 vB/input).' },
+  { id: 'mega20', name: '20-User Mega Batch', n: 20, fail: [], desc: 'Max playground size — amortised cost approaches asymptote (~139 vB/input at N≈500+; ~143 vB at N=100).' },
   { id: 'bails5', name: 'Coordinator Bails', n: 5, fail: [0, 1, 2, 3, 4], desc: 'Every participant primes, coordinator never broadcasts, everyone escapes.' },
   { id: 'rbd3', name: 'Replace-By-Depth (3)', n: 3, fail: [], desc: '3 participants — after initial prime, P1 re-primes at deeper depth before batch.' },
 ];
