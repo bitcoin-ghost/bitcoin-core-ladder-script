@@ -584,10 +584,20 @@ static RungCoil ParseCoil(const UniValue& obj)
         throw JSONRPCError(RPC_INVALID_PARAMETER,
             "coil.rung_destinations was removed in v0.8 (E-010). Track per-rung destinations off-chain.");
     }
-    if (obj.exists("conditions") && !obj["conditions"].get_array().empty()) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-            "Coil conditions are reserved and not currently active. "
-            "Use covenant/recursion block types (CTV, RECURSE_*, VAULT_LOCK, AMOUNT_LOCK) on rungs instead.");
+    if (obj.exists("conditions")) {
+        // Audit 2026-05-03 second pass F7: check isArray() before
+        // get_array() so a malformed type ({}, "...", 42) produces a
+        // clean RPC_INVALID_PARAMETER instead of an internal-error
+        // "get_array() failed".
+        if (!obj["conditions"].isArray()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "Coil 'conditions' must be an array (and is reserved-not-active anyway).");
+        }
+        if (!obj["conditions"].get_array().empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "Coil conditions are reserved and not currently active. "
+                "Use covenant/recursion block types (CTV, RECURSE_*, VAULT_LOCK, AMOUNT_LOCK) on rungs instead.");
+        }
     }
     return coil;
 }
@@ -2315,6 +2325,12 @@ static RPCHelpMan signrungtx()
                             wit_relay.blocks.push_back(std::move(dummy));
                         }
                     } else {
+                        // Audit 2026-05-03 second pass F7: check isArray()
+                        // before get_array() for clean error reporting.
+                        if (!relay_spec["blocks"].isArray()) {
+                            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                                "relay_blocks[" + std::to_string(rl) + "].blocks must be an array");
+                        }
                         const UniValue& rb_arr = relay_spec["blocks"].get_array();
                         if (rb_arr.size() != conditions.relays[rl].blocks.size()) {
                             throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -3889,7 +3905,17 @@ static RPCHelpMan createrungtx()
 
     for (size_t r = 0; r < rungs_arr.size(); ++r) {
         const UniValue& rung_obj = rungs_arr[r];
-        uint8_t output_index = rung_obj["output_index"].getInt<int>();
+        // Audit 2026-05-03 second pass F5: read as int and bounds-check
+        // BEFORE narrowing to uint8_t. A user-supplied value of 256 would
+        // otherwise silently truncate to 0 and assign the rung to output 0
+        // (the user's desired-but-invalid index never produces an error).
+        int output_index_raw = rung_obj["output_index"].getInt<int>();
+        if (output_index_raw < 0 || output_index_raw > 0xFF) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "Rung " + std::to_string(r) + ": output_index " +
+                std::to_string(output_index_raw) + " out of range [0, 255]");
+        }
+        uint8_t output_index = static_cast<uint8_t>(output_index_raw);
 
         if (output_index >= outputs_arr.size()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -4384,7 +4410,18 @@ static RPCHelpMan qabi_authchain()
         if (seed.size() != 32) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "auth_seed must be exactly 32 bytes");
         }
-        uint32_t chain_length = self.Arg<uint64_t>("chain_length");
+        // Audit 2026-05-03 second pass F6: bounds-check chain_length BEFORE
+        // narrowing uint64_t → uint32_t. A user value of 2^33 would
+        // otherwise silently truncate to 0 and produce H^0(seed) = seed as
+        // the auth_tip, stranding any UTXO committed against the user's
+        // intended commitment.
+        uint64_t chain_length_raw = self.Arg<uint64_t>("chain_length");
+        if (chain_length_raw > std::numeric_limits<uint32_t>::max()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "chain_length " + std::to_string(chain_length_raw) +
+                " exceeds uint32 max (4294967295)");
+        }
+        uint32_t chain_length = static_cast<uint32_t>(chain_length_raw);
 
         uint256 tip = rung::ComputeAuthChainTip(std::span<const uint8_t>(seed), chain_length);
 
