@@ -1266,6 +1266,20 @@ bool ParseDescriptor(const std::string& desc,
                      std::vector<std::vector<std::vector<uint8_t>>>& pubkeys,
                      std::string& error)
 {
+    // Audit 2026-05-03 second pass F10: cap descriptor length to bound
+    // memory pressure from hostile input. The existing MAX_PARSE_ITEMS
+    // (1000) and MAX_PARSE_DEPTH (32) caps bound the AST size, but a
+    // single very long descriptor string (e.g. 1 MB of nested aliases)
+    // could still cause allocator pressure during tokenisation. 65 KB is
+    // well above any realistic ladder descriptor (typical: ~200 B; the
+    // largest playground preset is under 4 KB) while staying small enough
+    // to keep the parser's worst-case allocations bounded.
+    static constexpr size_t MAX_DESCRIPTOR_LEN = 65536;
+    if (desc.size() > MAX_DESCRIPTOR_LEN) {
+        error = "descriptor too long: " + std::to_string(desc.size()) +
+                " bytes exceeds maximum (" + std::to_string(MAX_DESCRIPTOR_LEN) + ")";
+        return false;
+    }
     ParseContext ctx{desc, keys, 0, {}};
 
     SkipWhitespace(ctx);
@@ -1395,7 +1409,15 @@ std::string FormatDescriptor(const RungConditions& conditions,
         }
         case RungBlockType::ADAPTOR_SIG: {
             result += "adaptor_sig(" + get_alias(rung_idx) + ", " + get_alias(rung_idx);
-            if (!block.fields.empty() && block.fields[0].type == RungDataType::SCHEME) {
+            // Audit 2026-05-03 second pass F10: also check
+            // !fields[0].data.empty() — a manually-constructed RungBlock
+            // with fields[0].type == SCHEME but empty data would otherwise
+            // out-of-bounds-read data[0]. Normal flow doesn't produce this
+            // shape (deserialiser enforces SCHEME = 1 byte), but the
+            // formatter is defensive against caller-supplied corruption.
+            if (!block.fields.empty() &&
+                block.fields[0].type == RungDataType::SCHEME &&
+                !block.fields[0].data.empty()) {
                 auto s = static_cast<RungScheme>(block.fields[0].data[0]);
                 if (s != RungScheme::SCHNORR) result += ", " + SchemeToString(s);
             }
@@ -1822,7 +1844,23 @@ bool ParseTxMLSCDescriptor(const std::string& desc,
             error = "expected output index at position " + std::to_string(ctx.pos);
             return false;
         }
-        size_t output_index = std::stoul(ctx.desc.substr(idx_start, ctx.pos - idx_start));
+        // Audit 2026-05-03 second pass F10: pre-validate length before
+        // std::stoul. A 30+-digit decimal exceeds ULONG_MAX and stoul
+        // throws std::out_of_range. The exception is normally caught by
+        // the JSONRPC framework but produces a generic 500-class error;
+        // pre-checking gives a clean RPC_INVALID_PARAMETER instead.
+        const size_t idx_str_len = ctx.pos - idx_start;
+        if (idx_str_len > 10) { // uint32 max = 10 digits, MAX_OUTPUT_INDEX much smaller
+            error = "output index too large (more than 10 digits) at position " + std::to_string(idx_start);
+            return false;
+        }
+        size_t output_index;
+        try {
+            output_index = std::stoul(ctx.desc.substr(idx_start, idx_str_len));
+        } catch (const std::exception&) {
+            error = "invalid output index at position " + std::to_string(idx_start);
+            return false;
+        }
         if (output_index > MAX_OUTPUT_INDEX) {
             error = "output index " + std::to_string(output_index) + " exceeds maximum (" + std::to_string(MAX_OUTPUT_INDEX) + ")";
             return false;
