@@ -2403,9 +2403,9 @@ const BLOCK_FAMILIES = [
         { name: 'pubkeys', dataType: 'PUBKEY', label: 'Public Keys (N)', placeholder: '02ab..., 03cd... (max 16)', multi: true },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
-      { type: 'ADAPTOR_SIG', label: 'ADAPTOR_SIG', desc: 'Adaptor signature for atomic swaps and payment channels', fields: [
+      { type: 'ADAPTOR_SIG', label: 'ADAPTOR_SIG', desc: 'Adaptor signature for atomic swaps and payment channels (post-E-002: only signing_key is on-chain; adaptor_point is off-chain protocol data revealed at settlement)', fields: [
         { name: 'signing_key', dataType: 'PUBKEY', label: 'Signing Key', placeholder: '02abcdef...' },
-        { name: 'adaptor_point', dataType: 'PUBKEY', label: 'Adaptor Point', placeholder: '32-byte x-only hex' }
+        { name: 'adaptor_point', dataType: 'PUBKEY', label: 'Adaptor Point (off-chain)', placeholder: '32-byte x-only hex — protocol-only, not committed', optional: true, witnessOnly: true }
       ]},
       { type: 'MUSIG_THRESHOLD', label: 'MUSIG_THR', desc: 'MuSig2/FROST aggregate threshold --M-of-N produces single Schnorr sig', fields: [
         { name: 'agg_pubkey', dataType: 'PUBKEY', label: 'Aggregate Key', placeholder: '02abcdef... (combined MuSig2/FROST key)' },
@@ -2624,9 +2624,9 @@ const BLOCK_FAMILIES = [
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Public Key', placeholder: '02abcdef...' },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
-      { type: 'PTLC', label: 'PTLC', desc: 'Point Time Locked Contract --adaptor sig + CSV for payment channels', fields: [
+      { type: 'PTLC', label: 'PTLC', desc: 'Point Time Locked Contract --adaptor sig + CSV for payment channels (post-v0.7: conditions only carry CSV; signing_key folds into the Merkle leaf; adaptor_point is off-chain)', fields: [
         { name: 'signing_key', dataType: 'PUBKEY', label: 'Signing Key', placeholder: '02abcdef...' },
-        { name: 'adaptor_point', dataType: 'PUBKEY', label: 'Adaptor Point', placeholder: '32-byte x-only hex' },
+        { name: 'adaptor_point', dataType: 'PUBKEY', label: 'Adaptor Point (off-chain)', placeholder: '32-byte x-only hex — protocol-only, not committed', optional: true, witnessOnly: true },
         { name: 'blocks', dataType: 'NUMERIC', label: 'Timelock (blocks)', placeholder: '144' }
       ]},
       { type: 'CLTV_SIG', label: 'CLTV_SIG', desc: 'SIG + CLTV combined --signature with absolute timelock', fields: [
@@ -3415,7 +3415,12 @@ BlockRegistry.HASH_SIG.buildSigner = (block, keyLookup, preimages, opts) => {
 BlockRegistry.PTLC.buildSigner = (block, keyLookup) => {
   const key = keyLookup(block.values.signing_key);
   if (!key) return null;
-  return { type: 'PTLC', privkey: key.privkey, adaptor_point: block.values.adaptor_point };
+  // PTLC (post-v0.7): only signing_key folds into the Merkle leaf
+  // (PubkeyCountForBlock = 1); adaptor_point is off-chain protocol data.
+  // signrungtx PTLC handler explicitly notes "v0.7: dropped the v0.6
+  // trailing PUBKEY loop (adaptor_point slot is gone)."
+  // Witness shape per current types.h: [PUBKEY, SIGNATURE].
+  return { type: 'PTLC', privkey: key.privkey };
 };
 
 BlockRegistry.CLTV_SIG.buildSigner = (block, keyLookup, preimages, opts) => {
@@ -4565,7 +4570,7 @@ function rungsToDescriptor(rungs) {
       const pks = (v.pubkeys || '').split(',').map(k => k.trim()).filter(Boolean);
       return inv + 'multisig(' + num(v.threshold) + pks.map(k => ', @' + k.substring(0, 8)).join('') + ')';
     }
-    case 'ADAPTOR_SIG': return inv + 'adaptor_sig(' + pk(v.pubkey) + ', ' + pk(v.adaptor_point) + schemeStr(v.scheme) + ')';
+    case 'ADAPTOR_SIG': return inv + 'adaptor_sig(' + pk(v.signing_key || v.pubkey) + schemeStr(v.scheme) + ')';
     case 'MUSIG_THRESHOLD': {
       const pks = (v.pubkeys || '').split(',').map(k => k.trim()).filter(Boolean);
       return inv + 'musig_threshold(' + num(v.threshold) + pks.map(k => ', @' + k.substring(0, 8)).join('') + ')';
@@ -4604,7 +4609,7 @@ function rungsToDescriptor(rungs) {
     case 'TIMELOCKED_SIG': return inv + 'timelocked_sig(' + pk(v.pubkey) + ', ' + num(v.blocks || v.csv) + ')';
     case 'HTLC': return inv + 'htlc(' + pk(v.sender || v.pubkey) + ', ' + pk(v.receiver) + ', ' + hex(v.preimage || v.hash) + ', ' + num(v.csv || v.blocks) + ')';
     case 'HASH_SIG': return inv + 'hash_sig(' + pk(v.pubkey) + ', ' + hex(v.preimage || v.hash) + ')';
-    case 'PTLC': return inv + 'ptlc(' + pk(v.pubkey) + ', ' + pk(v.adaptor_point) + ', ' + num(v.csv || v.blocks) + ')';
+    case 'PTLC': return inv + 'ptlc(' + pk(v.signing_key || v.pubkey) + ', ' + num(v.csv || v.blocks) + ')';
     case 'CLTV_SIG': return inv + 'cltv_sig(' + pk(v.pubkey) + ', ' + num(v.height) + ')';
     case 'TIMELOCKED_MULTISIG': {
       const pks = (v.pubkeys || '').split(',').map(k => k.trim()).filter(Boolean);
