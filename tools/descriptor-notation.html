@@ -126,13 +126,10 @@ html[data-theme="dark"] .sidebar,
 html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 </style>
 </head>
-<body><div id="v08-transition-banner" role="alert" style="background:#b91c1c;color:#fff;padding:10px 16px;text-align:center;font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:500;position:sticky;top:0;z-index:9999;border-bottom:2px solid #7f1d1d;line-height:1.4;">
-  <strong>⚠ v0.8 transition — interactive tool not yet updated.</strong>
-  The Ladder Script signet was reset on 2026-04-29 for v0.8
-  (audit fixes: <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/tag/v30.0-ladder-0.8" style="color:#fde047;text-decoration:underline;">E-009 / E-010 / E-018a / E-018b</a>).
-  This page still emits a pre-v0.8 wire format and will produce txs that the chain rejects.
-  Awaiting tool update.
-  <button onclick="document.getElementById('v08-transition-banner').remove()" style="margin-left:12px;background:transparent;color:#fde047;border:1px solid #fde047;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;">dismiss</button>
+<body><div id="legacy-tool-banner" role="alert" style="background:#b91c1c;color:#fff;padding:10px 16px;text-align:center;font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:500;position:sticky;top:0;z-index:9999;border-bottom:2px solid #7f1d1d;line-height:1.4;">
+  <strong>⚠ Reference page — last updated at v0.7.</strong>
+  Descriptor syntax has evolved since v0.7 (v0.8 through <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/tag/v30.0-ladder-0.22" style="color:#fde047;text-decoration:underline;">v0.22</a>); some examples on this page may not parse against the current `parseladder` RPC. Refresh in progress.
+  <button onclick="document.getElementById('legacy-tool-banner').remove()" style="margin-left:12px;background:transparent;color:#fde047;border:1px solid #fde047;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;">dismiss</button>
 </div>
 
 
