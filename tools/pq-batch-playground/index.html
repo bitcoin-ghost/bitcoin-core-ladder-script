@@ -202,12 +202,7 @@ body {
 .status-dot.offline { background: var(--red); }
 </style>
 </head>
-<body><div id="legacy-tool-banner" role="alert" style="background:#b91c1c;color:#fff;padding:10px 16px;text-align:center;font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:500;position:sticky;top:0;z-index:9999;border-bottom:2px solid #7f1d1d;line-height:1.4;">
-  <strong>⚠ Interactive tool — last updated at v0.7.</strong>
-  Consensus has moved on (v0.8 through <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/tag/v30.0-ladder-0.22" style="color:#fde047;text-decoration:underline;">v0.22</a>) — wire format, witness shapes and several RPC signatures have changed since this page was written. Transactions built here will be rejected by the current signet. Refresh in progress.
-  <button onclick="document.getElementById(&quot;legacy-tool-banner&quot;).remove()" style="margin-left:12px;background:transparent;color:#fde047;border:1px solid #fde047;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;">dismiss</button>
-</div>
-
+<body>
 <div id="root"></div>
 
 <script type="text/babel">
@@ -226,9 +221,23 @@ const MIN_N = 2;
 const MAX_N = 16;
 const DEFAULT_N = 5;
 
-// Per-input baseline (vB) for SIG(FALCON-512) — measured from the live
-// stress test (test/functional/feature_rung_pq_batch_stress.py at N=100).
-const SIG_FALCON_BASELINE_VB_PER_INPUT = 436;
+// Per-input baseline (vB) for SIG(FALCON-512) — N independent FALCON-512
+// signature inputs without batching. Per the current PQ_BATCH spec
+// (~400 vB/input is the rounded baseline; the live stress test
+// test/functional/feature_rung_pq_batch_stress.py confirms this within
+// a few vB at N=100).
+const SIG_FALCON_BASELINE_VB_PER_INPUT = 400;
+
+// Per-input cost model under PQ_BATCH (post-v0.7 measurements):
+//   Anchor input  ≈ 392 vB total per-input (witness PUBKEY 897 + SIG 666
+//                   + framing, segwit-discounted). Paid once per commit
+//                   per tx.
+//   Cache input   ≈ 14 vB total per-input (just the MLSC proof
+//                   scaffolding; signature verify short-circuits via
+//                   tx-local cache).
+// Asymptote at large N: cache cost dominates → ~14 vB/input.
+const ANCHOR_PER_INPUT_VB = 392;
+const CACHE_PER_INPUT_VB = 14;
 
 // Per-PQ_BATCH-UTXO funding amount. Kept small so a single signet faucet
 // call (default 0.001 BTC = 100,000 sats) covers N up to 10 with headroom
@@ -527,8 +536,8 @@ function App() {
     }});
     dispatch({ type: 'SET_METRICS', metrics: {
       vsize, weight, perInput, baselineVb, savings,
-      anchorPayload: 41 + Math.ceil((897 + 666 + 4) / 4),  // base + witness/4
-      cachePayload: 41 + 14,                                  // base + MLSC proof witness
+      anchorPayload: ANCHOR_PER_INPUT_VB,
+      cachePayload: CACHE_PER_INPUT_VB,
     }});
     dispatch({ type: 'SET_PHASE', phase: 'spent' });
     dispatch({ type: 'SET_BUSY', busy: false });
@@ -682,7 +691,7 @@ function StagePanel({ state, error, loading, onReset }) {
         </div>
       )}
       <div className="banner cyan">
-        <strong>What this is:</strong> a focused demo of PQ_BATCH (wire ID 0x0A03). Funds N UTXOs sharing one FALCON-512 pubkey commit, then drains them in a single tx where ONE input ("anchor") reveals the pubkey + sig and the rest validate from a tx-local cache. Per-input cost asymptotes to ~55 vB vs ~436 vB for independent FALCON sigs (~8× saving at large N).
+        <strong>What this is:</strong> a focused demo of PQ_BATCH (wire ID 0x0A03). Funds N UTXOs sharing one FALCON-512 pubkey commit, then drains them in a single tx where ONE input ("anchor") reveals the pubkey + sig and the rest validate from a tx-local cache. Per-input cost asymptotes to ~14 vB vs ~400 vB for independent FALCON sigs (~28× saving at the asymptote; ~22× at N=100; ~8× at N=10).
       </div>
 
       <div className="phase-panel">
@@ -817,18 +826,18 @@ function RightPanel({ state }) {
           <tbody>
             <tr>
               <td>Anchor input</td>
-              <td className="num">{m ? m.anchorPayload : '~433'}</td>
-              <td className="num">≈ 433</td>
+              <td className="num">{m ? m.anchorPayload : '~392'}</td>
+              <td className="num">≈ 392</td>
             </tr>
             <tr>
               <td>Cache input × {Math.max(0, state.n - 1)}</td>
-              <td className="num">{m ? m.cachePayload : '~55'}</td>
-              <td className="num">≈ 55 each</td>
+              <td className="num">{m ? m.cachePayload : '~14'}</td>
+              <td className="num">≈ 14 each</td>
             </tr>
             <tr>
               <td><strong>Per input (mean)</strong></td>
               <td className="num"><strong>{m ? m.perInput.toFixed(1) : '—'}</strong></td>
-              <td className="num"><strong>≈ 55</strong></td>
+              <td className="num"><strong>≈ 14</strong></td>
             </tr>
           </tbody>
         </table>
@@ -848,11 +857,13 @@ function RightPanel({ state }) {
       )}
 
       <div className="pg-section" style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-        Baseline {SIG_FALCON_BASELINE_VB_PER_INPUT} vB/input is the asymptotic per-input cost
-        of N independent SIG(FALCON-512) inputs, measured live at N=100 in
-        <code>test/functional/feature_rung_pq_batch_stress.py</code>. Batch
-        sizes ≤ 20 here; consensus allows ≤ ~1,810 PQ_BATCH inputs in one
-        standard tx (100K vB cap).
+        Baseline {SIG_FALCON_BASELINE_VB_PER_INPUT} vB/input is the per-input
+        cost of N independent SIG(FALCON-512) inputs without batching.
+        This page caps N at {MAX_N} (one fund tx, MAX_RUNGS bound);
+        the stress test <code>feature_rung_pq_batch_stress.py</code>
+        goes higher by funding via N separate txs. Standard relay caps
+        at ~1,810 PQ_BATCH inputs per spend tx (100K vB witness cap /
+        ~14 vB cache cost + 1 anchor).
       </div>
     </div>
   );
