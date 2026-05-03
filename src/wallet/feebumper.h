@@ -93,6 +93,16 @@ public:
         case SigVersion::TAPROOT:
         case SigVersion::TAPSCRIPT:
             assert(false);
+        case SigVersion::LADDER:
+            // Audit 2026-05-03 second pass F9: Ladder Script (v4 RUNG_TX)
+            // is currently not signable through the wallet's signing path —
+            // v4 outputs are signed via the dedicated signrungtx /
+            // signladder RPCs instead. Until wallet v4 signing lands, fee
+            // bumping a v4 tx is not a meaningful operation; assert to
+            // surface any caller that reaches here. (Without this case,
+            // the prior code silently fell through, producing a zero
+            // contribution to the fee-bump weight estimate.)
+            assert(false);
         }
     }
 

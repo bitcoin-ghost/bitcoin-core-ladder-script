@@ -290,6 +290,22 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry
         entry.pushKV("blockhash", block_hash.GetHex());
     }
 
+    // Audit 2026-05-03 second pass F8: emit the v4 RUNG_TX tx-level
+    // fields (conditions_root + qabi_block + aggregated_sig) when the
+    // transaction is v4. Without this, decoderawtransaction /
+    // getrawtransaction / REST /tx/ paths show vin/vout/locktime but
+    // hide the v4-specific tx-level state — block explorers, wallets,
+    // and debugging tools can't reconstruct v4 tx state from JSON.
+    if (tx.version == CTransaction::RUNG_TX_VERSION) {
+        entry.pushKV("conditions_root", tx.conditions_root.GetHex());
+        if (!tx.qabi_block.empty()) {
+            entry.pushKV("qabi_block", HexStr(tx.qabi_block));
+        }
+        if (!tx.aggregated_sig.empty()) {
+            entry.pushKV("aggregated_sig", HexStr(tx.aggregated_sig));
+        }
+    }
+
     if (include_hex) {
         entry.pushKV("hex", EncodeHexTx(tx)); // The hex-encoded transaction. Used the name "hex" to be consistent with the verbose output of "getrawtransaction".
     }
