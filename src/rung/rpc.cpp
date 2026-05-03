@@ -862,8 +862,11 @@ static RPCHelpMan validateladder()
 {
     std::string hex_str = self.Arg<std::string>("hex");
     CMutableTransaction mtx;
-    if (!DecodeHexTx(mtx, hex_str)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Failed to decode transaction");
+    std::string decode_err;
+    if (!DecodeHexTx(mtx, hex_str, /*try_no_witness=*/false, /*try_witness=*/true, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty() ? "Failed to decode transaction"
+                               : "Failed to decode transaction: " + decode_err);
     }
 
     CTransaction tx(mtx);
@@ -2041,8 +2044,11 @@ static RPCHelpMan signrungtx()
 {
     std::string hex_str = self.Arg<std::string>("hex");
     CMutableTransaction mtx;
-    if (!DecodeHexTx(mtx, hex_str)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Failed to decode transaction");
+    std::string decode_err;
+    if (!DecodeHexTx(mtx, hex_str, /*try_no_witness=*/false, /*try_witness=*/true, &decode_err)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+            decode_err.empty() ? "Failed to decode transaction"
+                               : "Failed to decode transaction: " + decode_err);
     }
 
     if (mtx.version != CTransaction::RUNG_TX_VERSION) {
@@ -2712,8 +2718,12 @@ static RPCHelpMan computectvhash()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
         {
             CMutableTransaction mtx;
-            if (!DecodeHexTx(mtx, request.params[0].get_str())) {
-                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Failed to decode transaction hex");
+            std::string decode_err;
+            if (!DecodeHexTx(mtx, request.params[0].get_str(),
+                              /*try_no_witness=*/false, /*try_witness=*/true, &decode_err)) {
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                    decode_err.empty() ? "Failed to decode transaction hex"
+                                       : "Failed to decode transaction hex: " + decode_err);
             }
 
             uint32_t input_index = 0;
@@ -3192,8 +3202,11 @@ static RPCHelpMan signladder()
         // 1. Decode transaction
         std::string hex_str = self.Arg<std::string>("hex");
         CMutableTransaction mtx;
-        if (!DecodeHexTx(mtx, hex_str)) {
-            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Failed to decode transaction");
+        std::string decode_err;
+        if (!DecodeHexTx(mtx, hex_str, /*try_no_witness=*/false, /*try_witness=*/true, &decode_err)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                decode_err.empty() ? "Failed to decode transaction"
+                                   : "Failed to decode transaction: " + decode_err);
         }
         if (mtx.version != CTransaction::RUNG_TX_VERSION) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Transaction is not v4 RUNG_TX");
@@ -4431,8 +4444,12 @@ static RPCHelpMan qabi_signqabo()
         }
 
         CMutableTransaction mtx;
-        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"), true)) {
-            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "tx decode failed");
+        std::string decode_err;
+        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"),
+                          /*try_no_witness=*/true, /*try_witness=*/true, &decode_err)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                decode_err.empty() ? "tx decode failed"
+                                   : "tx decode failed: " + decode_err);
         }
         if (mtx.qabi_block.empty()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
@@ -4503,8 +4520,12 @@ static RPCHelpMan qabi_sighash()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
     {
         CMutableTransaction mtx;
-        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"), true)) {
-            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "tx decode failed");
+        std::string decode_err;
+        if (!DecodeHexTx(mtx, self.Arg<std::string>("hex_tx"),
+                          /*try_no_witness=*/true, /*try_witness=*/true, &decode_err)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                decode_err.empty() ? "tx decode failed"
+                                   : "tx decode failed: " + decode_err);
         }
         CTransaction tx(mtx);
         uint256 sighash = rung::ComputeSighashQABO(tx);
