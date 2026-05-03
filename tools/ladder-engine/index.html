@@ -2380,11 +2380,7 @@ body {
 .walkthrough-dot.done { background: var(--amber-dim); }
 </style>
 </head>
-<body><div id="legacy-tool-banner" role="alert" style="background:#b91c1c;color:#fff;padding:10px 16px;text-align:center;font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:500;position:sticky;top:0;z-index:9999;border-bottom:2px solid #7f1d1d;line-height:1.4;">
-  <strong>⚠ Interactive tool — last updated at v0.7.</strong>
-  Consensus has moved on (v0.8 through <a href="https://github.com/defenwycke/bitcoin-core-ladder-script/releases/tag/v30.0-ladder-0.22" style="color:#fde047;text-decoration:underline;">v0.22</a>) — wire format, witness shapes and several RPC signatures have changed since this page was written. Transactions built here will be rejected by the current signet. Refresh in progress.
-  <button onclick="document.getElementById(&quot;legacy-tool-banner&quot;).remove()" style="margin-left:12px;background:transparent;color:#fde047;border:1px solid #fde047;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;">dismiss</button>
-</div>
+<body>
 
 <div id="root"></div>
 <script type="text/babel">
@@ -2740,7 +2736,7 @@ const BLOCK_FAMILIES = [
         { name: 'owner_id', dataType: 'PUBKEY_COMMIT', label: 'Owner ID', placeholder: '32-byte SHA256(owner Rung 0 FALCON pubkey) (conditions)' },
         { name: 'spend_preimage', dataType: 'PREIMAGE', label: 'Spend Preimage', placeholder: '32-byte preimage at depth committed_depth+1', witnessOnly: true }
       ]},
-      { type: 'PQ_BATCH', label: 'PQ_BATCH', desc: 'PQ batch authorisation --commits SHA256(falcon_pubkey); the anchor input in a tx reveals the pubkey + a PQ signature, and every other input gated by the same hash short-circuits via a tx-level cache. ~18 vB/input amortised across N inputs. The fund flow auto-generates a FALCON-512 keypair when pubkey_hash is empty (writes the SHA256 commit into pubkey_hash and stashes the keypair into pq_pubkey/pq_privkey for the spend signer). To use a pre-existing key, fill pubkey_hash + pq_pubkey + pq_privkey manually.', fields: [
+      { type: 'PQ_BATCH', label: 'PQ_BATCH', desc: 'PQ batch authorisation --commits SHA256(falcon_pubkey); the anchor input in a tx reveals the pubkey + a PQ signature, and every other input gated by the same hash short-circuits via a tx-level cache. Per-input cost asymptotes to ~14 vB at large N (anchor pays ~392 vB once; each cache input ~14 vB). The fund flow auto-generates a FALCON-512 keypair when pubkey_hash is empty (writes the SHA256 commit into pubkey_hash and stashes the keypair into pq_pubkey/pq_privkey for the spend signer). To use a pre-existing key, fill pubkey_hash + pq_pubkey + pq_privkey manually.', fields: [
         { name: 'pubkey_hash', dataType: 'HASH256', label: 'Pubkey Hash', placeholder: 'Auto-filled at fund time --SHA256(pq_pubkey), 32 B (conditions)' },
         { name: 'pq_pubkey', dataType: 'PUBKEY', label: 'PQ Pubkey (anchor only)', placeholder: 'Auto-filled at fund time --hex FALCON/Dilithium pubkey, used to anchor the spend witness', witnessOnly: true, optional: true },
         { name: 'pq_privkey', dataType: 'PUBKEY', label: 'PQ Privkey (anchor only)', placeholder: 'Auto-filled at fund time --hex private key, signs the per-input ladder sighash at spend', witnessOnly: true, optional: true }
@@ -2831,7 +2827,7 @@ const BLOCK_RULES = {
   P2TR_LEGACY: 'Legacy P2TR key-path wrapped. Same evaluation as SIG --key-path Taproot spend with typed fields. Closes key-path data surfaces.',
   P2TR_SCRIPT_LEGACY: 'Legacy P2TR script-path wrapped. HASH256 is Merkle root of script tree, internal key folded into Merkle leaf. Revealed leaf (SCRIPT_BODY) must be valid Ladder Script conditions (up to 32 bytes). Closes the primary inscription/data-embedding vector.',
   QABI_PRIME: 'QABIO priming state transition. Reveals the next auth chain preimage, bumps committed_depth, and mutates the QABI_SPEND rung\'s committed_root + committed_expiry via a covenant check (tx.vout[0] must be an MLSC UTXO whose conditions_root equals the re-computed primed tree). Participant-authorised: only the auth_seed holder can produce a valid preimage. No coordinator signature required at priming time.',
-  QABI_SPEND: 'QABIO batch spend. Consensus-enforced N-party atomic batch: each primed input reveals its preimage at committed_depth+1, verifies against committed auth_tip, then a single FALCON-512 coordinator signature (SIGHASH_QABO, 666 B) authorises the whole tx. Output set must bit-exact match the QABIBlock outputs list (tx-level hashOutputs). Tx-level aggregated_sig is shared across all inputs \u2014 one FALCON verify per tx, not per input.',
+  QABI_SPEND: 'QABIO batch spend. Consensus-enforced N-party atomic batch: each primed input reveals its preimage at committed_depth+1, verifies against committed auth_tip, then a single FALCON-512 coordinator signature (SIGHASH_QABO, variable up to 666 B) authorises the whole tx. The output-set binding check enforces tx.conditions_root == qabi_block.outputs_conditions_root, output_count match, and per-output value match (every v4 MLSC output\'s scriptPubKey is structurally 0xDF || tx.conditions_root, so binding the root pins every destination structurally without storing per-output scriptPubKeys on the wire). Tx-level aggregated_sig is shared across all inputs \u2014 one FALCON verify per tx, not per input.',
   PQ_BATCH: 'PQ batch authorisation. Conditions commit SHA256(pq_pubkey). Exactly one input per (tx, commit) is the "anchor": its witness reveals the pubkey + a PQ signature over the per-input ladder sighash. Every other input gated by the same hash carries no PQ witness and short-circuits via a tx-local cache the anchor populates after its first verify. Scheme derived from pubkey size (897 \u2192 FALCON-512, 1793 \u2192 FALCON-1024, 1952 \u2192 Dilithium3). No priming, no coordinator, no output-set binding \u2014 the simple "key-sharing pool" complement to QABIO.',
 };
 
@@ -2893,7 +2889,7 @@ function getCoilSymbol(type) {
 // Wire-level coil types (C++ RPC format)
 const WIRE_COIL_TYPES = [
   { value: 'UNLOCK', label: 'UNLOCK --Standard spend' },
-  { value: 'UNLOCK_TO', label: 'UNLOCK_TO --Spend to address + conditions' },
+  { value: 'UNLOCK_TO', label: 'UNLOCK_TO --reserved (use OUTPUT_CHECK or CTV instead)', disabled: true },
 ];
 const ATTESTATION_TYPES = [
   { value: 'INLINE', label: 'INLINE --Sigs in witness' },
@@ -3361,13 +3357,12 @@ BlockRegistry.MULTISIG.buildSigner = (block, keyLookup, preimages, opts) => {
 BlockRegistry.ADAPTOR_SIG.buildSigner = (block, keyLookup) => {
   const key = keyLookup(block.values.signing_key);
   if (!key) return null;
-  // ADAPTOR_SIG folds two PUBKEYs into the merkle leaf (signing_key +
-  // adaptor_point). The library's signrungtx extractor walks condition-
-  // side PUBKEY fields in positional order via a `pubkeys` array — a
-  // named `adaptor_point` key is dropped on the floor, the leaf is
-  // committed with only one pubkey at fund time, and the spend's
-  // recomputed leaf never matches the on-chain root.
-  return { type: 'ADAPTOR_SIG', privkey: key.privkey, pubkeys: [block.values.adaptor_point] };
+  // ADAPTOR_SIG (post-E-002): only the signing pubkey is folded into the
+  // Merkle leaf (PubkeyCountForBlock = 1). The adaptor_point is consumed
+  // off-chain by the protocol (DLC settlement, atomic swap reveal), not
+  // committed in conditions. Per the current descriptor `adaptor_sig(@signer)`
+  // — single pubkey arg.
+  return { type: 'ADAPTOR_SIG', privkey: key.privkey };
 };
 
 BlockRegistry.MUSIG_THRESHOLD.buildSigner = (block, keyLookup) => {
@@ -8045,7 +8040,7 @@ const EXAMPLES = [
 
   {
     title: 'SINGLE SIG (FALCON512)',
-    desc: 'Post-quantum single signature using NIST FIPS 206 FALCON-512 (FN-DSA). Compact lattice-based signatures (~666 bytes). Full block encoding with SCHEME field routing to PQ verification.',
+    desc: 'Post-quantum single signature using NIST FIPS 206 FALCON-512 (FN-DSA). Compact lattice-based signatures (variable, up to 666 bytes; FALCON sigs are variable-length). Full block encoding with SCHEME field routing to PQ verification.',
     tags: [['FALCON512', 'sig'], ['PQ', 'hash']],
     rungs: [
       { label: 'SPEND', blocks: [
@@ -8145,7 +8140,7 @@ const EXAMPLES = [
 
   {
     title: 'PQ BATCH POOL',
-    desc: 'Pool of UTXOs sharing one FALCON-512 key. PQ_BATCH commits SHA256(falcon_pubkey) at fund time. The "anchor" input in the spend tx reveals the pubkey + a FALCON signature once; every other input gated by the same hash short-circuits via a tx-local cache the anchor populates. Net cost ~18 vB/input vs ~400 vB/input for separate FALCON sigs.\n\nPOOL_KEY: PQ_BATCH gates the UTXO with the pubkey commit. The fund flow auto-generates a fresh FALCON-512 keypair, computes SHA256(pubkey), and writes both the commit (into pubkey_hash, on-chain) and the keypair (into block.values, persisted with the record so the spend can sign).\n\nThis preset funds + spends ONE PQ_BATCH UTXO end-to-end. The multi-input "anchor + cache" cost amortisation is demonstrated live at the PQ Batch Playground (Tools \u2192 PQ Batch Playground) and exercised in test/functional/feature_rung_pq_batch.py.',
+    desc: 'Pool of UTXOs sharing one FALCON-512 key. PQ_BATCH commits SHA256(falcon_pubkey) at fund time. The "anchor" input in the spend tx reveals the pubkey + a FALCON signature once; every other input gated by the same hash short-circuits via a tx-local cache the anchor populates. Per-input cost asymptotes to ~14 vB vs ~400 vB/input for separate FALCON sigs (~28× saving at the asymptote).\n\nPOOL_KEY: PQ_BATCH gates the UTXO with the pubkey commit. The fund flow auto-generates a fresh FALCON-512 keypair, computes SHA256(pubkey), and writes both the commit (into pubkey_hash, on-chain) and the keypair (into block.values, persisted with the record so the spend can sign).\n\nThis preset funds + spends ONE PQ_BATCH UTXO end-to-end. The multi-input "anchor + cache" cost amortisation is demonstrated live at the PQ Batch Playground (Tools \u2192 PQ Batch Playground) and exercised in test/functional/feature_rung_pq_batch.py.',
     tags: [['PQ_BATCH', 'sig'], ['FALCON', 'sig']],
     rungs: [
       { label: 'POOL_KEY', blocks: [
