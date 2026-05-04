@@ -122,6 +122,14 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
                 {RPCResult::Type::OBJ, "scriptPubKey", "", ScriptPubKeyDoc()},
             }},
         }},
+        // v4 RUNG_TX (Ladder Script) tx-level fields. Only present when
+        // the transaction's version == 4.
+        {RPCResult::Type::STR_HEX, "conditions_root", /*optional=*/true,
+         "v4 only: the shared conditions root for all MLSC outputs (32 B)"},
+        {RPCResult::Type::STR_HEX, "qabi_block", /*optional=*/true,
+         "v4 only: serialised QABI block (variable, present when QABI is in use)"},
+        {RPCResult::Type::STR_HEX, "aggregated_sig", /*optional=*/true,
+         "v4 only: aggregated signature (variable, present when present)"},
     };
 }
 

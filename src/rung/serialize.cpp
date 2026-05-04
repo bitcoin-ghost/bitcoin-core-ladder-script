@@ -353,6 +353,17 @@ bool DeserializeBlock(DataStream& ss, RungBlock& block_out,
             error = "ADAPTOR_SIG has no condition fields: got " + std::to_string(n_fields);
             return false;
         }
+        // F26: QABI_PRIME has no condition fields either (NO_IMPLICIT, pure
+        // witness-driven). Pre-fix the spend-time deserialiser silently
+        // accepted attacker-chosen extra bytes; mirror the ADAPTOR_SIG
+        // guard so any rung carrying QABI_PRIME with non-empty conditions
+        // is rejected.
+        if (block_out.type == RungBlockType::QABI_PRIME &&
+            ctx == static_cast<uint8_t>(SerializationContext::CONDITIONS) &&
+            n_fields > 0) {
+            error = "QABI_PRIME has no condition fields: got " + std::to_string(n_fields);
+            return false;
+        }
         // ACCUMULATOR v2 witness: exactly [NUMERIC(element_id), MERKLE_PROOF].
         // The legacy v1 shape (1 root HASH256 + up to 8 sibling HASH256 + 1
         // leaf HASH256, all attacker-chosen) carried up to 9 × 32 = 288 B of

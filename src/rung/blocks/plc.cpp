@@ -183,9 +183,14 @@ EvalResult EvalLatchSetBlock(const RungBlock& block, const RungEvalContext& /*ct
 
 EvalResult EvalLatchResetBlock(const RungBlock& block, const RungEvalContext& /*ctx*/)
 {
-    // Latch reset — activates when state >= 1 (set).
+    // Latch reset — activates when state >= 1 (set) AND delay has decayed
+    // to zero via the RECURSE_MODIFIED carry-rule chain.
     // Field layout: PUBKEY (resetter key), NUMERIC (state), NUMERIC (delay blocks)
-    // Pair with RECURSE_MODIFIED to enforce state 1→0 in the output.
+    // Pair with RECURSE_MODIFIED to enforce state 1→0 + delay decrement in
+    // each successor output. Without the `delay == 0` gate, the field was
+    // committed in conditions but never consensus-active — covenants
+    // shipped with delay > 0 would fire immediately, defeating the
+    // "wait N covenant steps before reset" semantics.
     if (!HasRequiredPubkeys(block, 1)) return EvalResult::ERROR;
     auto numerics = FindAllFields(block, RungDataType::NUMERIC);
     if (numerics.size() < 2) return EvalResult::ERROR; // need state + delay
@@ -195,8 +200,8 @@ EvalResult EvalLatchResetBlock(const RungBlock& block, const RungEvalContext& /*
     int64_t state = *state_opt;
     int64_t delay = *delay_opt;
     if (delay < 0) return EvalResult::ERROR;
-    if (state >= 1) return EvalResult::SATISFIED;    // set → can reset
-    return EvalResult::UNSATISFIED;                   // already unset → RESET rung inactive
+    if (state >= 1 && delay == 0) return EvalResult::SATISFIED;  // set + matured → can reset
+    return EvalResult::UNSATISFIED;
 }
 
 EvalResult EvalCounterDownBlock(const RungBlock& block, const RungEvalContext& /*ctx*/)

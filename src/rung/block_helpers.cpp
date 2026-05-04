@@ -95,12 +95,24 @@ bool FetchLadderSighash(const RungEvalContext& ctx,
     // Production path: precomputed + tx + conditions all present.
     if (ctx.precomputed && ctx.tx && ctx.input_conditions && ctx.precomputed->ladder_ready) {
         uint256 hash;
-        if (rung::api::SignatureHashLadder(*ctx.precomputed, *ctx.tx,
-                                            ctx.input_index, hash_type,
-                                            *ctx.input_conditions, hash)) {
-            std::memcpy(out, hash.data(), 32);
-            return true;
+        if (!rung::api::SignatureHashLadder(*ctx.precomputed, *ctx.tx,
+                                             ctx.input_index, hash_type,
+                                             *ctx.input_conditions, hash)) {
+            // Stage 3 audit (F14): fail CLOSED here. Pre-fix this branch
+            // dropped through to the test-stub path that returned a
+            // 32-byte zero sighash + true. That bypassed the hash_type
+            // whitelist in SignatureHashLadder: an attacker who knew the
+            // private key could pre-sign the all-zero message, then
+            // append a rejected hash_type (e.g. 0x40 ANYPREVOUT) to the
+            // signature; both signing and verifying paths would land in
+            // the stub branch, the verifier would check against zero,
+            // and the signature would satisfy across any tx context bound
+            // to that pubkey. Returning false here keeps the caller on
+            // the EvalResult::ERROR path.
+            return false;
         }
+        std::memcpy(out, hash.data(), 32);
+        return true;
     }
     // Test stub path: no backing tx. Zero sighash; mock checkers ignore the
     // hash bytes, real consensus never takes this branch (VerifyRungTx always
@@ -508,6 +520,18 @@ EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
             // post-mutation tree would commit to fake_rung_post_mutation and
             // the spender chooses output_root to match.
             if (!ctx.mlsc_proof) return EvalResult::UNSATISFIED;
+            // Stage 3 audit (F15): MERKLE_PATH proof mode populates
+            // verified_leaves.leaves with a single entry (the revealed
+            // rung's leaf). Cross-rung mutation targets at non-revealed
+            // indices have nothing to compare against — vl.leaves[idx]
+            // would read past the vector. Require FULL_LEAVES proof
+            // mode for any cross-rung mutation. (Same-rung mutation is
+            // handled by the branch above and uses the revealed rung
+            // directly, so MERKLE_PATH stays usable for the common
+            // single-rung covenant carry.)
+            if (static_cast<size_t>(m.rung_idx) >= vl.leaves.size()) {
+                return EvalResult::UNSATISFIED;
+            }
             bool found = false;
             for (const auto& target : ctx.mlsc_proof->revealed_mutation_targets) {
                 if (target.idx == static_cast<uint16_t>(m.rung_idx)) {
@@ -552,7 +576,18 @@ EvalResult VerifyMutatedLeaves(const RungEvalContext& ctx,
         }
         if (!applied) return EvalResult::UNSATISFIED;
 
-        // Recompute the leaf for this rung using TX_MLSC leaf computation
+        // Recompute the leaf for this rung using TX_MLSC leaf computation.
+        // Stage 3 audit (F15 part 2): bounds-check the write into
+        // leaves_copy. Under MERKLE_PATH proof mode `vl.leaves` holds a
+        // single entry (the revealed-rung leaf); writing to an arbitrary
+        // m.rung_idx would be out-of-bounds and undefined behaviour.
+        // Cross-rung mutation already returned above; same-rung mutation
+        // can still hit this branch with rung_index > 0 in MERKLE_PATH
+        // mode. Reject as UNSATISFIED so downstream BuildMerkleTree is
+        // never called over an OOB-mutated buffer.
+        if (static_cast<size_t>(m.rung_idx) >= leaves_copy.size()) {
+            return EvalResult::UNSATISFIED;
+        }
         RungCoil coil = ctx.input_conditions->coil;
         auto cp = BuildCPRung(mutated_rung, rung_pks, coil);
         leaves_copy[m.rung_idx] = ComputeTxMLSCLeaf(cp);

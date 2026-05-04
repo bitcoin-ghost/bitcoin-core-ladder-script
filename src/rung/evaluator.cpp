@@ -83,6 +83,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <optional>
 
@@ -495,6 +496,7 @@ namespace api {
 bool ValidateRungOutputs(const LadderTxView& tx, std::string& error)
 {
     size_t data_return_count = 0;
+    size_t spendable_mlsc_count = 0;
 
     for (size_t i = 0; i < tx.output_count; ++i) {
         const auto spk = tx.outputs[i].script_pub_key.as_span();
@@ -519,6 +521,7 @@ bool ValidateRungOutputs(const LadderTxView& tx, std::string& error)
                             std::to_string(MIN_RUNG_OUTPUT_VALUE);
                     return false;
                 }
+                spendable_mlsc_count++;
             }
             continue;
         }
@@ -532,6 +535,29 @@ bool ValidateRungOutputs(const LadderTxView& tx, std::string& error)
     // Only one DATA_RETURN output allowed per transaction
     if (data_return_count > 1) {
         error = "too many DATA_RETURN outputs: " + std::to_string(data_return_count) + " (max 1)";
+        return false;
+    }
+
+    // Stage 3 audit (F16): the chainstate synthetic root entry stores a
+    // uint16_t refcount counting unspent non-DATA_RETURN MLSC outputs from
+    // the creating tx (`coins.cpp:AddCoins`). A v4 tx with > 65535
+    // spendable outputs would silently wrap the refcount at write time:
+    // refcount==0 short-circuits before the synthetic entry is ever
+    // written, leaving every output with no recoverable conditions_root
+    // and effectively unspendable. Block weight (~4M WU) doesn't bound
+    // this — a dense v4 tx fits ~50k+ outputs in a single block, well
+    // past the wrap point. Reject at consensus so an honest signer can't
+    // accidentally burn funds and a malicious miner can't mine an
+    // unrecoverable-UTXO chunk. The legacy 33-byte synthetic format had
+    // no refcount and would have been unaffected; the v0.13 35-byte
+    // format with the refcount field needs this cap. Cap held inside
+    // the standard relay envelope for forward compatibility — future
+    // chainstate-format bumps to wider refcounts can relax it.
+    if (spendable_mlsc_count > std::numeric_limits<uint16_t>::max()) {
+        error = "v4 tx has too many spendable MLSC outputs: " +
+                std::to_string(spendable_mlsc_count) + " > " +
+                std::to_string(std::numeric_limits<uint16_t>::max()) +
+                " (synthetic root refcount cap)";
         return false;
     }
 

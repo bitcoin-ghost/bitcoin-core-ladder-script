@@ -103,6 +103,20 @@ bool IsStandardTx(const CTransaction& tx, const std::optional<unsigned>& max_dat
 {
     // Ladder Script: v4 transactions use typed ladder witnesses — custom policy
     if (tx.version == CTransaction::RUNG_TX_VERSION) {
+        // Stage 3 audit (F17): v4 short-circuited the entire IsStandardTx,
+        // including the MAX_STANDARD_TX_WEIGHT cap. Realistic v4 standard
+        // txs (including QABI_BLOCK_MAX_SOFT = 64 KB qabi_block) fit
+        // comfortably inside the 400 kWU envelope — so applying the same
+        // ceiling to v4 mempool acceptance closes a multi-hundred-KB
+        // mempool-DoS gap (per-input MAX_LADDER_WITNESS_SIZE = 100 KB ×
+        // many inputs could enter the mempool unbounded above the
+        // standard cap). Consensus block weight (4 MWU) still applies as
+        // the absolute ceiling; this is the policy floor.
+        unsigned int v4_sz = GetTransactionWeight(tx);
+        if (v4_sz > MAX_STANDARD_TX_WEIGHT) {
+            reason = "tx-size";
+            return false;
+        }
         return rung::IsStandardRungTx(tx, reason);
     }
 
