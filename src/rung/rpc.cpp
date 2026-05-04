@@ -507,6 +507,25 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
                 type_str + " has " + std::to_string(n_pks) +
                 " pubkeys, max " + std::to_string(rung::MAX_PUBKEYS_PER_MULTISIG));
         }
+        // F25: validate the K-vs-N relationship at fund time. Pre-fix
+        // createrungtx silently accepted K=0 (degenerate, always-spendable
+        // by anyone) and K>N (consensus-unspendable encumbrance — funds
+        // could be locked into an unspendable script via wallet error).
+        // The consensus evaluator rejects both at spend time; fund-time
+        // enforcement closes the UX trap at the wallet layer.
+        // K lives in fields[0] as a 1..4-byte little-endian integer.
+        if (!block.fields.empty() && block.fields[0].type == RungDataType::NUMERIC) {
+            uint32_t k_val = 0;
+            const auto& k_data = block.fields[0].data;
+            for (size_t i = 0; i < k_data.size() && i < 4; ++i) {
+                k_val |= static_cast<uint32_t>(k_data[i]) << (8 * i);
+            }
+            if (k_val == 0 || k_val > n_pks) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    type_str + " threshold K=" + std::to_string(k_val) +
+                    " out of range [1, N=" + std::to_string(n_pks) + "]");
+            }
+        }
         std::vector<std::vector<uint8_t>> ms_pubkeys(
             pubkeys_out->begin() + multisig_pk_start, pubkeys_out->end());
         uint256 pubkey_root = rung::BuildPubkeyMerkleRoot(ms_pubkeys);
@@ -518,6 +537,23 @@ static RungBlock ParseBlockSpec(const UniValue& block_obj, bool conditions_only,
         block.merkle_pubkeys = ms_pubkeys;
         // Remove the staged MULTISIG pubkeys from the positional list.
         pubkeys_out->resize(multisig_pk_start);
+    }
+
+    // F26: blocks whose conditions layout is intentionally empty must
+    // reject any condition-side fields at fund time. The serialise.cpp
+    // path explicitly enforces this for ADAPTOR_SIG; the same shape
+    // applies to QABI_PRIME (NO_IMPLICIT — purely witness-driven). Pre-
+    // fix createrungtx accepted spurious fields here, which the spend-
+    // time evaluator silently ignored — net effect: a wallet could
+    // commit a conditions_root that bound attacker-chosen extra bytes,
+    // a low-bandwidth data-embedding channel.
+    if (conditions_only &&
+        (block.type == RungBlockType::QABI_PRIME ||
+         block.type == RungBlockType::ADAPTOR_SIG) &&
+        !block.fields.empty()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            type_str + " has no condition fields; got " +
+            std::to_string(block.fields.size()));
     }
 
     // Fund-time strict layout enforcement. Mirrors the spend-time
@@ -2946,6 +2982,13 @@ static RPCHelpMan parseladder()
                 {RPCResult::Type::STR_HEX, "conditions_hex", "Serialized conditions"},
                 {RPCResult::Type::STR_HEX, "mlsc_root", "MLSC Merkle root"},
                 {RPCResult::Type::NUM, "n_rungs", "Number of rungs"},
+                {RPCResult::Type::ARR, "pubkeys_hex", "Per-rung pubkey lists (hex). pubkeys_hex[r] is the ordered pubkey list for rung r — pass back to formatladder for a key-aware descriptor round-trip.",
+                    {{RPCResult::Type::ARR, "", "",
+                        {{RPCResult::Type::STR_HEX, "pubkey", "compressed/x-only pubkey hex"}}}}},
+                {RPCResult::Type::ARR, "merkle_pubkeys_hex", "Per-rung × per-block side-channel pubkey lists (hex) for blocks whose pubkeys are folded into the leaf hash (e.g. multisig). Empty per-block list for blocks that don't fold pubkeys. Pass back to formatladder alongside pubkeys_hex for full round-trip.",
+                    {{RPCResult::Type::ARR, "", "",
+                        {{RPCResult::Type::ARR, "", "",
+                            {{RPCResult::Type::STR_HEX, "pubkey", "compressed/x-only pubkey hex"}}}}}}},
             },
         },
         RPCExamples{
@@ -3003,6 +3046,145 @@ static RPCHelpMan parseladder()
         result.pushKV("conditions_hex", HexStr(bytes));
         result.pushKV("mlsc_root", root.GetHex());
         result.pushKV("n_rungs", static_cast<int>(conditions.rungs.size()));
+
+        UniValue pubkeys_arr(UniValue::VARR);
+        for (const auto& rung_pks : pubkeys) {
+            UniValue rung_arr(UniValue::VARR);
+            for (const auto& pk : rung_pks) rung_arr.push_back(HexStr(pk));
+            pubkeys_arr.push_back(rung_arr);
+        }
+        result.pushKV("pubkeys_hex", pubkeys_arr);
+
+        UniValue mpk_arr(UniValue::VARR);
+        for (const auto& rung : conditions.rungs) {
+            UniValue rung_arr(UniValue::VARR);
+            for (const auto& block : rung.blocks) {
+                UniValue block_arr(UniValue::VARR);
+                for (const auto& pk : block.merkle_pubkeys) {
+                    block_arr.push_back(HexStr(pk));
+                }
+                rung_arr.push_back(block_arr);
+            }
+            mpk_arr.push_back(rung_arr);
+        }
+        result.pushKV("merkle_pubkeys_hex", mpk_arr);
+        return result;
+    },
+    };
+}
+
+static RPCHelpMan computesighash()
+{
+    return RPCHelpMan{"computesighash",
+        "Compute the v4 RUNG_TX signature hash for a single input.\n"
+        "Exposes SignatureHashLadder / SignatureHashLadderKeyPath so reference\n"
+        "(tx, input, conditions) → expected_sighash tuples can be produced and\n"
+        "consumed by any implementation independently of the C++ signer path.\n",
+        {
+            {"hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Unsigned v4 transaction hex"},
+            {"input", RPCArg::Type::NUM, RPCArg::Optional::NO, "Input index to compute sighash for"},
+            {"spent_outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Outputs being spent",
+                {{"spent_output", RPCArg::Type::OBJ, RPCArg::Optional::NO, "",
+                    {{"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "BTC"},
+                     {"scriptPubKey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, ""}}}}},
+            {"conditions", RPCArg::Type::STR, RPCArg::Optional::NO,
+                "Rung conditions as JSON string (same shape as signrungtx 'conditions' arg)"},
+            {"variant", RPCArg::Type::STR, RPCArg::DefaultHint{"\"ladder\""},
+                "\"ladder\" (LadderSighash/v1) or \"key_path\" (LadderKeyPathSighash/v1)"},
+            {"hash_type", RPCArg::Type::NUM, RPCArg::DefaultHint{"0"},
+                "Sighash type byte (default 0 = SIGHASH_DEFAULT)"},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::STR_HEX, "sighash", "32-byte sighash hex"},
+            {RPCResult::Type::STR, "variant", "Which sighash domain was used"},
+            {RPCResult::Type::NUM, "hash_type", "Sighash type byte echoed back"},
+        }},
+        RPCExamples{
+            HelpExampleCli("computesighash", "<txhex> 0 '[{\"amount\":0.001,\"scriptPubKey\":\"df...\"}]' '[{\"blocks\":[{\"type\":\"SIG\",\"fields\":[{\"type\":\"SCHEME\",\"hex\":\"01\"}]}]}]'")
+        },
+    [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+    {
+        std::string hex_str = request.params[0].get_str();
+        CMutableTransaction mtx;
+        std::string decode_err;
+        if (!DecodeHexTx(mtx, hex_str, /*try_no_witness=*/false, /*try_witness=*/true, &decode_err)) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                decode_err.empty() ? "Failed to decode transaction"
+                                   : "Failed to decode transaction: " + decode_err);
+        }
+        if (mtx.version != CTransaction::RUNG_TX_VERSION) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Transaction is not v4 RUNG_TX");
+        }
+
+        unsigned int input_idx = request.params[1].getInt<unsigned int>();
+        if (input_idx >= mtx.vin.size()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Input index out of range");
+        }
+
+        const UniValue& spent_arr = request.params[2].get_array();
+        if (spent_arr.size() != mtx.vin.size()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "spent_outputs count must match input count");
+        }
+        std::vector<CTxOut> spent_outputs;
+        for (size_t i = 0; i < spent_arr.size(); ++i) {
+            CTxOut txout;
+            txout.nValue = AmountFromValue(spent_arr[i]["amount"]);
+            auto spk_bytes = ParseHex(spent_arr[i]["scriptPubKey"].get_str());
+            txout.scriptPubKey = CScript(spk_bytes.begin(), spk_bytes.end());
+            spent_outputs.push_back(txout);
+        }
+
+        PrecomputedTransactionData txdata;
+        txdata.Init(mtx, std::vector<CTxOut>(spent_outputs));
+
+        UniValue conds_arr;
+        if (!conds_arr.read(request.params[3].get_str()) || !conds_arr.isArray()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "conditions must be a JSON array string");
+        }
+        std::vector<std::vector<std::vector<uint8_t>>> rung_pks_unused, relay_pks_unused;
+        std::vector<uint8_t> rung_oi_unused;
+        UniValue empty_coil(UniValue::VOBJ);
+        UniValue empty_relays(UniValue::VARR);
+        rung::RungConditions conditions = ParseConditionsSpec(
+            conds_arr, empty_coil, empty_relays,
+            rung_pks_unused, relay_pks_unused, &rung_oi_unused);
+
+        if (rung::IsMLSCScript(spent_outputs[input_idx].scriptPubKey)) {
+            uint256 root;
+            rung::GetMLSCRoot(spent_outputs[input_idx].scriptPubKey, root);
+            conditions.conditions_root = root;
+        }
+
+        std::string variant = "ladder";
+        if (!request.params[4].isNull()) variant = request.params[4].get_str();
+        if (variant != "ladder" && variant != "key_path") {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "variant must be \"ladder\" or \"key_path\"");
+        }
+
+        uint8_t hash_type = SIGHASH_DEFAULT;
+        if (!request.params[5].isNull()) {
+            int h = request.params[5].getInt<int>();
+            if (h < 0 || h > 0xFF) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "hash_type out of range");
+            }
+            hash_type = static_cast<uint8_t>(h);
+        }
+
+        uint256 sighash;
+        bool ok = (variant == "key_path")
+            ? rung::SignatureHashLadderKeyPath(txdata, mtx, input_idx, hash_type, sighash)
+            : rung::SignatureHashLadder(txdata, mtx, input_idx, hash_type, conditions, sighash);
+        if (!ok) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "sighash computation failed");
+        }
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("sighash", sighash.GetHex());
+        result.pushKV("variant", variant);
+        result.pushKV("hash_type", static_cast<int>(hash_type));
         return result;
     },
     };
@@ -3011,9 +3193,21 @@ static RPCHelpMan parseladder()
 static RPCHelpMan formatladder()
 {
     return RPCHelpMan{"formatladder",
-        "Format serialized conditions as a descriptor string.\n",
+        "Format serialized conditions as a descriptor string.\n"
+        "When pubkeys_hex (typically taken verbatim from parseladder) is supplied,\n"
+        "pubkey-bearing blocks render with the original key material instead of the\n"
+        "non-reparseable @? placeholder, enabling a strong descriptor round-trip.\n"
+        "When keys is also supplied, pubkeys are rendered as @alias where they match.\n",
         {
             {"conditions_hex", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Serialized conditions hex"},
+            {"pubkeys_hex", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Per-rung pubkey lists (hex), as returned by parseladder",
+                {{"rung", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "",
+                    {{"pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Compressed/x-only pubkey hex"}}}}},
+            {"keys", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Key alias map JSON: {\"alias\": \"pubkey_hex\", ...}"},
+            {"merkle_pubkeys_hex", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "Per-rung × per-block side-channel pubkey lists (hex), as returned by parseladder. Required for round-tripping blocks whose pubkeys are folded into the leaf hash (e.g. multisig).",
+                {{"rung", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "",
+                    {{"block", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "",
+                        {{"pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "Compressed/x-only pubkey hex"}}}}}}},
         },
         RPCResult{RPCResult::Type::OBJ, "", "",
             {
@@ -3037,7 +3231,56 @@ static RPCHelpMan formatladder()
         conditions.relays = ladder.relays;
         conditions.coil = ladder.coil;
 
-        std::string desc = rung::FormatDescriptor(conditions);
+        std::vector<std::vector<std::vector<uint8_t>>> pubkeys;
+        if (!request.params[1].isNull()) {
+            const UniValue& pks_arr = request.params[1].get_array();
+            pubkeys.reserve(pks_arr.size());
+            for (size_t r = 0; r < pks_arr.size(); ++r) {
+                const UniValue& rung_arr = pks_arr[r].get_array();
+                std::vector<std::vector<uint8_t>> rung_pks;
+                rung_pks.reserve(rung_arr.size());
+                for (size_t i = 0; i < rung_arr.size(); ++i) {
+                    rung_pks.push_back(ParseHex(rung_arr[i].get_str()));
+                }
+                pubkeys.push_back(std::move(rung_pks));
+            }
+        }
+
+        std::map<std::string, std::string> aliases; // hex -> alias
+        if (!request.params[2].isNull()) {
+            UniValue keys_obj(UniValue::VOBJ);
+            if (request.params[2].isObject()) {
+                keys_obj = request.params[2];
+            } else {
+                keys_obj.read(request.params[2].get_str());
+            }
+            for (const auto& alias : keys_obj.getKeys()) {
+                aliases[keys_obj[alias].get_str()] = alias;
+            }
+        }
+
+        // merkle_pubkeys_hex: per-rung × per-block side data for blocks that
+        // fold their pubkeys into the leaf hash (e.g. MULTISIG). The wire
+        // format strips these; without re-injection the formatter cannot
+        // recover them and emits a non-reparseable form.
+        if (!request.params[3].isNull()) {
+            const UniValue& mpk_arr = request.params[3].get_array();
+            for (size_t r = 0; r < mpk_arr.size() && r < conditions.rungs.size(); ++r) {
+                const UniValue& rung_arr = mpk_arr[r].get_array();
+                auto& rung = conditions.rungs[r];
+                for (size_t b = 0; b < rung_arr.size() && b < rung.blocks.size(); ++b) {
+                    const UniValue& block_arr = rung_arr[b].get_array();
+                    auto& block = rung.blocks[b];
+                    block.merkle_pubkeys.clear();
+                    block.merkle_pubkeys.reserve(block_arr.size());
+                    for (size_t i = 0; i < block_arr.size(); ++i) {
+                        block.merkle_pubkeys.push_back(ParseHex(block_arr[i].get_str()));
+                    }
+                }
+            }
+        }
+
+        std::string desc = rung::FormatDescriptor(conditions, pubkeys, aliases);
 
         UniValue result(UniValue::VOBJ);
         result.pushKV("descriptor", desc);
@@ -4596,6 +4839,7 @@ void RegisterRungRPCCommands(CRPCTable& t)
         {"rung", &verifyadaptorpresig},
         {"rung", &parseladder},
         {"rung", &formatladder},
+        {"rung", &computesighash},
 #ifdef ENABLE_QABIO
         // QABI family (BIP-YYYY). Only registered when the extension is
         // compiled in. Callers on a node built without QABIO get
