@@ -678,6 +678,14 @@ The 11 condition data types referenced above are: `PUBKEY`,
 `SIGNATURE`, `PREIMAGE`, `SCRIPT_BODY`, `MERKLE_PROOF`, `DATA`. Their
 allowed sizes and contexts are defined in `src/rung/types.h`.
 
+The PLC rows `LATCH_SET`, `LATCH_RESET`, `COUNTER_DOWN`, `COUNTER_UP`
+and the anchor row `ANCHOR_ORACLE` declare a required `PUBKEY` whose
+sole role is **Merkle-leaf identity tagging** — no signature is
+verified against this key at spend time. This is intentional and
+distinguishes these blocks from the SIG-family rows where the
+embedded `PUBKEY` is access control. The full reasoning is in
+Rationale §22.
+
 #### Legacy bridging rule (`P2SH_LEGACY` / `P2WSH_LEGACY` / `P2TR_SCRIPT_LEGACY`)
 
 The three legacy script-bridging blocks share one witness shape:
@@ -2035,6 +2043,57 @@ consensus surface that every node validates. A future BIP that wants
 to relax `MAX_PUBKEYS_PER_MULTISIG` can do so with a fresh
 soft-fork; nothing in the format precludes it.
 
+### 22. Why do some PLC blocks commit a pubkey in the Merkle leaf without verifying a signature at spend time?
+
+Five blocks in the registry — `LATCH_SET`, `LATCH_RESET`,
+`COUNTER_DOWN`, `COUNTER_UP`, and `ANCHOR_ORACLE` — declare a
+required `PUBKEY` field whose value is folded into the Merkle leaf at
+fund time and revealed at spend time, but whose evaluator does **not**
+perform a signature check. A reviewer scanning the registry table
+will reasonably ask whether a sig check has been forgotten. It has
+not; the pattern is intentional and load-bearing.
+
+The pubkey here serves as a **Merkle-leaf identity tag**, not as
+access control. Two distinct LATCH-bearing UTXOs created by two
+different parties with structurally identical conditions (same state,
+same delay, same block layout) must produce two distinct
+`conditions_root`s — otherwise one party could fund a covenant and
+another party could spend it. Folding the funder-chosen pubkey into
+the leaf hash provides that distinctness for free, without paying for
+a signature verification at spend time.
+
+Access control for these blocks comes from a different layer: the
+covenant chain. `LATCH_*` and `COUNTER_*` are designed to be paired
+with `RECURSE_MODIFIED` (or its variants), which constrains the
+*next* output's conditions to be a specific mutation of the current
+one. The actual gate on "who can fire this rung" is a SIG block in
+the same rung (or a relay), not the PLC block itself. The PLC block
+provides the *state predicate* — "the latch is set", "the counter is
+down to zero" — that the SIG-gated branch composes with.
+
+Equivalently: the PLC family is closer to BIP 119 `OP_CTV` (a pure
+structural commitment) than to BIP 340 Schnorr (an authenticated
+spend). Treating the embedded pubkey as a sig key would be
+double-checking the same access control the composing SIG block
+already enforces.
+
+The reviewer-visible cue is the `WitnessRule` column: `Reveal 1`
+denotes "one PUBKEY revealed for leaf reconstruction", as opposed to
+`Fixed 2` ("PUBKEY + SIGNATURE"). The five PLC rows (`LATCH_SET`,
+`LATCH_RESET`, `COUNTER_DOWN`, `COUNTER_UP`) are `Reveal 1`;
+`ANCHOR_ORACLE` is `Fixed 1` because the witness shape is
+`[PUBKEY(oracle)]` only — the oracle pubkey is revealed for leaf
+reconstruction and downstream off-chain protocols, but the on-chain
+evaluator does not bind a signature to it. The companion C++
+evaluator implementations carry the same comment block.
+
+The `LATCH_RESET` `delay` field is the dual case: a NUMERIC committed
+in conditions whose value **is** consensus-active (the rung only
+fires when `delay == 0`), with the decrement enforced by a
+`RECURSE_MODIFIED` covenant chain. Reviewers should expect to see
+PLC blocks composed with `RECURSE_*` and a SIG branch, not used as
+standalone access-control primitives.
+
 ## Backwards Compatibility
 
 Pre-activation, v4 transactions are accepted by legacy nodes as
@@ -2162,6 +2221,98 @@ and the soft-fork activation guide are at
 <https://ladder-script.org/docs>. The website is a verification aid;
 this BIP is self-contained and implementable from the document
 alone.
+
+## Implementation Audit History
+
+This section is an honest record of the internal-review findings the
+author has surfaced and closed in the reference implementation prior
+to mailing-list circulation. It is **not** a substitute for the
+external review enumerated in Open Items #1; it exists so reviewers
+can see the failure modes the author has already swept for and judge
+where the residual risk is likely to live. Every finding listed below
+is closed in the canonical source and locked behind a regression
+test (unit or functional) that fails if the fix is reverted.
+
+The audit ran in four passes against the v0.12 / v0.13 implementation:
+
+1. **QABI / coordinator-attack-channel pass.** Closed coordinator-side
+   side-channels in the QABI batch ceremony (canonical `batch_id`
+   derivation, strict participant ordering, duplicate-id rejection),
+   plus the parallel-script-check race for `PQ_BATCH` cache lookup.
+2. **RPC ergonomics + narrowing pass (2026-05-03).** Bounds-checked
+   user-supplied integers before narrowing to uint8/uint16/uint32,
+   pre-validated decimal string lengths, capped descriptor input
+   length, hardened defensive reads against caller-supplied empty
+   `data` arrays.
+3. **Consensus / policy hardening pass (2026-05-03 second pass).**
+   Closed RPC schema gaps, fail-closed sighash on invalid `hash_type`,
+   bounds-checked Merkle proof indices, capped spendable MLSC outputs
+   below `uint16_t::max()`, applied `MAX_STANDARD_TX_WEIGHT` to v4 tx
+   in mempool standardness.
+4. **Descriptor parser/printer symmetry pass (2026-05-04).** Closed
+   parser↔printer asymmetries that produced non-reparseable or
+   semantically-drifted output, locked the full set behind a property
+   test that round-trips every supported block family.
+
+The findings, with file pointers:
+
+| Tag  | One-line description                                                                                              | Source                                |
+|------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------|
+| F1   | Spend-time `target.rung` not bound to leaf-hash committed at `target.idx`; spender could substitute fake rung      | `src/rung/blocks/qabi.cpp:217`        |
+| F2   | Parallel `CCheckQueue` workers raced on `PQ_BATCH` cache; added sequential anchor pre-pass                          | `src/rung/blocks/qabi.cpp:849`        |
+| F3   | Governance ratio comparison overflowed in 64-bit cross-multiply; switched to `__int128`                            | `src/rung/blocks/governance.cpp:201`  |
+| F4   | RPC narrowing: user-supplied output index could silently truncate from `uint64` to `uint8` and reroute outputs    | `src/rung/rpc.cpp:3998`               |
+| F5   | RPC narrowing: chain length silently truncated `uint64`→`uint32`, producing degenerate `H^0(seed) = seed`         | `src/rung/rpc.cpp:4503`               |
+| F6/F7| QABI coordinator-side log₂(N!) permutation channel + duplicate-participant channel; strict ascending order        | `src/rung/qabi.cpp:153`               |
+| F7   | RPC isArray check before `get_array()` so malformed shapes produce clean RPC errors instead of internal-error leak | `src/rung/rpc.cpp:588`                |
+| F8   | `batch_id` could carry coordinator-attacker bytes; canonical derivation from already-committed fields              | `src/rung/qabi.cpp:271`               |
+| F9   | `MUSIG_THRESHOLD` degenerated to plain SIG when M/N omitted; require both fields present and validated             | `src/rung/blocks/sig.cpp:152`         |
+| F10  | Hostile descriptor input could be 1 MB+; capped descriptor length to 65 KB pre-tokenisation                        | `src/rung/descriptor.cpp:1306`        |
+| F11  | RPC `decoderawtransaction` schema rejected v4-only optional fields; declared as optional                            | `src/rpc/rawtransaction.cpp`          |
+| F12  | `LATCH_RESET` `delay` field was committed in conditions but never enforced at evaluation                            | `src/rung/blocks/plc.cpp`             |
+| F13  | MULTISIG inner-tree padding-leaf used the same tagged-hash domain as real pubkey leaves; defence-in-depth fix gives padding its own `LadderMultisigPadding/v1` domain so a future `FieldMinSize(PUBKEY)` loosening can't alias padding to a 0-byte attacker pubkey | `src/rung/conditions.cpp:259`         |
+| F14  | `FetchLadderSighash` returned zero on invalid `hash_type` (fail-open); now fail-closed                              | `src/rung/block_helpers.cpp`          |
+| F15  | `VerifyMutatedLeaves` could OOB-index `vl.leaves[m.rung_idx]` in `MERKLE_PATH` mode                                  | `src/rung/block_helpers.cpp`          |
+| F16  | Spendable MLSC output count could wrap synthetic UTXO refcount → unspendable UTXOs; capped at `uint16_t::max()`     | `src/rung/evaluator.cpp`              |
+| F17  | v4 tx bypassed `MAX_STANDARD_TX_WEIGHT` in mempool standardness, allowing ~3.6 MB DoS                              | `src/policy/policy.cpp`               |
+| F18  | Anchor-family formatter cases all rendered as bare family name and dropped their parameter                          | `src/rung/descriptor.cpp`             |
+| F19  | `formatladder` emitted non-reparseable `@?` for pubkey-bearing blocks; added `pubkeys_hex`/`merkle_pubkeys_hex` plumbing | `src/rung/rpc.cpp`, `src/rung/descriptor.cpp` |
+| F20  | `ADAPTOR_SIG` and `PTLC` formatters emitted v0.6's second-pubkey arg that the parser had dropped in v0.7           | `src/rung/descriptor.cpp:1411,1635`   |
+| F21  | `MUSIG_THRESHOLD` formatter used `PubkeyCountForBlock=1` (consensus leaf) for descriptor pubkey count; reads `N` from `fields[1]` | `src/rung/descriptor.cpp:1437`        |
+| F22  | `ANCHOR_FEE` had no formatter case; fell through to placeholder `(...)`                                              | `src/rung/descriptor.cpp:1899`        |
+| F23  | Four formatters chained two `get_alias()` calls inside one `+` expression; unspecified C++ evaluation order silently swapped pubkey order | `src/rung/descriptor.cpp:1516,1605,1635,1904` |
+| F24  | `htlc`/`hash_sig` parser SHA256'd input; formatter only had stored hash; reparse hashed again — drift. Added `h:HASH256` form     | `src/rung/descriptor.cpp:148,839,867` |
+| F25  | `createrungtx` accepted MULTISIG/TIMELOCKED_MULTISIG with K=0 or K>N (consensus-unspendable encumbrance, wallet UX trap)              | `src/rung/rpc.cpp` (ParseBlockSpec MULTISIG branch) |
+| F26  | `createrungtx` and `serialize.cpp` accepted spurious conditions fields on QABI_PRIME / ADAPTOR_SIG; low-bandwidth data-embedding channel; closed at both layers | `src/rung/rpc.cpp`, `src/rung/serialize.cpp` |
+
+Two cross-cutting verification programmes complement the per-finding
+fixes:
+
+- **Test-vector drift detection.** 149 committed reference vectors
+  (68 positive + 55 negative + 26 spend) under
+  `src/test/data/rung_tx_*.json`. Every CI run regenerates the
+  vectors from the reference implementation in default-verify mode
+  and fails on byte-level drift; intentional regeneration requires
+  `VECTORS_REGENERATE=1`.
+- **Independent verifier.** A pure-Python zero-dependency
+  re-implementation under `tools/independent-impl/` reproduces the
+  conditions root for **60 of 68** committed positive vectors across
+  **45 distinct block types** byte-for-byte, including HTLC,
+  MULTISIG (with inner pubkey-Merkle root), TIMELOCKED_MULTISIG,
+  ANCHOR_FEE, VAULT_LOCK, and the P2PK/P2PKH/P2WPKH/P2TR legacy
+  wrappers. The verifier is built from the BIP draft and the
+  wire-format documentation only — no shared code with the reference
+  implementation. The remaining eight vectors involve script-bearing
+  legacy wrappers, the QABI_SPEND / PQ_BATCH PQ surface, and the
+  COSIGN / ACCUMULATOR / OUTPUT_CHECK compound shapes; these are
+  follow-on work, not consensus gaps.
+
+A live signet fuzzer at `tools/remote-fuzz/` has run **~18 000
+mutation iterations** against the development signet at
+`<https://ladder-script.org>` with **zero anomalies** and 100 %
+clean rejection. All seven RPC strategies plus audit-driven fixed
+cases (F14, F17) reject as expected; full results are reproducible
+with `--rng-seed`.
 
 ## Security Considerations
 
@@ -2340,6 +2491,20 @@ participant's `committed_root`, and the evaluator rejects every
 primed input. The escape rung in each participant's conditions tree
 provides a unilateral exit if the coordinator never broadcasts. The
 trust model is therefore liveness-on-coordinator, safety-on-consensus.
+
+**Common misreading: PLC pubkey-in-leaf is not a missing sig check.**
+Five blocks (`LATCH_SET`, `LATCH_RESET`, `COUNTER_DOWN`,
+`COUNTER_UP`, `ANCHOR_ORACLE`) commit a `PUBKEY` into the Merkle leaf
+without verifying a signature against it at spend time. This is
+intentional: the pubkey is a leaf identity tag that distinguishes
+otherwise-structurally-identical UTXOs at fund time. Access control
+for these blocks comes from a SIG block in the same rung composed
+with a `RECURSE_*` covenant chain, not from the embedded pubkey
+itself. A reviewer reading the registry table in isolation may
+suspect a missing access check; Rationale §22 carries the full
+justification and the C++ evaluators carry matching comment blocks.
+Adding redundant sig checks to these blocks would not improve
+security and would increase witness cost on every spend.
 
 **Audit status.** The implementation has been internally reviewed
 across multiple iterations and runs end-to-end on a private signet

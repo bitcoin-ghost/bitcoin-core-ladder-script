@@ -296,8 +296,22 @@ BASE_SCRIPTS = [
     'feature_rung_tx.py',
     'feature_rung_legacy.py',
     'feature_qabi.py',
+    'feature_qabi_size.py',
     'feature_rung_p2p.py',
     'feature_rung_fuzz.py',
+    'feature_rung_anti_embedding.py',
+    'feature_rung_pq_batch.py',
+    'feature_rung_pq_batch_stress.py',
+    'feature_deferred_vectors.py',
+    # Vector fixture verification — run in default-verify mode against
+    # the committed src/test/data/rung_tx_*.json files. Detects drift
+    # between consensus behaviour and the activation-gate fixtures.
+    # To regenerate after an intentional change, set VECTORS_REGENERATE=1.
+    'feature_rung_tx_vectors.py',
+    'feature_rung_tx_neg_vectors.py',
+    'feature_rung_tx_spend_vectors.py',
+    'feature_rung_descriptor_roundtrip.py',
+    'feature_rung_sighash_vectors.py',
     'rpc_uptime.py',
     'feature_discover.py',
     'wallet_resendwallettransactions.py',
