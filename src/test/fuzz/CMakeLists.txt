@@ -40,6 +40,7 @@ add_executable(fuzz
   cuckoocache.cpp
   decode_tx.cpp
   descriptor_parse.cpp
+  rung_verify.cpp
   deserialize.cpp
   eval_script.cpp
   feefrac.cpp

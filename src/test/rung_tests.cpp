@@ -2958,6 +2958,49 @@ BOOST_AUTO_TEST_CASE(sighash_ladder_rejects_invalid_hashtype)
     BOOST_CHECK(!rung::SignatureHashLadder(txdata, mtx, 0, 0x04, conditions, hash));
 }
 
+BOOST_AUTO_TEST_CASE(fetch_ladder_sighash_fails_closed_on_invalid_hashtype)
+{
+    // Stage 3 audit (F14) regression. Pre-fix, FetchLadderSighash dropped
+    // through to a 32-byte zero stub when SignatureHashLadder rejected the
+    // hash_type. That bypassed the LadderSighash hash_type whitelist: a
+    // signer who knew the privkey could pre-sign the all-zero message, ship
+    // the signature with a banned hash_type byte (e.g. 0x40 ANYPREVOUT),
+    // and both signing and verifying paths would compute against zero — a
+    // signature that satisfies across any tx context bound to that pubkey.
+    // Post-fix the production branch returns false when SignatureHashLadder
+    // rejects the type; the caller propagates EvalResult::ERROR.
+    CMutableTransaction mtx;
+    mtx.version = CTransaction::RUNG_TX_VERSION;
+    mtx.vin.emplace_back();
+    mtx.vin[0].prevout = COutPoint(Txid::FromUint256(uint256::ONE), 0);
+    mtx.vin[0].nSequence = 0xFFFFFFFF;
+    mtx.vout.emplace_back(50000, CScript() << OP_RETURN);
+    CTransaction tx(mtx);
+
+    PrecomputedTransactionData txdata;
+    txdata.Init(tx, std::vector<CTxOut>{CTxOut(100000, CScript() << OP_RETURN)});
+
+    rung::LadderTxViewBuilder tvb(tx);
+    rung::LadderPrecomputedBuilder pcb(txdata);
+    RungConditions conditions;
+
+    RungEvalContext ctx;
+    ctx.tx = &tvb.view;
+    ctx.precomputed = &pcb.view;
+    ctx.input_conditions = &conditions;
+    ctx.input_index = 0;
+
+    uint8_t out[32];
+    // Invalid hash_type: 0x40 (ANYPREVOUT) is in the rejected set.
+    // Production branch must fail closed, NOT return zero stub.
+    BOOST_CHECK(!rung::FetchLadderSighash(ctx, /*hash_type=*/0x40, out));
+    // Also check 0xC0 (ANYPREVOUTANYSCRIPT) and a generic invalid 0xFF.
+    BOOST_CHECK(!rung::FetchLadderSighash(ctx, /*hash_type=*/0xC0, out));
+    BOOST_CHECK(!rung::FetchLadderSighash(ctx, /*hash_type=*/0xFF, out));
+    // Sanity: a valid hash_type (0x01 = SIGHASH_ALL) returns true.
+    BOOST_CHECK(rung::FetchLadderSighash(ctx, /*hash_type=*/0x01, out));
+}
+
 // ============================================================================
 // Output policy tests
 // ============================================================================
@@ -3480,9 +3523,11 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_backward_compat)
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_satisfied)
+BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_delay_zero_satisfied)
 {
-    // LATCH_RESET with state=1 → SATISFIED (can reset)
+    // LATCH_RESET with state=1, delay=0 → SATISFIED. The covenant chain
+    // (RECURSE_MODIFIED) has decremented `delay` to 0; the reset rung
+    // can now fire.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
@@ -3490,10 +3535,30 @@ BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_satisfied)
     block.type = RungBlockType::LATCH_RESET;
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)}); // state=1
-    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(6)}); // delay=6
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // delay=0
 
     RungEvalContext ctx;
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+}
+
+BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_delay_nonzero_unsatisfied)
+{
+    // LATCH_RESET with state=1, delay > 0 → UNSATISFIED. Stage 2 audit
+    // (LATCH_RESET delay enforcement): pre-fix the field was committed
+    // in conditions but ignored at eval, so any state>=1 latch would
+    // reset immediately regardless of the declared delay. Regression
+    // test ensures the carry-rule decrement is load-bearing.
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    RungBlock block;
+    block.type = RungBlockType::LATCH_RESET;
+    block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)}); // state=1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(6)}); // delay=6 (unmatured)
+
+    RungEvalContext ctx;
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_state_unset_unsatisfied)
@@ -6832,8 +6897,7 @@ BOOST_AUTO_TEST_CASE(accumulator_valid_proof)
 BOOST_AUTO_TEST_CASE(accumulator_invalid_proof)
 {
     // Tampered proof: change the root → must not verify against the (correct)
-    // proof for element_id=0.
-    uint256 leaf_0 = BuildAccumulatorLeaf(0);
+    // proof for element_id=0. The proof is the sibling leaf (leaf_1).
     uint256 leaf_1 = BuildAccumulatorLeaf(1);
     uint256 wrong_root;
     std::memset(wrong_root.data(), 0xAB, 32);
@@ -12139,6 +12203,64 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_with_leaves_no_output_error)
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
+BOOST_AUTO_TEST_CASE(verify_mutated_leaves_merkle_path_oob_safe)
+{
+    // Stage 3 audit (F15) regression. VerifyMutatedLeaves mainline path
+    // built `leaves_copy = vl.leaves` and then wrote leaves_copy[m.rung_idx]
+    // for both same-rung and cross-rung mutations. Under MERKLE_PATH proof
+    // mode `vl.leaves` carries a single entry — any same-rung mutation at
+    // rung_index > 0 (or any cross-rung mutation reaching the leaves
+    // comparison) was an out-of-bounds vector access (UB). Post-fix the
+    // function bounds-checks and returns UNSATISFIED instead of corrupting
+    // adjacent memory or crashing.
+    MockSignatureChecker checker;
+    ScriptExecutionData execdata;
+
+    // Construct the smallest spec that exercises the OOB path: a
+    // RECURSE_MODIFIED block requesting a same-rung mutation at rung_idx=1
+    // while verified_leaves carries only one leaf (the MERKLE_PATH layout).
+    RungBlock block;
+    block.type = RungBlockType::RECURSE_MODIFIED;
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});  // max_depth
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});  // rung_idx = 1
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});  // block_idx
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});  // param_idx
+    block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(1)});  // delta
+
+    // Single-leaf verified_leaves, total_rungs > 1 (the MERKLE_PATH shape).
+    MLSCVerifiedLeaves verified;
+    verified.leaves = {uint256::ONE};        // size 1
+    verified.root = uint256::ONE;
+    verified.rung_index = 1;                  // != 0
+    verified.total_rungs = 2;
+    verified.total_relays = 0;
+
+    // Minimal input_conditions and spending_output so we don't trip the
+    // fail-closed null checks.
+    RungConditions conditions;
+    Rung rung;
+    RungBlock inner;
+    inner.type = RungBlockType::CSV;
+    inner.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)});
+    rung.blocks.push_back(inner);
+    conditions.rungs.push_back(rung);
+
+    rung::api::LadderOutputView spending_output;
+    std::vector<uint8_t> spk = {0xDF};
+    spending_output.script_pub_key = {spk.data(), spk.size()};
+    spending_output.value = 0;
+
+    RungEvalContext ctx;
+    ctx.verified_leaves = &verified;
+    ctx.input_conditions = &conditions;
+    ctx.spending_output = &spending_output;
+
+    // Pre-fix: writing leaves_copy[1] when leaves_copy.size() == 1 is UB.
+    // Post-fix: returns UNSATISFIED. Either way the test must not crash.
+    EvalResult r = EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx);
+    BOOST_CHECK(r == EvalResult::UNSATISFIED || r == EvalResult::ERROR);
+}
+
 // ============================================================================
 // KEY_REF_SIG direct evaluation
 // ============================================================================
@@ -13147,6 +13269,70 @@ BOOST_AUTO_TEST_CASE(tx_mlsc_descriptor_multi_rung)
     BOOST_CHECK_EQUAL(parsed.outputs.size(), 2u);
     BOOST_CHECK_EQUAL(parsed.outputs[0].rungs.size(), 2u); // sig + csv
     BOOST_CHECK_EQUAL(parsed.outputs[1].rungs.size(), 1u); // sig
+}
+
+// 21. Full-fidelity TX_MLSC descriptor round-trip
+//   parse(d) -> format -> parse should match the first parse on every
+//   per-output rung's blocks/fields. Locks the F18..F24 fixes for the
+//   multi-output surface, mirroring the single-tree functional test.
+BOOST_AUTO_TEST_CASE(tx_mlsc_descriptor_roundtrip_property)
+{
+    auto pk_a = MakePubkey();
+    auto pk_b = MakePubkey(); pk_b[1] = 0xBB;
+    auto pk_c = MakePubkey(); pk_c[1] = 0xCC;
+    std::map<std::string, std::vector<uint8_t>> keys = {
+        {"alice", pk_a}, {"bob", pk_b}, {"carol", pk_c},
+    };
+    std::map<std::string, std::string> aliases = {
+        {HexStr(pk_a), "alice"},
+        {HexStr(pk_b), "bob"},
+        {HexStr(pk_c), "carol"},
+    };
+
+    const std::vector<std::string> cases = {
+        "ladder(output(0, sig(@alice)))",
+        "ladder(output(0, sig(@alice)), output(1, sig(@bob)))",
+        "ladder(output(0, or(sig(@alice), csv(144))), output(1, sig(@bob)))",
+        "ladder(output(0, and(sig(@alice), csv(144))), output(1, multisig(2, @alice, @bob, @carol)))",
+        "ladder(output(0, anchor(10)), output(1, cltv(0)))",
+        "ladder(output(0, htlc(@alice, @bob, h:" + std::string(64, 'a') +
+            ", 144)), output(1, sig(@carol)))",
+    };
+
+    for (const auto& d : cases) {
+        TxMLSCDescriptor parsed1;
+        std::string error;
+        BOOST_REQUIRE_MESSAGE(ParseTxMLSCDescriptor(d, keys, parsed1, error),
+                                "step-1 parse: " + d + " err=" + error);
+
+        std::string formatted = FormatTxMLSCDescriptor(parsed1, aliases);
+
+        TxMLSCDescriptor parsed3;
+        BOOST_REQUIRE_MESSAGE(ParseTxMLSCDescriptor(formatted, keys, parsed3, error),
+                                "step-3 reparse: " + formatted + " err=" + error);
+
+        BOOST_REQUIRE_EQUAL(parsed1.outputs.size(), parsed3.outputs.size());
+        for (size_t o = 0; o < parsed1.outputs.size(); ++o) {
+            const auto& a = parsed1.outputs[o];
+            const auto& b = parsed3.outputs[o];
+            BOOST_REQUIRE_EQUAL(a.rungs.size(), b.rungs.size());
+            for (size_t r = 0; r < a.rungs.size(); ++r) {
+                BOOST_REQUIRE_EQUAL(a.rungs[r].blocks.size(), b.rungs[r].blocks.size());
+                for (size_t k = 0; k < a.rungs[r].blocks.size(); ++k) {
+                    BOOST_CHECK_EQUAL(static_cast<uint16_t>(a.rungs[r].blocks[k].type),
+                                       static_cast<uint16_t>(b.rungs[r].blocks[k].type));
+                }
+            }
+            BOOST_REQUIRE_EQUAL(a.rung_pubkeys.size(), b.rung_pubkeys.size());
+            for (size_t r = 0; r < a.rung_pubkeys.size(); ++r) {
+                BOOST_REQUIRE_EQUAL(a.rung_pubkeys[r].size(),
+                                     b.rung_pubkeys[r].size());
+                for (size_t k = 0; k < a.rung_pubkeys[r].size(); ++k) {
+                    BOOST_CHECK(a.rung_pubkeys[r][k] == b.rung_pubkeys[r][k]);
+                }
+            }
+        }
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
@@ -17668,6 +17854,86 @@ BOOST_AUTO_TEST_CASE(stress_deserialize_ladder_witness_random)
     }
     BOOST_TEST_MESSAGE("stress_deserialize_ladder_witness_random: " << parsed_ok
                         << " parsed, " << parsed_fail << " rejected (of " << N << ")");
+}
+
+BOOST_AUTO_TEST_CASE(stress_verify_rung_tx_random)
+{
+    // In-process mirror of src/test/fuzz/rung_verify.cpp. The libFuzzer
+    // harness needs a separate clang+sanitizer build; this stress test
+    // gives us continuous coverage in the standard test_bitcoin run, so
+    // any new crash or assertion in the VerifyRungTx hot path falls out
+    // of `make check` rather than waiting for an explicit fuzz session.
+    StressRNG r(0xE5E5E5E5E5E5E5E5ULL);
+    constexpr int N = 5000;
+    int parsed_v4 = 0, verified_attempted = 0;
+    for (int i = 0; i < N; ++i) {
+        size_t len = r.range(2048);
+        auto bytes = RandomBytes(r, len);
+        if (bytes.size() < 4) continue;
+        // Bias the buffer to start with the v4 version marker so the
+        // VerifyRungTx hot path actually gets exercised. Random buffers
+        // hit `04 00 00 00` once in 2^32 — setting the prefix here makes
+        // every iteration land in the v4 deserialiser.
+        bytes[0] = 0x04; bytes[1] = 0x00; bytes[2] = 0x00; bytes[3] = 0x00;
+
+        DataStream ds{bytes};
+        CMutableTransaction mtx;
+        try {
+            ds >> TX_WITH_WITNESS(mtx);
+        } catch (...) {
+            continue;
+        }
+        if (mtx.version != CTransaction::RUNG_TX_VERSION) continue;
+        if (mtx.vin.empty() || mtx.vin.size() > 32) continue;
+        ++parsed_v4;
+
+        std::vector<CTxOut> spent_outputs;
+        spent_outputs.reserve(mtx.vin.size());
+        for (size_t k = 0; k < mtx.vin.size(); ++k) {
+            CTxOut o;
+            o.nValue = static_cast<CAmount>(r.range(21'000'000'00000000ULL));
+            unsigned char spk[33] = {0xDF};
+            for (size_t j = 0; j < 32; ++j) spk[1 + j] = static_cast<unsigned char>(r.next());
+            spk[1] ^= static_cast<unsigned char>(k);
+            o.scriptPubKey = CScript(spk, spk + 33);
+            spent_outputs.push_back(o);
+        }
+
+        PrecomputedTransactionData txdata;
+        try {
+            txdata.Init(mtx, std::vector<CTxOut>(spent_outputs));
+        } catch (...) {
+            continue;
+        }
+
+        const CTransaction tx{mtx};
+        for (size_t k = 0; k < tx.vin.size(); ++k) {
+            MutableTransactionSignatureChecker checker{
+                &mtx, static_cast<unsigned int>(k),
+                spent_outputs[k].nValue, txdata,
+                MissingDataBehavior::FAIL};
+            ScriptError err{SCRIPT_ERR_OK};
+            std::string err_msg;
+            // Stress invariant: any boolean is fine; a crash or
+            // assertion failure is the bug class we're guarding against.
+            (void)rung::VerifyRungTx(tx, static_cast<unsigned int>(k),
+                                      spent_outputs[k],
+                                      /*flags=*/0, checker, txdata,
+                                      &err,
+                                      /*block_height=*/0,
+                                      /*shared_cache=*/nullptr,
+                                      /*qabo_sig_cache=*/nullptr,
+                                      /*pq_batch_cache=*/nullptr,
+                                      /*pq_batch_cache_mutex=*/nullptr,
+                                      /*shared_cache_mutex=*/nullptr,
+                                      /*qabo_sig_cache_mutex=*/nullptr,
+                                      &err_msg);
+            ++verified_attempted;
+        }
+    }
+    BOOST_TEST_MESSAGE("stress_verify_rung_tx_random: "
+                        << parsed_v4 << " v4 txs (of " << N
+                        << "), " << verified_attempted << " VerifyRungTx calls");
 }
 
 BOOST_AUTO_TEST_CASE(stress_is_standard_rung_tx_random)
