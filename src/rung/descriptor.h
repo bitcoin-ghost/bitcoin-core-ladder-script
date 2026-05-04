@@ -162,8 +162,19 @@ bool ParseTxMLSCDescriptor(const std::string& desc,
                             std::string& error);
 
 /** Format a TX_MLSC descriptor from rung data.
- *  @return descriptor string */
+ *  @return descriptor string
+ *  @note Lossy summary: only emits block type names, not field bodies.
+ *  Used for witness-side debugging output. For a full-fidelity
+ *  reparseable form, use the TxMLSCDescriptor overload. */
 std::string FormatTxMLSCDescriptor(const std::vector<CreationProofRung>& rungs);
+
+/** Full-fidelity TX_MLSC descriptor formatter. Emits the complete
+ *  output(idx, ...) form with all block fields, so
+ *  ParseTxMLSCDescriptor(FormatTxMLSCDescriptor(parse(d))) round-trips.
+ *  @param[in] desc      The parsed multi-output descriptor
+ *  @param[in] aliases   Reverse map: pubkey hex → alias name (optional) */
+std::string FormatTxMLSCDescriptor(const TxMLSCDescriptor& desc,
+                                    const std::map<std::string, std::string>& aliases = {});
 
 } // namespace rung
 

@@ -135,6 +135,25 @@ std::string ReadHex(ParseContext& ctx)
     return ctx.desc.substr(start, ctx.pos - start);
 }
 
+/** F24: Read either a `h:HEX` (already 32-byte hash, stored as-is) or `HEX`
+ *  (preimage, will be SHA256'd by the caller). The `h:` form lets the
+ *  formatter emit conditions verbatim, which is the only way the
+ *  parse->format->parse round-trip can hold for hash-folding blocks
+ *  (htlc, hash_sig). On success returns the bytes to store in the
+ *  HASH256 conditions field, with `out_already_hashed` indicating
+ *  whether the caller still needs to hash.  */
+std::vector<uint8_t> ReadHashOrPreimage(ParseContext& ctx, bool& out_already_hashed)
+{
+    SkipWhitespace(ctx);
+    out_already_hashed = false;
+    if (ctx.pos + 1 < ctx.desc.size() && ctx.desc[ctx.pos] == 'h' &&
+        ctx.desc[ctx.pos + 1] == ':') {
+        ctx.pos += 2;
+        out_already_hashed = true;
+    }
+    return ParseHex(ReadHex(ctx));
+}
+
 std::vector<uint8_t> MakeNumericField(uint32_t val)
 {
     std::vector<uint8_t> data(4);
@@ -835,8 +854,12 @@ bool ParseHtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint
     rung_pks.push_back(pk2);
 
     if (!Expect(ctx, ',')) return false;
-    auto preimage = ParseHex(ReadHex(ctx));
-    if (preimage.empty()) { ctx.error = "htlc requires preimage hex"; return false; }
+    bool already_hashed = false;
+    auto bytes = ReadHashOrPreimage(ctx, already_hashed);
+    if (bytes.empty()) { ctx.error = "htlc requires preimage hex (or h:HASH256)"; return false; }
+    if (already_hashed && bytes.size() != 32) {
+        ctx.error = "htlc h: form requires 32-byte hash"; return false;
+    }
 
     if (!Expect(ctx, ',')) return false;
     uint32_t csv_val;
@@ -844,9 +867,14 @@ bool ParseHtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint
 
     block.type = RungBlockType::HTLC;
     // Conditions: HASH256(sha256(preimage)), NUMERIC(csv), SCHEME
-    CSHA256 hasher;
-    std::vector<uint8_t> hash(CSHA256::OUTPUT_SIZE);
-    hasher.Write(preimage.data(), preimage.size()).Finalize(hash.data());
+    std::vector<uint8_t> hash;
+    if (already_hashed) {
+        hash = std::move(bytes);
+    } else {
+        CSHA256 hasher;
+        hash.assign(CSHA256::OUTPUT_SIZE, 0);
+        hasher.Write(bytes.data(), bytes.size()).Finalize(hash.data());
+    }
     block.fields.push_back({RungDataType::HASH256, hash});
     block.fields.push_back({RungDataType::NUMERIC, MakeNumericField(csv_val)});
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
@@ -855,7 +883,7 @@ bool ParseHtlc(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint
 
 bool ParseHashSig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<uint8_t>>& rung_pks)
 {
-    // hash_sig(@pk, preimage_hex)
+    // hash_sig(@pk, preimage_hex)  -or-  hash_sig(@pk, h:HASH256_hex)
     if (!Expect(ctx, '(')) return false;
     std::string alias = ReadAlias(ctx);
     if (alias.empty()) return false;
@@ -864,13 +892,22 @@ bool ParseHashSig(ParseContext& ctx, RungBlock& block, std::vector<std::vector<u
     rung_pks.push_back(pk);
 
     if (!Expect(ctx, ',')) return false;
-    auto preimage = ParseHex(ReadHex(ctx));
-    if (preimage.empty()) { ctx.error = "hash_sig requires preimage hex"; return false; }
+    bool already_hashed = false;
+    auto bytes = ReadHashOrPreimage(ctx, already_hashed);
+    if (bytes.empty()) { ctx.error = "hash_sig requires preimage hex (or h:HASH256)"; return false; }
+    if (already_hashed && bytes.size() != 32) {
+        ctx.error = "hash_sig h: form requires 32-byte hash"; return false;
+    }
 
     block.type = RungBlockType::HASH_SIG;
-    CSHA256 hasher;
-    std::vector<uint8_t> hash(CSHA256::OUTPUT_SIZE);
-    hasher.Write(preimage.data(), preimage.size()).Finalize(hash.data());
+    std::vector<uint8_t> hash;
+    if (already_hashed) {
+        hash = std::move(bytes);
+    } else {
+        CSHA256 hasher;
+        hash.assign(CSHA256::OUTPUT_SIZE, 0);
+        hasher.Write(bytes.data(), bytes.size()).Finalize(hash.data());
+    }
     block.fields.push_back({RungDataType::HASH256, hash});
     block.fields.push_back({RungDataType::SCHEME, {static_cast<uint8_t>(RungScheme::SCHNORR)}});
     return Expect(ctx, ')');
@@ -1408,7 +1445,10 @@ std::string FormatDescriptor(const RungConditions& conditions,
             return result;
         }
         case RungBlockType::ADAPTOR_SIG: {
-            result += "adaptor_sig(" + get_alias(rung_idx) + ", " + get_alias(rung_idx);
+            // v0.7: parser dropped the second @adaptor_point arg (T = t·G
+            // is off-chain only). The formatter emits the same single-arg
+            // shape so format(parse(d)) round-trips. F20.
+            result += "adaptor_sig(" + get_alias(rung_idx);
             // Audit 2026-05-03 second pass F10: also check
             // !fields[0].data.empty() — a manually-constructed RungBlock
             // with fields[0].type == SCHEME but empty data would otherwise
@@ -1430,8 +1470,18 @@ std::string FormatDescriptor(const RungConditions& conditions,
                 for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
                     threshold |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
             result += "musig_threshold(" + std::to_string(threshold);
-            size_t n = PubkeyCountForBlock(block.type, block);
-            for (size_t i = 0; i < n; ++i) result += ", " + get_alias(rung_idx);
+            // F21: emit N pubkeys, where N is stored in fields[1] (the
+            // descriptor-side participant count). Do NOT use
+            // PubkeyCountForBlock() here — that returns 1 because the
+            // consensus leaf binds a single aggregate key, but the
+            // descriptor surface lists every participant individually,
+            // and the parser pushed N entries onto rung_pks.
+            uint32_t n = 0;
+            if (block.fields.size() >= 2) {
+                for (size_t i = 0; i < block.fields[1].data.size() && i < 4; ++i)
+                    n |= static_cast<uint32_t>(block.fields[1].data[i]) << (8 * i);
+            }
+            for (uint32_t i = 0; i < n; ++i) result += ", " + get_alias(rung_idx);
             result += ")";
             return result;
         }
@@ -1500,7 +1550,12 @@ std::string FormatDescriptor(const RungConditions& conditions,
             return result;
         }
         case RungBlockType::VAULT_LOCK: {
-            result += "vault_lock(" + get_alias(rung_idx) + ", " + get_alias(rung_idx) + ", ";
+            // F23: see ANCHOR_FEE comment — separate statements for get_alias.
+            result += "vault_lock(";
+            result += get_alias(rung_idx);
+            result += ", ";
+            result += get_alias(rung_idx);
+            result += ", ";
             if (!block.fields.empty()) {
                 uint32_t val = 0;
                 for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
@@ -1584,9 +1639,18 @@ std::string FormatDescriptor(const RungConditions& conditions,
             return result;
         }
         case RungBlockType::HTLC: {
-            result += "htlc(" + get_alias(rung_idx) + ", " + get_alias(rung_idx) + ", ";
+            // F23: see ANCHOR_FEE comment — separate statements for get_alias.
+            // F24: emit the hash via the `h:` prefix so reparse stores it
+            // verbatim instead of hashing again. The `h:` form is the only
+            // way htlc/hash_sig can round-trip; the formatter never sees the
+            // original preimage (it isn't in conditions).
+            result += "htlc(";
+            result += get_alias(rung_idx);
+            result += ", ";
+            result += get_alias(rung_idx);
+            result += ", ";
             for (const auto& f : block.fields) {
-                if (f.type == RungDataType::HASH256) { result += HexStr(f.data) + ", "; break; }
+                if (f.type == RungDataType::HASH256) { result += "h:" + HexStr(f.data) + ", "; break; }
             }
             for (const auto& f : block.fields) {
                 if (f.type == RungDataType::NUMERIC) {
@@ -1601,15 +1665,20 @@ std::string FormatDescriptor(const RungConditions& conditions,
             return result;
         }
         case RungBlockType::HASH_SIG: {
+            // F24: emit `h:` form so format(parse(d)) round-trips.
             result += "hash_sig(" + get_alias(rung_idx) + ", ";
             for (const auto& f : block.fields) {
-                if (f.type == RungDataType::HASH256) { result += HexStr(f.data); break; }
+                if (f.type == RungDataType::HASH256) { result += "h:" + HexStr(f.data); break; }
             }
             result += ")";
             return result;
         }
         case RungBlockType::PTLC: {
-            result += "ptlc(" + get_alias(rung_idx) + ", " + get_alias(rung_idx) + ", ";
+            // F20: parser dropped the v0.6 second @adaptor_point arg, formatter
+            // must match (single pubkey + csv).
+            result += "ptlc(";
+            result += get_alias(rung_idx);
+            result += ", ";
             for (const auto& f : block.fields) {
                 if (f.type == RungDataType::NUMERIC) {
                     uint32_t val = 0;
@@ -1718,14 +1787,73 @@ std::string FormatDescriptor(const RungConditions& conditions,
             return result;
         }
         case RungBlockType::ANCHOR:
-        case RungBlockType::ANCHOR_CHANNEL:
-        case RungBlockType::ANCHOR_POOL:
-        case RungBlockType::ANCHOR_RESERVE:
-        case RungBlockType::ANCHOR_SEAL:
-        case RungBlockType::ANCHOR_ORACLE: {
+        case RungBlockType::ANCHOR_CHANNEL: {
+            // Single NUMERIC: anchor_id (ANCHOR) or commitment_number
+            // (ANCHOR_CHANNEL). Stage 3 audit (F18) regression: pre-fix
+            // both were emitted as `name()` — empty parens — losing the
+            // NUMERIC. Round-trip parse(format(parse(d))) failed because
+            // the parser then required a number.
             std::string name = BlockTypeName(block.type);
             std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-            result += name + "()";
+            uint32_t val = 0;
+            if (!block.fields.empty()) {
+                for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
+                    val |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
+            }
+            result += name + "(" + std::to_string(val) + ")";
+            return result;
+        }
+        case RungBlockType::ANCHOR_POOL: {
+            // Conditions: [HASH256(vtxo_root), NUMERIC(participant_count)].
+            // Parser shape (descriptor.cpp:1126): anchor_pool(<hash_hex>, <count>).
+            uint32_t cnt = 0;
+            std::string hash_hex;
+            if (block.fields.size() >= 1)
+                hash_hex = HexStr(block.fields[0].data);
+            if (block.fields.size() >= 2) {
+                for (size_t i = 0; i < block.fields[1].data.size() && i < 4; ++i)
+                    cnt |= static_cast<uint32_t>(block.fields[1].data[i]) << (8 * i);
+            }
+            result += "anchor_pool(" + hash_hex + ", " + std::to_string(cnt) + ")";
+            return result;
+        }
+        case RungBlockType::ANCHOR_RESERVE: {
+            // Conditions: [NUMERIC(n), NUMERIC(m), HASH256(guardian)].
+            uint32_t n = 0, m = 0;
+            std::string guardian_hex;
+            if (block.fields.size() >= 1) {
+                for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
+                    n |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
+            }
+            if (block.fields.size() >= 2) {
+                for (size_t i = 0; i < block.fields[1].data.size() && i < 4; ++i)
+                    m |= static_cast<uint32_t>(block.fields[1].data[i]) << (8 * i);
+            }
+            if (block.fields.size() >= 3)
+                guardian_hex = HexStr(block.fields[2].data);
+            result += "anchor_reserve(" + std::to_string(n) + ", " +
+                      std::to_string(m) + ", " + guardian_hex + ")";
+            return result;
+        }
+        case RungBlockType::ANCHOR_SEAL: {
+            // Conditions: [HASH256, HASH256] — pair commit.
+            std::string a, b;
+            if (block.fields.size() >= 1) a = HexStr(block.fields[0].data);
+            if (block.fields.size() >= 2) b = HexStr(block.fields[1].data);
+            result += "anchor_seal(" + a + ", " + b + ")";
+            return result;
+        }
+        case RungBlockType::ANCHOR_ORACLE: {
+            // Conditions: [NUMERIC(outcome_count)]; pubkey folds into
+            // Merkle leaf. Parser shape (descriptor.cpp:1157 →
+            // ParsePubkeyNumericBlock): anchor_oracle(@pubkey, <count>).
+            uint32_t cnt = 0;
+            if (!block.fields.empty()) {
+                for (size_t i = 0; i < block.fields[0].data.size() && i < 4; ++i)
+                    cnt |= static_cast<uint32_t>(block.fields[0].data[i]) << (8 * i);
+            }
+            result += "anchor_oracle(" + get_alias(rung_idx) + ", " +
+                      std::to_string(cnt) + ")";
             return result;
         }
         case RungBlockType::DATA_RETURN: {
@@ -1761,6 +1889,29 @@ std::string FormatDescriptor(const RungConditions& conditions,
             }
             result += name + "(";
             if (!block.fields.empty()) result += HexStr(block.fields[0].data);
+            result += ")";
+            return result;
+        }
+        case RungBlockType::ANCHOR_FEE: {
+            // anchor_fee(@pk1, @pk2, min_fee, max_fee, max_weight, commitment)
+            // Conditions layout: [SCHEME(1), NUMERIC, NUMERIC, NUMERIC, NUMERIC]
+            // F22: was falling through to the placeholder default, producing
+            // a non-reparseable "anchor_fee(...)" string.
+            // F23: must call get_alias() in separate statements — operands of
+            // operator+ have unspecified evaluation order in C++, and get_alias
+            // mutates pk_cursor, so chaining them in one expression can swap
+            // the rendered pubkey order (observed under GCC) and break round-trip.
+            result += "anchor_fee(";
+            result += get_alias(rung_idx);
+            result += ", ";
+            result += get_alias(rung_idx);
+            for (size_t i = 1; i < block.fields.size() && i <= 4; ++i) {
+                uint32_t v = 0;
+                for (size_t j = 0; j < block.fields[i].data.size() && j < 4; ++j) {
+                    v |= static_cast<uint32_t>(block.fields[i].data[j]) << (8 * j);
+                }
+                result += ", " + std::to_string(v);
+            }
             result += ")";
             return result;
         }
@@ -1954,6 +2105,44 @@ std::string FormatTxMLSCDescriptor(const std::vector<CreationProofRung>& rungs)
         }
         if (rung_indices.size() > 1) result += ")";
         result += ")";
+    }
+    result += ")";
+    return result;
+}
+
+std::string FormatTxMLSCDescriptor(const TxMLSCDescriptor& desc,
+                                    const std::map<std::string, std::string>& aliases)
+{
+    // Reuse FormatDescriptor for each output by synthesising a transient
+    // RungConditions. This keeps a single code path for per-block
+    // emission, so any future formatter fix lands here automatically.
+    // Wrapper-stripping: FormatDescriptor wraps in `ladder(...)`, with
+    // `or(...)` if the rung count is > 1. Strip exactly that wrapper
+    // to splice into the multi-output `output(idx, ...)` envelope.
+    std::string result = "ladder(";
+    bool first = true;
+    for (size_t i = 0; i < desc.outputs.size(); ++i) {
+        const auto& out = desc.outputs[i];
+        if (out.rungs.empty()) continue;
+
+        RungConditions conds;
+        conds.rungs = out.rungs;
+        std::string inner = FormatDescriptor(conds, out.rung_pubkeys, aliases);
+
+        // Strip the outer `ladder(` ... `)` wrapper.
+        const std::string ladder_prefix = "ladder(";
+        if (inner.size() < ladder_prefix.size() + 1 ||
+            inner.compare(0, ladder_prefix.size(), ladder_prefix) != 0 ||
+            inner.back() != ')') {
+            // Should not happen; FormatDescriptor always emits this shape.
+            continue;
+        }
+        std::string body = inner.substr(ladder_prefix.size(),
+                                          inner.size() - ladder_prefix.size() - 1);
+
+        if (!first) result += ", ";
+        first = false;
+        result += "output(" + std::to_string(i) + ", " + body + ")";
     }
     result += ")";
     return result;
