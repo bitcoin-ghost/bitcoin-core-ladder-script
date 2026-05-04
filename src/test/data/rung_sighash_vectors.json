@@ -1,0 +1,339 @@
+{
+  "version": 1,
+  "description": "Isolated v4 RUNG_TX sighash vectors. Inputs (tx_hex, input_idx, spent_outputs, conditions, variant, hash_type) are self-contained; expected_sighash_hex is the canonical 32-byte sighash. Reviewers and independent implementations consume these to verify their sighash code.",
+  "vectors": [
+    {
+      "name": "single SIG, 1 output, ladder/SIGHASH_DEFAULT",
+      "description": "Simplest case: one input, one output, SIGHASH_DEFAULT.",
+      "tx_hex": "04000000000201b94db8664ef28cfc85b42193702137e3d48bc589f06a7c51779074ac746911f20000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 0,
+      "expected_sighash_hex": "7d7d032ba44ac3a315a988e46c0b8ce25151677df0faaaf3860286011785c00c"
+    },
+    {
+      "name": "single SIG, 2 outputs, ladder/SIGHASH_DEFAULT",
+      "description": "Multi-output baseline; sighash binds the outputs hash.",
+      "tx_hex": "04000000000201c330f8c8b755708c3f934f47d58b7170675af79d7d5d1741b551b2727921c1d00000000000feffffffb80c25955e8876c2207ba02ebdd3f3ddc6d0c4e6e6ef5c3277c60b595a70dd0e02bc33029500000000bc3302950000000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 0,
+      "expected_sighash_hex": "391c8e04830dad7411186d2ffb6ab7373724531e486c1784143555a06179505c"
+    },
+    {
+      "name": "single SIG, 1 output, ladder/SIGHASH_NONE",
+      "description": "SIGHASH_NONE drops outputs from the sighash domain.",
+      "tx_hex": "040000000002016380abe019ad76cfb472d4b7b006868f454bc85f5497881ce383b66f2663b1770000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 2,
+      "expected_sighash_hex": "abb0777442e4a9a6b48596be7597347765722a81a72baad8d13c531ed2bbcad7"
+    },
+    {
+      "name": "single SIG, 1 output, ladder/SIGHASH_SINGLE",
+      "description": "SIGHASH_SINGLE binds only the matching output.",
+      "tx_hex": "04000000000201c035117b936be6b88711a48de02b996541ef31069635e4b68177024ba1dbda3c0000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 3,
+      "expected_sighash_hex": "a4a474b2f4bc3f97af6c93b06611d46fa18a5ba9452b6c9fe35cff3dd5b2ecca"
+    },
+    {
+      "name": "single SIG, 1 output, ladder/SIGHASH_ANYONECANPAY",
+      "description": "ANYONECANPAY|ALL \u2014 input set may grow; sighash drops other inputs.",
+      "tx_hex": "04000000000201594d3c55bdcce2beaf118e042927c9963cd897a50d342c4fca297d9aa221dedf0000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 129,
+      "expected_sighash_hex": "f33b17760b98ef6e248fcda0203589156dd0266253376edfd95bf7f320a336ab"
+    },
+    {
+      "name": "CSV(144) Empty rung, ladder",
+      "description": "No-pubkey timelock rung; sighash still commits to the conditions hash.",
+      "tx_hex": "04000000000201e363f02738e97bda338e7e0f23f2e48ec539e40d6630ba3b3587f9b434a8720b0000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df8c2785189976ec41c57d6d86b3e8ed4e722a34fbd972d9502192af10011e7154"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "CSV",
+              "fields": [
+                {
+                  "type": "NUMERIC",
+                  "hex": "90000000"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 0,
+      "expected_sighash_hex": "069401cf2f234a6062f1dc991511d9c386e5bb1f142139f2022d32384df02203"
+    },
+    {
+      "name": "AND(SIG, CSV(72)), ladder",
+      "description": "Multi-block rung: both blocks fold into the conditions root.",
+      "tx_hex": "0400000000020171c2c5811acc79b9eb29ece8fb467805b822696cdb9ec551b275432938f80a740000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df534a6ecc47e5e00fde9b83a1d2c7816e0cfd428d582366ed50e8cf1825f6af2e"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            },
+            {
+              "type": "CSV",
+              "fields": [
+                {
+                  "type": "NUMERIC",
+                  "hex": "48000000"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 0,
+      "expected_sighash_hex": "e22ddda592c6b3570127fe6b9f02e4bb8fa23cde69838a3b9a1ec1170c41dc9d"
+    },
+    {
+      "name": "OR(SIG, SIG), ladder, target rung 0",
+      "description": "Multi-rung OR; sighash domain is the same regardless of chosen rung.",
+      "tx_hex": "04000000000201e4fee8b308bb1a37b57ee7db68ee782903cda0b4730600a588da280b8c0c483b0000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df8cbaa4c9d5ba0ba80f251fc6ede869972ad543fcd21bf9ed852d6b6b175d7880"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "ladder",
+      "hash_type": 0,
+      "expected_sighash_hex": "ea91fc8c6da51241e4192b8168a4085451c417e2cd97d0e9e8ab233305a2a40d"
+    },
+    {
+      "name": "single SIG, 1 output, key_path/SIGHASH_DEFAULT",
+      "description": "LadderKeyPathSighash/v1 domain; does not commit to conditions.",
+      "tx_hex": "040000000002013ce2c12fe663720fa82bb61b2a6b741e91c6ecdaf637d76d543ed2d9d42cd6760000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "key_path",
+      "hash_type": 0,
+      "expected_sighash_hex": "ff770c9c06dd4e32f9ff683db2e798dc65d3c889035a19768e89fba59b78bb10"
+    },
+    {
+      "name": "single SIG, 1 output, key_path/SIGHASH_NONE",
+      "description": "Key-path with SIGHASH_NONE \u2014 outputs dropped, conditions still absent.",
+      "tx_hex": "040000000002017f535f6392a0099d5e7130bcae9a77e8dd78b077815dd588c18c7ab6bbf5fa6c0000000000feffffff2304949d5be6275ece8773cf5753d7546a0049f0c05828784211b688182ec602017867042a0100000000000000000000",
+      "input_idx": 0,
+      "spent_outputs": [
+        {
+          "amount_sats": 4999900000,
+          "scriptpubkey_hex": "df6de312f00508000c33d15b804dc025bb2656ca6bd27e074d7cd77574fb5ad6f5"
+        }
+      ],
+      "conditions": [
+        {
+          "output_index": 0,
+          "blocks": [
+            {
+              "type": "SIG",
+              "fields": [
+                {
+                  "type": "SCHEME",
+                  "hex": "01"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "variant": "key_path",
+      "hash_type": 2,
+      "expected_sighash_hex": "efea049cb6d49bc9a46bade3a84c6fa45bc9310d0732a476a3853a45229241a4"
+    }
+  ]
+}
