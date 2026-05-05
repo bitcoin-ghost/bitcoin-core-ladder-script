@@ -320,10 +320,10 @@
   <span class="json-key">"inverted"</span>: <span class="json-num">false</span>,
   <span class="json-key">"fields"</span>: [
     { <span class="json-key">"type"</span>: <span class="json-str">"PUBKEY"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"02abc1...33 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"NUMERIC"</span>, <span class="json-key">"value"</span>: <span class="json-num">144</span> }
+    { <span class="json-key">"type"</span>: <span class="json-str">"SIGNATURE"</span>, <span class="json-key">"hex"</span>: <span class="json-str">"30440...64 bytes"</span> }
   ]
 }</pre></div>
+  <p class="section-text" style="margin-top:6px;font-size:12px;color:#888">The timelock NUMERIC lives in conditions only &mdash; it is not duplicated in the witness. After <code>MergeConditionsAndWitness</code> the evaluator sees SCHEME, NUMERIC, PUBKEY, SIGNATURE in a single merged block.</p>
 </div>
 
 <!-- Use Cases -->
