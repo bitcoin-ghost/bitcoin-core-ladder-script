@@ -171,7 +171,7 @@
   <table class="field-table">
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td class="field-name">until_height</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-size">Conditions</td><td class="field-desc">Absolute block height at which the covenant terminates. Before this height, the output must re-encumber with the same conditions; at or after, the spend is unconditionally satisfied. Compared against <code>max(ctx.block_height, tx.lock_time)</code> &mdash; spenders can use <code>nLockTime</code> to assert "this spend will be confirmed at height &ge; X" the same way CLTV does.</td></tr>
+      <tr><td class="field-name">until_height</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Absolute block height at which the covenant terminates. Before this height, the output must re-encumber with the same conditions; at or after, the spend is unconditionally satisfied. Compared against <code>max(ctx.block_height, tx.lock_time)</code> &mdash; spenders can use <code>nLockTime</code> to assert "this spend will be confirmed at height &ge; X" the same way CLTV does.</td></tr>
     </tbody>
   </table>
 </div>
