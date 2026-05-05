@@ -215,8 +215,8 @@
   <div class="eval-box">
     <div class="eval-step"><span class="eval-step-num">1.</span><span class="eval-step-text"><span class="eval-keyword">HasRequiredPubkeys(block, 1)</span>: at least one PUBKEY (the resetter key) must be present in the merged block; else &rarr; <span class="eval-result-err">ERROR</span>. Identity is bound at MLSC-proof level via merkle_pub_key.</span></div>
     <div class="eval-step"><span class="eval-step-num">2.</span><span class="eval-step-text">Collect NUMERICs. Fewer than 2 &rarr; <span class="eval-result-err">ERROR</span>. <span class="eval-keyword">ReadNumeric</span> the first as <code>state</code> and the second as <code>delay_blocks</code>; either undecodable &rarr; <span class="eval-result-err">ERROR</span></span></div>
-    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>delay_blocks &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span> (the consensus check on the value is sign-only; an L2 protocol may use it to time the reset).</span></div>
-    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>state &ge; 1</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (set; the RESET rung is live &mdash; pair with RECURSE_MODIFIED to enforce 1&rarr;0 in the output); else &rarr; <span class="eval-result-unsat">UNSATISFIED</span> (already unset)</span></div>
+    <div class="eval-step"><span class="eval-step-num">3.</span><span class="eval-step-text">If <code>delay_blocks &lt; 0</code> &rarr; <span class="eval-result-err">ERROR</span></span></div>
+    <div class="eval-step"><span class="eval-step-num">4.</span><span class="eval-step-text">If <code>state &ge; 1</code> <em>and</em> <code>delay_blocks == 0</code> &rarr; <span class="eval-result-sat">SATISFIED</span> (set + matured; the RESET rung is live &mdash; pair with RECURSE_MODIFIED to enforce 1&rarr;0 and decrement <code>delay_blocks</code> in the output). Otherwise (unset, or set but <code>delay_blocks &gt; 0</code>) &rarr; <span class="eval-result-unsat">UNSATISFIED</span>. Without the <code>delay_blocks == 0</code> gate the timed-reset semantics would not be consensus-active &mdash; covenants shipped with <code>delay &gt; 0</code> would otherwise fire immediately.</span></div>
   </div>
 </div>
 
@@ -230,7 +230,8 @@
       <tr><td>Fewer than 2 NUMERIC fields, or either undecodable</td><td class="r-err">ERROR</td></tr>
       <tr><td><code>delay_blocks &lt; 0</code></td><td class="r-err">ERROR</td></tr>
       <tr><td><code>state == 0</code> (already unset)</td><td class="r-unsat">UNSATISFIED</td></tr>
-      <tr><td><code>state &ge; 1</code> (set, RESET rung is live)</td><td class="r-sat">SATISFIED</td></tr>
+      <tr><td><code>state &ge; 1</code> but <code>delay_blocks &gt; 0</code> (still maturing)</td><td class="r-unsat">UNSATISFIED</td></tr>
+      <tr><td><code>state &ge; 1</code> and <code>delay_blocks == 0</code> (set + matured, RESET rung is live)</td><td class="r-sat">SATISFIED</td></tr>
     </tbody>
   </table>
 </div>
