@@ -201,7 +201,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <a href="recurse-until.html" class="block-card"><div class="block-code">0x0403</div><div class="block-name">RECURSE_UNTIL</div><div class="block-desc">Conditional recursion with termination condition. Bounded loops with exit criteria.</div></a>
       <a href="recurse-count.html" class="block-card"><div class="block-code">0x0404</div><div class="block-name">RECURSE_COUNT</div><div class="block-desc">Count-limited recursion. Decrements counter each spend, terminates at zero.</div></a>
       <a href="recurse-split.html" class="block-card"><div class="block-code">0x0405</div><div class="block-name">RECURSE_SPLIT</div><div class="block-desc">One input covenant fans out into multiple output covenants.</div></a>
-      <a href="recurse-decay.html" class="block-card"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Each recursive spend reduces output value by a committed decay factor.</div></a>
+      <a href="recurse-decay.html" class="block-card"><div class="block-code">0x0406</div><div class="block-name">RECURSE_DECAY</div><div class="block-desc">Each recursive spend reduces a committed parameter by a fixed decay-per-step. Same evaluator as RECURSE_MODIFIED with deltas negated.</div></a>
     </div>
   </div>
 
@@ -210,10 +210,10 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
     <h2 class="family-title" style="color:#2980b9;">Anchor Family &mdash; 0x0500</h2>
     <p class="family-intro">Commit to external state references &mdash; channel IDs, pool IDs, reserve requirements, oracle attestations, tamper-evident seals.</p>
     <div class="block-grid">
-      <a href="anchor.html" class="block-card"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic anchor point. 32-byte anchor hash identifying an off-chain structure.</div></a>
-      <a href="anchor-channel.html" class="block-card"><div class="block-code">0x0502</div><div class="block-name">ANCHOR_CHANNEL</div><div class="block-desc">Payment channel anchor. Channel ID and sequence number.</div></a>
-      <a href="anchor-pool.html" class="block-card"><div class="block-code">0x0503</div><div class="block-name">ANCHOR_POOL</div><div class="block-desc">Liquidity pool anchor. Binds UTXO to a specific pool structure.</div></a>
-      <a href="anchor-reserve.html" class="block-card"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Reserve proof anchor. Minimum reserve amount for proof of reserves.</div></a>
+      <a href="anchor.html" class="block-card"><div class="block-code">0x0501</div><div class="block-name">ANCHOR</div><div class="block-desc">Generic marker block. Single NUMERIC anchor_id identifying an off-chain structure.</div></a>
+      <a href="anchor-channel.html" class="block-card"><div class="block-code">0x0502</div><div class="block-name">ANCHOR_CHANNEL</div><div class="block-desc">Payment-channel marker. Single commitment_number field.</div></a>
+      <a href="anchor-pool.html" class="block-card"><div class="block-code">0x0503</div><div class="block-name">ANCHOR_POOL</div><div class="block-desc">VTXO-tree anchor (Ark-style). HASH256 of the VTXO tree root + participant count.</div></a>
+      <a href="anchor-reserve.html" class="block-card"><div class="block-code">0x0504</div><div class="block-name">ANCHOR_RESERVE</div><div class="block-desc">Guardian set with M-of-N threshold. Two NUMERIC thresholds + HASH256(guardian set).</div></a>
       <a href="anchor-seal.html" class="block-card"><div class="block-code">0x0505</div><div class="block-name">ANCHOR_SEAL</div><div class="block-desc">Tamper-evident seal. Single-use commitment for client-side validation.</div></a>
       <a href="anchor-oracle.html" class="block-card"><div class="block-code">0x0506</div><div class="block-name">ANCHOR_ORACLE</div><div class="block-desc">Oracle attestation anchor. Spending requires oracle's signed event attestation.</div></a>
       <a href="data-return.html" class="block-card"><div class="block-code">0x0507</div><div class="block-name">DATA_RETURN</div><div class="block-desc">Typed OP_RETURN replacement. 1&ndash;40 bytes, max one per transaction.</div></a>
@@ -234,11 +234,11 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <a href="counter-down.html" class="block-card"><div class="block-code">0x0631</div><div class="block-name">COUNTER_DOWN</div><div class="block-desc">Down counter for N-spend limits.</div></a>
       <a href="counter-preset.html" class="block-card"><div class="block-code">0x0632</div><div class="block-name">COUNTER_PRESET</div><div class="block-desc">Preset counter with configurable target. Reset on trigger.</div></a>
       <a href="counter-up.html" class="block-card"><div class="block-code">0x0633</div><div class="block-name">COUNTER_UP</div><div class="block-desc">Up counter for tracking spend count in stateful covenants.</div></a>
-      <a href="compare.html" class="block-card"><div class="block-code">0x0641</div><div class="block-name">COMPARE</div><div class="block-desc">Numeric comparator with configurable operator (EQ, NE, LT, LE, GT, GE).</div></a>
+      <a href="compare.html" class="block-card"><div class="block-code">0x0641</div><div class="block-name">COMPARE</div><div class="block-desc">Numeric comparator with configurable operator (EQ, NEQ, GT, LT, GTE, LTE, IN_RANGE).</div></a>
       <a href="sequencer.html" class="block-card"><div class="block-code">0x0651</div><div class="block-name">SEQUENCER</div><div class="block-desc">Step sequencer. Ordered multi-phase spending policies.</div></a>
       <a href="one-shot.html" class="block-card"><div class="block-code">0x0661</div><div class="block-name">ONE_SHOT</div><div class="block-desc">Single-pulse trigger. Exactly one spend, then permanently disables.</div></a>
       <a href="rate-limit.html" class="block-card"><div class="block-code">0x0671</div><div class="block-name">RATE_LIMIT</div><div class="block-desc">Maximum spends within a block-height window.</div></a>
-      <a href="cosign.html" class="block-card"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Co-signing gate. Additional signature from a committed co-signer key.</div></a>
+      <a href="cosign.html" class="block-card"><div class="block-code">0x0681</div><div class="block-name">COSIGN</div><div class="block-desc">Co-spend constraint. Conditions hold HASH256 of a co-signer scriptPubKey; spend requires another input in the same tx with a matching SPK.</div></a>
     </div>
   </div>
 
