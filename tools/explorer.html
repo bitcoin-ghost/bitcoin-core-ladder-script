@@ -413,7 +413,7 @@ async function searchTxDirect(txid) {
     for (let i = 0; i < tx.vout.length; i++) {
       const out = tx.vout[i];
       const spk = out.scriptPubKey;
-      const isMLSC = spk.hex && spk.hex.startsWith('c2') && spk.hex.length === 66;
+      const isMLSC = spk.hex && spk.hex.toLowerCase().startsWith('df') && (spk.hex.length === 2 || (spk.hex.length >= 66 && spk.hex.length <= 146));
       const typeLabel = isMLSC ? '<span style="color:var(--accent);font-weight:600">MLSC</span>' : spk.type;
       html += `<div style="padding:6px 0;border-bottom:1px solid var(--border-light);font-size:13px">`;
       html += `<span style="color:var(--text-light)">#${i}</span> ${out.value.toFixed(8)} tBTC &mdash; ${typeLabel}`;
