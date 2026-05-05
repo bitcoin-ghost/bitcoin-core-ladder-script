@@ -328,8 +328,8 @@ signrungtx         <span class="comment">raw per-input signing path</span>
 createrung         <span class="comment">build a single LadderWitness from JSON</span>
 
 <span class="comment"># descriptor language</span>
-parseladder        <span class="comment">parse descriptor to conditions hex + MLSC root</span>
-formatladder       <span class="comment">format conditions hex as descriptor string</span>
+parseladder        <span class="comment">parse descriptor to conditions hex + MLSC root + pubkeys_hex + merkle_pubkeys_hex</span>
+formatladder       <span class="comment">format conditions hex as descriptor string (key-aware via pubkeys_hex + keys + merkle_pubkeys_hex args)</span>
 
 <span class="comment"># inspection / validation</span>
 decoderung         <span class="comment">decode a ladder witness from hex</span>
@@ -337,6 +337,7 @@ validateladder     <span class="comment">validate every witness on a raw v4 RUNG
 serialiseconditions <span class="comment">serialise conditions for P2SH/P2WSH/P2TR_SCRIPT inner-script use</span>
 computectvhash     <span class="comment">compute BIP-119 CTV template hash</span>
 computemutation    <span class="comment">compute mutated conditions for RECURSE_MODIFIED / RECURSE_DECAY</span>
+computesighash     <span class="comment">compute the v4 sighash for a single input (LadderSighash/v1 or LadderKeyPathSighash/v1) — preview before signing</span>
 
 <span class="comment"># PQ helpers</span>
 generatepqkeypair  <span class="comment">FALCON-512 / FALCON-1024 / Dilithium3 / SPHINCS+</span>

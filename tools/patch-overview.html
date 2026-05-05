@@ -163,13 +163,13 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
   <p class="page-sub">What changes are needed to add Ladder Script to Bitcoin Core</p>
 
   <div class="stats-row">
-    <div class="stat"><span class="stat-val">961</span><span class="stat-key">Lines Patched</span></div>
-    <div class="stat"><span class="stat-val">33</span><span class="stat-key">Files Modified</span></div>
-    <div class="stat"><span class="stat-val">21,247</span><span class="stat-key">New Code (Rung Lib)</span></div>
-    <div class="stat"><span class="stat-val">39</span><span class="stat-key">New Files</span></div>
+    <div class="stat"><span class="stat-val">~1,600</span><span class="stat-key">Lines Patched</span></div>
+    <div class="stat"><span class="stat-val">32</span><span class="stat-key">Files Modified</span></div>
+    <div class="stat"><span class="stat-val">~21,900</span><span class="stat-key">New Code (Rung Lib)</span></div>
+    <div class="stat"><span class="stat-val">38</span><span class="stat-key">New Files</span></div>
   </div>
 
-  <div class="note">Ladder Script adds a self-contained library (<code>src/rung/</code>) to Bitcoin Core plus a single boundary header (<code>src/rung_shims.h</code>). The patch to existing Core code is 961 lines across 33 modified files &mdash; routing, type definitions, build wiring. The bulk of the implementation (21,247 lines across 39 new library files: 38 in <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header) does not touch existing Core code. Per-section walkthrough: <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> and <a href="docs/#ANNOTATED_LIBRARY">Annotated Library</a>.</div>
+  <div class="note">Ladder Script adds a self-contained library (<code>src/rung/</code>) to Bitcoin Core plus a single boundary header (<code>src/rung_shims.h</code>). The patch to existing Core code is approximately 1,600 lines across 32 modified files &mdash; routing, type definitions, build wiring. The bulk of the implementation (~21,900 lines across 38 new library files in <code>src/rung/</code> plus the <code>src/rung_shims.h</code> boundary header) does not touch existing Core code. Per-section walkthrough: <a href="docs/#ANNOTATED_DIFF">Annotated Patch</a> and <a href="docs/#ANNOTATED_LIBRARY">Annotated Library</a>.</div>
 
   <!-- -- PATCH TO EXISTING CODE -- -->
   <div class="section">
@@ -246,9 +246,9 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
     <table>
       <thead><tr><th>Layer</th><th style="text-align:right;">Count</th><th>What</th></tr></thead>
       <tbody>
-        <tr><td class="col-file">Boost unit tests</td><td class="col-lines">655</td><td class="col-desc">Across rung_tests + qabi_tests + tx_mlsc_tests suites. Block evaluation, serialisation, sighash, conditions, policy, MLSC proofs, field validation, multi-party scale tests up to N=3,000.</td></tr>
-        <tr><td class="col-file">Functional tests</td><td class="col-lines">52</td><td class="col-desc">9 files / ~52 distinct test methods on regtest: <code>feature_rung_tx</code>, <code>feature_rung_p2p</code>, <code>feature_rung_legacy</code>, <code>feature_rung_fuzz</code>, <code>feature_rung_pq_batch</code> + <code>_stress</code>, <code>feature_qabi</code>, <code>feature_qabi_size</code>, <code>feature_deferred_vectors</code>.</td></tr>
-        <tr><td class="col-file">Live signet</td><td class="col-lines">46</td><td class="col-desc">Preset end-to-end test (<code>tools/test-presets.py</code>): 46 fund + spend ceremonies on live signet via the public ladder-script.org API.</td></tr>
+        <tr><td class="col-file">Boost unit tests</td><td class="col-lines">665</td><td class="col-desc">Across rung_tests + qabi_tests + tx_mlsc_tests suites. Block evaluation, serialisation, sighash, conditions, policy, MLSC proofs, field validation, multi-party scale tests up to N=3,000. Includes the F12&ndash;F26 regression tests and the in-process VerifyRungTx stress mirror of the libFuzzer harness.</td></tr>
+        <tr><td class="col-file">Functional tests</td><td class="col-lines">143</td><td class="col-desc">15 files / ~143 distinct test methods on regtest: the original suite (<code>feature_rung_tx</code>, <code>feature_rung_p2p</code>, <code>feature_rung_legacy</code>, <code>feature_rung_fuzz</code>, <code>feature_rung_pq_batch</code> + <code>_stress</code>, <code>feature_qabi</code>, <code>feature_qabi_size</code>, <code>feature_deferred_vectors</code>, <code>feature_rung_anti_embedding</code>) plus the activation-gate vector triad (<code>feature_rung_tx_vectors</code>, <code>feature_rung_tx_neg_vectors</code>, <code>feature_rung_tx_spend_vectors</code>) and the new descriptor round-trip + sighash-vector verifiers (<code>feature_rung_descriptor_roundtrip</code>, <code>feature_rung_sighash_vectors</code>).</td></tr>
+        <tr><td class="col-file">Live signet</td><td class="col-lines">36+</td><td class="col-desc">~36 distinct fund + spend patterns exercised end-to-end against the public ladder-script.org signet, plus 400,000+ remote-fuzz mutation iterations against the same node with 0 anomalies (as of v30.0-ladder-0.23).</td></tr>
         <tr><td class="col-file">TLA+ formal specs</td><td class="col-lines">27</td><td class="col-desc">10 general evaluation, 10 per-family block evaluators, 7 specialised invariants. Covers wire format, anti-spam, Merkle proofs, sighash binding, covenant termination, cross-input rules.</td></tr>
       </tbody>
     </table>
@@ -266,7 +266,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="diff-block">
       <div class="diff-file">./build/bin/test_bitcoin --list_content | grep -c '^    '</div>
-      <div class="diff-desc">Boost unit test count (655 across all ladder suites: <code>grep -c '^BOOST_AUTO_TEST_CASE' src/test/rung_tests.cpp</code>). Functional test count = <code>grep -c '^    def test_' test/functional/feature_rung*.py test/functional/feature_qabi*.py test/functional/feature_deferred_vectors.py</code> plus <code>def vec_</code> and <code>def fuzz_</code> entries.</div>
+      <div class="diff-desc">Boost unit test count (665 across all ladder suites: <code>grep -c '^BOOST_AUTO_TEST_CASE' src/test/rung_tests.cpp</code>). Functional test count = <code>grep -c '^    def test_\|^def vec_\|^def spend_\|^def fuzz_' test/functional/feature_rung*.py test/functional/feature_qabi*.py test/functional/feature_deferred_vectors.py</code>.</div>
     </div>
 
     <div class="diff-block">

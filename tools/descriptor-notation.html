@@ -324,8 +324,8 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <thead><tr><th>Notation</th><th>Block type</th><th>Arguments</th></tr></thead>
       <tbody>
         <tr><td>timelocked_sig(@pk, csv)</td><td>TIMELOCKED_SIG</td><td>Signature + relative timelock</td></tr>
-        <tr><td>htlc(@receiver, @sender, preimage, csv)</td><td>HTLC</td><td>Receiver key first (path=0 hashlock), sender key second (path=1 refund), preimage hex, CSV blocks. The path indicator is added by the witness builder.</td></tr>
-        <tr><td>hash_sig(@pk, preimage)</td><td>HASH_SIG</td><td>Key + preimage hex</td></tr>
+        <tr><td>htlc(@receiver, @sender, preimage | h:HASH256, csv)</td><td>HTLC</td><td>Receiver key first (path=0 hashlock), sender key second (path=1 refund), preimage hex (auto-SHA256'd) <em>or</em> the <code>h:</code> form supplying the 32-byte hash directly, CSV blocks. The path indicator is added by the witness builder.</td></tr>
+        <tr><td>hash_sig(@pk, preimage | h:HASH256)</td><td>HASH_SIG</td><td>Key + preimage hex (auto-SHA256'd) <em>or</em> the <code>h:</code> form supplying the 32-byte hash directly.</td></tr>
         <tr><td>ptlc(@pk, csv)</td><td>PTLC</td><td>Single signing key (v0.7+) + CSV blocks. Adaptor point T is off-chain only.</td></tr>
         <tr><td>cltv_sig(@pk, height)</td><td>CLTV_SIG</td><td>Signature + absolute timelock</td></tr>
         <tr><td>timelocked_multisig(M, @k1, ..., csv)</td><td>TIMELOCKED_MULTISIG</td><td>Threshold, keys, CSV blocks</td></tr>
@@ -501,7 +501,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="example">
       <div class="example-title">parseladder</div>
-      <div class="example-desc">Parse a descriptor into conditions hex and MLSC root.</div>
+      <div class="example-desc">Parse a descriptor into conditions hex, MLSC root, and the per-rung pubkey side-channel arrays needed for a key-aware round-trip.</div>
       <div class="code-block"><span class="cm">$ bitcoin-cli -signet parseladder \</span>
   <span class="cm">"ladder(or(sig(@alice), and(csv(52560), sig(@bob))))" \</span>
   <span class="cm">'{"alice":"02abc...","bob":"03def..."}'</span>
@@ -509,13 +509,15 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 {
   <span class="kw">"conditions_hex"</span>: <span class="num">"020100010203fd50cd0001010101000000"</span>,
   <span class="kw">"mlsc_root"</span>: <span class="num">"adbd9257578360bc6884ef46b18f30e1..."</span>,
-  <span class="kw">"n_rungs"</span>: <span class="num">2</span>
+  <span class="kw">"n_rungs"</span>: <span class="num">2</span>,
+  <span class="kw">"pubkeys_hex"</span>: [[<span class="num">"02abc..."</span>], [<span class="num">"03def..."</span>]],
+  <span class="kw">"merkle_pubkeys_hex"</span>: [[[]], [[], []]]
 }</div>
     </div>
 
     <div class="example">
       <div class="example-title">formatladder</div>
-      <div class="example-desc">Convert conditions hex back to a descriptor string.</div>
+      <div class="example-desc">Convert conditions hex back to a descriptor string. Pass the <code>pubkeys_hex</code> + key map + <code>merkle_pubkeys_hex</code> from <code>parseladder</code> to render <code>@aliases</code> faithfully (see the Round-trip section below).</div>
       <div class="code-block"><span class="cm">$ bitcoin-cli -signet formatladder "01010364010101000000"</span>
 
 {
@@ -540,7 +542,20 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
     <div class="section-head">Round-trip</div>
     <p>Descriptors round-trip through <code>parseladder</code> and <code>formatladder</code>:</p>
     <div class="code-block"><span class="fn">ladder</span>(<span class="fn">csv</span>(<span class="num">100</span>))  →  <span class="num">01010364010101000000</span>  →  <span class="fn">ladder</span>(<span class="fn">csv</span>(<span class="num">100</span>))</div>
-    <p>Key aliases are not preserved in the hex (the keys are hashed into the Merkle tree). When formatting back, unknown keys appear as <code>@?</code> or truncated hex.</p>
+    <p>Public keys are folded into the Merkle leaf hash and not present in the conditions blob. To round-trip a descriptor that names <code>@aliases</code>, pass <code>parseladder</code>'s <code>pubkeys_hex</code> and <code>merkle_pubkeys_hex</code> arrays plus the original key map back to <code>formatladder</code>:</p>
+    <div class="code-block"><span class="cm">$ R=$(bitcoin-cli -signet parseladder \</span>
+  <span class="cm">"ladder(multisig(2, @alice, @bob, @carol))" \</span>
+  <span class="cm">'{"alice":"02ab...","bob":"03cd...","carol":"02ef..."}')</span>
+<span class="cm">$ CH=$(echo "$R"   | jq -r .conditions_hex)</span>
+<span class="cm">$ PKS=$(echo "$R"  | jq -c .pubkeys_hex)</span>
+<span class="cm">$ MPKS=$(echo "$R" | jq -c .merkle_pubkeys_hex)</span>
+<span class="cm">$ bitcoin-cli -signet formatladder "$CH" "$PKS" \</span>
+  <span class="cm">'{"alice":"02ab...","bob":"03cd...","carol":"02ef..."}' "$MPKS"</span>
+
+{
+  <span class="kw">"descriptor"</span>: <span class="num">"ladder(multisig(2, @alice, @bob, @carol))"</span>
+}</div>
+    <p>If you call <code>formatladder</code> with only the conditions hex (no pubkey side-data), pubkey-bearing blocks render with truncated-hex placeholders that won't reparse. The <code>pubkeys_hex</code> + <code>merkle_pubkeys_hex</code> + key-map combination is required for descriptors that name keys (sig, multisig, htlc, vault_lock, anchor_fee, timelocked_sig, ptlc, etc.).</p>
   </div>
 
   <!-- WALLET INTEGRATION -->

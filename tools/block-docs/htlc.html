@@ -100,7 +100,7 @@
         <td class="field-type">HASH256</td>
         <td class="field-size">32 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">SHA-256 hash that the receiver-path preimage must match.</td>
+        <td class="field-desc">SHA-256 hash that the receiver-path preimage must match. <strong>F24:</strong> the descriptor surface accepts either form &mdash; <code>htlc(@r, @s, &lt;preimage_hex&gt;, csv)</code> auto-SHA256s the input, while <code>htlc(@r, @s, h:&lt;HASH256_hex&gt;, csv)</code> stores the supplied 32-byte hash verbatim. Both produce identical conditions; the <code>h:</code> form is what <code>formatladder</code> emits so that <code>parse&nbsp;&rarr;&nbsp;format&nbsp;&rarr;&nbsp;parse</code> round-trips at the conditions-root level.</td>
       </tr>
       <tr>
         <td class="field-name">csv</td>

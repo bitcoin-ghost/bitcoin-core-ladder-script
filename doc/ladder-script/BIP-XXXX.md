@@ -1859,11 +1859,11 @@ The structural answer to "this is a fork of Bitcoin Core". The
 Ladder Script implementation is split into two artefacts with sharply
 asymmetric review obligations:
 
-- A **boundary-respecting patch** to existing Bitcoin Core code (961
-  insertions across 33 modified files): type definitions, dispatch
-  routing, build wiring, RPC plumbing. Every change is either a
-  hook for v4 dispatch or a defaulted-parameter addition that
-  preserves every existing call site.
+- A **boundary-respecting patch** to existing Bitcoin Core code
+  (approximately 1,600 insertions across 32 modified files): type
+  definitions, dispatch routing, build wiring, RPC plumbing. Every
+  change is either a hook for v4 dispatch or a defaulted-parameter
+  addition that preserves every existing call site.
 - A **self-contained library** at `src/rung/` (38 files) plus the
   `src/rung_shims.h` boundary header (one file). The library
   includes Core headers via `rung_shims.h` and nothing else; Core
@@ -1875,9 +1875,9 @@ and the rest of the existing Core surface.
 
 **Bounded review surface.** A reviewer who wants to verify "this BIP
 does not change v1/v2/v3 validation, signature verification, or
-script evaluation" can do so by reading the 961-line patch plus
+script evaluation" can do so by reading the ~1,600-line patch plus
 `src/rung/api.h`. That is the consensus surface for the integration
-question. The remaining 21,247 lines (20,884 under `src/rung/` plus
+question. The remaining ~21,900 lines (21,506 under `src/rung/` plus
 363 in `src/rung_shims.h`) are implementation; their consensus
 contract is enforced by the test vectors in
 `src/test/data/rung_tx_vectors.json`. A consensus reviewer who wants
@@ -2166,7 +2166,7 @@ against the three rule families above for satisfying spends.
 The reference implementation is `libladder`, a self-contained C++
 library under `src/rung/` in the `bitcoin-core-ladder-script`
 repository. Bitcoin Core integration is provided by the boundary
-header `src/rung_shims.h` and a 961-line patch across 33 modified
+header `src/rung_shims.h` and an approximately 1,600-line patch across 32 modified
 Core files. The two-artefact split is load-bearing for review and
 long-term maintenance and is justified in Rationale Q18.
 
@@ -2216,7 +2216,7 @@ Pre-built signed binaries for Linux x86_64, macOS arm64, and Windows
 x86_64 are published per release with PGP-signed `SHA256SUMS`; the
 release-signing key fingerprint is
 `777FE81F8CC077FD3D08055E852C2B3190F5B928`. End-to-end documentation,
-the annotated 961-line Core patch, the annotated library walkthrough,
+the annotated ~1,600-line Core patch, the annotated library walkthrough,
 and the soft-fork activation guide are at
 <https://ladder-script.org/docs>. The website is a verification aid;
 this BIP is self-contained and implementable from the document
@@ -2288,31 +2288,32 @@ The findings, with file pointers:
 Two cross-cutting verification programmes complement the per-finding
 fixes:
 
-- **Test-vector drift detection.** 149 committed reference vectors
-  (68 positive + 55 negative + 26 spend) under
-  `src/test/data/rung_tx_*.json`. Every CI run regenerates the
-  vectors from the reference implementation in default-verify mode
-  and fails on byte-level drift; intentional regeneration requires
-  `VECTORS_REGENERATE=1`.
+- **Test-vector drift detection.** 170 committed reference vectors
+  (68 positive + 76 negative + 26 spend) plus a 10-vector isolated
+  sighash fixture under `src/test/data/rung_tx_*.json` and
+  `src/test/data/rung_sighash_vectors.json`. Every CI run regenerates
+  the vectors from the reference implementation in default-verify
+  mode and fails on byte-level drift; intentional regeneration
+  requires `VECTORS_REGENERATE=1`.
 - **Independent verifier.** A pure-Python zero-dependency
   re-implementation under `tools/independent-impl/` reproduces the
-  conditions root for **60 of 68** committed positive vectors across
-  **45 distinct block types** byte-for-byte, including HTLC,
+  conditions root for **68 of 68** committed positive vectors across
+  **50+ distinct block types** byte-for-byte, including HTLC,
   MULTISIG (with inner pubkey-Merkle root), TIMELOCKED_MULTISIG,
-  ANCHOR_FEE, VAULT_LOCK, and the P2PK/P2PKH/P2WPKH/P2TR legacy
-  wrappers. The verifier is built from the BIP draft and the
-  wire-format documentation only — no shared code with the reference
-  implementation. The remaining eight vectors involve script-bearing
-  legacy wrappers, the QABI_SPEND / PQ_BATCH PQ surface, and the
-  COSIGN / ACCUMULATOR / OUTPUT_CHECK compound shapes; these are
-  follow-on work, not consensus gaps.
+  ANCHOR_FEE, VAULT_LOCK, P2PK/P2PKH/P2WPKH/P2TR/P2SH/P2WSH/
+  P2TR_SCRIPT legacy wrappers, ACCUMULATOR, COSIGN, OUTPUT_CHECK,
+  KEY_REF_SIG, the RECURSE_* family, the PLC family, PQ_BATCH (commit
+  side), QABI_PRIME, QABI_SPEND, and the DATA_RETURN+SIG two-rung
+  shape. The verifier is built from the BIP draft and the wire-format
+  documentation only — no shared code with the reference
+  implementation.
 
-A live signet fuzzer at `tools/remote-fuzz/` has run **~18 000
-mutation iterations** against the development signet at
-`<https://ladder-script.org>` with **zero anomalies** and 100 %
-clean rejection. All seven RPC strategies plus audit-driven fixed
-cases (F14, F17) reject as expected; full results are reproducible
-with `--rng-seed`.
+A live signet fuzzer at `tools/remote-fuzz/` has run **400 000+
+cumulative mutation iterations** against the development signet at
+`<https://ladder-script.org>` (as of v30.0-ladder-0.23) with **zero
+real anomalies** and 100 % clean rejection. All seven RPC strategies
+plus audit-driven fixed cases (F14, F17) reject as expected; full
+results are reproducible with `--rng-seed`.
 
 ## Security Considerations
 
@@ -2549,7 +2550,7 @@ their named bars.
      one Bitcoin consensus reviewer (libbitcoinkernel or
      Core-validation fluency), and at least one cryptography /
      Schnorr-tweak reviewer. Each publishes a written assessment
-     of the consensus surface (the 961-line integration patch, the
+     of the consensus surface (the ~1,600-line integration patch, the
      library under `src/rung/`, the wire format, the per-input and
      QABO sighashes, the LadderTweak/v1 construction, and the
      QABIO and PQ_BATCH evaluators).

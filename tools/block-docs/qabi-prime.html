@@ -101,6 +101,7 @@
     </tbody>
   </table>
   <p class="section-text" style="margin-top:12px">QABI_PRIME has no conditions-context fields. All four fields are witness-only. The evaluator reads the &ldquo;current state&rdquo; (auth_tip, committed_root/depth/expiry, owner_id) from the QABI_SPEND rung of the input conditions tree &mdash; there is no duplication.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888"><strong>F26:</strong> the conditions field count is exactly zero. Any spurious conditions field on a QABI_PRIME block is rejected at fund time by <code>createrungtx</code> and at consensus by the wire-format deserialiser, closing a low-bandwidth attacker-data-embedding channel.</p>
 </div>
 
 <!-- Evaluation -->

@@ -12,8 +12,9 @@ Endpoints:
   POST /api/ladder/broadcast     - sendrawtransaction (push to signet)
   POST /api/ladder/decode        - decoderung (decode ladder hex)
   POST /api/ladder/validate      - validateladder (validate structure)
-  POST /api/ladder/parse         - parseladder (descriptor to conditions)
-  POST /api/ladder/format        - formatladder (conditions to descriptor)
+  POST /api/ladder/parse         - parseladder (descriptor to conditions; returns pubkeys_hex + merkle_pubkeys_hex side data for F19 round-trip)
+  POST /api/ladder/format        - formatladder (conditions to descriptor; accepts pubkeys_hex + keys + merkle_pubkeys_hex for key-aware round-trip)
+  POST /api/ladder/computesighash - computesighash (preview the canonical sighash an input commits to)
   POST /api/ladder/computemutation - computemutation (recursive covenant roots)
   GET  /api/ladder/tx/{txid}     - getrawtransaction (lookup tx)
   POST /api/ladder/faucet        - fund a test address from faucet wallet
@@ -608,7 +609,54 @@ async def format_ladder(request: Request):
         raise HTTPException(400, "Missing 'hex' field.")
 
     keys = data.get("keys", {})
-    result = await rpc_call("formatladder", [hex_str, keys])
+    # F19: pubkeys_hex + merkle_pubkeys_hex thread back from parseladder so
+    # pubkey-bearing blocks render with the original key material instead of
+    # the non-reparseable @? placeholder. Both are optional for legacy
+    # callers that only have conditions hex.
+    pubkeys_hex = data.get("pubkeys_hex")
+    merkle_pubkeys_hex = data.get("merkle_pubkeys_hex")
+    args = [hex_str]
+    if pubkeys_hex is not None or keys or merkle_pubkeys_hex is not None:
+        args.append(pubkeys_hex if pubkeys_hex is not None else [])
+        args.append(keys if keys else {})
+        if merkle_pubkeys_hex is not None:
+            args.append(merkle_pubkeys_hex)
+    result = await rpc_call("formatladder", args)
+    return result
+
+
+@app.post("/api/ladder/computesighash")
+async def compute_sighash(request: Request):
+    """Compute the v4 RUNG_TX sighash for a single input. Exposes
+    SignatureHashLadder / SignatureHashLadderKeyPath so engine UIs and
+    independent verifiers can preview the canonical 32-byte sighash an
+    input is about to commit to."""
+    body = await request.body()
+    if len(body) > MAX_JSON_SIZE:
+        raise HTTPException(400, "Request too large.")
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON.")
+
+    hex_str = _validate_hex(data.get("hex", ""), "hex")
+    if not hex_str:
+        raise HTTPException(400, "Missing 'hex' field.")
+    input_idx = data.get("input")
+    if not isinstance(input_idx, int) or input_idx < 0:
+        raise HTTPException(400, "'input' must be a non-negative integer.")
+    spent_outputs = data.get("spent_outputs")
+    if not isinstance(spent_outputs, list):
+        raise HTTPException(400, "'spent_outputs' must be an array.")
+    conditions = data.get("conditions")
+    if conditions is None:
+        raise HTTPException(400, "Missing 'conditions' field.")
+    # Conditions on the wire is a JSON-encoded string for the RPC.
+    conds_json = conditions if isinstance(conditions, str) else json.dumps(conditions)
+    variant = data.get("variant", "ladder")
+    hash_type = data.get("hash_type", 0)
+    result = await rpc_call("computesighash",
+                              [hex_str, input_idx, spent_outputs, conds_json, variant, hash_type])
     return result
 
 

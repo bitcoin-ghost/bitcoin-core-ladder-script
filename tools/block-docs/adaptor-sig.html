@@ -114,6 +114,7 @@
     </tbody>
   </table>
   <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Single signing pubkey folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). v0.7 dropped the second "adaptor point" slot &mdash; T = t&middot;G is needed only for off-chain witness extraction, not for on-chain consensus, since the adapted sig verifies as a normal Schnorr against the signing key. No key fields in conditions.</p>
+  <p class="section-text" style="margin-top:8px;font-size:12px;color:#888"><strong>F26:</strong> the conditions field count is exactly zero. Any spurious conditions field on an ADAPTOR_SIG block is rejected at fund time by <code>createrungtx</code> and at consensus by the wire-format deserialiser.</p>
 </div>
 
 <!-- Wire Format -->

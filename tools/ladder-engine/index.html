@@ -2610,7 +2610,7 @@ const BLOCK_FAMILIES = [
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true },
         { name: 'blocks', dataType: 'NUMERIC', label: 'Timelock (blocks)', placeholder: '144' },
       ]},
-      { type: 'HTLC', label: 'HTLC', desc: 'Hash + Timelock + Sig --Lightning HTLC / atomic swap', fields: [
+      { type: 'HTLC', label: 'HTLC', desc: 'Hash + Timelock + Sig --Lightning HTLC / atomic swap. Engine builds via createrungtx (preimage path only). For hash-only setups (you have the payment hash but not the preimage --typical sender role) use the descriptor surface: htlc(@receiver, @sender, h:HASH256, csv) via parseladder. See descriptor-notation.', fields: [
         { name: 'preimage', dataType: 'PREIMAGE', label: 'Payment Preimage', placeholder: 'Hex secret --node computes payment hash' },
         { name: 'hash', dataType: 'HASH256', label: 'Payment Hash (read-only)', placeholder: 'Auto-computed by node from preimage', computed: true },
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Claimer Key', placeholder: '02abcdef...' },
@@ -2618,7 +2618,7 @@ const BLOCK_FAMILIES = [
         { name: 'blocks', dataType: 'NUMERIC', label: 'Timeout (blocks)', placeholder: '144' },
         { name: 'scheme', dataType: 'SCHEME', label: 'Scheme', placeholder: 'SCHNORR', optional: true }
       ]},
-      { type: 'HASH_SIG', label: 'HASH_SIG', desc: 'Hash preimage + Signature --atomic swap claim', fields: [
+      { type: 'HASH_SIG', label: 'HASH_SIG', desc: 'Hash preimage + Signature --atomic swap claim. Engine builds via createrungtx (preimage path only). For hash-only setups, use the descriptor h: form via parseladder.', fields: [
         { name: 'preimage', dataType: 'PREIMAGE', label: 'Preimage (secret)', placeholder: 'Hex data --node computes SHA256 hash' },
         { name: 'hash', dataType: 'HASH256', label: 'Hash (read-only)', placeholder: 'Auto-computed by node from preimage', computed: true },
         { name: 'pubkey', dataType: 'PUBKEY', label: 'Public Key', placeholder: '02abcdef...' },
@@ -11319,6 +11319,28 @@ function SpendPanel() {
         }
       }
       signPayload.hex = unsignedHex;
+      // Pre-sign sighash diagnostic: surface the canonical 32-byte sighash
+      // each MLSC input is about to commit to, so users can copy and verify
+      // it externally (matches what test/functional/feature_rung_sighash_
+      // vectors.py captures and what computesighash returns). Failures here
+      // are non-fatal — the diagnostic just doesn't render.
+      try {
+        for (let si = 0; si < signers.length; si++) {
+          const s = signers[si];
+          if (!s.conditions) continue;
+          const probe = await apiCall('/api/ladder/computesighash', {
+            hex: unsignedHex,
+            input: s.input,
+            spent_outputs,
+            conditions: s.conditions,
+            variant: 'ladder',
+            hash_type: 0,
+          }, true);
+          if (probe && probe.sighash) {
+            addLog('input ' + s.input + ' sighash (LadderSighash/v1, SIGHASH_DEFAULT): ' + probe.sighash, 'info');
+          }
+        }
+      } catch (_) { /* diagnostic only */ }
       let signResult = await apiCall('/api/ladder/sign', signPayload, true);
       if (!signResult || !signResult.hex) throw new Error('Signing failed.');
       addLog(signerBlocks.length + ' signature block(s) applied (' + scheme + ')', 'ok');

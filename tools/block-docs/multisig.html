@@ -107,7 +107,7 @@
         <td class="field-type">NUMERIC</td>
         <td class="field-size">1 B</td>
         <td class="field-side-c">Conditions</td>
-        <td class="field-desc">Required number of valid signatures (K, 1 &le; K &le; 16)</td>
+        <td class="field-desc">Required number of valid signatures. <strong>K must satisfy 1 &le; K &le; N</strong> (N = supplied pubkey count, max 16). Out-of-range K is rejected at fund time by <code>createrungtx</code> (F25) and at consensus by the spend-time evaluator.</td>
       </tr>
       <tr>
         <td class="field-name">scheme</td>
