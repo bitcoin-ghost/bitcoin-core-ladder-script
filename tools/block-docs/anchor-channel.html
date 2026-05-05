@@ -140,7 +140,7 @@
   <h1 class="block-title">ANCHOR_CHANNEL</h1>
   <p class="block-subtitle">v0.7+ pure-marker channel anchor. Carries an optional <code>commitment_number</code> NUMERIC and nothing else. The v0.6 design also embedded local/remote channel pubkeys, but no consumer ever validated them &mdash; they were a 66&nbsp;B/spend silent data channel (closed audit finding E-002). Future Lightning consumers needing channel keys should compose ANCHOR_CHANNEL with a SIG/MULTISIG block, or extend the spec with an <code>ANCHOR_CHANNEL_KEYED</code> variant whose keys are sig-validated.</p>
   <span class="block-family-badge badge-anchor">Anchor</span>
-  <span class="invertible-badge inv-yes">Invertible</span>
+  <span class="invertible-badge inv-no">Non-Invertible</span>
 </div>
 
 <!-- Diagram -->
