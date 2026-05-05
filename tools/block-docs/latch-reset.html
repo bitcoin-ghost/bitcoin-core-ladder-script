@@ -175,7 +175,8 @@
     <thead><tr><th>Field</th><th>Data Type</th><th>Size</th><th>Side</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td class="field-name">state</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Current latch state: 0 = unset, &ge; 1 = set</td></tr>
-      <tr><td class="field-name">delay_blocks</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Optional delay parameter (block count) for reset timing</td></tr>
+      <tr><td class="field-name">delay_blocks</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Delay countdown (block count). Reset only fires when delay has decayed to 0 via the RECURSE_MODIFIED carry-rule chain. Must be &ge; 0.</td></tr>
+      <tr><td class="field-name">resetter_pubkey</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Resetter key (folded out of conditions via merkle_pub_key; revealed at spend time and bound by Merkle proof). Required by <code>HasRequiredPubkeys(block, 1)</code> at consensus.</td></tr>
     </tbody>
   </table>
   <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public key folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). No key field in conditions.</p>

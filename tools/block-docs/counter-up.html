@@ -176,6 +176,7 @@
     <tbody>
       <tr><td class="field-name">current</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Current counter value (NUMERIC[0])</td></tr>
       <tr><td class="field-name">target</td><td class="field-type">NUMERIC</td><td class="field-size">1-4 B</td><td class="field-side-c">Conditions</td><td class="field-desc">Target count value (NUMERIC[1])</td></tr>
+      <tr><td class="field-name">event_pubkey</td><td class="field-type">PUBKEY</td><td class="field-size">32-33 B</td><td class="field-side-w">Witness</td><td class="field-desc">Event signer key (folded out of conditions via merkle_pub_key; revealed at spend time and bound by Merkle proof). Required by <code>HasRequiredPubkeys(block, 1)</code> at consensus.</td></tr>
     </tbody>
   </table>
   <p class="section-text" style="margin-top:8px;font-size:12px;color:#888">Public key folded into Merkle leaf via merkle_pub_key (PubkeyCountForBlock = 1). No key field in conditions.</p>
