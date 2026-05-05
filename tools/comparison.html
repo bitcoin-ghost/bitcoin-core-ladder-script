@@ -234,13 +234,13 @@ Witness: choose IF or ELSE path + data</div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script</div>
         <div class="comp-code">ladder(or(
-  htlc(@sender, @receiver, &lt;preimage&gt;, 144),
+  htlc(@receiver, @sender, &lt;preimage&gt;, 144),
   and(sig(@sender), cltv(900000))
 ))
 
 1 compound block + 1 fallback rung
 Merkelised: only spending rung revealed
-Descriptor: htlc(@alice, @bob, hex, 144)</div>
+Descriptor: htlc(@receiver, @sender, hex, 144)</div>
         <div class="comp-note"><span class="tag-native">Native</span> HTLC is a single compound block. Unrevealed rung stays private (MLSC).</div>
       </div>
     </div>
@@ -581,16 +581,17 @@ Mitigations exist but are mempool-policy.</div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (ANCHOR_FEE)</div>
         <div class="comp-code">ladder(anchor_fee(
-  scheme=schnorr,
-  min_fee_rate=10000,   // sat/kvB
-  max_fee_rate=1000000,
-  max_weight=4000,
-  commitment_number=N
+  @local, @remote,
+  10,         // min_fee_rate (sat/vB)
+  1000,       // max_fee_rate (sat/vB)
+  4000,       // max_weight (WU)
+  N           // commitment_number
 ))
 
-Spend tx&apos;s fee rate must lie in [min, max]
-Spend tx weight bounded
-Enforced at consensus, not policy</div>
+Spend tx&apos;s 2-of-2 sig must clear,
+fee rate must lie in [min, max],
+weight bounded by max_weight.
+Enforced at consensus, not policy.</div>
         <div class="comp-note"><span class="tag-native">Native</span> Anchor spends carry their own fee-rate envelope.</div>
       </div>
     </div>
@@ -616,14 +617,15 @@ Privacy depends on Tor + onion routing</div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (PTLC)</div>
         <div class="comp-code">ladder(or(
-  ptlc(@receiver, &lt;point P&gt;),
+  ptlc(@receiver, 144),
   and(sig(@sender), cltv(900000))
 ))
 
-Each hop uses a different point P_i
-Adaptor sig reveals scalar t_i &mdash; not H
-Hops are unlinkable on-chain
-Wormhole attack mitigated by adaptor binding</div>
+PTLC: single signing key + CSV refund.
+The adaptor point T = t&middot;G is off-chain only;
+each hop uses a different P_i so on-chain
+spends are not linked by a shared hash.
+Adaptor sig reveals scalar t_i &mdash; not H.</div>
         <div class="comp-note"><span class="tag-native">Native</span> PTLC block uses point-locked adaptor signatures, not preimage reveal.</div>
       </div>
     </div>
@@ -686,14 +688,15 @@ Wallet must store entire pre-computed tree</div>
         <div class="comp-label new">Ladder Script (RECURSE_SPLIT)</div>
         <div class="comp-code">ladder(and(
   sig(@owner),
-  recurse_split(2, @left_root, @right_root)
+  recurse_split(2, 10000)
 ))
 
-Each spend produces 2 children
-  inheriting left/right sub-roots
-Tree depth bounded by max_depth
-Children carry their own conditions
-  &mdash; can be re-encumbered or terminated</div>
+recurse_split(max_splits, min_split_sats):
+each spend may produce up to max_splits
+outputs &mdash; each at least min_split_sats &mdash;
+that re-encumber the same conditions with
+max_splits decremented. Tree depth is
+bounded; total output value &le; input.</div>
         <div class="comp-note"><span class="tag-native">Native</span> Bounded recursive fan-out with per-child conditions.</div>
       </div>
     </div>
@@ -720,13 +723,14 @@ Workaround: trust + protocol enforcement
       </div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (COSIGN)</div>
-        <div class="comp-code">ladder(cosign(&lt;partner_outpoint&gt;))
+        <div class="comp-code">ladder(cosign(&lt;SHA256(partner_spk)&gt;))
 
-UTXO A&apos;s conditions reference UTXO B&apos;s
-  outpoint as required co-input.
-Spend tx must include both A and B.
+UTXO A&apos;s conditions commit to the
+SHA256 of UTXO B&apos;s scriptPubKey.
+Spend tx must include another input
+whose spent SPK hashes to the same.
 B can carry its own COSIGN pointing
-  back to A &mdash; mutual binding at consensus</div>
+back to A &mdash; mutual binding at consensus.</div>
         <div class="comp-note"><span class="tag-native">Native</span> Cross-UTXO atomic spend, enforced at consensus.</div>
       </div>
     </div>
@@ -754,15 +758,16 @@ No native counter, no native latch.</div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (COUNTER / LATCH)</div>
         <div class="comp-code">ladder(and(
-  sig(@owner),
-  counter_down(start=10),  // or counter_up
-  recurse_same()
+  counter_down(@owner, 10),  // or counter_up
+  recurse_same(100)
 ))
 
-Counter decrements each spend, terminates at 0
-LATCH_SET / LATCH_RESET: one-shot toggles
-COUNTER_PRESET: bound counter to a value
-State persists in the next leaf via recursion</div>
+counter_down(@event_pk, count): each spend
+must be authorised by event_pk; pair with
+RECURSE_MODIFIED to decrement count and
+re-encumber. Terminates at 0.
+LATCH_SET / LATCH_RESET: one-shot toggles.
+COUNTER_PRESET: accumulator vs preset.</div>
         <div class="comp-note"><span class="tag-native">Native</span> Persistent state via recursion + counter blocks.</div>
       </div>
     </div>
@@ -788,17 +793,19 @@ Standard relay: 80 bytes (policy only)</div>
       </div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (DATA_RETURN)</div>
-        <div class="comp-code">ladder(data_return(&lt;type_tag&gt;, &lt;1-40 bytes&gt;))
+        <div class="comp-code">ladder(data_return(&lt;1-40 byte hex&gt;))
 
-Type tag identifies the application
-Cap: 40 bytes per output, consensus-enforced
-Cap: 2 DATA_RETURN outputs per tx
-No witness abuse vector
-  &mdash; data lives in conditions, not witness</div>
+Single DATA payload (1-40 bytes), with the
+first bytes typically used by an application
+as a protocol tag &mdash; the consensus rule is on
+total length, not on a separate type field.
+Cap: 40 bytes per output, consensus-enforced.
+Cap: 1 DATA_RETURN output per tx (evaluator.cpp:537).
+Output is consensus-unspendable (nValue == 0).</div>
         <div class="comp-note"><span class="tag-native">Native</span> Typed, capped, non-bloating.</div>
       </div>
     </div>
-    <div class="comp-verdict"><strong>Ladder Script:</strong> DATA_RETURN replaces OP_RETURN with a typed, capped primitive. Inscriptions and similar envelope abuses cannot exist because witness data is not free &mdash; per-tx user-chosen data is bounded at 112 bytes total.</div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> DATA_RETURN replaces OP_RETURN with a typed, capped primitive. Inscriptions and similar envelope abuses cannot exist because witness data is not free &mdash; per-tx user-chosen data is bounded at 40 bytes (one DATA_RETURN output max) plus the structural overhead of the conditions tree.</div>
   </div>
 
   <!-- 19. ADAPTOR SIGNATURES -->
@@ -822,14 +829,15 @@ Adaptor logic lives in the wallet,
       </div>
       <div class="comp-side">
         <div class="comp-label new">Ladder Script (ADAPTOR_SIG)</div>
-        <div class="comp-code">ladder(adaptor_sig(@signer, &lt;point T&gt;))
+        <div class="comp-code">ladder(adaptor_sig(@signer))
 
-Conditions commit to point T = t&middot;G
-Witness: adaptor signature s&apos;
-Spend reveals t to anyone watching
-  the chain, atomically with confirmation
-DLC settlement, atomic swaps,
-  pay-for-secret &mdash; all primitives</div>
+ADAPTOR_SIG v0.7+: single signing key only.
+The adaptor point T = t&middot;G lives off-chain;
+the adapted signature s&apos; verifies on-chain
+as a normal Schnorr against @signer.
+Counterparty extracts t off-chain by
+comparing s&apos; to its presig &mdash; revealing the
+DLC scalar atomically with confirmation.</div>
         <div class="comp-note"><span class="tag-native">Native</span> Adaptor signatures verified at consensus.</div>
       </div>
     </div>
