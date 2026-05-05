@@ -12848,6 +12848,63 @@ function App() {
 
   const descriptorOutput = useMemo(() => rungsToDescriptor(rungs), [rungs]);
 
+  // F19 round-trip rehearsal: extract every pubkey in the rungs, build a
+  // keys map keyed by the same 8-char prefix the descriptor's `pk(v)` emits
+  // (`@` + v.substring(0, 8)), call parseladder + formatladder via the
+  // proxy, and report whether the descriptor round-trips byte-for-byte.
+  // The descriptor in this UI uses 8-char pseudo-aliases by design; this
+  // rehearsal just confirms parser/printer agree on those aliases when
+  // matched to the original pubkeys.
+  const [rtResult, setRtResult] = useState(null);
+  const [rtRunning, setRtRunning] = useState(false);
+  const handleDescriptorRoundTrip = useCallback(async () => {
+    setRtRunning(true);
+    setRtResult(null);
+    try {
+      const pubkeys = new Set();
+      const hexPkRe = /^(02|03)[0-9a-fA-F]{64}$/;
+      rungs.forEach(r => r.blocks.forEach(b => {
+        Object.values(b.values || {}).forEach(v => {
+          if (typeof v !== 'string') return;
+          v.split(',').map(s => s.trim()).forEach(s => {
+            if (hexPkRe.test(s)) pubkeys.add(s);
+          });
+        });
+      }));
+      const keys = {};
+      [...pubkeys].forEach(pk => { keys[pk.substring(0, 8)] = pk; });
+      const r1 = await apiCall('/api/ladder/parse',
+        { descriptor: descriptorOutput, keys }, true);
+      if (!r1 || !r1.conditions_hex) {
+        setRtResult({ ok: false, msg: 'parseladder failed', detail: JSON.stringify(r1) });
+        return;
+      }
+      const r2 = await apiCall('/api/ladder/format', {
+        hex: r1.conditions_hex,
+        pubkeys_hex: r1.pubkeys_hex,
+        keys,
+        merkle_pubkeys_hex: r1.merkle_pubkeys_hex,
+      }, true);
+      if (!r2 || !r2.descriptor) {
+        setRtResult({ ok: false, msg: 'formatladder failed', detail: JSON.stringify(r2) });
+        return;
+      }
+      const ok = r2.descriptor === descriptorOutput;
+      setRtResult({
+        ok,
+        msg: ok ? 'byte-equal round-trip' : 'descriptor differs after round-trip',
+        original: descriptorOutput,
+        formatted: r2.descriptor,
+        conditions_hex: r1.conditions_hex,
+        mlsc_root: r1.mlsc_root,
+      });
+    } catch (e) {
+      setRtResult({ ok: false, msg: 'round-trip threw: ' + (e.message || e) });
+    } finally {
+      setRtRunning(false);
+    }
+  }, [descriptorOutput, rungs]);
+
   const signladderCommand = useMemo(() => {
     // Extract unique 66-char hex pubkeys from all rung block values
     const pubkeys = new Set();
@@ -13410,11 +13467,33 @@ ${ladderRows.map(r => `
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
                 <div style={{ fontSize: 9, padding: '4px 8px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', color: 'var(--text-dim)', letterSpacing: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>DESCRIPTOR</span>
-                  <button style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: 9, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onClick={() => { navigator.clipboard?.writeText(descriptorOutput); }}>COPY</button>
+                  <span style={{ display: 'flex', gap: 4 }}>
+                    <button style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: 9, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onClick={handleDescriptorRoundTrip} disabled={rtRunning} title={showTooltips ? 'Run parseladder + formatladder against the proxy and confirm byte-equal round-trip (F19 plumbing)' : undefined}>{rtRunning ? '...' : 'ROUND-TRIP'}</button>
+                    <button style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: 9, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onClick={() => { navigator.clipboard?.writeText(descriptorOutput); }}>COPY</button>
+                  </span>
                 </div>
                 <div style={{ overflow: 'auto', padding: '12px', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-primary)', background: 'var(--bg-primary)', borderBottom: '1px solid var(--border)' }}>
                   {descriptorOutput}
                 </div>
+                {rtResult && (
+                  <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
+                    <div style={{ color: rtResult.ok ? '#00ff88' : 'var(--red)', marginBottom: 4 }}>
+                      {rtResult.ok ? '\u2713' : '\u2717'} {rtResult.msg}
+                    </div>
+                    {rtResult.conditions_hex && (
+                      <div style={{ wordBreak: 'break-all', marginBottom: 4 }}>conditions_hex: <span style={{ color: 'var(--amber)' }}>{rtResult.conditions_hex}</span></div>
+                    )}
+                    {rtResult.mlsc_root && (
+                      <div style={{ wordBreak: 'break-all', marginBottom: 4 }}>mlsc_root: <span style={{ color: 'var(--amber)' }}>{rtResult.mlsc_root}</span></div>
+                    )}
+                    {rtResult.formatted && !rtResult.ok && (
+                      <div style={{ wordBreak: 'break-all' }}>formatted: <span style={{ color: 'var(--text-primary)' }}>{rtResult.formatted}</span></div>
+                    )}
+                    {rtResult.detail && (
+                      <div style={{ wordBreak: 'break-all' }}>detail: {rtResult.detail.substring(0, 300)}</div>
+                    )}
+                  </div>
+                )}
                 <div style={{ fontSize: 9, padding: '4px 8px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', color: 'var(--text-dim)', letterSpacing: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>SIGNLADDER COMMAND</span>
                   <button style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: 9, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onClick={() => { navigator.clipboard?.writeText(signladderCommand); }}>COPY</button>
