@@ -1,12 +1,12 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: 20,884 lines across 38 files in `src/rung/`, plus the
-363-line `src/rung_shims.h` boundary header (21,247 lines across 39 new
+implementation: ~21,600 lines across 38 files in `src/rung/`, plus the
+363-line `src/rung_shims.h` boundary header (~21,900 lines across 39 new
 files in total).
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
-the 961-line patch to existing Bitcoin Core code. The patch is the
+the ~1,600-line patch to existing Bitcoin Core code. The patch is the
 hooks; this is the engine.
 
 > **Reading order.** Part 1 is the narrative tour (how a single

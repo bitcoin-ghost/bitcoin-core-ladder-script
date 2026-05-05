@@ -1905,7 +1905,7 @@ no `git grep` across Core to find every call site that touches
 Ladder Script logic, because there are none outside the shim. This
 property is what Core maintainers will care about most over the
 multi-year horizon, and it is the reason the integration patch is
-961 lines rather than several thousand.
+~1,600 lines rather than several thousand.
 
 The cost is one extra build target (`bitcoin_rung`) and one extra
 boundary header. The benefit is that every long-term maintenance

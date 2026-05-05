@@ -17,8 +17,8 @@ signatures (FALCON-512/1024, Dilithium3, SPHINCS+) selected via the per-block SC
 relays for cross-rung composition, and recursive covenants. The BIP-118 ANYPREVOUT
 hash-type family is unconditionally rejected; spend mode (key-path vs script-path) is
 implicit in the witness stack count.
-Transactions use `RUNG_TX_VERSION = 4`. Test coverage: 660 unit tests (`src/test/rung_tests.cpp`),
-~52 functional test methods across 9 files (`test/functional/feature_rung_*.py`,
+Transactions use `RUNG_TX_VERSION = 4`. Test coverage: 665 unit tests (`src/test/rung_tests.cpp`),
+~143 functional test methods across 15 files (`test/functional/feature_rung_*.py`,
 `feature_qabi*.py`, `feature_deferred_vectors.py`), and 27 TLA+ specifications.
 
 - [Full Documentation](README.md)

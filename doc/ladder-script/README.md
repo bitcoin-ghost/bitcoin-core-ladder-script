@@ -32,7 +32,7 @@ Merkelised conditions (MLSC).
 |----------|-------------|
 | [INTEGRATION.md](INTEGRATION.md) | Wallet integration, RPC commands, descriptor language |
 | [REVIEW_GUIDE.md](REVIEW_GUIDE.md) | Full library walkthrough: purpose / behaviour / load-bearing invariants / optional-for-MVP, per file |
-| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Core Integration Patch walkthrough (~961 lines added across 33 modified files) |
+| [ANNOTATED_DIFF.md](ANNOTATED_DIFF.md) | Core Integration Patch walkthrough (~1,600 lines added across 32 modified files) |
 | [MEASUREMENTS.md](MEASUREMENTS.md) | Empirical tx / vsize / UTXO measurements vs P2WPKH and P2TR |
 
 ### Deployment
@@ -73,14 +73,14 @@ Interactive HTML pages in [`tools/`](../../tools/) (served at `ladder-script.org
 | `src/rung/sighash.cpp` | 265 | `SignatureHashLadder` (script-path) and `SignatureHashLadderKeyPath` (key-path); valid hash-type set `{0x00..0x03, 0x81..0x83}` (BIP-118 ANYPREVOUT family `{0x40..0x43, 0xC0..0xC3}` rejected) |
 | `src/rung/adaptor.cpp` | 188 | Adaptor signature utilities |
 | `src/rung/pq_verify.cpp` | 149 | Post-quantum signature verification (FALCON-512/1024, Dilithium3, SPHINCS+) via `liboqs` |
-| **Total src/rung/** | **20,888** | **37 files** (`.cpp` + `.h`, excl. `CMakeLists.txt`) |
+| **Total src/rung/** | **~21,600** | **37 files** (`.cpp` + `.h`, excl. `CMakeLists.txt`); plus the `src/rung_shims.h` boundary header (363 lines) brings the library total to ~21,900 across 39 files |
 
 ## Test Coverage
 
 | Suite | Count |
 |-------|-------|
-| Unit tests (BOOST cases in `src/test/rung_tests.cpp`) | 655 |
-| Functional tests (~52 test methods across `feature_rung_*.py`, `feature_qabi*.py`, `feature_deferred_vectors.py`) | 9 files |
+| Unit tests (BOOST cases in `src/test/rung_tests.cpp`) | 665 |
+| Functional tests (~143 test methods across `feature_rung_*.py`, `feature_qabi*.py`, `feature_deferred_vectors.py`) | 15 files |
 | TLA+ formal specs (`spec/`) | 27 specs |
 
 ## Repository

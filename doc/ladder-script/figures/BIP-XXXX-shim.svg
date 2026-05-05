@@ -37,7 +37,7 @@
   <g>
     <rect class="core" x="20" y="40" width="220" height="280" rx="4"/>
     <text x="130" y="62" text-anchor="middle" class="title">Bitcoin Core (existing)</text>
-    <text x="130" y="80" text-anchor="middle" class="corestat">33 modified files · +961 lines</text>
+    <text x="130" y="80" text-anchor="middle" class="corestat">32 modified files · ~1,600 lines</text>
 
     <text x="34" y="108" class="mono">src/validation.cpp</text>
     <text x="34" y="126" class="mono">src/primitives/transaction.h</text>
@@ -68,7 +68,7 @@
   <g>
     <rect class="lib" x="500" y="40" width="260" height="280" rx="4"/>
     <text x="630" y="62" text-anchor="middle" class="title">Ladder library (new)</text>
-    <text x="630" y="80" text-anchor="middle" class="libstat">39 new files · 21,247 lines</text>
+    <text x="630" y="80" text-anchor="middle" class="libstat">39 new files · ~21,900 lines</text>
 
     <rect class="libfile" x="514" y="98" width="232" height="34" rx="3"/>
     <text x="630" y="118" text-anchor="middle" class="mono" font-weight="600">src/rung/api.h</text>
@@ -112,7 +112,7 @@
   <!-- Legend / takeaway box -->
   <g>
     <text x="20" y="370" class="label" font-weight="600">Reviewer audit surface for "this BIP doesn't change v1/v2/v3 validation":</text>
-    <text x="20" y="388" class="label">  the 961-line patch (left) plus <tspan class="mono">src/rung/api.h</tspan> (right).</text>
+    <text x="20" y="388" class="label">  the ~1,600-line patch (left) plus <tspan class="mono">src/rung/api.h</tspan> (right).</text>
     <text x="20" y="406" class="label">  Everything else under <tspan class="mono">src/rung/</tspan> is implementation; conformance is enforced by the test vectors.</text>
   </g>
 </svg>

@@ -12,8 +12,8 @@ Ladder Script ships as two distinct things:
 
 | Artefact | LOC | Scope | Reviewer doc |
 |----------|-----|-------|--------------|
-| **Core Integration Patch** | 961 (insertions) | 33 modified Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
-| **Ladder Library** | 21,247 | Self-contained module: 38 files under `src/rung/` (20,884 LOC) plus the `src/rung_shims.h` boundary header (363 LOC) | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
+| **Core Integration Patch** | ~1,600 (insertions) | 32 modified Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
+| **Ladder Library** | ~21,900 | Self-contained module: 38 files under `src/rung/` (~21,600 LOC) plus the `src/rung_shims.h` boundary header (363 LOC) | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
 
 No existing Bitcoin Core function signatures change. The `CScriptCheck` constructor
 gains four defaulted parameters (block height + three per-tx cache `shared_ptr`s); every
@@ -488,7 +488,7 @@ consider:
 - `rpc.cpp` (developer convenience)
 
 Dropping all droppable components yields approximately **~5,000–6,000 LOC** of library
-code versus the full 21,247 — the same 961-LOC Core Integration Patch in both cases.
+code versus the full ~21,900 — the same ~1,600-LOC Core Integration Patch in both cases.
 
 ---
 

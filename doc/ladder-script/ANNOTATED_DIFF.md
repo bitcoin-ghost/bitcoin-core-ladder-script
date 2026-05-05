@@ -15,12 +15,12 @@ each modification.
 
 | Category                              | Files | Lines added |
 |---------------------------------------|------:|------------:|
-| Modified Bitcoin Core files           |    33 |        +961 |
-| New library code (`src/rung/` + `src/rung_shims.h`) | 39 |     +21,247 |
-| New tests (`src/test/rung_tests.cpp`) |     1 |     +17,855 |
-| **Total surface change**              |    73 |     +39,866 |
+| Modified Bitcoin Core files           |    32 |       ~1,600 |
+| New library code (`src/rung/` + `src/rung_shims.h`) | 39 |    ~21,900 |
+| New tests (`src/test/rung_tests.cpp`) |     1 |     ~17,855 |
+| **Total surface change**              |    72 |    ~41,355 |
 
-The design principle is **minimal core intrusion**: the 961 patched lines
+The design principle is **minimal core intrusion**: the ~1,600 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
 `src/rung/` library which Core treats as just another linked dependency
 (`bitcoin_rung`).
@@ -33,7 +33,7 @@ No existing transaction version is reinterpreted; v4 is additive.
 
 ---
 
-## Core Integration Points (33 files, +961 lines)
+## Core Integration Points (32 files, ~1,600 lines)
 
 The sections below are ordered by impact (highest LOC first) so that a
 reviewer scanning the patch sees the architectural changes before the
@@ -668,7 +668,7 @@ new defaulted parameters. Single test signature update.
 
 ## Tests
 
-`src/test/rung_tests.cpp` — **17,855 lines, 660 unit tests** organised
+`src/test/rung_tests.cpp` — **~17,855 lines, 665 unit tests** organised
 into multiple boost test suites:
 
 - `rung_tests` — block evaluator unit tests, descriptor parser, witness
@@ -679,11 +679,14 @@ into multiple boost test suites:
 - `tx_mlsc_tests` — wire-format roundtrips for the v4 transaction
   serialiser.
 
-Plus 9 functional test files (~52 distinct test methods) under `test/functional/`:
+Plus 15 functional test files (~143 distinct test methods) under `test/functional/`:
 `feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`,
 `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`,
-`feature_rung_fuzz.py`, `feature_qabi.py`, `feature_qabi_size.py`,
-`feature_deferred_vectors.py`.
+`feature_rung_fuzz.py`, `feature_rung_anti_embedding.py`, `feature_qabi.py`,
+`feature_qabi_size.py`, `feature_deferred_vectors.py`,
+`feature_rung_tx_vectors.py`, `feature_rung_tx_neg_vectors.py`,
+`feature_rung_tx_spend_vectors.py`, `feature_rung_descriptor_roundtrip.py`,
+`feature_rung_sighash_vectors.py`.
 
 ---
 
