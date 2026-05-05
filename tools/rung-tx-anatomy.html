@@ -240,13 +240,14 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
 
     <div class="detail">
       <div class="detail-head"><div class="detail-swatch" style="background:var(--c-micro)"></div><div class="detail-title">Micro-header encoding</div></div>
-      <p>Each block starts with a single byte. Values <code>0x00</code>&ndash;<code>0x3E</code> are micro-headers that encode the block type via a lookup table. Fields use the implicit layout, so no field count or type bytes are needed. Values <code>0x80</code>/<code>0x81</code> are escape codes for full 2-byte type + explicit fields.</p>
+      <p>Each block starts with a single byte. Values <code>0x00</code>&ndash;<code>0x7F</code> are micro-header slots (128 total), currently populated up to <code>0x3F</code> = PQ_BATCH; unused slots are reserved for future block types. A populated micro-header encodes the block type via a lookup table; fields use the implicit layout, so no field count or type bytes are needed. Values <code>0x80</code>/<code>0x81</code> are escape codes for full 2-byte type + explicit fields.</p>
       <table>
         <tr><td>0x00</td><td>SIG</td></tr>
         <tr><td>0x01</td><td>MULTISIG</td></tr>
         <tr><td>0x03</td><td>CSV</td></tr>
         <tr><td>0x0A</td><td>CTV</td></tr>
         <tr><td>0x3E</td><td>OUTPUT_CHECK</td></tr>
+        <tr><td>0x3F</td><td>PQ_BATCH</td></tr>
         <tr><td>0x80</td><td>Escape (full type follows)</td></tr>
         <tr><td>0x81</td><td>Escape + inverted</td></tr>
       </table>
