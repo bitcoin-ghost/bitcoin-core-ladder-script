@@ -170,7 +170,11 @@ Dynamically managed allowlists and blocklists using Merkle accumulators.
 
 **Block types:** ACCUMULATOR (0x0806), SIG (0x0001)
 
-ACCUMULATOR verifies set membership via a Merkle proof against a committed root. Combined
-with inversion (`!ACCUMULATOR`), it becomes a blocklist. The Merkle root can be updated
-via RECURSE_MODIFIED, enabling dynamic addition and removal of authorised parties without
-recreating the output. Capped at 10 HASH256 fields (root + 8 proof nodes + leaf).
+ACCUMULATOR verifies set membership via a Merkle proof against a committed root. Conditions
+carry a single 32-byte `set_root`; the spend witness carries a `NUMERIC(element_id)` plus a
+`MERKLE_PROOF` of up to `MAX_ACCUMULATOR_PROOF_DEPTH = 4` sibling hashes (max set size
+2&#x2074; = 16 members). The leaf is `TaggedHash("LadderAccumulatorLeaf/v1", element_id_LE)`,
+not attacker-supplied bytes — closes the v0.5 audit-2 finding E-001. Combined with inversion
+(`!ACCUMULATOR`), the block becomes a blocklist. The set root can be updated via
+RECURSE_MODIFIED, enabling dynamic addition and removal of authorised parties without
+recreating the output. Caps: 1 ACCUMULATOR per rung, 2 per tx (across MLSC-spending inputs).
