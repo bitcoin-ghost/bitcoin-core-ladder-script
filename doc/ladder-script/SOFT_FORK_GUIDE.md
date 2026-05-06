@@ -1,8 +1,10 @@
 # Ladder Script Soft Fork Guide
 
-How Ladder Script activates as a soft fork on Bitcoin. All 65 block types
-activate together in a single deployment. Transactions use
-`RUNG_TX_VERSION = 4`.
+How Ladder Script activates as a soft fork on Bitcoin. The recommended
+deployment is a single activation event covering all 65 block types,
+with a 15-block phased fallback if the testing programme fails to meet
+the activation gate; see [Activation scope](#activation-scope) below.
+Transactions use `RUNG_TX_VERSION = 4`.
 
 ## Phased Approach
 
@@ -22,8 +24,8 @@ timestamps.
 ### Phase 2: External Review
 
 Bitcoin Core developers and the broader community review:
-- The ~1,600-line integration patch to existing Bitcoin Core code (32 modified files; insertions only)
-- The ~21,900-line self-contained library (~21,600 lines in `src/rung/` + 363 lines in the `src/rung_shims.h` boundary header)
+- The ~1,300-line integration patch to existing Bitcoin Core code (31 modified files, +1,237/-69 vs `v30.0`)
+- The ~21,900-line self-contained library (21,506 lines in `src/rung/` + 363 lines in the `src/rung_shims.h` boundary header)
 - The 27 TLA+ formal specifications under `spec/`
 - The anti-spam hardening and evaluation semantics
 
@@ -38,12 +40,15 @@ BIP 9 version bits signaling. At activation height:
   legacy Bitcoin Script (v1/v2 transactions) and Ladder Script (v4
   transactions) coexist on the same chain. Nodes validate each version
   with its respective rules.
-- All 65 Ladder Script block types activate simultaneously. No phased
-  block type rollout.
+- The block-type set that activates is the [activation scope](#activation-scope)
+  question below — recommended all 65 in one event, with a 15-block phased
+  fallback.
 - The Legacy family (P2PK, P2PKH, P2SH, P2WPKH, P2WSH, P2TR, P2TR_SCRIPT)
   allows wrapping existing Bitcoin output formats inside Ladder Script
   conditions, enabling migration from legacy to Ladder Script at the
-  wallet's pace.
+  wallet's pace. The legacy wrappers are in **both** the all-in scope
+  and the 15-block MVP, so migration tooling has a complete target
+  regardless of which path activates.
 - `RUNG_VERIFY_MLSC_ONLY` flag enforced: v4 outputs must use MLSC
   (`0xDF` prefix). Inline conditions (`0xC1`) — an earlier design that
   was removed before the cleanup pass — remain rejected as a defence in
@@ -78,12 +83,45 @@ A future soft fork could make v4 RUNG_TX the only valid transaction format:
 **This phase is far future** and would require its own BIP, community consensus,
 and a long migration window. It is not part of the initial activation proposal.
 
-### Why All Block Types Activate Together
+### Activation scope
 
-Individual block type activation would create combinatorial complexity in testing
-and validation. Each block type's evaluation is independent and self-contained.
-The anti-spam rules and wire format are designed as a coherent system. Activating
-subsets would require maintaining multiple validation codepaths.
+The block-type set that activates at Phase 3 is the most contested
+architectural question in the proposal. BIP-XXXX §Q3 lays out two
+options side by side; this section summarises the choice and points
+at the BIP for the full Pros/Cons treatment.
+
+**Option A — Phased activation (15-block MVP).** A first BIP covering
+the structural core plus the complete legacy-migration story:
+`SIG`, `MULTISIG`, `CSV`, `CLTV` (sig + timelock core);
+`HTLC`, `CTV` (Lightning + covenant primitives);
+`KEY_REF_SIG` (pubkey relay);
+`DATA_RETURN` (OP_RETURN replacement);
+plus all 7 Legacy wrappers (`P2PK_LEGACY` through `P2TR_SCRIPT_LEGACY`).
+Recursion, anchor, PLC, governance, the remaining compound family,
+and QABIO would each ship as follow-on BIPs with their own activation
+events.
+
+**Option B — All-in activation (this proposal's recommendation).**
+All 65 blocks plus the QABIO extension activate together at a single
+deployment-bit event. The 65 blocks share their wire format, leaf
+hashing, witness merging, and evaluator dispatch — a phased path
+pays the inductive-correctness-proof cost N times for an aesthetic
+preference rather than a structural gain. Wallets, indexers, and
+explorers write the v4 path once.
+
+**Recommendation:** Option B, **conditional on the testing programme
+detailed in BIP-XXXX §Open Items "Activation gate" completing to its
+named bars before any mainnet-activation proposal is filed**. If any
+component of the activation gate fails to complete to bar, **Option A
+is the agreed fallback** and a phased BIP will be prepared from this
+proposal's text. This contingency is announced upfront so no party —
+author, reviewer, or activation-time community — is surprised by the
+path the proposal takes.
+
+The full Pros/Cons discussion lives in
+[`BIP-XXXX.md`](BIP-XXXX.md) §Q3. The block registry is modular at
+the implementation level either way; future soft forks can still add
+blocks at unused type codes (the 65 used codes leave 65,471 free).
 
 ## Activation Mechanics
 
@@ -240,8 +278,8 @@ time. The following consensus rules bound the structural surface:
 
 | Suite | Count | Purpose |
 |-------|-------|---------|
-| Unit tests | 619 | All block evaluators, serialisation, Merkle tree, sighash, anti-spam (`rung_tests` + `qabi_tests` + `tx_mlsc_tests` boost suites combined) |
-| Functional tests | 8 files / 52 methods | End-to-end regtest: create, sign, broadcast, verify v4 transactions (`feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`, `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`, `feature_qabi.py`, `feature_qabi_size.py`) |
+| Unit tests | 665 | All block evaluators, serialisation, Merkle tree, sighash, anti-spam (combined across `rung_tests`, `tx_mlsc_tests`, `utxo_dedup_tests`, `anchor_fee_type_tests`, `keypath_domain_tests`, `qabi_tests` boost suites in `src/test/rung_tests.cpp`) |
+| Functional tests | 8 files / 44 `test_*` methods + 8 `run_test` drivers | End-to-end regtest: create, sign, broadcast, verify v4 transactions (`feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`, `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`, `feature_qabi.py`, `feature_qabi_size.py`) |
 | Signet verification | 65/65 | All active block types: fund + mine + spend on live signet with recorded txids |
 | Engine + presets | 56 | `tools/test-presets.py` exercises 56 fund + spend ceremonies on live signet |
 | TLA+ formal specs | 27 | Evaluation semantics, composition, anti-spam, wire format, Merkle, sighash, covenants, cross-input, per-family block evaluators |
