@@ -106,6 +106,9 @@ QABIO carries the coordinator's tx-level signature).
 - Wire format and consensus rules: [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md).
 - Per-block evaluator: `src/rung/blocks/qabi.cpp::EvalPQBatchBlock`.
 - Cache type: `rung::PQBatchCache` (`src/rung/evaluator.h`).
-- Boost test: `qabi_tests/pq_batch_*` in `src/test/rung_tests.cpp`.
+- Boost tests in `src/test/rung_tests.cpp`:
+  - `rung_tests/pq_batch_rejects_extra_fields_e020`
+  - `rung_tests/pq_batch_rejects_cardinality_bypass_e021`
+  - `qabi_tests/pq_batch_parallel_cache_determinism`
 - Functional tests: `feature_rung_pq_batch.py`,
   `feature_rung_pq_batch_stress.py`.
