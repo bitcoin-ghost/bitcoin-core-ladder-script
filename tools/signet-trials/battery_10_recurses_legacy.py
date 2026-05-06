@@ -78,23 +78,27 @@ def _recurse_chain_with_mutation(name, btype, parent_amount_lo, parent_amount_hi
 
 
 def t67_recurse_modified():
-    # Parent AMOUNT_LOCK[100M, 200M]; RECURSE_MODIFIED targets block 1
-    # (AMOUNT_LOCK), param 0 (min_sats), delta +1.
-    # Child must be AMOUNT_LOCK[100_000_001, 200_000_000].
+    # AMOUNT_LOCK eval (covenant.cpp:215) checks
+    # `min_sats <= ctx.output_amount <= max_sats`. The harness's
+    # 1-BTC small UTXO yields a spend output of ~0.998 BTC =
+    # 99_800_000 sat, so the band must span that. Use
+    # [10_000_000, 200_000_000] = [0.1 BTC, 2 BTC].
+    # RECURSE_MODIFIED mutates AMOUNT_LOCK block (idx 1) param 0
+    # (min_sats) by +1 each hop.
     _recurse_chain_with_mutation(
         "67. RECURSE_MODIFIED (AMOUNT_LOCK min += 1)", "RECURSE_MODIFIED",
-        parent_amount_lo=100_000_000, parent_amount_hi=200_000_000,
-        child_amount_lo=100_000_001, child_amount_hi=200_000_000,
+        parent_amount_lo=10_000_000, parent_amount_hi=200_000_000,
+        child_amount_lo=10_000_001, child_amount_hi=200_000_000,
         mutation_block_idx=1, mutation_param_idx=0, mutation_delta=1)
 
 
 def t68_recurse_decay():
     # RECURSE_DECAY: eval negates delta, so encoded delta=+1 produces
-    # mutation -1. Parent AMOUNT_LOCK[100M, 200M] → child[99_999_999, 200M].
+    # mutation -1. Same AMOUNT_LOCK band as T67 to fit the trial UTXO.
     _recurse_chain_with_mutation(
         "68. RECURSE_DECAY (AMOUNT_LOCK min -= 1)", "RECURSE_DECAY",
-        parent_amount_lo=100_000_000, parent_amount_hi=200_000_000,
-        child_amount_lo=99_999_999, child_amount_hi=200_000_000,
+        parent_amount_lo=10_000_000, parent_amount_hi=200_000_000,
+        child_amount_lo=9_999_999, child_amount_hi=200_000_000,
         mutation_block_idx=1, mutation_param_idx=0, mutation_delta=1)
 
 
@@ -129,11 +133,14 @@ def _legacy_wrapper(name, outer_type, needs_internal_pubkey=False):
 
     outer_fields = [{"type": "PREIMAGE", "hex": inner_hex}]
     if needs_internal_pubkey:
-        # Internal Taproot key — distinct from the inner P2PKH key so
-        # the trial doesn't over-load merkle_pub_key folds.
-        ipk = derive(f"t-legacy-{outer_type}-internal")
-        ipkh = ipk.get_pubkey().get_bytes().hex()
-        outer_fields.append({"type": "PUBKEY", "hex": ipkh})
+        # P2TR_SCRIPT_LEGACY (registry pubkey_count=1): the witness
+        # PUBKEY field plays double duty — at consensus
+        # `ExtractBlockPubkeys` (evaluator.cpp:572) reads it as the
+        # merkle_pub_key for OUTER-leaf reconstruction, while
+        # `EvalInnerConditions` also forwards it to the inner
+        # P2PKH_LEGACY block as the spender's pubkey. The two keys
+        # must therefore be the SAME pubkey at fund and spend time.
+        outer_fields.append({"type": "PUBKEY", "hex": pkh})
 
     fund_rungs = [{"output_index": 0, "blocks": [{"type": outer_type,
                                                   "fields": outer_fields}]}]

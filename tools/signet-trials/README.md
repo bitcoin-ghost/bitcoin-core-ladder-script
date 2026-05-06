@@ -12,29 +12,27 @@ End-to-end fund + spend trials against the Ladder Script signet
 
 ## Coverage as of 2026-05-06
 
-**67 trials passing end-to-end** (65 OK + 2 PASS_NEG for deliberate
-negatives) covering **62 of 65 active block types directly + 3 via
-playgrounds = 65/65**. Batteries 9-10 closed five previously
-untested block types: KEY_REF_SIG (relay structure), COSIGN
-(2-input cross-reference), RECURSE_SPLIT (single-rung split),
-P2WSH_LEGACY and P2SH_LEGACY (inner script body via
-`serialiseconditions` auto-converting PUBKEY → HASH160 inside
-P2PKH_LEGACY).
+**71 trials passing end-to-end** (69 OK + 2 PASS_NEG for deliberate
+negatives) covering **all 62 active block types in this trial
+battery + 3 via playgrounds = 65/65 active block types** confirmed
+on the live Ladder Script signet.
 
-Three trials still fail at consensus and need follow-up:
-- `RECURSE_MODIFIED` / `RECURSE_DECAY` (T67/T68): the spend's
-  conditions tree fails to produce the eval's expected mutated
-  root even with delta=0 (identity mutation). Suspect signrungtx's
-  ParseConditionsSpec vs createrungtx's per-rung field ordering or
-  coil propagation difference for 2-block rungs. C++ boost tests
-  cover this via `MockSignatureChecker`; the live-signet path
-  needs a debug trace of `ComputeConditionsRootMLSC` at fund vs
-  spend.
-- `P2TR_SCRIPT_LEGACY` (T71): registry pubkey_count=1 means the
-  internal Taproot key is folded into the merkle_pub_key. T71
-  passes the internal pubkey in both fund and spender conditions
-  but consensus still rejects — likely the inner P2PKH leaf
-  binding has a separate issue from the simpler P2WSH/P2SH cases.
+Batteries 9-10 closed every previously-untested type:
+- KEY_REF_SIG (relay structure with `relays` + `relay_blocks`)
+- COSIGN (2-input cross-reference; input 1's COSIGN targets
+  SHA256(input 0 SPK))
+- RECURSE_SPLIT (single-rung spend with mutated max_splits;
+  shared output SPK)
+- RECURSE_MODIFIED / RECURSE_DECAY (2-block rung
+  `[RECURSE_*, AMOUNT_LOCK]`; mutation targets AMOUNT_LOCK
+  param 0)
+- P2WSH_LEGACY / P2SH_LEGACY (inner script body via
+  `serialiseconditions` auto-converting PUBKEY → HASH160
+  inside P2PKH_LEGACY)
+- P2TR_SCRIPT_LEGACY (registry pubkey_count=1 — the witness
+  PUBKEY plays double duty as merkle_pub_key for OUTER leaf
+  reconstruction AND as the inner P2PKH spender pubkey, so the
+  trial uses the same pubkey for both)
 
 QABI/PQ_BATCH (3 types) are covered by their dedicated playgrounds
 (`tools/qabio-playground/`, `tools/pq-batch-playground/`).
@@ -51,7 +49,7 @@ QABI/PQ_BATCH (3 types) are covered by their dedicated playgrounds
 | `battery_7_adaptor_musig.py` | T61..T62 | ADAPTOR_SIG (plain Schnorr), MUSIG_THRESHOLD (1-of-1) |
 | `battery_8_output_check.py` | T63 | OUTPUT_CHECK |
 | `battery_9_keyref_cosign_split.py` | T64..T66 | KEY_REF_SIG (relay), COSIGN (2-input), RECURSE_SPLIT (single-rung spend with mutated max_splits) |
-| `battery_10_recurses_legacy.py` | T67..T71 | RECURSE_MODIFIED/DECAY (FAIL), P2WSH_LEGACY, P2SH_LEGACY, P2TR_SCRIPT_LEGACY (FAIL) |
+| `battery_10_recurses_legacy.py` | T67..T71 | RECURSE_MODIFIED, RECURSE_DECAY, P2WSH_LEGACY, P2SH_LEGACY, P2TR_SCRIPT_LEGACY |
 | `run_full_battery.py` | T01..T36 | runner that re-executes batteries 1+2+3 in sequence |
 
 ## Running
@@ -103,42 +101,52 @@ python3 tools/signet-trials/battery_5_plc.py
   inside a back-to-back-mined battery — use bit-22-only (value=0)
   for trivial-pass.
 
-## Untested types (need scaffolding extensions)
+## All 65 block types now covered end-to-end
 
-Closed in battery 9:
-- **KEY_REF_SIG**: now passing (T64). `createrungtx` 7th positional
-  arg accepts `relays`; `signrungtx` signer-spec accepts
-  `relay_blocks` array. The relay's SIG block needs `privkey` for
-  `BuildWitnessBlock`'s `SignSingleKey` path even though it's the
-  pubkey-commitment side.
-- **COSIGN**: now passing (T65). Two-input scenario: input 0 is a
-  vanilla SIG UTXO, input 1's COSIGN block targets
-  `SHA256(input 0's scriptPubKey)`. Each input's signer spec is
-  passed as a separate entry in `signrungtx`'s signers array.
+The previously-untested types closed in batteries 9-10:
 
-Still untested via this harness:
-- **RECURSE_SPLIT** (T66): the spend's child outputs must
-  re-encumber with the mutated rung's MLSC root (max_splits
-  decremented by 1), but the child root computation needs to align
-  with the eval's `BuildCPRung` + `ComputeTxMLSCLeaf` path
-  (specifically the input's coil bytes must propagate to the
-  child's leaf). T66 currently fails consensus
-  (`mempool-script-verify-flag-failed`); needs a follow-up that
-  computes the expected output root via `parseladder` /
-  `serialiseconditions` rather than building the child rungs by
-  hand.
-- **RECURSE_MODIFIED / RECURSE_DECAY**: similar to RECURSE_SPLIT
-  but with per-mutation `MutationSpec` parameters. The
-  `signrungtx` `mutation_targets` infrastructure (rpc.cpp:2533+)
-  exists but the trial harness doesn't yet drive it.
-- **P2SH / P2WSH / P2TR_SCRIPT_LEGACY**: need a serialised inner
-  LadderWitness with PUBKEY fields preserved (the existing
-  `serialiseconditions` RPC folds PUBKEY into rung_pks under
-  `conditions_only=true`, which is wrong for legacy-wrapper inner
-  bodies — the inner SIG block needs the pubkey in its fields so
-  the script body's HASH256 commits to it). A dedicated RPC or
-  flag is needed.
+- **KEY_REF_SIG** (T64): `createrungtx` 7th positional arg accepts
+  `relays`; `signrungtx` signer-spec accepts `relay_blocks` array.
+  The relay's SIG block needs `privkey` for `BuildWitnessBlock`'s
+  `SignSingleKey` path even though it's the pubkey-commitment side.
+- **COSIGN** (T65): two-input scenario — input 0 is a vanilla SIG
+  UTXO, input 1's COSIGN block targets
+  `SHA256(input 0's scriptPubKey)`. Each input's signer spec is a
+  separate entry in `signrungtx`'s signers array.
+- **RECURSE_SPLIT** (T66): single-rung spend with mutated
+  max_splits. All v4 outputs share the same `tx.conditions_root`,
+  so a single rung at output_index=0 + N output values produces N
+  outputs with identical SPK that all match the eval's
+  `expected_root`.
+- **RECURSE_MODIFIED / RECURSE_DECAY** (T67/T68): 2-block rung
+  `[RECURSE_*, AMOUNT_LOCK]`. The mutation targets AMOUNT_LOCK
+  param 0 (min_sats); spend re-encumbers with min_sats ± 1. The
+  trial-config gotcha here: the spend output's value must lie
+  inside the AMOUNT_LOCK band — a 1-BTC trial UTXO yields a
+  ~0.998-BTC spend output, so the band [10M, 200M] sat is what
+  fits. (Earlier attempts with band [100M, 200M] failed not for
+  RECURSE_MODIFIED reasons but because AMOUNT_LOCK rejected the
+  output value.)
+- **P2WSH_LEGACY / P2SH_LEGACY** (T69/T70): outer commits to
+  SHA256/RIPEMD160 of the inner script body. Inner = 1
+  P2PKH_LEGACY block — `serialiseconditions` auto-converts the
+  inner PUBKEY → HASH160 inside the parser (rpc.cpp:384-390), so
+  the resulting bytes deserialise cleanly under
+  SerializationContext::CONDITIONS at spend time.
+- **P2TR_SCRIPT_LEGACY** (T71): registry pubkey_count=1 means
+  the internal Taproot key is folded into the OUTER leaf via
+  merkle_pub_key. At consensus, `ExtractBlockPubkeys`
+  (`evaluator.cpp:572`) reads the witness PUBKEY field as the
+  merkle_pub_key. But `EvalInnerConditions`
+  (`blocks/legacy.cpp:88-95`) ALSO forwards that same PUBKEY to
+  the inner block's witness fields, where the inner P2PKH eval
+  uses it as the spender's pubkey. So the witness PUBKEY plays
+  double duty — the trial uses the SAME pubkey for both the
+  internal Taproot key and the inner P2PKH key, which is the
+  pattern the wire format requires.
 
-All five remaining items are covered by C++ boost tests in
-`src/test/rung_tests.cpp` already; the gap is just live-signet
-end-to-end coverage via the trial battery.
+This pattern (single witness PUBKEY = both merkle_pub_key fold +
+inner script's signer key) isn't documented anywhere obvious; it
+fell out of debugging the leaf-root mismatch via
+`computesighash` / a manual fund→spend root comparison (see
+`/tmp/debug_p2tr_script.py`).
