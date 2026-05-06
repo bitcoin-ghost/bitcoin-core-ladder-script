@@ -290,9 +290,14 @@ order they fire, with the failure mode for each:
    UNSATISFIED.
 3. **Spend preimage valid.** `SHA256^(committed_depth + 1)(spend_preimage)
    == auth_tip`. Failure → UNSATISFIED.
-4. **Aggregated signature size.** `tx.aggregated_sig.size() ==
-   QABI_AGGREGATED_SIG_MAX (666)` and `tx.qabi_block` non-empty.
-   Failure → ERROR.
+4. **Aggregated signature size.** `tx.aggregated_sig.size() in
+   [1, QABI_AGGREGATED_SIG_MAX (666)]` and `tx.qabi_block` non-empty.
+   v0.14 dropped the fixed-666 padding rule (which left a 0..66 B/tx
+   coordinator-side embedding channel in the trailing zero bytes); the
+   field now carries the actual variable FALCON sig length and OQS
+   validates the encoded length internally during verify. Failure →
+   UNSATISFIED (sized 0 or > 666 short-circuits before the FALCON
+   call).
 5. **qabi_block parses and matches committed root.** Parse
    `qabi_block`; check `coord_pk.size() == QABI_COORDINATOR_PUBKEY_SIZE
    (897)`; verify `SHA256(qabi_block) == committed_root`. Failure →
@@ -481,16 +486,19 @@ For consensus-level reference material:
 
 QABIO is implemented, tested, and running on the Ladder Script
 signet. The consensus implementation lives in
-`src/rung/qabi.{h,cpp}`, `src/rung/evaluator.cpp`
-(`EvalQABIPrimeBlock` / `EvalQABISpendBlock`), `src/rung/policy.cpp`
-(RBD helpers), and `src/validation.cpp` (RBD mempool integration) in
-the bitcoin-core-ladder repository.
+`src/rung/qabi.{h,cpp}` (state types, `SIGHASH_QABO`, auth-chain
+helpers), `src/rung/blocks/qabi.cpp` (`EvalQABIPrimeBlock` /
+`EvalQABISpendBlock` / `EvalPQBatchBlock`), `src/rung/policy.cpp`
+(RBD helpers), and `src/validation.cpp` (RBD mempool integration)
+in the bitcoin-core-ladder repository.
 
 Test coverage includes:
 
-- ~50 unit test cases under the `qabi_tests` Boost suite covering all 9
-  consensus checks, the QABO sig cache amortisation, multi-party
-  scale testing up to N=3,000, and the SIG escape rung end-to-end.
+- 90 unit test cases under the `qabi_tests` Boost suite in
+  `src/test/rung_tests.cpp` covering all 9 consensus checks (each
+  has a named `qabi_spend_check{1,3..9}_*` regression), the QABO sig
+  cache amortisation, multi-party scale testing up to N=3,000, and
+  the SIG escape rung end-to-end.
 - Functional regression tests in `test/functional/feature_qabi.py`
   exercising the full mined priming lifecycle, the SIG escape after
   priming, and reorg survival on a regtest node.
