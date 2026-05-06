@@ -22,17 +22,24 @@ vin[]:              prevout(36) + scriptSig_len(1) + nSequence(4) per input
 conditions_root:    32 bytes                     ← ONE root for entire tx
 vout_count:         varint
 vout[]:             nValue(8) per output          ← just values, nothing else
+                    (if nValue == 0: data_len varint + data[1..40] for DATA_RETURN)
 witness[]:          per-input spending witness
-aggregated_sig_len: varint (0 if no aggregation)
-aggregated_sig:     half-aggregated Schnorr s value (32 bytes if present)
+qabi_block_len:     CompactSize (0 if not a QABIO tx)
+qabi_block[]:       QABIO tx-level batch block (0..QABI_BLOCK_MAX_HARD = 262,144 B)
+aggregated_sig_len: CompactSize (0 if not a QABIO tx)
+aggregated_sig[]:   FALCON-512 coordinator signature (1..666 B when present;
+                    variable per BIP-FALCON, v0.14 carries the actual length)
 nLockTime:          uint32
 ```
 
-Each output is 8 bytes (value only, no scriptPubKey on the wire). On deserialisation,
-outputs are inflated to `CTxOut(value, 0xDF + conditions_root)` for compatibility with
-existing Bitcoin Core code.
+Each output is 8 bytes (value only, no scriptPubKey on the wire). On
+deserialisation, outputs are inflated to `CTxOut(value, 0xDF +
+conditions_root)` for compatibility with existing Bitcoin Core code
+(DATA_RETURN outputs reconstruct as `CTxOut(0, 0xDF + root + data)`).
+The `qabi_block` and `aggregated_sig` fields are non-empty only for
+QABIO transactions; for every other v4 tx they are zero-length.
 
-**Source**: `primitives/transaction.h:254-266`.
+**Source**: `primitives/transaction.h:213-265`.
 
 ### DATA_RETURN Outputs
 
@@ -139,7 +146,7 @@ in `pubkey.cpp`. `SignSchnorrLadder()` in `key.cpp`.
 
 The `conditions_root` is treated as an x-only public key. Schnorr signature verified
 using `SignatureHashLadderKeyPath` (tagged hash `"LadderKeyPathSighash/v1"`). No conditions
-revealed. This is the **109 vB** path (1-in, 1-out) or **118 vB** for a standard 2-output payment.
+revealed. This is the **109 vB** path (1-in, 1-out) or **127 vB** for a standard 2-output payment.
 
 ### Script-path (2 or 3 element witness): `[LadderWitness, MLSCProof, (internal_pubkey)]`
 
@@ -187,7 +194,10 @@ transaction. Leaf membership verified against cached leaf set via `SharedTreeCac
 6. Build Merkle tree → `computed_root`
 7. Compare `computed_root == conditions_root` (or verify tweak for 3-element witness)
 
-**Source**: `conditions.cpp:560-655`.
+**Source**: `VerifyMLSCProof` in `conditions.cpp` (function definition
+~line 1164; the public proof helpers were consolidated in v0.7 into a
+single test-only verifier — production paths inline the equivalent
+checks inside `VerifyRungTx`).
 
 ---
 
@@ -196,8 +206,10 @@ transaction. Leaf membership verified against cached leaf set via `SharedTreeCac
 ### Per-transaction (run once per v4 tx)
 
 Production validation runs `CheckRungTxLevel` unconditionally per v4 tx
-(`validation.cpp:2406`). The evaluator re-runs the same check on
-`input_index == 0` as a redundant safety net for test paths.
+(`validation.cpp:2469`, with a fallback null-spent-outputs path at
+`validation.cpp:2354` for early checks). The evaluator re-runs the
+same check on `input_index == 0` as a redundant safety net for test
+paths.
 
 1. `ValidateRungOutputs`: all outputs must be MLSC (`0xDF`), max 1 DATA_RETURN,
    dust threshold (546 sats)
@@ -264,19 +276,21 @@ At spend time, compact MLSC coins are inflated by looking up the synthetic root 
 | Format | vBytes | Fee (10 sat/vB) |
 |--------|--------|-----------------|
 | P2PKH | 226 | 2,260 sats |
-| P2WPKH | 143 | 1,430 sats |
-| P2TR key-path | 157 | 1,570 sats |
-| **RUNG_TX key-path** | **118** | **1,180 sats** |
-| **RUNG_TX script-path (SIG+CSV)** | **124** | **1,240 sats** |
+| P2WPKH | 141 | 1,410 sats |
+| P2TR key-path | 155 | 1,550 sats |
+| **RUNG_TX key-path** | **127** | **1,270 sats** |
+| **RUNG_TX script-path (SIG+CSV)** | **148** | **1,480 sats** |
 
-### Batch payment (1 input, N outputs)
+### Batch payment (1 input, N MLSC outputs)
 
-| Outputs | P2WPKH | P2TR | **RUNG_TX key** | Saving vs P2WPKH |
-|---------|--------|------|-----------------|------------------|
-| 2 | 143 vB | 167 vB | **118 vB** | 17% |
+Per `MEASUREMENTS.md` table 2:
+
+| Outputs | P2WPKH | P2TR | **RUNG_TX (MLSC)** | Saving vs P2WPKH |
+|---------|--------|------|--------------------|------------------|
+| 2 | 141 vB | 155 vB | **127 vB** | 10% |
 | 10 | 389 vB | 499 vB | **191 vB** | 51% |
-| 100 | 3,181 vB | 4,381 vB | **914 vB** | 71% |
-| 1000 | 31,081 vB | 43,081 vB | **8,114 vB** | 74% |
+| 100 | 3,179 vB | 4,369 vB | **911 vB** | 71% |
+| 1,000 | ~31,079 vB | ~43,069 vB | ~8,111 vB | ~74% |
 
 ### Full lifecycle (create + spend)
 
