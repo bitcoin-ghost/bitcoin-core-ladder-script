@@ -304,16 +304,16 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
       <tbody>
         <tr><td>hysteresis_fee(low, high)</td><td>HYSTERESIS_FEE</td><td>Fee band thresholds</td></tr>
         <tr><td>hysteresis_value(low, high)</td><td>HYSTERESIS_VALUE</td><td>Value band thresholds</td></tr>
-        <tr><td>timer_continuous(blocks)</td><td>TIMER_CONTINUOUS</td><td>Consecutive blocks required</td></tr>
-        <tr><td>timer_off_delay(trigger, hold)</td><td>TIMER_OFF_DELAY</td><td>Trigger + hold-off blocks</td></tr>
-        <tr><td>latch_set(@pk, state)</td><td>LATCH_SET</td><td>Key + state value</td></tr>
-        <tr><td>latch_reset(@pk, state)</td><td>LATCH_RESET</td><td>Key + state value</td></tr>
-        <tr><td>counter_down(@pk, count)</td><td>COUNTER_DOWN</td><td>Key + counter target</td></tr>
-        <tr><td>counter_preset(@pk, count)</td><td>COUNTER_PRESET</td><td>Key + preset count</td></tr>
-        <tr><td>counter_up(@pk, count)</td><td>COUNTER_UP</td><td>Key + counter target</td></tr>
+        <tr><td>timer_continuous(accumulated, target)</td><td>TIMER_CONTINUOUS</td><td>Accumulated + target blocks (2 numerics)</td></tr>
+        <tr><td>timer_off_delay(remaining)</td><td>TIMER_OFF_DELAY</td><td>Remaining hold-off blocks (1 numeric)</td></tr>
+        <tr><td>latch_set(@pk, state)</td><td>LATCH_SET</td><td>Setter key + state value</td></tr>
+        <tr><td>latch_reset(@pk, state, delay)</td><td>LATCH_RESET</td><td>Resetter key + state value + delay blocks</td></tr>
+        <tr><td>counter_down(@pk, count)</td><td>COUNTER_DOWN</td><td>Event signer + counter</td></tr>
+        <tr><td>counter_preset(@pk, current, preset)</td><td>COUNTER_PRESET</td><td>Approval signer + current + preset count</td></tr>
+        <tr><td>counter_up(@pk, current, target)</td><td>COUNTER_UP</td><td>Event signer + current + target count</td></tr>
         <tr><td>compare(op, value_b)</td><td>COMPARE</td><td>Operator (1=EQ..7=IN_RANGE) + threshold. Optional value_c for IN_RANGE</td></tr>
-        <tr><td>sequencer(steps)</td><td>SEQUENCER</td><td>Number of sequence steps</td></tr>
-        <tr><td>one_shot(@pk, N)</td><td>ONE_SHOT</td><td>Key + activation window</td></tr>
+        <tr><td>sequencer(current_step, total_steps)</td><td>SEQUENCER</td><td>Current step + total step count (2 numerics)</td></tr>
+        <tr><td>one_shot(@pk, state, commitment_hex)</td><td>ONE_SHOT</td><td>Key + state value + 32-byte commitment hash</td></tr>
         <tr><td>rate_limit(max, cap, refill)</td><td>RATE_LIMIT</td><td>Max per block, accumulation cap, refill blocks</td></tr>
         <tr><td>cosign(hex)</td><td>COSIGN</td><td>32-byte conditions hash of co-input</td></tr>
       </tbody>
@@ -329,7 +329,7 @@ html[data-theme="dark"] .site-header { background: var(--bg-alt) !important; }
         <tr><td>ptlc(@pk, csv)</td><td>PTLC</td><td>Single signing key (v0.7+) + CSV blocks. Adaptor point T is off-chain only.</td></tr>
         <tr><td>cltv_sig(@pk, height)</td><td>CLTV_SIG</td><td>Signature + absolute timelock</td></tr>
         <tr><td>timelocked_multisig(M, @k1, ..., csv)</td><td>TIMELOCKED_MULTISIG</td><td>Threshold, keys, CSV blocks</td></tr>
-        <tr><td>anchor_fee(@local, @remote, min, max, weight, num)</td><td>ANCHOR_FEE</td><td>2-of-2 sigs + fee rate band + weight limit (anti-pinning L2 anchor)</td></tr>
+        <tr><td>anchor_fee(@local, @remote, min_fee, max_fee, max_weight, commitment)</td><td>ANCHOR_FEE</td><td>2-of-2 sigs + fee rate band + weight limit + spender commitment numeric (anti-pinning L2 anchor)</td></tr>
       </tbody>
     </table>
 
