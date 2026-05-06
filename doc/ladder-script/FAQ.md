@@ -159,12 +159,14 @@ This means:
   consensus) every conditions byte is structurally typed and consumed
   by an evaluator.
 
-Key-consuming block types (those returning `true` from `IsKeyConsumingBlockType()`)
-include: SIG, MULTISIG, ADAPTOR_SIG, MUSIG_THRESHOLD, KEY_REF_SIG, COSIGN,
-TIMELOCKED_SIG, HTLC, HASH_SIG, CLTV_SIG, PTLC, TIMELOCKED_MULTISIG,
-P2PK_LEGACY, P2PKH_LEGACY, P2WPKH_LEGACY, P2TR_LEGACY, P2TR_SCRIPT_LEGACY,
-ANCHOR_CHANNEL, ANCHOR_ORACLE, VAULT_LOCK, LATCH_SET, LATCH_RESET,
-COUNTER_DOWN, COUNTER_UP.
+Key-consuming block types (those returning `true` from `IsKeyConsumingBlockType()`,
+canonical list at `src/rung/types.h:455`) include: SIG, MULTISIG, ADAPTOR_SIG,
+MUSIG_THRESHOLD, KEY_REF_SIG, TIMELOCKED_SIG, HTLC, HASH_SIG, CLTV_SIG, PTLC,
+TIMELOCKED_MULTISIG, ANCHOR_FEE, P2PK_LEGACY, P2PKH_LEGACY, P2WPKH_LEGACY,
+P2TR_LEGACY, P2TR_SCRIPT_LEGACY, ANCHOR_ORACLE, VAULT_LOCK, LATCH_SET,
+LATCH_RESET, COUNTER_DOWN, COUNTER_UP. (COSIGN does *not* consume pubkeys
+&mdash; it carries a single HASH256 only &mdash; and ANCHOR_CHANNEL was
+demoted to a pure marker in v0.7, so neither appears in the allowlist.)
 
 ---
 
@@ -345,8 +347,10 @@ Ladder Script enforces multiple layers of anti-spam protection:
 3. **Data-embedding type rejection**: For blocks without an implicit layout,
    high-bandwidth data types (PUBKEY_COMMIT, HASH256, HASH160, DATA) are
    rejected. This prevents layout-less blocks from carrying
-   16 x 80 = 1280 bytes of unvalidated payload. ACCUMULATOR is whitelisted
-   (needs variable HASH256 fields for Merkle proofs, capped at 10).
+   16 x 80 = 1280 bytes of unvalidated payload. ACCUMULATOR (v2) carries
+   exactly 3 fields &mdash; HASH256(set_root), NUMERIC(element_id),
+   MERKLE_PROOF(siblings) &mdash; with depth capped at 4 and per-tx
+   ACCUMULATOR-block count capped at 2.
 
 4. **DATA type restriction**: The DATA type is only allowed in DATA_RETURN
    blocks. Using it in any other block type causes a deserialization error.
@@ -765,7 +769,7 @@ transaction. The maximum data payload is 40 bytes (`FieldMaxSize(DATA)`).
 | SCHEME size | 1 byte | Fixed |
 | PUBKEY_COMMIT size | exactly 32 bytes | Fixed (used only by `QABI_SPEND.owner_pubkey_hash`) |
 | MERKLE_PROOF size | 0-128 bytes | `MAX_MULTISIG_TREE_DEPTH=4` levels &times; 32 B |
-| Max ACCUMULATOR fields | 10 | root + 8 proof nodes + leaf |
+| ACCUMULATOR fields (v2) | exactly 3 | HASH256(set_root) + NUMERIC(element_id) + MERKLE_PROOF (depth &le; 4) |
 | Legacy inner depth | 2 | `MAX_LEGACY_INNER_DEPTH` |
 | Max implicit fields per layout | 8 | `MAX_IMPLICIT_FIELDS` |
 | Micro-header slots | 128 | `MICRO_HEADER_SLOTS` |
