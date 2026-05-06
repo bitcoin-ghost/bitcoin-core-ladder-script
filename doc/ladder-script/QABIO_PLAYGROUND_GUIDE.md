@@ -114,6 +114,10 @@ binding), use **`PQ_BATCH`** instead — see
   auth-chain helpers).
 - RBD mempool policy: `src/rung/policy.h::IsValidRBDReplacement`.
 - Coordinator sighash: `src/rung/qabi.h::ComputeSighashQABO`.
-- Boost tests: `qabi_tests/multi_party_*` in `src/test/rung_tests.cpp`.
+- Boost tests in `src/test/rung_tests.cpp` (all under the `qabi_tests` suite):
+  - `qabi_block_*` — QABIBlock serialise / parse-rejection
+  - `qabi_root_*` / `sighash_qabo_*` — `committed_root` and `SIGHASH_QABO` bindings
+  - `qabi_spend_*` — multi-party batch spend (including `qabi_spend_end_to_end_happy_path`, `qabi_spend_check1_unprimed` ... `qabi_spend_check9_bad_falcon_sig`)
+  - `rbd_*` — Replace-By-Depth detection + replacement validity
 - Functional test: `feature_qabi.py` (24 test methods covering all six
   scenarios end-to-end).
