@@ -79,7 +79,7 @@ by a specific block evaluator.
 | Conditions-side `HASH256` (TAGGED_HASH tag, CTV template, COSIGN target, HTLC payment hash, ANCHOR_POOL/RESERVE/SEAL guardian) | 32 B per field | Per-block layout × `MAX_BLOCKS_PER_RUNG = 8` × revealed rungs | Application commitment — funder picks the hash, spender reveals the matching preimage |
 | `PREIMAGE` (witness) | up to 32 B | `MAX_PREIMAGE_FIELDS_PER_TX = 2` | `SHA256(preimage) == HASH256` in conditions |
 | `SCRIPT_BODY` (witness) | up to 80 B | `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` | `HASH256(script_body) == HASH160`/`HASH256` in conditions; used by P2SH/P2WSH/P2TR_SCRIPT wrappers |
-| `PUBKEY` (witness, leaf reconstruction) | 32-65 B per pubkey | Bounded by `PubkeyCountForBlock` per block type | Must reproduce the committed leaf hash |
+| `PUBKEY` (witness, leaf reconstruction) | 32-65 B per ECC pubkey; up to 2048 B for PQ schemes (`FieldMaxSize(PUBKEY)`) | Bounded by `PubkeyCountForBlock` per block type | Must reproduce the committed leaf hash; PQ pubkeys must be valid under the declared scheme |
 | `conditions_root` | 32 B | per MLSC output | Merkle commit — same shape as P2WSH script-hash, P2TR output-key |
 | MLSC proof sibling hash | 32 B per sibling | depth ≤ 4 (log₂ of `MAX_RUNGS = 16`) per input | Each sibling hashes an attacker-chosen subtree |
 | `nLockTime` + `nSequence` | 4 + 4 per input | standard Bitcoin | Inherited from base tx format |
