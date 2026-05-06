@@ -7,15 +7,27 @@
 ## Overview
 
 TX_MLSC moves the MLSC root from per-output scriptPubKeys to a single
-per-transaction commitment. Each output is just a value (8 bytes). A
-creation proof in the witness validates that the root was derived from
-real, typed conditions. Each rung's coil declares which output it governs
-— the output-to-rung binding is cryptographic (committed in the Merkle
+per-transaction commitment. Each output is just a value (8 bytes). The
+root is verified per spending input via the `MLSCProof` carried in
+that input's witness `stack[1]` (`src/rung/conditions.cpp` —
+`VerifyMLSCProof` and the equivalent inlined checks in `VerifyRungTx`).
+Each rung's coil declares which output it governs — the
+output-to-rung binding is cryptographic (committed in the Merkle
 tree), not a stored bitmask.
 
 This is the PLC model applied to Bitcoin outputs: one ladder program per
 transaction, multiple output coils. The architecture that Ladder Script
 was originally designed around.
+
+> **Terminology note.** This document uses "creation proof" as a
+> conceptual name for the data needed to rebuild a rung leaf
+> (structural template + value commitment). In the wire format that
+> data lives inside each spending input's `MLSCProof`
+> (`witness stack[1]`) — there is no separate top-level creation_proof
+> field on the v4 transaction. Each spending input rebuilds only the
+> rung it reveals plus the sibling hashes needed to verify against
+> `conditions_root`; spending one output never requires the full set
+> of all rungs to be on-chain in one place.
 
 ---
 
@@ -24,16 +36,27 @@ was originally designed around.
 ### Transaction format (v4 RUNG_TX with TX_MLSC)
 
 ```
-nVersion:        int32 (= 4)
-vin_count:       varint
-vin[]:           prevout(36) + scriptSig_len(1) + nSequence(4) per input
-vout_count:      varint
-conditions_root: 32 bytes                          ← ONE root for entire tx
-vout[]:          nValue(8) per output               ← just values, nothing else
-nLockTime:       uint32
-witness[]:       per-input spending witness
-creation_proof:  structural templates + value commitments (once per tx)
+nVersion:           int32 (= 4)
+dummy:              uint8 (= 0x00)
+flags:              uint8 (= 0x02, TX_MLSC + witness)
+vin_count:          varint
+vin[]:              prevout(36) + scriptSig_len(1) + nSequence(4) per input
+conditions_root:    32 bytes                       ← ONE root for entire tx
+vout_count:         varint
+vout[]:             nValue(8) per output            ← just values, nothing else
+                    (if nValue == 0: data_len varint + data[1..40] for DATA_RETURN)
+witness[]:          per-input spending witness — each contains
+                    stack[0] LadderWitness + stack[1] MLSCProof
+qabi_block_len:     CompactSize (0 if not a QABIO tx)
+qabi_block[]:       QABIO tx-level batch block (0..QABI_BLOCK_MAX_HARD = 262,144 B)
+aggregated_sig_len: CompactSize (0 if not a QABIO tx)
+aggregated_sig[]:   FALCON-512 coordinator signature (1..666 B when present)
+nLockTime:          uint32
 ```
+
+The structural templates + value commitments per rung are reconstructed
+from each spending input's `MLSCProof`; they are not laid out as a
+separate top-level field. This matches `primitives/transaction.h:213-265`.
 
 ### Output format
 
@@ -138,11 +161,15 @@ Merkle proof against conditions_root.
 
 ---
 
-## Creation Proof
+## Creation Proof (per-input)
 
-The creation proof is a witness section that enables block-level validation
-of the conditions_root. It appears once per transaction after all input
-witness stacks.
+"Creation proof" is the conceptual name for the data that rebuilds a
+rung's leaf hash (structural template + value commitment). It does
+**not** appear as a separate top-level field on a v4 RUNG_TX.
+Instead, each spending input's `MLSCProof` (`witness stack[1]`)
+carries the equivalent payload for the rung being revealed plus the
+sibling hashes needed to walk the path to `conditions_root`. The
+shape below describes the per-rung data, not a once-per-tx wire field.
 
 ### Format
 
@@ -172,26 +199,35 @@ relay dependencies at spend time and skip relay enforcement; the leaf
 hash binds them.
 Witness weight: 1 WU per byte.
 
-### Validation (block acceptance)
+### Validation
 
-For each v4 transaction with outputs:
+For each v4 transaction:
 
-1. If creation proof is missing: **reject transaction**.
-2. For each rung in the creation proof:
-   a. Validate structural template:
-      - block_type must be in the known set (IsKnownBlockType)
-      - inverted flag must be valid for this type (IsInvertibleBlockType)
-      - coil_type must be known (IsKnownCoilType)
-      - attestation must be known (IsKnownAttestationMode)
-      - output_index must be < vout_count
-   b. Accept value_commitment as-is (opaque 32-byte hash)
-3. Compute rung_leaf for each rung:
-   `TaggedHash("LadderLeaf/v1", template || value_commitment)`
-4. Build Merkle tree from all rung_leaves using sorted interior nodes.
-5. Verify computed root == conditions_root in the transaction body.
-6. Verify every non-DATA_RETURN output has at least one rung assigned to it
-   (at least one rung has coil.output_index pointing to it).
-7. If any check fails: **reject transaction**.
+- **Per-tx (`CheckRungTxLevel` in `validation.cpp:2469`)**:
+  1. `ValidateRungOutputs`: every output must be MLSC (`0xDF` prefix
+     or zero-value DATA_RETURN), at most 1 DATA_RETURN, every
+     non-DATA_RETURN output ≥ `MIN_RUNG_OUTPUT_VALUE = 546 sats`.
+  2. PREIMAGE / SCRIPT_BODY count across all MLSC-spending inputs ≤
+     per-tx caps.
+  3. If `qabi_block` / `aggregated_sig` are present, they must be
+     coherent (length within bounds, FALCON sig parses).
+
+- **Per-input (`VerifyRungTx`)**:
+  1. Read `MLSCProof` from spending input's `witness stack[1]`.
+  2. Validate the revealed rung's structural template: known
+     block_type, valid inverted flag (`IsInvertibleBlockType`),
+     known coil_type / attestation, `output_index < vout_count`.
+  3. Compute the rung_leaf via
+     `TaggedHash("LadderLeaf/v1", template || value_commitment)`,
+     using the witness pubkeys folded in via `merkle_pub_key`.
+  4. Walk the proof_hashes (sibling hashes) from the leaf upward,
+     recomputing the root via the sorted-pair interior hash.
+  5. Verify the computed root equals the transaction's
+     `conditions_root` (or its detweaked form for 3-element witnesses).
+  6. Verify the revealed rung's `coil.output_index` matches the
+     output being spent.
+
+If any check fails: **reject transaction**.
 
 ---
 
@@ -278,60 +314,48 @@ This requires one block database read per spend. On modern hardware
 
 ### Transaction sizes
 
-Simple payment (1 input, 2 outputs, 1 rung per output):
-
-```
-Base:    version(4) + marker(2) + vin_count(1) + input(41)
-       + vout_count(1) + conditions_root(32) + 2×output(8) + locktime(4)
-       = 101 bytes × 4 WU = 404 WU
-
-Witness: LadderWitness(112) + MLSCProof(43) + overhead(4)
-       + creation_proof(2 × 42 = 84)
-       = 243 bytes × 1 WU = 243 WU
-
-Total: 647 WU = 162 vB
-Fee (10 sat/vB): 1,620 sats
-```
-
-Note: post-quantum signatures (FALCON-512, Dilithium3, etc.) are supported
-via the SCHEME byte but produce larger witnesses due to larger signature and
-key sizes. PQ migration is a security upgrade, not a fee reduction.
+Per `MEASUREMENTS.md` row N=2 of the spend-and-relock sweep, a
+1-in / 2-out RUNG_TX (key-path spend, one MLSC output and a change
+output) measures **127 vB** total. The implementation does not lay
+out a separate per-tx creation_proof — the equivalent data is rebuilt
+per spending input from `stack[1] MLSCProof` (just the spending
+rung's template + value commitment + sibling hashes for the path to
+the root, not all rungs).
 
 ### Full comparison — simple payment (1 in, 2 out)
 
-| Format | Signature | Weight | vBytes | Fee |
-|--------|-----------|--------|--------|-----|
-| P2PKH | ECDSA | 904 | 226 | 2,260 sats |
-| P2SH 2-of-3 | ECDSA | 1,484 | 371 | 3,710 sats |
-| P2WPKH | ECDSA | 568 | 142 | 1,420 sats |
-| P2WSH 2-of-3 | ECDSA | 811 | 203 | 2,030 sats |
-| P2TR key-path | Schnorr | 621 | 155 | 1,553 sats |
-| P2TR script 2-of-3 | Schnorr | 854 | 214 | 2,135 sats |
-| **TX_MLSC** | **Schnorr** | **647** | **162** | **1,620 sats** |
+| Format | Signature | vBytes | Fee (10 sat/vB) |
+|--------|-----------|--------|-----------------|
+| P2PKH | ECDSA | 226 | 2,260 sats |
+| P2WPKH | ECDSA | 141 | 1,410 sats |
+| P2TR key-path | Schnorr | 155 | 1,550 sats |
+| **TX_MLSC key-path** | **Schnorr** | **127** | **1,270 sats** |
+| TX_MLSC script-path (no tweak) | Schnorr | 148 | 1,480 sats |
 
-### Batch payment comparison (1 in, N out, 1 rung per out)
+### Batch payment comparison (1 in, N MLSC outputs)
 
-| Outputs | P2PKH | P2WPKH | P2TR | **TX_MLSC** |
-|---------|-------|--------|------|-------------|
-| 2 | 904 | 568 | 621 | **647** |
-| 10 | 1,992 | 1,560 | 1,997 | **1,279** |
-| 100 | 14,792 | 13,108 | 17,497 | **7,867** |
+Per `MEASUREMENTS.md` table 2 / `SIZING.md` table 2:
 
-TX_MLSC is the cheapest format for 3+ outputs. For 100 outputs:
-40% cheaper than P2WPKH, 55% cheaper than P2TR.
+| Outputs | P2WPKH | P2TR | **TX_MLSC** | Saving vs P2WPKH |
+|---------|--------|------|-------------|------------------|
+| 2 | 141 vB | 155 vB | **127 vB** | 10% |
+| 10 | 389 vB | 499 vB | **191 vB** | 51% |
+| 100 | 3,179 vB | 4,369 vB | **911 vB** | 71% |
 
-### Consolidation (5 in, 1 out)
+TX_MLSC is the cheapest format for 2+ MLSC outputs. For 100 outputs,
+**71% cheaper than P2WPKH** and **79% cheaper than P2TR**.
 
-| Format | Weight | vBytes | Fee |
-|--------|--------|--------|-----|
-| P2PKH | 3,136 | 784 | 7,840 sats |
-| P2WPKH | 1,532 | 383 | 3,830 sats |
-| P2TR key-path | 1,365 | 341 | 3,413 sats |
-| **TX_MLSC** | **1,857** | **464** | **4,640 sats** |
+### Per-output asymptote
 
-TX_MLSC is more expensive for consolidation due to extra proof hashes
-per input (~32 bytes each). Overhead: ~50 sats vs current Ladder.
-Still cheaper than P2PKH.
+Per `SIZING.md`, the per-output marginal cost asymptotes to ~8 vB
+(MLSC) vs ~31 vB (P2WPKH) and ~43 vB (P2TR) — a 4-5× per-output
+saving at large N.
+
+Note: post-quantum signatures (FALCON-512, Dilithium3, etc.) are
+supported via the SCHEME byte but produce larger witnesses due to
+larger signature and key sizes. The `PQ_BATCH` and `QABIO` blocks
+amortise PQ signature cost across N inputs (see [`PQ_BATCH_SPEC.md`]
+(PQ_BATCH_SPEC.md) and [`QABIO.md`](QABIO.md)).
 
 ---
 
