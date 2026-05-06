@@ -1,12 +1,12 @@
 # Ladder Script: Annotated Library
 
 This document explains the internals of the Ladder Script reference
-implementation: ~21,600 lines across 38 files in `src/rung/`, plus the
-363-line `src/rung_shims.h` boundary header (~21,900 lines across 39 new
-files in total).
+implementation: 21,506 lines across 37 `.cpp`/`.h` files in `src/rung/`,
+plus the 363-line `src/rung_shims.h` boundary header (21,869 lines across
+38 new files in total).
 
 It complements [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md), which covers
-the ~1,600-line patch to existing Bitcoin Core code. The patch is the
+the ~1,300-line patch to existing Bitcoin Core code. The patch is the
 hooks; this is the engine.
 
 > **Reading order.** Part 1 is the narrative tour (how a single
@@ -21,25 +21,25 @@ hooks; this is the engine.
 ```
 src/
 ├── rung_shims.h              363 LOC — Core ↔ library boundary (the ONE adapter)
-└── rung/                          ── 20,888 LOC, 38 files
+└── rung/                          ── 21,506 LOC, 37 .cpp/.h files (+ 1 CMakeLists.txt)
     ├── CMakeLists.txt          98
     │
     ├── api.h                  560  — adapter types (LadderScript, LadderTxView, ...)
-    ├── types.h              1,696  — RungBlockType enum (65 active), BlockTypeInfo registry
+    ├── types.h              1,693  — RungBlockType enum (65 active), BlockTypeInfo registry
     ├── types.cpp               46
     │
     ├── conditions.h          401  — RungConditions, parsing, conditions_root
-    ├── conditions.cpp      1,385
+    ├── conditions.cpp      1,389
     │
-    ├── descriptor.h          170  — descriptor language (sig(@k), or(...), etc.)
-    ├── descriptor.cpp      1,924
+    ├── descriptor.h          181  — descriptor language (sig(@k), or(...), etc.)
+    ├── descriptor.cpp      2,151
     │
     ├── evaluator.h           406  — VerifyRungTx + caches (Shared/QABO/PQBatch)
-    ├── evaluator.cpp       1,704
+    ├── evaluator.cpp       1,730
     │
     ├── block_dispatch.h       81  — per-block-type evaluator registry
     ├── block_helpers.h       126
-    ├── block_helpers.cpp     613
+    ├── block_helpers.cpp     648
     │
     ├── sighash.h              66  — `SignatureHashLadder` + `SignatureHashLadderKeyPath`
     ├── sighash.cpp           265
@@ -47,7 +47,7 @@ src/
     ├── pq_verify.h            52  — FALCON / Dilithium3 / SPHINCS+ wrappers
     ├── pq_verify.cpp         149
     │
-    ├── qabi.h                278  — QABIO state (auth chain, batch block, sig)
+    ├── qabi.h                279  — QABIO state (auth chain, batch block, sig)
     ├── qabi.cpp              484
     │
     ├── adaptor.h              58  — adaptor sigs (PTLC)
@@ -57,20 +57,20 @@ src/
     ├── policy.cpp            341
     │
     ├── serialize.h           174  — wire-format read/write
-    ├── serialize.cpp       1,130
+    ├── serialize.cpp       1,141
     │
     ├── write_helpers.h       103
     │
-    ├── rpc.cpp             4,556  — every RPC: createrungtx, signrungtx, qabi_*
+    ├── rpc.cpp             4,857  — every RPC: createrungtx, signrungtx, qabi_*
     │
-    └── blocks/                  ── 11 files, 3,851 LOC — per-family block evaluators
+    └── blocks/                  ── 11 files, 3,856 LOC — per-family block evaluators
         ├── sig.cpp             279  — SIG, KEY_REF_SIG, MULTISIG, MUSIG_THRESHOLD
         ├── timelock.cpp        161  — CSV, CLTV, CSV_TIME, CLTV_TIME
         ├── hash.cpp            121  — TAGGED_HASH, HASH_GUARDED
         ├── covenant.cpp        240  — CTV, VAULT_LOCK, AMOUNT_LOCK
         ├── recursion.cpp       351  — RECURSE_SAME / UNTIL / COUNT / SPLIT / MODIFIED / DECAY
         ├── anchor.cpp          275  — ANCHOR family + DATA_RETURN
-        ├── plc.cpp             432  — PLC family (HYSTERESIS, TIMER, LATCH, RATE_LIMIT, COSIGN, ...)
+        ├── plc.cpp             437  — PLC family (HYSTERESIS, TIMER, LATCH, RATE_LIMIT, COSIGN, ...)
         ├── compound.cpp        332  — TIMELOCKED_SIG, HTLC, HASH_SIG, PTLC, CLTV_SIG, TIMELOCKED_MULTISIG, ANCHOR_FEE
         ├── governance.cpp      329  — EPOCH_GATE, WEIGHT_LIMIT, INPUT_COUNT, ACCUMULATOR, OUTPUT_CHECK
         ├── legacy.cpp          349  — P2PK_LEGACY, P2PKH_LEGACY, P2WPKH_LEGACY, P2TR_LEGACY, ...
@@ -289,7 +289,7 @@ always available.
 
 # Part 2 — File-by-file reference
 
-## `evaluator.cpp` (1,301 lines)
+## `evaluator.cpp` (1,730 lines)
 
 The central verification engine. Everything that actually executes a
 ladder script flows through this file.
@@ -373,7 +373,7 @@ ladder script flows through this file.
 
 ---
 
-## `api.h` (528 lines)
+## `api.h` (560 lines)
 
 The library's public surface — the **only** header Core code includes.
 Read this header first; everything else is internal.
@@ -459,7 +459,7 @@ narrow `extern "C"` wrapper for language bindings is anticipated
 
 ---
 
-## `types.h` (1,566 lines)
+## `types.h` (1,693 lines)
 
 The library's master type registry. Defines `RungBlockType`,
 `RungDataType`, the in-memory `RungBlock` / `Rung` / `LadderWitness`
@@ -544,7 +544,7 @@ require PQ scheme support).
 
 ---
 
-## `conditions.h` (310 lines) and `conditions.cpp` (1,078 lines)
+## `conditions.h` (401 lines) and `conditions.cpp` (1,389 lines)
 
 The **conditions_root** is the 32-byte commitment that lives at the
 tx level. This pair of files defines `RungConditions`, the
@@ -659,7 +659,7 @@ evaluators at startup via the `register_*_blocks()` functions.
 
 ---
 
-## `block_helpers.h` (107 lines) and `block_helpers.cpp` (475 lines)
+## `block_helpers.h` (126 lines) and `block_helpers.cpp` (648 lines)
 
 Shared utilities used by multiple block evaluators. Lives outside
 `blocks/` because cross-family helpers don't belong to any one
@@ -700,7 +700,7 @@ family.
 
 ---
 
-## `evaluator.h` (369 lines)
+## `evaluator.h` (406 lines)
 
 The header complement to `evaluator.cpp`. Defines the per-tx caches
 and the `RungEvalContext` consumed by every block evaluator.
@@ -746,7 +746,7 @@ and the `RungEvalContext` consumed by every block evaluator.
 
 ---
 
-## `sighash.h` (66 lines) and `sighash.cpp` (224 lines)
+## `sighash.h` (66 lines) and `sighash.cpp` (265 lines)
 
 Defines `SIGHASH_LADDER` (BIP341-derived, no annex/tapscript/
 codeseparator) and `SIGHASH_QABO` (the QABIO coordinator's tx-level
@@ -793,7 +793,7 @@ sighash). Two tagged hashes: `LadderSighash/v1` for script-path,
 
 ---
 
-## `pq_verify.h` (52 lines) and `pq_verify.cpp` (146 lines)
+## `pq_verify.h` (52 lines) and `pq_verify.cpp` (149 lines)
 
 Thin wrapper around `liboqs` — the only PQ-aware compilation unit in
 the library. Every PQ block evaluator (`SIG` with PQ scheme,
@@ -829,7 +829,7 @@ the library. Every PQ block evaluator (`SIG` with PQ scheme,
 
 ---
 
-## `qabi.h` (233 lines) and `qabi.cpp` (416 lines)
+## `qabi.h` (279 lines) and `qabi.cpp` (484 lines)
 
 QABIO state types and helpers: the `qabi_block` data structure,
 serialisation, the auth hash chain, and `SIGHASH_QABO`.
@@ -881,7 +881,7 @@ serialisation, the auth hash chain, and `SIGHASH_QABO`.
 
 ---
 
-## `serialize.h` (129 lines) and `serialize.cpp` (1,051 lines)
+## `serialize.h` (174 lines) and `serialize.cpp` (1,141 lines)
 
 Wire-format read/write for `LadderWitness`, `RungBlock`, `RungCoil`,
 `Relay`. The serialiser uses the `*_CONDITIONS` and `*_WITNESS`
@@ -924,7 +924,7 @@ reads — no bespoke per-block parsers.
 
 ---
 
-## `descriptor.h` (170 lines) and `descriptor.cpp` (1,866 lines)
+## `descriptor.h` (181 lines) and `descriptor.cpp` (2,151 lines)
 
 The descriptor language: human-friendly compact notation that
 parses to `RungConditions` and formats back. The "front door" for
@@ -975,7 +975,7 @@ authoring conditions.
 
 ---
 
-## `policy.h` (100 lines) and `policy.cpp` (339 lines)
+## `policy.h` (81 lines) and `policy.cpp` (341 lines)
 
 Mempool standardness and QABIO Replace-By-Depth (RBD) policy. Pure
 predicates — no Core types, no global state.
@@ -1065,7 +1065,7 @@ Files are listed in dependency order: signature blocks first
 
 ---
 
-## `blocks/sig.cpp` (334 lines)
+## `blocks/sig.cpp` (279 lines)
 
 Signature-bearing blocks. The most-used block in the library.
 
@@ -1211,7 +1211,7 @@ output's conditions_root is recovered, recomputed, and compared.
 
 ---
 
-## `blocks/anchor.cpp` (268 lines)
+## `blocks/anchor.cpp` (275 lines)
 
 Anchor outputs and ancillary "I'm here" markers. Most are
 informational — they pass unless their commit/limit fails.
@@ -1239,7 +1239,7 @@ informational — they pass unless their commit/limit fails.
 
 ---
 
-## `blocks/plc.cpp` (429 lines)
+## `blocks/plc.cpp` (437 lines)
 
 Programmable Logic Controller-inspired blocks: hysteresis bands,
 timers, latches, counters. Borrowed from the PLC programming model
@@ -1275,7 +1275,7 @@ the descriptor language is named after.
 
 ---
 
-## `blocks/compound.cpp` (307 lines)
+## `blocks/compound.cpp` (332 lines)
 
 Higher-level patterns built from base blocks. Each compound block
 is a single descriptor primitive that expands into multiple gates.
@@ -1302,7 +1302,7 @@ is a single descriptor primitive that expands into multiple gates.
 
 ---
 
-## `blocks/governance.cpp` (328 lines)
+## `blocks/governance.cpp` (329 lines)
 
 Tx-shape governance blocks: introspection on tx-level structure
 (input count, output count, weight, etc.).
@@ -1332,7 +1332,7 @@ Tx-shape governance blocks: introspection on tx-level structure
 
 ---
 
-## `blocks/legacy.cpp` (326 lines)
+## `blocks/legacy.cpp` (349 lines)
 
 Wrapper blocks for Bitcoin's pre-v4 script types. These let an MLSC
 UTXO contain a P2PKH or P2WSH or P2TR-like spending path — useful
@@ -1367,7 +1367,7 @@ calling back into the ladder evaluator with the inner conditions.
 
 ---
 
-## `blocks/qabi.cpp` (784 lines — the largest block file)
+## `blocks/qabi.cpp` (982 lines — the largest block file)
 
 QABIO + PQ_BATCH evaluators. The most complex per-block code in
 the library because it threads the per-tx caches and enforces the
@@ -1408,7 +1408,7 @@ that return `LADDER_ERR_QABI_DISABLED`.
 
 # Part 2c — Boundary, RPC, and small files
 
-## `src/rung_shims.h` (353 lines — lives in `src/`, not `src/rung/`)
+## `src/rung_shims.h` (363 lines — lives in `src/`, not `src/rung/`)
 
 The **only** file that crosses the Core ↔ library boundary. Every
 function here is `inline` and header-only — there's nothing to link
@@ -1460,7 +1460,7 @@ The library itself never has to change.
 
 ---
 
-## `rpc.cpp` (4,217 lines — the largest single file)
+## `rpc.cpp` (4,857 lines — the largest single file)
 
 All 21 RPC commands plus the dispatch table and registration
 function. Organised by RPC suite, each suite contiguous.
@@ -1544,7 +1544,7 @@ The rest of the type machinery is header-only in `types.h`.
 
 ---
 
-## `CMakeLists.txt` (97 lines)
+## `CMakeLists.txt` (98 lines)
 
 The library's CMake target. Defines `bitcoin_rung` as a static
 library, wires in source files (top-level `src/rung/*.cpp` plus
