@@ -103,7 +103,7 @@ Used by wallets to derive the committed `auth_tip` for new UTXOs and to produce 
 qabi_sighash <tx_hex>
 ```
 
-Returns the SIGHASH_QABO that a coordinator would sign. Covers: version, vin (outpoints + sequences), vout (values + scripts), conditions_root, qabi_block, per-input witness stacks, nLockTime. Excludes: aggregated_sig (chicken-and-egg), creation_proof.
+Returns the SIGHASH_QABO that a coordinator would sign. Covers: version, vin (outpoints + sequences), vout (values + scripts), conditions_root, qabi_block, per-input witness stacks, nLockTime. Excludes `aggregated_sig` (chicken-and-egg — the sighash is what's about to be signed).
 
 ### `qabi_signqabo` — coordinator signing
 
@@ -120,7 +120,7 @@ qabi_signqabo <tx_hex> <coordinator_privkey_hex>
 }
 ```
 
-Computes SIGHASH_QABO, signs it with the FALCON-512 private key, and re-serialises the tx with `aggregated_sig` populated by the actual variable-length signature (consensus accepts `1..QABI_AGGREGATED_SIG_MAX = 666` bytes). Rejects txs without a `qabi_block` (not a QABIO batch). v0.14 dropped the previous fixed-666 padding after 4 closed a coordinator-side embedding channel.
+Computes SIGHASH_QABO, signs it with the FALCON-512 private key, and re-serialises the tx with `aggregated_sig` populated by the actual variable-length signature (consensus accepts `1..QABI_AGGREGATED_SIG_MAX = 666` bytes). Rejects txs without a `qabi_block` (not a QABIO batch). v0.14 dropped the previous fixed-666 padding rule because shorter sigs were zero-padded to 666 B and the trailing zeros formed a 0..66 B/tx coordinator-side embedding channel.
 
 ---
 
