@@ -177,9 +177,10 @@ Blocks use lowercase names: `sig(@alias)`, `csv(N)`, `multisig(M, @pk1, ...)`, e
 Parsed by `ParseDescriptor()`, formatted by `FormatDescriptor()` in `descriptor.h/cpp`.
 
 ### EPOCH_GATE
-Block type 0x0801 (Governance family). Periodic spending window: spendable only when
-`block_height mod period == offset`. Not invertible. Conditions: NUMERIC(period),
-NUMERIC(offset).
+Block type 0x0801 (Governance family). Periodic spending window: spendable only
+when `block_height % epoch_size < window_size` &mdash; i.e. for the first
+`window_size` blocks of every epoch. Not invertible. Conditions: NUMERIC(epoch_size),
+NUMERIC(window_size); both must be `> 0` and `window_size <= epoch_size`.
 
 ### EvalResult
 Enum in `evaluator.h`. Four values: SATISFIED (conditions met), UNSATISFIED (valid but
@@ -353,9 +354,10 @@ Block type 0x0004 (Signature family). MuSig2/FROST aggregate threshold signature
 Key-consuming with 1 pubkey. Conditions: NUMERIC(M), NUMERIC(N). Not invertible.
 
 ### NUMERIC
-Data type 0x08. Numeric value (threshold, locktime, etc.), 1 to 8 bytes little-endian.
-Encoded as CompactSize (varint) in the wire format when using implicit layouts. Always
-stored internally as 4-byte LE.
+Data type 0x08. Numeric value (threshold, locktime, etc.), 1 to 4 bytes
+little-endian (`FieldMaxSize(NUMERIC) = 4` in `types.h`). Encoded as
+CompactSize (varint) in the wire format when using implicit layouts.
+Always stored internally as 4-byte LE.
 
 ### ONE_SHOT
 Block type 0x0661 (PLC family). One-shot activation window. Conditions: NUMERIC(state),
@@ -412,9 +414,12 @@ Data type 0x05. Hash preimage, exactly 32 bytes. Witness-only (never in conditio
 Limited to 2 PREIMAGE + SCRIPT_BODY fields per witness (`MAX_PREIMAGE_FIELDS_PER_WITNESS`).
 
 ### PTLC
-Block type 0x0704 (Compound family). Adaptor signature + CSV combined: point-locked
-payment channel. Key-consuming with 2 pubkeys. Conditions: NUMERIC(csv_sequence).
-Not invertible.
+Block type 0x0704 (Compound family). Adaptor signature + CSV combined:
+point-locked payment channel. v0.7+ key-consuming with **1 pubkey** (the
+single signing key &mdash; the dead second-pubkey slot from v0.6 was
+removed). The adaptor point T = t&middot;G is off-chain only; the spend
+reveals a normal Schnorr signature that the counterparty extracts the
+adaptor secret from. Conditions: NUMERIC(csv_sequence). Not invertible.
 
 ### PUBKEY
 Data type 0x01. Public key, 1 to 2048 bytes (supports PQ keys). Witness-only. In
