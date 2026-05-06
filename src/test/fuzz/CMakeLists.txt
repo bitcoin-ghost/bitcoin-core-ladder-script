@@ -41,6 +41,8 @@ add_executable(fuzz
   decode_tx.cpp
   descriptor_parse.cpp
   rung_verify.cpp
+  rung_deserialize.cpp
+  rung_evaluator.cpp
   deserialize.cpp
   eval_script.cpp
   feefrac.cpp
@@ -141,6 +143,13 @@ target_link_libraries(fuzz
   test_fuzz
   bitcoin_cli
   bitcoin_common
+  bitcoin_rung   # PUBLIC ENABLE_QABIO/HAVE_LIBOQS defines reach the
+                 # fuzz translation units; without this, rung_verify.cpp
+                 # sees the non-QABIO `struct QABOSigCache {};` while
+                 # libbitcoin_rung.a was compiled with the full
+                 # `using QABOSigCache = std::map<uint256,
+                 # QABOVerifiedEntry>;` alias — link fails on QABIO
+                 # cache argument types.
   bitcoin_util
   minisketch
   leveldb
