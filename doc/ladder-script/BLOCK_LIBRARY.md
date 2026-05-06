@@ -77,11 +77,11 @@ little-endian on the wire.
 | Code | Name | Inv | Key | PK# | Conditions | Description |
 |--------|------|-----|-----|-----|------------|-------------|
 | 0x0501 | ANCHOR | yes | no | 0 | NUMERIC(anchor_id) | Generic anchor marker |
-| 0x0502 | ANCHOR_CHANNEL | yes | no | 0 | NUMERIC(commitment_number) | Lightning channel anchor marker (pure commitment_number; the channel keys live in a sibling SIG rung). |
+| 0x0502 | ANCHOR_CHANNEL | no | no | 0 | NUMERIC(commitment_number) | Lightning channel anchor marker (pure commitment_number; the channel keys live in a sibling SIG rung). Not in `IsInvertibleBlockType` allowlist &mdash; inverting a marker would let a spender flip a structurally-empty block to SATISFIED with no payload, breaking the marker semantic. |
 | 0x0503 | ANCHOR_POOL | yes | no | 0 | HASH256(vtxo_root), NUMERIC(count) | Pool anchor |
 | 0x0504 | ANCHOR_RESERVE | yes | no | 0 | NUMERIC(n), NUMERIC(m), HASH256(guardian) | Reserve anchor (guardian set) |
 | 0x0505 | ANCHOR_SEAL | yes | no | 0 | HASH256(32), HASH256(32) | Seal anchor |
-| 0x0506 | ANCHOR_ORACLE | yes | yes | 1 | NUMERIC(outcome_count) | Oracle anchor. Witness: implicit `[PUBKEY(oracle)]`. |
+| 0x0506 | ANCHOR_ORACLE | no | yes | 1 | NUMERIC(outcome_count) | Oracle anchor. Witness: implicit `[PUBKEY(oracle)]`. Key-consuming, so never invertible. |
 | 0x0507 | DATA_RETURN | yes | no | 0 | DATA(var, max 40) | Unspendable data commitment (replaces OP_RETURN) |
 
 ## PLC Family (0x0600 - 0x06FF)
@@ -92,16 +92,16 @@ little-endian on the wire.
 | 0x0602 | HYSTERESIS_VALUE | yes | no | 0 | NUMERIC(high), NUMERIC(low) | Value hysteresis band |
 | 0x0611 | TIMER_CONTINUOUS | yes | no | 0 | NUMERIC(accumulated), NUMERIC(target) | Continuous timer (consecutive blocks) |
 | 0x0612 | TIMER_OFF_DELAY | yes | no | 0 | NUMERIC(remaining) | Off-delay timer (hold after trigger) |
-| 0x0621 | LATCH_SET | yes | yes | 1 | NUMERIC(state) | Latch set (state activation) |
-| 0x0622 | LATCH_RESET | yes | yes | 1 | NUMERIC(state), NUMERIC(delay) | Latch reset (state deactivation) |
-| 0x0631 | COUNTER_DOWN | yes | yes | 1 | NUMERIC(count) | Down counter (decrement on event) |
+| 0x0621 | LATCH_SET | no | yes | 1 | NUMERIC(state) | Latch set (state activation). Key-consuming, so never invertible. |
+| 0x0622 | LATCH_RESET | no | yes | 1 | NUMERIC(state), NUMERIC(delay) | Latch reset; SATISFIED requires `state >= 1 AND delay == 0` (the reset only fires after the carry-rule chain has matured). Key-consuming, never invertible. |
+| 0x0631 | COUNTER_DOWN | no | yes | 1 | NUMERIC(count) | Down counter (decrement on event). Key-consuming, never invertible. |
 | 0x0632 | COUNTER_PRESET | yes | no | 0 | NUMERIC(current), NUMERIC(preset) | Preset counter (approval accumulator) |
-| 0x0633 | COUNTER_UP | yes | yes | 1 | NUMERIC(current), NUMERIC(target) | Up counter (increment on event) |
+| 0x0633 | COUNTER_UP | no | yes | 1 | NUMERIC(current), NUMERIC(target) | Up counter (increment on event). Key-consuming, never invertible. |
 | 0x0641 | COMPARE | yes | no | 0 | NUMERIC(op), NUMERIC(b), NUMERIC(c) | Comparator (amount vs thresholds) |
 | 0x0651 | SEQUENCER | yes | no | 0 | NUMERIC(current_step), NUMERIC(total) | Step sequencer |
 | 0x0661 | ONE_SHOT | yes | no | 0 | NUMERIC(state), HASH256(commitment) | One-shot activation window |
 | 0x0671 | RATE_LIMIT | yes | no | 0 | NUMERIC(max), NUMERIC(cap), NUMERIC(refill) | Rate limiter |
-| 0x0681 | COSIGN | no | yes | 0 | HASH256(32) | Cross-input co-spend constraint |
+| 0x0681 | COSIGN | no | no | 0 | HASH256(32) | Cross-input co-spend constraint. Carries only a HASH256 (SHA256 of the partner input's spent scriptPubKey) &mdash; not key-consuming. Not in `IsInvertibleBlockType` allowlist. |
 
 ## Compound Family (0x0700 - 0x07FF)
 
@@ -167,15 +167,30 @@ conditions that have no direct equivalent in legacy Script.
 | `[/AMOUNT_LOCK: lo, hi]` | Passes when output amount OUTSIDE `[lo, hi]` | Value-exclusion zone (privacy) |
 | `[/CTV: H]` | Passes when output template differs | "Not this template" guard |
 
-**Key-consuming blocks are NOT invertible** &mdash; the deserialiser rejects
-the inverted bit on `SIG`, `MULTISIG`, `MUSIG_THRESHOLD`, `ADAPTOR_SIG`,
-`PTLC`, `HTLC`, `HASH_SIG`, `TIMELOCKED_SIG`, `CLTV_SIG`,
-`TIMELOCKED_MULTISIG`, `KEY_REF_SIG`, `VAULT_LOCK`, `ANCHOR_FEE`,
-`COSIGN`, and the `*_LEGACY` family. Inverting a key-consuming block
-would let a spender provide a garbage pubkey that fails verification,
-flip the result to `SATISFIED`, and embed up to 33 bytes of arbitrary
-data per block. To express "anyone EXCEPT key K can spend" or "n-of-m
-have NOT signed", compose with non-key-consuming gating blocks (e.g.
+**Inversion is an explicit allowlist** &mdash; the deserialiser
+rejects the inverted bit on every block type not in
+`IsInvertibleBlockType` (`src/rung/types.h:490`). The exclusions are:
+
+- **Every key-consuming block** (`SIG`, `MULTISIG`, `MUSIG_THRESHOLD`,
+  `ADAPTOR_SIG`, `KEY_REF_SIG`, `PTLC`, `HTLC`, `HASH_SIG`,
+  `TIMELOCKED_SIG`, `CLTV_SIG`, `TIMELOCKED_MULTISIG`, `VAULT_LOCK`,
+  `ANCHOR_FEE`, `ANCHOR_ORACLE`, `LATCH_SET`, `LATCH_RESET`,
+  `COUNTER_DOWN`, `COUNTER_UP`, `P2PK_LEGACY`, `P2PKH_LEGACY`,
+  `P2WPKH_LEGACY`, `P2TR_LEGACY`, `P2TR_SCRIPT_LEGACY`) &mdash;
+  inverting one would let a spender provide a garbage pubkey that
+  fails verification, flip the result to `SATISFIED`, and embed up
+  to 33 bytes of arbitrary data per block.
+- **Pure markers and HASH-binding blocks without a leaf-fold escape**
+  (`HASH_GUARDED`, `COSIGN`, `ANCHOR_CHANNEL`) &mdash; inverting them
+  would similarly let arbitrary HASH256 / NUMERIC payloads
+  satisfy by failure-flip.
+- **Sigless compound state-machine blocks** (`EPOCH_GATE`,
+  `RELATIVE_VALUE`, `OUTPUT_CHECK`) &mdash; inverting them flips
+  range / ratio / output-position semantics in ways the spec
+  intentionally doesn't define.
+
+To express "anyone EXCEPT key K can spend" or "n-of-m have NOT
+signed", compose with non-key-consuming gating blocks (e.g.
 `[CSV: N] AND [/COSIGN: hash(other_input_spk)]` for a key-exclusion
 window) or use a different rung as the alternative path.
 
