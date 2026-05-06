@@ -2131,35 +2131,43 @@ The reference implementation provides the `createrungtx`,
 
 ## Test Vectors
 
-A machine-readable starter set ships at
-`src/test/data/rung_tx_vectors.json`. Each vector records the seeds
-used to derive the deterministic keys, the unsigned and signed wire
-hex of both the funding and spending transactions, the resulting MLSC
-scriptPubKey, and the conditions root. All transactions in the file
+A machine-readable fixture set ships at `src/test/data/`:
+`rung_tx_vectors.json` (positive cases, 68 vectors),
+`rung_tx_neg_vectors.json` (negative / rejection cases, 76 vectors),
+and `rung_tx_spend_vectors.json` (full fund-then-spend flows, 26
+vectors) — **170 vectors total**. Each vector records the seeds used
+to derive the deterministic keys, the unsigned and signed wire hex of
+both the funding and spending transactions, the resulting MLSC
+scriptPubKey, and the conditions root. All transactions in the files
 were produced by the reference implementation on regtest and were
-broadcast to the mempool successfully. The fixture currently covers
-three block types representative of the three witness-rule families
-exercised by the consensus path:
+broadcast to the mempool successfully.
 
-| Vector | Block type        | Witness rule                                  |
-|--------|-------------------|-----------------------------------------------|
-| v1     | `SIG`             | Triplets-K (key-path, single-rung, auto-tweaked) |
-| v2     | `P2WPKH_LEGACY`   | Bridging (HASH160-committed pubkey)           |
-| v3     | `HTLC`            | Triplets-K + Reveal-P (claim path: preimage + sig) |
+Coverage spans roughly 25 distinct block types and the eight
+witness-rule families: `SIG` (Triplets-K key-path), `P2WPKH_LEGACY`
+(Bridging), `HTLC` (claim-path Reveal-P + refund-path),
+`CSV` / `CLTV` / `CSV_TIME` / `CLTV_TIME` (Empty), `MULTISIG` v2
+inner-Merkle (Triplets-K), `CTV` (Empty), `PQ_BATCH` single-anchor
+(PQ-anchor), `DATA_RETURN` (Unspendable), `ANCHOR_*` markers (Empty),
+`AMOUNT_LOCK` / `WEIGHT_LIMIT` / `INPUT_COUNT` / `OUTPUT_COUNT` /
+`RELATIVE_VALUE` (Empty), `TAGGED_HASH` / `HASH_GUARDED` (Reveal-P),
+`ACCUMULATOR` (Reveal-P + MERKLE_PROOF), `P2SH_LEGACY` /
+`P2WSH_LEGACY` (Bridging), `VAULT_LOCK` (Fixed N + 2 PUBKEYs),
+`TIMELOCKED_SIG` / `HASH_SIG` / `CLTV_SIG` / `TIMELOCKED_MULTISIG`
+(compounds), and PLC blocks (`LATCH_SET`, `COUNTER_DOWN`, `COMPARE`,
+`SEQUENCER`, `ONE_SHOT`, `RATE_LIMIT`, `COSIGN`, etc).
 
-The reference implementation has 660 Boost unit test cases under
-`src/test/rung_tests.cpp` and multiple functional tests under
-`test/functional/feature_rung_*.py`. A future revision is expected to
-extend the JSON file with vectors for QABIO priming, QABIO batch
-spends, PQ_BATCH spends, and at minimum one negative vector per
-witness rule. Negative vectors close cross-implementation
-malleability surfaces — a vector that reorders triplets in a
-`MULTISIG` witness, or pads `MAX_PREIMAGE_FIELDS_PER_TX + 1`
-preimages, lets an alternative implementation prove its
-deserialiser rejects the case identically rather than merely
-accepting the positive vectors. The current fixture is sufficient to
-verify byte-identical behaviour of an alternative implementation
-against the three rule families above for satisfying spends.
+The reference implementation has 665 Boost unit test cases under
+`src/test/rung_tests.cpp` plus 15 functional test files (~143
+distinct test methods) under `test/functional/feature_rung_*.py`,
+`feature_qabi*.py`, and `feature_deferred_vectors.py`. Negative
+vectors close cross-implementation malleability surfaces — a vector
+that reorders triplets in a `MULTISIG` witness, or pads
+`MAX_PREIMAGE_FIELDS_PER_TX + 1` preimages, lets an alternative
+implementation prove its deserialiser rejects the case identically
+rather than merely accepting the positive vectors. The activation
+gate (Open Items) requires further expansion targeting at least 50
+vectors per family with explicit cap-boundary cases and sighash
+cross-replay attempts.
 
 ## Reference Implementation
 
@@ -2640,14 +2648,16 @@ their named bars.
   verify the same properties on bounded state spaces and report
   zero counter-examples. Full results will be published alongside
   the activation proposal. (Activation gate component 2.)
-- **Test vectors expansion.** The starter set in
-  `src/test/data/rung_tx_vectors.json` covers `SIG`,
-  `P2WPKH_LEGACY`, and `HTLC` — three of eight witness-rule
-  families. The activation gate requires at least 50 vectors across
-  all eight families, including positive, negative, and edge cases
-  (cap boundaries, sighash cross-replay, witness malleability
-  negatives). A future revision will extend the fixture toward that
-  bar. (Activation gate component 3.)
+- **Test vectors expansion.** The fixture set under
+  `src/test/data/` (`rung_tx_vectors.json` 68 positive,
+  `rung_tx_neg_vectors.json` 76 negative, `rung_tx_spend_vectors.json`
+  26 fund+spend &mdash; 170 total) spans roughly 25 block types
+  across the eight witness-rule families. The activation gate
+  requires at least 50 vectors *per family* (positive, negative, and
+  edge cases &mdash; cap boundaries, sighash cross-replay, witness
+  malleability negatives), with explicit coverage of every cap
+  boundary and every sighash variant. A future revision will continue
+  expanding toward that bar. (Activation gate component 3.)
 - **Activation parameters.** The deployment bit, start time, and
   timeout are out of scope for this BIP. They will be specified in
   a separate activation document at the time of mainnet proposal.
