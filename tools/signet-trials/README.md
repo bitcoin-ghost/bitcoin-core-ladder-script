@@ -12,13 +12,15 @@ End-to-end fund + spend trials against the Ladder Script signet
 
 ## Coverage as of 2026-05-06
 
-**63 trials passing end-to-end** (61 OK + 2 PASS_NEG for deliberate
-negatives) covering 55 of 65 active block types directly. The
-remaining 7 (KEY_REF_SIG, RECURSE_MODIFIED/DECAY/SPLIT, COSIGN,
-P2SH/P2WSH/P2TR_SCRIPT_LEGACY) and 3 QABI/PQ_BATCH need infrastructure
-beyond plain rung+spend (relays, mutation chains, cross-input,
-inner script bodies). QABI/PQ_BATCH are covered by their dedicated
-playgrounds (`tools/qabio-playground/`, `tools/pq-batch-playground/`).
+**65 trials passing end-to-end** (63 OK + 2 PASS_NEG for deliberate
+negatives) covering **57 of 65 active block types directly + 3 via
+playgrounds = 60/65**. Battery 9 added KEY_REF_SIG (relay structure)
+and COSIGN (2-input cross-reference). The remaining 5 untested
+(RECURSE_MODIFIED / RECURSE_DECAY / RECURSE_SPLIT,
+P2SH/P2WSH/P2TR_SCRIPT_LEGACY) need RPC-surface extensions that
+aren't in scope for the trial battery — see "Untested types" below.
+QABI/PQ_BATCH (3 types) are covered by their dedicated playgrounds
+(`tools/qabio-playground/`, `tools/pq-batch-playground/`).
 
 ## Files
 
@@ -31,6 +33,7 @@ playgrounds (`tools/qabio-playground/`, `tools/pq-batch-playground/`).
 | `battery_6_ctv_accum_recurse.py` | T57..T60 | CTV (BIP-119), ACCUMULATOR, RECURSE_UNTIL, RECURSE_COUNT |
 | `battery_7_adaptor_musig.py` | T61..T62 | ADAPTOR_SIG (plain Schnorr), MUSIG_THRESHOLD (1-of-1) |
 | `battery_8_output_check.py` | T63 | OUTPUT_CHECK |
+| `battery_9_keyref_cosign_split.py` | T64..T66 | KEY_REF_SIG (relay), COSIGN (2-input), RECURSE_SPLIT (currently FAIL — needs coil/leaf engineering) |
 | `run_full_battery.py` | T01..T36 | runner that re-executes batteries 1+2+3 in sequence |
 
 ## Running
@@ -84,15 +87,40 @@ python3 tools/signet-trials/battery_5_plc.py
 
 ## Untested types (need scaffolding extensions)
 
-- **KEY_REF_SIG**: harness needs to build a `relays[]` array in the
-  LadderWitness alongside `rungs[]`. Currently the harness only
-  produces flat rungs.
-- **RECURSE_MODIFIED / RECURSE_DECAY / RECURSE_SPLIT**: need
-  per-spend mutation-target output scaffolding.
-- **COSIGN**: needs 2 funded UTXOs in the same spend tx with
-  matching `conditions_hash` cross-references.
-- **P2SH / P2WSH / P2TR_SCRIPT_LEGACY**: need an inner LadderWitness
-  serialised as the SCRIPT_BODY witness field.
+Closed in battery 9:
+- **KEY_REF_SIG**: now passing (T64). `createrungtx` 7th positional
+  arg accepts `relays`; `signrungtx` signer-spec accepts
+  `relay_blocks` array. The relay's SIG block needs `privkey` for
+  `BuildWitnessBlock`'s `SignSingleKey` path even though it's the
+  pubkey-commitment side.
+- **COSIGN**: now passing (T65). Two-input scenario: input 0 is a
+  vanilla SIG UTXO, input 1's COSIGN block targets
+  `SHA256(input 0's scriptPubKey)`. Each input's signer spec is
+  passed as a separate entry in `signrungtx`'s signers array.
 
-These are covered by C++ boost tests already (`rung_tests`), but
-not yet by the live-signet trial battery.
+Still untested via this harness:
+- **RECURSE_SPLIT** (T66): the spend's child outputs must
+  re-encumber with the mutated rung's MLSC root (max_splits
+  decremented by 1), but the child root computation needs to align
+  with the eval's `BuildCPRung` + `ComputeTxMLSCLeaf` path
+  (specifically the input's coil bytes must propagate to the
+  child's leaf). T66 currently fails consensus
+  (`mempool-script-verify-flag-failed`); needs a follow-up that
+  computes the expected output root via `parseladder` /
+  `serialiseconditions` rather than building the child rungs by
+  hand.
+- **RECURSE_MODIFIED / RECURSE_DECAY**: similar to RECURSE_SPLIT
+  but with per-mutation `MutationSpec` parameters. The
+  `signrungtx` `mutation_targets` infrastructure (rpc.cpp:2533+)
+  exists but the trial harness doesn't yet drive it.
+- **P2SH / P2WSH / P2TR_SCRIPT_LEGACY**: need a serialised inner
+  LadderWitness with PUBKEY fields preserved (the existing
+  `serialiseconditions` RPC folds PUBKEY into rung_pks under
+  `conditions_only=true`, which is wrong for legacy-wrapper inner
+  bodies — the inner SIG block needs the pubkey in its fields so
+  the script body's HASH256 commits to it). A dedicated RPC or
+  flag is needed.
+
+All five remaining items are covered by C++ boost tests in
+`src/test/rung_tests.cpp` already; the gap is just live-signet
+end-to-end coverage via the trial battery.
