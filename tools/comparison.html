@@ -632,38 +632,46 @@ Adaptor sig reveals scalar t_i &mdash; not H.</div>
     <div class="comp-verdict"><strong>Ladder Script:</strong> PTLC is a typed block, not a script template. Each hop&apos;s point is independent, so the route is unlinkable even if multiple force-close txs land on-chain.</div>
   </div>
 
-  <!-- 14. ACCUMULATOR ALLOWLIST -->
+  <!-- 14. ACCUMULATOR SET MEMBERSHIP -->
   <div class="comparison">
-    <div class="comp-title">14. Accumulator Allowlist (1-of-N from a 1000-key set)</div>
-    <div class="comp-desc">Allow any of 1,000 authorised keys to spend &mdash; without revealing the full set.</div>
+    <div class="comp-title">14. Accumulator Set Membership (whitelist of up to 16 entries)</div>
+    <div class="comp-desc">Commit to a small enumerated set on-chain; spend by proving an element is in the set, without revealing the rest.</div>
     <div class="comp-grid">
       <div class="comp-side">
-        <div class="comp-label old">Bitcoin Script (P2SH multisig)</div>
-        <div class="comp-code">OP_1 &lt;pk1&gt; &lt;pk2&gt; ... &lt;pk1000&gt; OP_1000
-  OP_CHECKMULTISIG
+        <div class="comp-label old">Bitcoin Script (P2SH OR-of-N)</div>
+        <div class="comp-code">OP_IF
+  &lt;pk1&gt; OP_CHECKSIG
+OP_ELSE OP_IF
+  &lt;pk2&gt; OP_CHECKSIG
+OP_ELSE ...
 
-Witness reveals all 1,000 pubkeys
-~33 KB script + ~33 KB witness
-Standard relay caps multisig at 20 keys
-Above 20: requires P2WSH workarounds
-  with chained OR or Merkle-tree of scripts</div>
-        <div class="comp-note"><span class="tag-impossible">Not feasible</span> 1,000-key sets blow out script size and witness limits.</div>
+Witness reveals every alternative pubkey
+inside the redeem script when spent &mdash;
+the unused branches are visible on-chain
+and contribute to the script-size cap.
+P2WSH/Taproot script trees help, but
+each leaf still embeds the full key.</div>
+        <div class="comp-note"><span class="tag-hacky">Linear / leaky</span> Every alternative pubkey is materialised in the redeem script or as a Tapscript leaf.</div>
       </div>
       <div class="comp-side">
-        <div class="comp-label new">Ladder Script (ACCUMULATOR)</div>
-        <div class="comp-code">ladder(accumulator(&lt;set_root&gt;))
+        <div class="comp-label new">Ladder Script (ACCUMULATOR + SIG)</div>
+        <div class="comp-code">ladder(and(
+  accumulator(&lt;set_root&gt;),
+  sig(@spender)
+))
 
-Conditions store: 32-byte set commitment
-Witness reveals: 1 pubkey + Merkle path
-  to prove membership in the set.
-
-Witness size: ~32 + 32&times;log&#8322;(N) bytes
-For N=1000: ~352 bytes total
-Set can grow to millions without size impact</div>
-        <div class="comp-note"><span class="tag-native">Native</span> ACCUMULATOR holds the set root; spender proves membership only.</div>
+Conditions store: 32-byte set root only.
+Witness reveals: element_id (1-4 B NUMERIC)
+  + Merkle path (32 B per level, depth &le; 4).
+Per-tx caps: 1 ACCUMULATOR per rung,
+  2 per transaction.
+Tree depth is capped at 4 &mdash; the set
+holds up to 2&#8308; = 16 entries; element_id
+is the per-leaf tag (range 0&ndash;65535).</div>
+        <div class="comp-note"><span class="tag-native">Native</span> ACCUMULATOR holds the set root; spender reveals only its element_id and the path to the root.</div>
       </div>
     </div>
-    <div class="comp-verdict"><strong>Ladder Script:</strong> ACCUMULATOR replaces N-of-M scripts with a Merkle commitment. Witness scales as log(N) instead of O(N), and only the spending key is revealed.</div>
+    <div class="comp-verdict"><strong>Ladder Script:</strong> ACCUMULATOR commits a Merkle root over a small enumerated set (up to 16 entries) and proves membership in O(log N) bytes. Pair with a SIG/MULTISIG block to bind a signature to the proven element. Larger allowlists today route through the inner-pubkey-Merkle MULTISIG (up to 16 keys) or off-chain coordination.</div>
   </div>
 
   <!-- 15. RECURSIVE SPLITTING TREE -->
@@ -869,7 +877,7 @@ DLC scalar atomically with confirmation.</div>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Multi-party batch settlement</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">CoinJoin / FROST</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">qabi_prime + qabi_spend</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">LN anchor anti-pinning</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Policy only</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">anchor_fee</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">PTLC (route privacy)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">HTLC (linkable)</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">ptlc</span></td></tr>
-        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">1-of-1000 allowlist</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Witness blow-up</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">accumulator</span></td></tr>
+        <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Set-membership proof (&le;16 entries)</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-hacky">Linear / leaky</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">accumulator</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Recursive split tree</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">CTV (rigid + inactive)</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">recurse_split</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Paired UTXOs</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">cosign</span></td></tr>
         <tr><td style="padding:8px 14px;border-bottom:1px solid var(--border-light);">Persistent state machines</td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-impossible">Not possible</span></td><td style="text-align:center;padding:8px;border-bottom:1px solid var(--border-light);"><span class="tag-native">counter / latch</span></td></tr>
