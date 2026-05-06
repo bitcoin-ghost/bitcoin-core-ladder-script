@@ -5,6 +5,14 @@
 > Regenerated from source code. Every claim traces to
 > `src/rung/conditions.{h,cpp}`, `src/rung/serialize.{h,cpp}`,
 > `src/rung/types.h`, or `src/rung/evaluator.cpp`.
+>
+> **Scope.** This document specifies the **MLSC primitive**: the
+> Merkle commitment scheme, leaf hashing, `merkle_pub_key` fold,
+> `MLSCProof` structure and verification, coil layout, and
+> MLSC-level security properties. The transaction-level wrapper
+> (the v4 RUNG_TX wire format, sizing comparisons, soft-fork
+> impact, embedding-surface analysis) lives in
+> [`TX_MLSC_SPEC.md`](TX_MLSC_SPEC.md).
 
 ---
 
@@ -230,11 +238,12 @@ from the witness block using `FindAllFields(block, RungDataType::PUBKEY)`.
 
 ### `SerializeRungBlocks(rung, ctx)` / `SerializeRelayBlocks(relay, ctx)`
 
-Legacy/test serialiser used by the full-MLSC leaf-computation path. The
-live consensus path uses `SerializeStructuralTemplate(CreationProofRung)`
-(see [TX_MLSC_SPEC.md](TX_MLSC_SPEC.md)) — that path encodes
-`n_relay_refs` and `relay_index` as `uint8` / `uint16 LE` instead of
-`CompactSize`, and produces a different leaf hash.
+Legacy/test serialiser used by the full-MLSC leaf-computation path.
+The live consensus path uses `SerializeStructuralTemplate` against a
+`CreationProofRung` reconstructed inside `evaluator.cpp` from the
+spending input's `MLSCProof`. That path encodes `n_relay_refs` and
+`relay_index` as `uint8` / `uint16 LE` instead of `CompactSize`, and
+produces a different leaf hash than the legacy helpers.
 
 Wire format for Merkle leaf input:
 

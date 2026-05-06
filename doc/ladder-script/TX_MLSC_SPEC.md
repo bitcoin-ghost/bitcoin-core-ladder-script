@@ -1,42 +1,41 @@
-# TX_MLSC — Transaction-Level Merkelised Ladder Script Conditions
+# TX_MLSC — Transaction Format for v4 RUNG_TX
 
 **Status:** Implemented in v4 RUNG_TX · 2026
 
----
-
-## Overview
-
-TX_MLSC moves the MLSC root from per-output scriptPubKeys to a single
-per-transaction commitment. Each output is just a value (8 bytes). The
-root is verified per spending input via the `MLSCProof` carried in
-that input's witness `stack[1]` (`src/rung/conditions.cpp` —
-`VerifyMLSCProof` and the equivalent inlined checks in `VerifyRungTx`).
-Each rung's coil declares which output it governs — the
-output-to-rung binding is cryptographic (committed in the Merkle
-tree), not a stored bitmask.
-
-This is the PLC model applied to Bitcoin outputs: one ladder program per
-transaction, multiple output coils. The architecture that Ladder Script
-was originally designed around.
-
-> **Terminology note.** This document uses "creation proof" as a
-> conceptual name for the data needed to rebuild a rung leaf
-> (structural template + value commitment). In the wire format that
-> data lives inside each spending input's `MLSCProof`
-> (`witness stack[1]`) — there is no separate top-level creation_proof
-> field on the v4 transaction. Each spending input rebuilds only the
-> rung it reveals plus the sibling hashes needed to verify against
-> `conditions_root`; spending one output never requires the full set
-> of all rungs to be on-chain in one place.
+> **Scope.** This document specifies the **transaction-level wire
+> format** that wraps the MLSC commitment scheme — the `nVersion`,
+> flag byte, output encoding, `qabi_block` / `aggregated_sig` tail,
+> sizing relative to other Bitcoin output formats, soft-fork impact,
+> and tx-level embedding-surface analysis.
+>
+> The lower-level **MLSC primitive itself** — leaf hashing,
+> `merkle_pub_key`, `MLSCProof` structure, `VerifyMLSCProof`
+> verification flow, coil layout, security properties of the Merkle
+> construction, and the relevant constants — lives in
+> [`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md). This doc references
+> it rather than restating it.
 
 ---
 
-## Design
+## 1. Overview
 
-### Transaction format (v4 RUNG_TX with TX_MLSC)
+A v4 RUNG_TX commits one shared MLSC `conditions_root` per transaction
+(prefix byte `0xDF`). Each output is just a value (8 bytes on the
+wire); the spending conditions are recovered from the commitment at
+spend time via the `MLSCProof` carried in each input's witness
+`stack[1]`. Each rung's coil declares which output it governs — the
+output-to-rung binding is cryptographic (committed in the Merkle leaf
+hash via the structural template), not a stored bitmask.
+
+This is the PLC model applied to Bitcoin outputs: one ladder program
+per transaction, multiple output coils.
+
+---
+
+## 2. Wire Format
 
 ```
-nVersion:           int32 (= 4)
+nVersion:           int32 (= 4, RUNG_TX_VERSION)
 dummy:              uint8 (= 0x00)
 flags:              uint8 (= 0x02, TX_MLSC + witness)
 vin_count:          varint
@@ -54,275 +53,91 @@ aggregated_sig[]:   FALCON-512 coordinator signature (1..666 B when present)
 nLockTime:          uint32
 ```
 
-The structural templates + value commitments per rung are reconstructed
-from each spending input's `MLSCProof`; they are not laid out as a
-separate top-level field. This matches `primitives/transaction.h:213-265`.
+**Source**: `primitives/transaction.h:213-265`.
 
-### Output format
+### Output encoding
 
 ```
 nValue:    int64    (8 bytes, little-endian satoshi amount)
 ```
 
-8 bytes per output. No scriptPubKey. No MLSC root. No rung_mask.
+Each non-DATA_RETURN output is exactly 8 bytes on the wire. No
+scriptPubKey, no MLSC root, no rung_mask. Consensus requires
+`nValue >= MIN_RUNG_OUTPUT_VALUE = 546 sats` for non-DATA_RETURN
+outputs.
 
-Consensus: nValue >= MIN_RUNG_OUTPUT_VALUE (546 sats) for non-DATA_RETURN.
+### DATA_RETURN encoding
 
-### DATA_RETURN outputs
-
-DATA_RETURN is identified by nValue == 0 (only DATA_RETURN outputs may
-have zero value):
+DATA_RETURN is signalled wire-side by `nValue == 0` (the only legal
+zero-value output type in v4). The deserialiser then reads:
 
 ```
 nValue:      int64    (must be 0)
-payload_len: varint   (0-40 bytes)
-payload:     bytes
+data_len:    varint   (1-40 bytes)
+data:        bytes
 ```
 
-Maximum 1 DATA_RETURN output per transaction.
+On deserialisation the output is reconstructed as
+`CTxOut(0, 0xDF || conditions_root || data)`. Maximum 1 DATA_RETURN
+per transaction (`evaluator.cpp:537`).
 
 ### conditions_root
 
-A 32-byte Merkle root computed from all rung leaves in the shared tree.
-Protocol-derived — not user-supplied. Computed during block validation
-from the creation proof data and verified against the value in the
-transaction body.
+A 32-byte Merkle root over all rung and relay leaves in the shared
+tree. Protocol-derived — not user-supplied. The leaf hashing,
+verification, and proof structure are specified in
+[`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md) §2-§7.
+
+### qabi_block / aggregated_sig
+
+The `qabi_block_len + qabi_block` and `aggregated_sig_len +
+aggregated_sig` fields are zero-length in non-QABIO transactions (the
+common case). For QABIO transactions, `qabi_block` carries the
+coordinator's batch block (entries, output set, sighash binding) and
+`aggregated_sig` carries the FALCON-512 coordinator signature. See
+[`QABIO.md`](QABIO.md) for the QABIO ceremony.
 
 ---
 
-## Shared Condition Tree (PLC Model)
+## 3. Per-tx vs Per-input Validation
 
-All rungs for all outputs live in ONE Merkle tree per transaction. Each
-rung's coil carries an output_index field declaring which output it
-governs. This binding is committed in the Merkle leaf — changing the
-output_index would change the leaf hash, breaking the proof.
+Validation runs at two layers:
 
-```
-Example: 2 outputs, each with a primary and backup rung
+- **Per-tx** (`CheckRungTxLevel` in `validation.cpp:2469`):
+  - `ValidateRungOutputs`: every output is MLSC, ≤ 1 DATA_RETURN,
+    every non-DATA_RETURN output ≥ `MIN_RUNG_OUTPUT_VALUE = 546 sats`.
+  - PREIMAGE / SCRIPT_BODY count across all MLSC-spending inputs is
+    bounded by the per-tx caps (see §6).
+  - `qabi_block` / `aggregated_sig` coherence (length within bounds,
+    FALCON sig parses) when present.
 
-         conditions_root
-        /               \
-    branch_01         branch_23
-    /       \         /       \
-rung_0   rung_1   rung_2   rung_3
-
-rung_0 coil: output_index=0   (SIG Alice → output 0)
-rung_1 coil: output_index=0   (MULTISIG backup → output 0)
-rung_2 coil: output_index=1   (SIG Bob → output 1)
-rung_3 coil: output_index=1   (SIG Carol + CSV → output 1)
-```
-
-Consensus limit: `MAX_RUNGS = 16` rungs per transaction
-(`src/rung/serialize.h`). The witness creation proof is also bounded by
-MAX_LADDER_WITNESS_SIZE and standard transaction weight limits.
-
-### Leaf computation
-
-```
-rung_leaf  = TaggedHash("LadderLeaf/v1",      structural_template || value_commitment)
-relay_leaf = TaggedHash("LadderRelayLeaf/v1", relay_template      || value_commitment)
-```
-
-Where:
-- structural_template: block types, inverted flags, coil (4 B: type/att/scheme/output_index)
-- relay_template:      block types, inverted flags, relay_refs
-- value_commitment:    SHA256(field_values || pubkeys) — 32 bytes, opaque
-
-Relay leaves use a distinct tagged-hash domain (`LadderRelayLeaf/v1`)
-from rung leaves (`LadderLeaf/v1`) so a relay leaf can never alias a
-rung leaf at the same block layout, while folding into the same
-`conditions_root` tree. The coil section of the structural_template is
-exactly 4 bytes (`type / attestation / scheme / output_index`) — there
-is no trailing `has_address` byte.
-
-### Tree construction
-
-Sorted interior nodes (no direction bits):
-
-```
-interior_node = TaggedHash("LadderInternal/v1", min(left, right) || max(left, right))
-```
-
-### Output-to-rung binding
-
-The binding between outputs and rungs is entirely within the Merkle tree:
-
-1. Each rung's coil contains `output_index` (which output this rung governs).
-2. The coil is part of the structural_template, which is part of the leaf hash.
-3. The leaf hash is committed by conditions_root.
-4. At spend time, the verifier reads the revealed rung's coil and checks
-   `output_index` matches the output being spent.
-
-No per-output rung_mask needed. The binding is cryptographic.
-
-An attacker cannot claim a rung for the wrong output — changing the
-output_index would change the leaf hash, which would invalidate the
-Merkle proof against conditions_root.
+- **Per-input** (`VerifyRungTx`):
+  - Witness stack must be 1, 2, or 3 elements.
+  - Key-path (1 element): Schnorr against `conditions_root` as x-only
+    pubkey, sighash via `LadderKeyPathSighash/v1`.
+  - Script-path (2-3 elements): the proof verification and ladder
+    evaluation flow specified in
+    [`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md) §8.
 
 ---
 
-## Creation Proof (per-input)
+## 4. Size and Fee Analysis
 
-"Creation proof" is the conceptual name for the data that rebuilds a
-rung's leaf hash (structural template + value commitment). It does
-**not** appear as a separate top-level field on a v4 RUNG_TX.
-Instead, each spending input's `MLSCProof` (`witness stack[1]`)
-carries the equivalent payload for the rung being revealed plus the
-sibling hashes needed to walk the path to `conditions_root`. The
-shape below describes the per-rung data, not a once-per-tx wire field.
+All vBytes are measured on the live build via the `mlsc_*_size_sweep`
+boost tests in `src/test/rung_tests.cpp` and reproduced in
+[`SIZING.md`](SIZING.md) and [`MEASUREMENTS.md`](MEASUREMENTS.md).
+The numbers below match those tables row-for-row.
 
-### Format
+### Single payment (1 input, 1 output)
 
-```
-n_rungs:    varint (total rungs in the shared tree)
-per rung:
-  structural_template:
-    n_blocks:   varint
-    per block:
-      block_type:  uint16  (must be known — one of 65 types)
-      inverted:    uint8   (0x00 or 0x01, validated per block type)
-    n_relay_refs:  uint8
-    per ref:
-      relay_index: uint16  (LE; must be < n_relays)
-    coil (4 bytes total):
-      coil_type:     uint8 (UNLOCK=0x01, UNLOCK_TO=0x02)
-      attestation:   uint8 (INLINE=0x01; AGGREGATE/DEFERRED reserved)
-      scheme:        uint8
-      output_index:  uint8 (which output this rung governs — must be < vout_count)
-  value_commitment:  32 bytes (SHA256 of field values + pubkeys for this rung)
-```
+| Format | Signature | vBytes | Fee (10 sat/vB) |
+|--------|-----------|--------|-----------------|
+| P2PKH | ECDSA | 192 | 1,920 sats |
+| P2WPKH | ECDSA | 110 | 1,100 sats |
+| P2TR key-path | Schnorr | 111 | 1,110 sats |
+| **TX_MLSC key-path** | **Schnorr** | **109** | **1,090 sats** |
 
-Typical size per rung: ~42 bytes (10 template + 32 commitment) for a
-single-block, no-relay rung. The `n_relay_refs` byte and any relay
-indices are part of the structural template — the spender cannot drop
-relay dependencies at spend time and skip relay enforcement; the leaf
-hash binds them.
-Witness weight: 1 WU per byte.
-
-### Validation
-
-For each v4 transaction:
-
-- **Per-tx (`CheckRungTxLevel` in `validation.cpp:2469`)**:
-  1. `ValidateRungOutputs`: every output must be MLSC (`0xDF` prefix
-     or zero-value DATA_RETURN), at most 1 DATA_RETURN, every
-     non-DATA_RETURN output ≥ `MIN_RUNG_OUTPUT_VALUE = 546 sats`.
-  2. PREIMAGE / SCRIPT_BODY count across all MLSC-spending inputs ≤
-     per-tx caps.
-  3. If `qabi_block` / `aggregated_sig` are present, they must be
-     coherent (length within bounds, FALCON sig parses).
-
-- **Per-input (`VerifyRungTx`)**:
-  1. Read `MLSCProof` from spending input's `witness stack[1]`.
-  2. Validate the revealed rung's structural template: known
-     block_type, valid inverted flag (`IsInvertibleBlockType`),
-     known coil_type / attestation, `output_index < vout_count`.
-  3. Compute the rung_leaf via
-     `TaggedHash("LadderLeaf/v1", template || value_commitment)`,
-     using the witness pubkeys folded in via `merkle_pub_key`.
-  4. Walk the proof_hashes (sibling hashes) from the leaf upward,
-     recomputing the root via the sorted-pair interior hash.
-  5. Verify the computed root equals the transaction's
-     `conditions_root` (or its detweaked form for 3-element witnesses).
-  6. Verify the revealed rung's `coil.output_index` matches the
-     output being spent.
-
-If any check fails: **reject transaction**.
-
----
-
-## UTXO Set
-
-### Entry format
-
-```
-conditions_root:  32 bytes  (shared across all outputs from same tx)
-nValue:            8 bytes  (per output)
-```
-
-The conditions_root is stored once per transaction group. Individual
-entries reference the shared root plus their value.
-
-Effective per entry: 8 bytes + shared root reference.
-
-### Comparison
-
-| | Current per-output MLSC | TX_MLSC |
-|---|---|---|
-| UTXO per entry | mlsc_root(32) + value(8) = 40 bytes | value(8) + shared_root_ref |
-| Attacker data per entry | 32 bytes (unverifiable root) | 0 bytes (protocol-derived root) |
-
----
-
-## Spending
-
-When spending output i from a TX_MLSC transaction:
-
-### Witness stack
-
-```
-stack[0]: LadderWitness    (rung blocks + fields — signatures, pubkeys, preimages)
-stack[1]: MLSCProof        (revealed rung conditions + Merkle proof in shared tree)
-```
-
-Same two-element stack as current. No change to witness structure.
-
-### MLSCProof contents
-
-```
-rung_index:       varint (which rung in the shared tree)
-revealed_rung:    full conditions data (block types, field values, coil)
-n_proof_hashes:   varint
-proof_hashes[]:   32 bytes each (siblings for Merkle path to conditions_root)
-```
-
-The proof_hashes prove the revealed rung is a leaf of conditions_root.
-Depth = ceil(log2(total_rungs)).
-
-### Verification (VerifyRungTx)
-
-1. Read conditions_root from UTXO set (shared root for this tx group).
-2. Deserialize MLSCProof: extract rung_index, revealed rung, proof_hashes.
-3. Read the revealed rung's coil: check `output_index` == the output
-   being spent. If mismatch: **reject**.
-4. Compute rung_leaf from revealed conditions + witness pubkeys
-   (same TaggedHash as creation proof leaf computation).
-5. Walk proof_hashes to compute root. Verify == conditions_root.
-6. Merge conditions with witness (same as current).
-7. Evaluate rung blocks (same as current — all 65 block types unchanged).
-8. If satisfied: spend authorized.
-
-### Proof path reconstruction
-
-The spender needs proof_hashes (sibling nodes in the shared tree). To
-obtain them:
-
-1. Look up the creating transaction from the block database (by txid from
-   the spending input's prevout).
-2. Read the creation proof from the creating tx's witness section.
-3. Extract all structural_templates and value_commitments.
-4. Recompute all rung_leaves.
-5. Build the Merkle tree.
-6. Extract the proof path for the target rung.
-
-This requires one block database read per spend. On modern hardware
-(NVMe SSD): ~0.1ms latency. Negligible.
-
----
-
-## Size and Fee Analysis
-
-### Transaction sizes
-
-Per `MEASUREMENTS.md` row N=2 of the spend-and-relock sweep, a
-1-in / 2-out RUNG_TX (key-path spend, one MLSC output and a change
-output) measures **127 vB** total. The implementation does not lay
-out a separate per-tx creation_proof — the equivalent data is rebuilt
-per spending input from `stack[1] MLSCProof` (just the spending
-rung's template + value commitment + sibling hashes for the path to
-the root, not all rungs).
-
-### Full comparison — simple payment (1 in, 2 out)
+### Standard payment (1 input, 2 outputs)
 
 | Format | Signature | vBytes | Fee (10 sat/vB) |
 |--------|-----------|--------|-----------------|
@@ -332,9 +147,7 @@ the root, not all rungs).
 | **TX_MLSC key-path** | **Schnorr** | **127** | **1,270 sats** |
 | TX_MLSC script-path (no tweak) | Schnorr | 148 | 1,480 sats |
 
-### Batch payment comparison (1 in, N MLSC outputs)
-
-Per `MEASUREMENTS.md` table 2 / `SIZING.md` table 2:
+### Batch payment (1 input, N MLSC outputs)
 
 | Outputs | P2WPKH | P2TR | **TX_MLSC** | Saving vs P2WPKH |
 |---------|--------|------|-------------|------------------|
@@ -342,318 +155,186 @@ Per `MEASUREMENTS.md` table 2 / `SIZING.md` table 2:
 | 10 | 389 vB | 499 vB | **191 vB** | 51% |
 | 100 | 3,179 vB | 4,369 vB | **911 vB** | 71% |
 
-TX_MLSC is the cheapest format for 2+ MLSC outputs. For 100 outputs,
-**71% cheaper than P2WPKH** and **79% cheaper than P2TR**.
+TX_MLSC is the cheapest format for 2+ MLSC outputs. At N=100, **71%
+cheaper than P2WPKH** and **79% cheaper than P2TR**.
 
 ### Per-output asymptote
 
-Per `SIZING.md`, the per-output marginal cost asymptotes to ~8 vB
-(MLSC) vs ~31 vB (P2WPKH) and ~43 vB (P2TR) — a 4-5× per-output
-saving at large N.
+Per-output marginal cost asymptotes to ~8 vB (TX_MLSC) vs ~31 vB
+(P2WPKH) and ~43 vB (P2TR) — a 4-5× per-output saving at large N.
 
-Note: post-quantum signatures (FALCON-512, Dilithium3, etc.) are
-supported via the SCHEME byte but produce larger witnesses due to
-larger signature and key sizes. The `PQ_BATCH` and `QABIO` blocks
-amortise PQ signature cost across N inputs (see [`PQ_BATCH_SPEC.md`]
-(PQ_BATCH_SPEC.md) and [`QABIO.md`](QABIO.md)).
+### Chainstate per coin
 
----
+Per `MERKLE-UTXO-SPEC.md` §11 (Chainstate Compression): TX_MLSC coins
+compress to **3 bytes** in chainstate, vs 24 B (P2WPKH) and 36 B
+(P2TR) — 8-12× smaller per coin. The 32-byte `conditions_root` is
+stored once per transaction in the synthetic UTXO entry at
+`(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`.
 
-## Security Analysis
+### Post-quantum
 
-### Attack 1: Embed readable data in conditions_root
-
-**Method:** Put a chosen 32-byte message as conditions_root.
-
-**Defense:** conditions_root is protocol-derived. The node recomputes it
-from validated templates + value_commitments and checks it matches.
-Attacker cannot supply an arbitrary root.
-
-Root = MerkleRoot(TaggedHash(template_i || SHA256(values_i || pubkeys_i))).
-To embed a specific message requires a preimage attack on nested SHA256.
-**Infeasible (2^256 work).**
-
-### Attack 2: Embed readable data in value_commitments
-
-**Method:** Control value_commitment bytes in the creation proof witness.
-
-**Defense:** value_commitment = SHA256(field_values || pubkeys). Hash
-output. To embed a specific 32-byte message requires a preimage attack.
-**Infeasible (2^256 work).**
-
-### Attack 3: Embed readable data in structural templates
-
-**Method:** Encode data in block_type choices and flags.
-
-**Defense:** Validated enums. block_type must be one of 65 values (~6 bits
-freedom), inverted must be 0/1 (1 bit), coil fields are constrained enums.
-~4 bits of steganographic freedom per rung. At MAX_RUNGS = 16 rungs per
-tx: ~8 bytes, not readable without attacker's codebook. **Negligible.**
-
-### Attack 4: Skip creation proof
-
-**Defense:** Consensus rejects. **Blocked.**
-
-### Attack 5: Mismatched creation proof
-
-**Defense:** Root recomputed and compared. Mismatch = reject. **Blocked.**
-
-### Attack 6: Valid but unspendable outputs
-
-**Method:** Valid templates with random pubkey in value_commitment.
-
-**Defense:** Economically constrained:
-- 546 sats burned per output (consensus dust)
-- 0 readable bytes (root and commitments are hash outputs)
-- Same as Taproot output to random key
-
-**Residual risk:** UTXO bloat from unspendable outputs. Defense is economic.
-
-### Attack 7: Forge creation proof (collision)
-
-**Defense:** Requires SHA256 collision (2^128 work). **Infeasible.**
-
-### Attack 8: Spend wrong output (rung mismatch)
-
-**Method:** Reveal a rung whose coil says output_index = 0 while spending
-output 1.
-
-**Defense:** Verifier reads coil.output_index from the revealed rung and
-checks it matches the output being spent. The coil is committed in the
-leaf hash → committed in conditions_root. Cannot be forged. **Blocked.**
-
-### Attack 9: Output with no assigned rungs
-
-**Method:** Create an output that no rung's coil points to. Output is
-unspendable (no rung can authorize it).
-
-**Defense:** Creation proof validation (step 6) requires every
-non-DATA_RETURN output to have at least one rung assigned. **Blocked.**
-
-### Attack 10: Multi-input preimage embedding
-
-**Existing defense:** MAX_PREIMAGE_FIELDS_PER_TX = 2. **64 bytes/tx.**
-
-### Attack 11: DATA_RETURN payload
-
-**Existing defense:** Max 1 per tx, max 40 bytes, zero value. **Bounded.**
+PQ signatures (FALCON-512, FALCON-1024, Dilithium3, SPHINCS+) are
+supported via the SCHEME byte. Per-input PQ signatures inflate the
+witness; the `PQ_BATCH` and `QABIO` blocks amortise that cost across
+N inputs (see [`PQ_BATCH_SPEC.md`](PQ_BATCH_SPEC.md) and
+[`QABIO.md`](QABIO.md) for amortised vB tables).
 
 ---
 
-## Privacy Analysis
+## 5. Privacy Analysis
 
 ### What is visible at creation time
 
-| Data | Visible | Content |
-|------|---------|---------|
-| Block types per rung | Yes | SIG, CSV, MULTISIG, CTV, etc. |
-| Inverted flags | Yes | Which blocks are negated |
-| Coil type and attestation | Yes | UNLOCK/UNLOCK_TO, INLINE only |
-| Output assignments | Yes | Which rung governs which output |
-| Rung count per output | Yes | Number of spending paths |
-| Field values | **No** | Hidden in value_commitment |
-| Pubkeys / key identities | **No** | Hidden in value_commitment |
-| Hash commitments | **No** | Hidden in value_commitment |
-| Timelock values | **No** | Hidden in value_commitment |
+| Data | Visible | Notes |
+|------|---------|-------|
+| Output values | Yes | 8 bytes each, on the wire |
+| `conditions_root` | Yes | 32 bytes, protocol-derived |
+| Number of outputs | Yes | varint count |
+| Number of rungs | No | Hidden inside the Merkle tree |
+| Block types per rung | No | Revealed only on spend |
+| Field values | No | Hidden in `value_commitment` until spend |
+| Pubkeys / key identities | No | Folded into the leaf hash via `merkle_pub_key`, never on-chain at fund time |
+| Hash commitments | No | Hidden in `value_commitment` |
+| Timelock values | No | Hidden in `value_commitment` |
 
 ### What is visible at spend time
 
-Only the exercised rung's full conditions (block types, field values) and
-pubkeys. All other rungs remain hidden behind their value_commitments.
+Only the exercised rung's full conditions (block types, field values)
+and the witness pubkeys feeding `merkle_pub_key`. All other rungs
+remain hidden behind their leaf hashes (revealed only as `proof_hashes`
+in the `MLSCProof`).
 
-### Privacy position
+### Position
 
-Structure visible, identity hidden. Comparable to Taproot script-path
-spend (which reveals the script structure). The sensitive data — who
-controls the funds — remains private until spend time.
-
----
-
-## Impact on Existing Systems
-
-### Block types and evaluator
-
-**No change.** All 65 block types, evaluation semantics, rung AND/OR logic,
-coil processing, inversion — all identical. The evaluator receives merged
-conditions + witness and evaluates exactly as today.
-
-### Descriptor notation
-
-**Extended.** Descriptors describe the transaction's condition set with
-output assignments:
-
-```
-ladder(
-  output(0,
-    or(
-      and(sig(@alice), csv(144)),
-      multisig(2, @a, @b, @c)
-    )
-  ),
-  output(1,
-    sig(@bob)
-  )
-)
-```
-
-### RPC commands
-
-- **signrungtx / signladder:** Generate creation proof alongside tx.
-  The node already has templates and values — just new serialization.
-- **createrungtx:** New output format (value only, no scriptPubKey).
-- **decoderungtx:** Display shared tree, creation proof, rung assignments.
-
-### MLSC Merkle tree (conditions.cpp)
-
-**Same algorithm.** Sorted interior nodes, TaggedHash. Leaf data changes
-from (full_rung_data || pubkeys) to (template || value_commitment).
-Tree construction code is identical.
-
-### Sighash computation
-
-**Minor change.** Sighash includes Hash(conditions_root || output_values)
-instead of Hash(output_scriptPubKeys).
-
-### Witness reference / diff witness
-
-**Works.** Multiple inputs from the same creating tx share conditions_root.
-Witness references are more natural with the shared tree.
-
-### Block validation performance
-
-Per tx: R template validations (table lookups) + R SHA256 (leaf hashes) +
-(R-1) SHA256 (tree construction) + 1 comparison.
-
-2-rung tx: ~4 SHA256 ops. 100-rung tx: ~200 SHA256 ops. Negligible.
-
-### Pruning
-
-Creation proof is witness data — prunable after validation. Spenders
-reconstruct proof paths from the creating tx (block database read).
-
-### Light clients / SPV
-
-No effect. Light clients trust full nodes validated creation proofs,
-same as signatures.
-
-### Backward compatibility
-
-There is no pre-activation TX_MLSC format. v4 RUNG_TX ships TX_MLSC as
-the only valid output format from genesis activation; the per-output
-MLSC root layout that earlier drafts described was rejected during
-review (it duplicated 32 B per output and exposed an attacker-supplied
-root in the UTXO set). The legacy P2*_LEGACY block family remains the
-compatibility surface for pre-v4 outputs.
+Structure visible, identity hidden. Comparable to a Taproot
+script-path spend (which reveals the script structure), except
+applied uniformly across every output of the transaction rather than
+per-output. The sensitive data — who controls the funds, which
+spending paths exist — remains private until each path is taken.
 
 ---
 
-## Residual Embeddable Surface
+## 6. Embedding Surface
 
-### At creation time
+The protocol bounds attacker-controllable bytes per transaction but
+does not zero them — every commit-reveal scheme is structurally the
+same in this respect (P2WSH commits 32 B per output, P2TR commits 32 B
+per output, TX_MLSC commits 32 B per tx).
 
-| Channel | Bytes | Readable? |
-|---------|-------|-----------|
-| conditions_root | 32 | No — protocol-derived, triple-hashed |
-| value_commitments (witness) | 32/rung | No — SHA256 output |
-| structural templates (witness) | ~10/rung | No — validated enums |
-| output values | 8/output | No — constrained by dust (546 sats) |
-| DATA_RETURN | 40 max | Yes — intentional, bounded |
-| nLockTime | 4 | Yes — standard Bitcoin field |
-| nSequence per input | 4/input | Yes — standard Bitcoin field |
+Per-tx caps relevant at the transaction level:
 
-**Readable attacker data at creation: 48 bytes per transaction (flat).**
+| Channel | Per-instance | Per-tx cap | Notes |
+|---------|--------------|------------|-------|
+| `conditions_root` | 32 B | 1 per tx | Protocol-derived, recomputed and compared on spend |
+| `DATA_RETURN` block | up to 40 B | 1 block per tx | Zero-value output, payload is the application-defined commitment |
+| `PREIMAGE` (witness) | up to 32 B | `MAX_PREIMAGE_FIELDS_PER_TX = 2` | Hash-bound to a HASH256 in conditions |
+| `SCRIPT_BODY` (witness) | up to 80 B | `MAX_SCRIPT_BODY_FIELDS_PER_TX = 1` | Hash-bound, used by legacy P2SH/P2WSH/P2TR_SCRIPT wrappers |
+| `qabi_block` (QABIO only) | up to 262,144 B | 1 per tx | Bounded by `QABI_BLOCK_MAX_HARD`; consensus-checked against the per-input committed root |
+| `aggregated_sig` (QABIO only) | up to 666 B | 1 per tx | FALCON-512 coordinator sig, bounded by `QABI_AGGREGATED_SIG_MAX` |
+| MLSC proof sibling hashes | 32 B per sibling | depth ≤ log₂(`MAX_RUNGS`) = 4 per input | Each sibling hashes an attacker-chosen subtree; bound by tree depth |
+| `nLockTime` + `nSequence` | 4 + 4 per input | standard Bitcoin | Inherited from base tx format |
 
-### At spend time
-
-| Channel | Bytes | Readable? |
-|---------|-------|-----------|
-| PREIMAGE fields | 64/tx max | Yes — hash-bound |
-| Conditions HASH256 | ~32/block | Yes — revealed in MLSC proof |
-| Nonce grinding | ~3/sig | Yes — unfixable |
-
-### Comparison with all formats
-
-| Format | Creation readable | Witness readable | UTXO spam |
-|--------|-------------------|------------------|-----------|
-| P2TR (Taproot) | 34 bytes/output | ~400,000 bytes/input | 34 bytes/output (unverifiable) |
-| Per-output MLSC (current) | 32 bytes/output | ~117 bytes/tx | 32 bytes/output (unverifiable) |
-| **TX_MLSC** | **48 bytes/tx (flat)** | **~117 bytes/tx** | **0 readable bytes** |
+The MLSC-primitive level caps (per-block field counts, leaf-side
+pubkey embedding, `IsDataEmbeddingType` rejection rules) live in
+[`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md) §11. Full empirical
+analysis in [`EMBEDDING_CHALLENGE.md`](EMBEDDING_CHALLENGE.md).
 
 ---
 
-## Implementation Checklist
+## 7. Impact on Existing Systems
 
-### Core (serialize.h / serialize.cpp / conditions.cpp / evaluator.cpp)
+| System | Change |
+|--------|--------|
+| Block types and evaluator | **No change.** All 65 block types and the AND-within-rung / OR-across-rungs evaluator are version-agnostic. |
+| Sighash | **Two new tagged hashes** (`LadderSighash/v1`, `LadderKeyPathSighash/v1`) for v4 only. Pre-v4 sighash unchanged. |
+| Descriptor language | **Extended** with the `output()` wrapper that maps each output index to its rung set. |
+| RPC | New `createrungtx` / `signrungtx` / `signladder` / `parseladder` / `formatladder` etc. — see [`RPC_REFERENCE.md`](RPC_REFERENCE.md). Existing RPCs unchanged. |
+| MLSC Merkle tree | New code path under `src/rung/conditions.cpp`; not invoked by pre-v4 tx validation. |
+| Witness reference / diff witness | Cross-input diff witnesses share the same `conditions_root` — see [`MERKLE-UTXO-SPEC.md`](MERKLE-UTXO-SPEC.md) §14. |
+| Block validation performance | Per tx: R template validations + R SHA256 (leaf hashes) + (R-1) SHA256 (tree) + 1 comparison. 100-rung tx ≈ 200 SHA256 ops — negligible. |
+| Pruning | Spending-side `MLSCProof` lives in the witness — prunable after validation. |
+| Light clients / SPV | No effect — light clients trust full nodes' verification, same as signatures. |
+| Backwards compatibility | v4 RUNG_TX is additive; v1/v2/v3 transactions continue to work unchanged. The Legacy block family (P2PK_LEGACY..P2TR_SCRIPT_LEGACY) provides the bridge for pre-v4 outputs. |
 
-- [x] Transaction serialization: conditions_root field, 8-byte output format
-- [x] DATA_RETURN detection via nValue == 0 (no rung_mask sentinel needed)
-- [x] CreationProof struct and deserialization
-- [x] ValidateCreationProof: template checks + root recomputation
-- [x] Verify every output has at least one rung (coil.output_index coverage)
-- [x] UTXO set: shared conditions_root + per-entry value
-- [x] VerifyRungTx: check coil.output_index matches spent output
-- [x] Leaf computation: TaggedHash("LadderLeaf/v1", template || value_commitment)
-- [x] Sighash: Hash(conditions_root || output_values)
+---
 
-### RPC (rpc.cpp)
+## 8. Implementation Checklist
 
-- [x] signrungtx: generate creation proof from conditions
-- [x] signladder: generate creation proof from descriptor
-- [x] createrungtx: new output format (value only)
-- [x] decoderungtx: display shared tree + creation proof + output assignments
+Reference items, ticked against the canonical
+`bitcoin-core-ladder-script` repository:
 
-### Descriptor (descriptor.cpp / descriptor.h)
+### Core integration (`src/rung_shims.h` + ~1,600-line patch across 32 modified files)
 
-- [x] output() wrapper in descriptor grammar
-- [x] parseladder: per-output rung assignment
-- [x] formatladder: emit output() wrappers
+- [x] Transaction serialisation: `conditions_root` field, 8-byte
+  output format, `qabi_block` + `aggregated_sig` tail.
+- [x] DATA_RETURN detection via `nValue == 0` (no separate sentinel).
+- [x] UTXO set: synthetic root entry at
+  `(txid, MLSC_ROOT_VOUT = 0xFFFFFFFF)`, prefix byte `0xDE`
+  (compressor-resistant).
+- [x] Compressor type `0x06` → 1-byte SPK marker for MLSC coins.
+- [x] `CheckRungTxLevel` per-tx hook (`validation.cpp:2469`).
+- [x] `VerifyRungTx` per-input (script verification, key-path /
+  script-path dispatch, MLSCProof verification).
+
+### MLSC primitive (`src/rung/conditions.{h,cpp}`)
+
+- [x] Tagged-hash domains (`LadderLeaf/v1`, `LadderInternal/v1`,
+  `LadderRelayLeaf/v1`).
+- [x] `BuildMerkleTree` with sorted-pair interior and `MLSC_EMPTY_LEAF`
+  padding.
+- [x] `MLSCProof` (de)serialisation in three modes (FULL_LEAVES /
+  MERKLE_PATH / SHARED).
+- [x] `VerifyMLSCProof` with optional `MLSCVerifiedLeaves` capture for
+  covenant evaluators.
+- [x] `ExtractBlockPubkeys` / `merkle_pub_key` fold.
+- [x] LadderTweak / `CheckLadderTweak` for key-path enablement.
+
+### RPC + descriptor (`src/rung/rpc.cpp`, `src/rung/descriptor.{h,cpp}`)
+
+- [x] `createrungtx` builds v4 transactions with the shared-tree shape.
+- [x] `signrungtx` / `signladder` produce per-input `MLSCProof` in
+  witness `stack[1]`.
+- [x] `parseladder` / `formatladder` round-trip the descriptor with
+  `output()` wrappers.
 
 ### Tests
 
-- [x] Creation proof: valid accepted
-- [x] Creation proof: missing rejected
-- [x] Creation proof: root mismatch rejected
-- [x] Creation proof: invalid block type rejected
-- [x] Creation proof: invalid inversion rejected
-- [x] Creation proof: output_index out of range rejected
-- [x] Creation proof: output with no rungs rejected
-- [x] Spend: coil output_index mismatch rejected
-- [x] Spend: valid Merkle proof accepted
-- [x] Spend: invalid Merkle proof rejected
-- [x] Spend from 1-output TX_MLSC (degenerate tree, 0 proof hashes)
-- [x] Spend from 10-output TX_MLSC (deep tree)
-- [x] Attestation mode enforcement (INLINE only, AGGREGATE/DEFERRED reserved)
-- [x] DATA_RETURN handling (nValue == 0)
-- [x] Dust threshold enforcement (nValue >= 546 for non-DATA_RETURN)
-- [x] MAX_PREIMAGE_FIELDS_PER_TX enforcement
-- [x] Spam: root not embeddable (protocol-derived)
-- [x] Spam: value_commitment not embeddable (hash output)
-- [x] Performance: validation overhead benchmark
+- [x] Positive vector fixtures (`rung_tx_vectors.json`, 68 vectors)
+  covering ~25 block types across the eight witness-rule families.
+- [x] Negative vectors (`rung_tx_neg_vectors.json`, 76 vectors).
+- [x] Fund+spend vectors (`rung_tx_spend_vectors.json`, 26 vectors).
+- [x] Sizing sweeps (`mlsc_creation_tx_size_sweep`,
+  `mlsc_spend_tx_size_sweep`, `mlsc_spend_path_sweep`,
+  `mlsc_utxo_storage_size`, `qabi_tx_size_sweep`).
+- [x] Anti-spam coverage (`feature_rung_anti_embedding`).
+- [x] Cross-rung mutation, RECURSE_* covenant, and TLA+ specs (27
+  models under `spec/`).
 
 ---
 
-## Open Questions
+## 9. Open Questions
 
-1. **Tree ordering.** Should rungs be ordered by output (all output 0 rungs
-   first, then output 1) or by creation order? Output-grouped ordering
-   means spending output 0 has shorter proofs (its rungs are adjacent in
-   the tree). Creation order is simpler. Recommendation: output-grouped.
+1. **Tree leaf ordering.** The current canonical order is
+   `[rung_leaf[0..N-1], relay_leaf[0..M-1]]`. Output-grouped ordering
+   (all rungs for output 0 before all rungs for output 1) would
+   shorten typical proof paths but complicates relay positioning.
+   Resolution deferred — current order is locked for v1.0.
 
-2. **Rung sharing.** Can two outputs share a rung? The coil has a single
-   output_index. For shared spending paths (e.g., a MULTISIG backup that
-   covers all outputs), each output needs its own copy of the rung with
-   a different output_index. This is a minor duplication but keeps the
-   model clean. Recommendation: no rung sharing, duplicate if needed.
+2. **Rung sharing across outputs.** Each rung's coil carries a single
+   `output_index`. Two outputs that share spending logic must each
+   carry their own copy of the rung with a different `output_index`.
+   This is a minor duplication. Recommendation: no rung sharing,
+   duplicate if needed; the inner-Merkle-pubkey commitment in
+   MULTISIG already provides the equivalent of rung-sharing for the
+   most common case (N-of-M shared signers).
 
-3. **Maximum rungs per transaction.** Resolved: `MAX_RUNGS = 16`
-   (`src/rung/serialize.h`). The 16-rung cap covers every realistic
-   condition graph (per `examples/` and `tests/functional/feature_rung_*.py`)
-   while keeping the creation-proof witness and DoS surface bounded.
+3. **Activation parameters.** The deployment bit, start time, and
+   timeout are out of scope for this BIP. They will be specified in
+   a separate activation document at the time of mainnet proposal.
 
-4. **Activation.** v4 RUNG_TX activates as a single soft fork; TX_MLSC
-   ships as the only valid output format. There is no per-output MLSC
-   compatibility path — pre-v4 spends use the dedicated P2*_LEGACY
-   block family inside a v4 envelope.
+4. **`UNLOCK_TO` coil type.** Reserved (`0x02`) but not yet wired to
+   any consensus check. A future wire-format upgrade may bind output
+   structure on-chain via a CTV-style template hash on the coil.
 
 ---
 
