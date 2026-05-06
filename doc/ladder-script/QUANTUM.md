@@ -155,7 +155,7 @@ ladder(or(
 ))
 ```
 
-- **Rung 0:** Schnorr signature. Cheap (109 vB key-path or 124 vB script-path).
+- **Rung 0:** Schnorr signature. Cheap (109 vB key-path or 148 vB script-path no-tweak).
   Use this while quantum computers don't exist.
 - **Rung 1:** FALCON-512 signature. Quantum-safe. Larger witness
   (variable, up to 666 B sig + 897 B pubkey) but protects against
