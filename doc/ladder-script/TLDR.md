@@ -13,13 +13,14 @@ Live on signet today. Post-quantum signatures verified on-chain.
 | Transaction Type | P2PKH | P2WPKH | P2TR | **Ladder Script** |
 |-----------------|-------|--------|------|-------------------|
 | Key-path spend (1-in, 1-out) | 192 vB | 110 vB | 111 vB | **109 vB** |
-| Standard payment (1-in, 2-out) | 226 vB | 143 vB | 157 vB | **118 vB** |
-| Script-path spend | — | — | ~170 vB | **124 vB** |
+| Standard payment (1-in, 2-out) | 226 vB | 141 vB | 155 vB | **127 vB** |
+| Script-path spend (1-in, 1-out) | — | — | 129 vB | **148 vB** |
 | 10-output batch | — | 389 vB | 499 vB | **191 vB** |
 | 100-output batch | — | 3,179 vB | 4,369 vB | **911 vB** |
 
-Script-path spends are smaller than P2WPKH key-path spends.
-One signature covers all outputs — 100 outputs, one sig.
+Key-path matches P2WPKH at the simplest case, then wins as soon as fan-out
+starts (MLSC overtakes P2WPKH at N=2 outputs). One MLSC scriptPubKey covers
+all outputs &mdash; 100 outputs, 1 shared `conditions_root`.
 
 ## UTXO Footprint
 
