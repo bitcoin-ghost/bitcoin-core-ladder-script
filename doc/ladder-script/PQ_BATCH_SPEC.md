@@ -42,9 +42,11 @@ The committed hash is `SHA256(canonical_falcon_pubkey_encoding)`. Fund time comm
 At spend, the **anchor input** (exactly one input in the tx) carries:
 
 ```cpp
-[PREIMAGE (falcon_pubkey_bytes, variable 897B for F-512 / 1793B for F-1024 / 1952B for Dilithium3),
- SIGNATURE (falcon_sig_bytes, variable 666B for F-512 / 1280B for F-1024 / 3293B for Dilithium3)]
+[PUBKEY    (falcon_pubkey_bytes, canonical 897 B for F-512 / 1793 B for F-1024 / 1952 B for Dilithium3),
+ SIGNATURE (falcon_sig_bytes, variable 1..666 B for F-512 / 1..1280 B for F-1024 / 3293 B fixed for Dilithium3)]
 ```
+
+The on-block field shape after `MergeConditionsAndWitness` is therefore `[HASH256, PUBKEY, SIGNATURE]` (3 fields) for the anchor and `[HASH256]` (1 field) for non-anchors — `EvalPQBatchBlock` pins these two exact shapes (E-020 / E-021).
 
 Every **other** `PQ_BATCH`-gated input with the **same** `HASH256` just carries its MLSC proof — no per-input witness cost beyond the proof path.
 
@@ -53,16 +55,19 @@ Every **other** `PQ_BATCH`-gated input with the **same** `HASH256` just carries 
 ```
 EvalPQBatch(block, ctx):
     commit = FindField(block, HASH256)  // 32 bytes
-    if block has witness PREIMAGE + SIGNATURE:
-        // This input is the anchor.
-        if SHA256(preimage) != commit: return UNSATISFIED
-        if !PQVerify(preimage_as_pubkey, ctx.tx.sighash, signature): return UNSATISFIED
-        // Cache (commit, tx_sighash, verified=true) in ctx for siblings.
-        cache_set(commit, verified)
+    pubkey = FindField(block, PUBKEY)
+    sig    = FindField(block, SIGNATURE)
+    if pubkey && sig:
+        // This input is the anchor (3-field shape).
+        if SHA256(pubkey) != commit: return UNSATISFIED
+        scheme = derive_scheme_from_pubkey_size(pubkey)   // 897/1793/1952 → F-512/F-1024/Dilithium3
+        if !PQVerify(scheme, pubkey, ctx.tx.sighash, sig): return UNSATISFIED
+        // Cache verified verdict by commit for sibling inputs.
+        cache_set(commit, verified=true)
         return SATISFIED
     else:
-        // Non-anchor input — look up the cache.
-        if cache_get(commit) == verified: return SATISFIED
+        // Non-anchor input (1-field shape) — look up the cache.
+        if cache_get(commit) == true: return SATISFIED
         return UNSATISFIED
 ```
 
