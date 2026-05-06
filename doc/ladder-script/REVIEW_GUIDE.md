@@ -12,8 +12,8 @@ Ladder Script ships as two distinct things:
 
 | Artefact | LOC | Scope | Reviewer doc |
 |----------|-----|-------|--------------|
-| **Core Integration Patch** | ~1,600 (insertions) | 32 modified Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
-| **Ladder Library** | ~21,900 | Self-contained module: 38 files under `src/rung/` (~21,600 LOC) plus the `src/rung_shims.h` boundary header (363 LOC) | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
+| **Core Integration Patch** | ~1,300 (+1,237/-69 vs `v30.0`) | 31 modified Bitcoin Core files (`src/primitives/`, `src/script/`, `src/validation.*`, `src/policy/`, `src/coins.*`, `src/compressor.*`, `src/core_write.cpp`, `src/core_read.cpp`, `src/key.*`, `src/pubkey.*`, `src/rpc/*`, `src/undo.h`, `src/wallet/feebumper.h`, `src/wallet/rpc/spend.cpp`) | [`ANNOTATED_DIFF.md`](ANNOTATED_DIFF.md) |
+| **Ladder Library** | ~21,900 | Self-contained module: 37 files under `src/rung/` (21,506 LOC) plus the `src/rung_shims.h` boundary header (363 LOC) | [`ANNOTATED_LIBRARY.md`](ANNOTATED_LIBRARY.md) and this document |
 
 No existing Bitcoin Core function signatures change. The `CScriptCheck` constructor
 gains four defaulted parameters (block height + three per-tx cache `shared_ptr`s); every
@@ -145,7 +145,7 @@ Every file entry below uses this structure:
 
 # Part 3 — Consensus Surface (load-bearing)
 
-## `src/rung/evaluator.h` (406 LOC) / `evaluator.cpp` (1704 LOC)
+## `src/rung/evaluator.h` (406 LOC) / `evaluator.cpp` (1730 LOC)
 
 - **Purpose**: top-level validation. This is the entry point Bitcoin Core calls to
   validate a v4 input.
@@ -158,7 +158,7 @@ Every file entry below uses this structure:
   - `EvalBlock(...)` — dispatches to the registered evaluator for the block's type.
   - `ApplyInversion(...)` — only valid for types in `IsInvertibleBlockType`; UNKNOWN
     inverted becomes ERROR (fail-closed).
-  - Per-tx checks (run once per v4 tx via `validation.cpp:2406`; redundant
+  - Per-tx checks (run once per v4 tx via `validation.cpp:2469`; redundant
     safety net inside the evaluator on `input_index == 0`):
     `ValidateRungOutputs` (all outputs must be MLSC, max 1 DATA_RETURN, dust
     threshold), creation proof (3+ outputs), PREIMAGE / SCRIPT_BODY count
@@ -180,7 +180,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: diagnostic `LogPrintf` calls on error paths help debugging
   but are not consensus-critical. They can be removed or gated behind a category.
 
-## `src/rung/conditions.h` (401 LOC) / `conditions.cpp` (1384 LOC)
+## `src/rung/conditions.h` (401 LOC) / `conditions.cpp` (1389 LOC)
 
 - **Purpose**: MLSC (Merkle Ladder Script Conditions) — the output format and Merkle
   tree. Leaves commit to rung structure + value_commitment. `ComputeValueCommitment`
@@ -211,7 +211,7 @@ Every file entry below uses this structure:
     covenants with cross-rung mutation (RECURSE_MODIFIED pointing at non-self rungs) are
     in scope.
 
-## `src/rung/serialize.h` (174 LOC) / `serialize.cpp` (1130 LOC)
+## `src/rung/serialize.h` (174 LOC) / `serialize.cpp` (1141 LOC)
 
 - **Purpose**: wire format for `LadderWitness` (the per-input witness stream). Handles
   serialization and fail-closed deserialization of blocks, rungs, relays, and the
@@ -260,7 +260,7 @@ Every file entry below uses this structure:
     them via the x-only tweak, so including them again is redundant and creates a
     cross-protocol signing-oracle risk.
 
-## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (126 LOC) / `block_helpers.cpp` (613 LOC)
+## `src/rung/block_dispatch.h` (81 LOC) / `block_helpers.h` (126 LOC) / `block_helpers.cpp` (648 LOC)
 
 - **Purpose**: registry + helpers. Every block evaluator self-registers via
   `RegisterBlock(type, fn)`; `LookupBlockEvaluator(type)` returns it. Helpers:
@@ -347,7 +347,7 @@ Every file entry below uses this structure:
   base blocks at larger witness cost. Compound encoding is a size optimisation with its
   own implicit layout.
 
-## `src/rung/blocks/plc.cpp` (432 LOC)
+## `src/rung/blocks/plc.cpp` (437 LOC)
 
 - **Purpose**: Programmable Logic Controller family — HYSTERESIS_FEE, HYSTERESIS_VALUE,
   TIMER_CONTINUOUS, TIMER_OFF_DELAY, LATCH_SET, LATCH_RESET, COUNTER_DOWN, COUNTER_PRESET,
@@ -395,9 +395,9 @@ Every file entry below uses this structure:
 - **Purpose**: QABIO (Quantum-resistant Authenticated Batch Input Output) blocks —
   `QABI_PRIME`, `QABI_SPEND`. Enables PQ-safe batch payout patterns.
 - **Optional / removable**: the whole file + the corresponding `src/rung/qabi.{h,cpp}`
-  (~649 LOC) + the descriptor parser's qabi path + the `QABI*` error codes are gated
-  behind `LADDER_ENABLE_QABIO`. Remove the define for a minimum-viable BIP that doesn't
-  include QABIO.
+  (763 LOC: 279 + 484) + the descriptor parser's qabi path + the `QABI*` error codes are
+  gated behind `LADDER_ENABLE_QABIO`. Remove the define for a minimum-viable BIP that
+  doesn't include QABIO.
 
 ---
 
@@ -425,7 +425,7 @@ Every file entry below uses this structure:
 - **Optional / removable**: relay-policy tightening (beyond the "all-MLSC" check) is
   implementation choice.
 
-## `src/rung/descriptor.h` (170 LOC) / `descriptor.cpp` (1924 LOC)
+## `src/rung/descriptor.h` (181 LOC) / `descriptor.cpp` (2151 LOC)
 
 - **Purpose**: human-readable descriptor parser. Grammar:
   `ladder(or(rung1, rung2, ...))` with lowercase function-style blocks and optional `!`
@@ -433,13 +433,14 @@ Every file entry below uses this structure:
 - **Optional / removable**: entire file. Developer convenience, never runs in
   consensus. A minimum-viable BIP could ship JSON-only.
 
-## `src/rung/rpc.cpp` (4555 LOC)
+## `src/rung/rpc.cpp` (4857 LOC)
 
-- **Purpose**: 20 JSON-RPC commands across six groups: descriptor authoring
+- **Purpose**: 21 JSON-RPC commands across six groups: descriptor authoring
   (`parseladder`, `formatladder`, `signladder`), construction and signing
   (`createrungtx`, `signrungtx`, `createrung`), inspection
-  (`serialiseconditions`, `decoderung`, `validateladder`, `computemutation`),
-  templates and commitments (`computectvhash`, `pqpubkeycommit`), PQ helpers
+  (`serialiseconditions`, `decoderung`, `validateladder`), templates,
+  commitments and sighash (`computectvhash`, `computemutation`,
+  `computesighash`, `pqpubkeycommit`), PQ / adaptor helpers
   (`generatepqkeypair`, `extractadaptorsecret`, `verifyadaptorpresig`), and
   the QABIO suite (`qabi_buildblock`, `qabi_blockinfo`, `qabi_authchain`,
   `qabi_signqabo`, `qabi_sighash`). Full per-RPC reference in
@@ -471,7 +472,7 @@ consider:
 - `blocks/sig.cpp`, `blocks/timelock.cpp`, `blocks/covenant.cpp` (CTV + AMOUNT_LOCK),
   `blocks/recursion.cpp` (SAME + MODIFIED + UNTIL only), `blocks/anchor.cpp`
   (DATA_RETURN only)
-- Core Integration Patch in full (the 805-LOC delta is already minimum)
+- Core Integration Patch in full (the ~1,300-LOC delta is already minimum)
 
 **Droppable for a conservative first soft-fork**
 - `blocks/plc.cpp` (entire PLC family)
@@ -488,7 +489,7 @@ consider:
 - `rpc.cpp` (developer convenience)
 
 Dropping all droppable components yields approximately **~5,000–6,000 LOC** of library
-code versus the full ~21,900 — the same ~1,600-LOC Core Integration Patch in both cases.
+code versus the full ~21,900 — the same ~1,300-LOC Core Integration Patch in both cases.
 
 ---
 
@@ -569,13 +570,14 @@ constants that drive the run cost).
 Reviewers can re-run:
 
 - **Boost unit tests**: `build/bin/test_bitcoin --run_test=rung_tests` plus
-  `qabi_tests` and `tx_mlsc_tests` — **660 cases total** across the three
-  suites.
+  `tx_mlsc_tests`, `utxo_dedup_tests`, `anchor_fee_type_tests`,
+  `keypath_domain_tests`, and `qabi_tests` — **665 cases total** across the
+  six suites in `src/test/rung_tests.cpp`.
 - **Functional tests**: `test/functional/feature_rung_tx.py`,
   `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`,
   `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`,
-  `feature_qabi.py`, `feature_qabi_size.py` — 8 files, 52 distinct test
-  methods.
+  `feature_qabi.py`, `feature_qabi_size.py` — 8 files, 44 `test_*` methods
+  plus 8 `run_test` drivers.
 - **Preset end-to-end**: `tools/test-presets.py --api <proxy>` — 56 presets
   exercise fund + spend on live signet.
 
