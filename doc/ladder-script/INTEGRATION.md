@@ -313,7 +313,7 @@ The full validation pipeline for a v4 RUNG_TX:
 
 ## RPC Command Reference
 
-The library adds **20 RPCs** across six groups (descriptor authoring, raw construction,
+The library adds **21 RPCs** across six groups (descriptor authoring, raw construction,
 inspection/validation, templates/commitments, PQ helpers, QABIO). Headline commands:
 
 | Command | Purpose |
@@ -323,7 +323,7 @@ inspection/validation, templates/commitments, PQ helpers, QABIO). Headline comma
 | `createrungtx` | Build an unsigned v4 RUNG_TX with shared conditions tree |
 | `signrungtx` | Sign a v4 RUNG_TX (raw path, used internally by `signladder`) |
 | `createrung` / `decoderung` / `validateladder` / `serialiseconditions` | Witness/conditions construction and inspection |
-| `computectvhash` / `computemutation` | Templates and recursive-covenant target hashes |
+| `computectvhash` / `computemutation` / `computesighash` | Templates, recursive-covenant target hashes, and sighash preview |
 | `generatepqkeypair` / `pqpubkeycommit` | PQ key helpers |
 | `extractadaptorsecret` / `verifyadaptorpresig` | Adaptor signature primitives (PTLC) |
 | `qabi_buildblock` / `qabi_blockinfo` / `qabi_authchain` / `qabi_signqabo` / `qabi_sighash` | QABIO ceremony |
