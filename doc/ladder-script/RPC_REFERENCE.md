@@ -1,6 +1,6 @@
 # RPC reference
 
-The Ladder Script library adds **20 RPCs** to Bitcoin Core. They cluster
+The Ladder Script library adds **21 RPCs** to Bitcoin Core. They cluster
 into six groups: descriptor-based authoring (the recommended modern path),
 raw conditions construction, inspection, templates and commitments,
 post-quantum helpers, and the QABIO suite.
@@ -30,6 +30,7 @@ array/object args as JSON strings and the server rejects them.
 | `validateladder`          | Validate every witness on a raw v4 RUNG_TX                                    |
 | `computemutation`         | Compute mutated conditions for `RECURSE_MODIFIED` / `RECURSE_DECAY`           |
 | `computectvhash`          | BIP-119 CTV template hash for a v4 RUNG_TX                                    |
+| `computesighash`          | Compute `LadderSighash/v1` or `LadderKeyPathSighash/v1` for one input         |
 | `pqpubkeycommit`          | SHA256(pubkey) commitment for `PQ_BATCH`                                      |
 | `generatepqkeypair`       | Generate a FALCON-512 / FALCON-1024 / Dilithium3 / SPHINCS+ keypair           |
 | `extractadaptorsecret`    | Extract `t = s_adapted - s_pre` from an adapted signature pair                |
@@ -205,6 +206,31 @@ Compute the BIP-119 `OP_CHECKTEMPLATEVERIFY` template hash for a v4
 RUNG_TX. The hash commits to version, locktime, inputs, outputs, and
 input index. Use this when constructing a CTV block that constrains
 how a created output can later be spent.
+
+### `computesighash`
+
+Compute the v4 RUNG_TX signature hash for a single input. Exposes
+`SignatureHashLadder` (`LadderSighash/v1`, script-path) and
+`SignatureHashLadderKeyPath` (`LadderKeyPathSighash/v1`, key-path) so
+reference (tx, input, conditions) → expected_sighash tuples can be
+produced and consumed by any implementation independently of the C++
+signer path. Useful for cross-implementation sighash conformance
+testing and for previewing what `signladder` / `signrungtx` will sign.
+
+```
+computesighash "hex" input spent_outputs "conditions" [variant] [hash_type]
+```
+
+| Arg             | Type    | Description                                                                                |
+|-----------------|---------|--------------------------------------------------------------------------------------------|
+| `hex`           | string  | Unsigned v4 RUNG_TX hex                                                                    |
+| `input`         | integer | Input index to compute the sighash for                                                     |
+| `spent_outputs` | array   | Outputs being spent (`[{"amount":..., "scriptPubKey":...}, ...]`); count must match `vin`  |
+| `conditions`    | string  | Rung conditions as a JSON array string (same shape as `signrungtx`'s `conditions` arg)     |
+| `variant`       | string  | Optional, default `"ladder"`. Use `"key_path"` for `LadderKeyPathSighash/v1`               |
+| `hash_type`     | integer | Optional sighash type byte, default 0 (`SIGHASH_DEFAULT`)                                  |
+
+**Returns:** `{ "sighash": "<32-byte hex>", "variant": "...", "hash_type": <int> }`.
 
 ### `pqpubkeycommit`
 
