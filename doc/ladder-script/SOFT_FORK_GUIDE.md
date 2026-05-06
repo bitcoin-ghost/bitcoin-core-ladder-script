@@ -279,7 +279,7 @@ time. The following consensus rules bound the structural surface:
 | Suite | Count | Purpose |
 |-------|-------|---------|
 | Unit tests | 665 | All block evaluators, serialisation, Merkle tree, sighash, anti-spam (combined across `rung_tests`, `tx_mlsc_tests`, `utxo_dedup_tests`, `anchor_fee_type_tests`, `keypath_domain_tests`, `qabi_tests` boost suites in `src/test/rung_tests.cpp`) |
-| Functional tests | 8 files / 44 `test_*` methods + 8 `run_test` drivers | End-to-end regtest: create, sign, broadcast, verify v4 transactions (`feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`, `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`, `feature_qabi.py`, `feature_qabi_size.py`) |
+| Functional tests | 15 files / 49 `test_*` methods + 15 `run_test` drivers | End-to-end regtest: create, sign, broadcast, verify v4 transactions (`feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`, `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`, `feature_rung_anti_embedding.py`, `feature_qabi.py`, `feature_qabi_size.py`, `feature_deferred_vectors.py`, `feature_rung_tx_vectors.py`, `feature_rung_tx_neg_vectors.py`, `feature_rung_tx_spend_vectors.py`, `feature_rung_descriptor_roundtrip.py`, `feature_rung_sighash_vectors.py`) |
 | Signet verification | 65/65 | All active block types: fund + mine + spend on live signet with recorded txids |
 | Engine + presets | 56 | `tools/test-presets.py` exercises 56 fund + spend ceremonies on live signet |
 | TLA+ formal specs | 27 | Evaluation semantics, composition, anti-spam, wire format, Merkle, sighash, covenants, cross-input, per-family block evaluators |

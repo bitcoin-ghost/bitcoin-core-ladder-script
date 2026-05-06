@@ -573,11 +573,14 @@ Reviewers can re-run:
   `tx_mlsc_tests`, `utxo_dedup_tests`, `anchor_fee_type_tests`,
   `keypath_domain_tests`, and `qabi_tests` — **665 cases total** across the
   six suites in `src/test/rung_tests.cpp`.
-- **Functional tests**: `test/functional/feature_rung_tx.py`,
+- **Functional tests**: 15 files under `test/functional/` — `feature_rung_tx.py`,
   `feature_rung_p2p.py`, `feature_rung_legacy.py`, `feature_rung_fuzz.py`,
   `feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`,
-  `feature_qabi.py`, `feature_qabi_size.py` — 8 files, 44 `test_*` methods
-  plus 8 `run_test` drivers.
+  `feature_rung_anti_embedding.py`, `feature_qabi.py`, `feature_qabi_size.py`,
+  `feature_deferred_vectors.py`, `feature_rung_tx_vectors.py`,
+  `feature_rung_tx_neg_vectors.py`, `feature_rung_tx_spend_vectors.py`,
+  `feature_rung_descriptor_roundtrip.py`, `feature_rung_sighash_vectors.py`
+  — 49 `test_*` methods plus 15 `run_test` drivers.
 - **Preset end-to-end**: `tools/test-presets.py --api <proxy>` — 56 presets
   exercise fund + spend on live signet.
 
