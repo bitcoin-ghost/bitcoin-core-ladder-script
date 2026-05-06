@@ -13,14 +13,14 @@ each modification.
 
 ## Overview
 
-| Category                              | Files | Lines added |
-|---------------------------------------|------:|------------:|
-| Modified Bitcoin Core files           |    32 |       ~1,600 |
-| New library code (`src/rung/` + `src/rung_shims.h`) | 39 |    ~21,900 |
-| New tests (`src/test/rung_tests.cpp`) |     1 |     ~17,855 |
-| **Total surface change**              |    72 |    ~41,355 |
+| Category                              | Files | Net lines (vs `v30.0`) |
+|---------------------------------------|------:|-----------------------:|
+| Modified Bitcoin Core files           |    31 |        +1,237 / -69    |
+| New library code (`src/rung/` + `src/rung_shims.h`) | 38 | +21,869              |
+| New tests (`src/test/rung_tests.cpp`) |     1 |               +18,121  |
+| **Total surface change**              |    70 |    ~+41,300 net        |
 
-The design principle is **minimal core intrusion**: the ~1,600 patched lines
+The design principle is **minimal core intrusion**: the ~1,300 patched lines
 add hooks, types, and routing — all real logic lives in the self-contained
 `src/rung/` library which Core treats as just another linked dependency
 (`bitcoin_rung`).
@@ -33,13 +33,13 @@ No existing transaction version is reinterpreted; v4 is additive.
 
 ---
 
-## Core Integration Points (32 files, ~1,600 lines)
+## Core Integration Points (31 files, ~1,300 lines)
 
 The sections below are ordered by impact (highest LOC first) so that a
 reviewer scanning the patch sees the architectural changes before the
 bookkeeping ones.
 
-### 1. `src/validation.cpp` (+296 / -20)
+### 1. `src/validation.cpp` (+389 / -21)
 
 The largest single Core change. Wires v4 transactions into the existing
 script-verification pipeline at four points and threads three per-tx caches
@@ -286,7 +286,7 @@ is 0x06 = MLSC. The full mechanism lives in the `.cpp` (section 3).
 
 ---
 
-### 6. `src/policy/policy.cpp` (+14)
+### 6. `src/policy/policy.cpp` (+28)
 
 Three insertions, all routing-only:
 
@@ -327,7 +327,7 @@ multi-block test run against a live signet.
 
 ---
 
-### 8. `src/coins.cpp` (+25) and `src/coins.h` (+4)
+### 8. `src/coins.cpp` (+127) and `src/coins.h` (+44)
 
 Defines and writes the **synthetic root coin entry**.
 
@@ -666,27 +666,76 @@ new defaulted parameters. Single test signature update.
 
 ---
 
+### 37. Other modified files
+
+The remaining seven files are pretty-printing, RPC plumbing, and undo-data
+support — small per-file but listed here so the patch surface is complete.
+
+- **`src/core_write.cpp` (+42)** — adds the v4 path to
+  `TxToUniv` so `decoderawtransaction` returns the new fields:
+  `conditions_root`, the per-output `value`-only / DATA_RETURN payload
+  shape, the synthetic root coin, the `qabi_block` (when present), and
+  the `aggregated_sig` (length-prefixed). Pretty-printing only — never
+  runs in consensus.
+- **`src/core_read.cpp` (+23 / -7)** — symmetrical to `core_write.cpp`:
+  surfaces the actual `ios_base::failure` message from the deserialiser
+  (e.g. `"qabi_block too large"`, `"aggregated_sig too large"`,
+  `"non-canonical ReadCompactSize()"`) instead of the generic
+  `"TX decode failed"` so RPC errors carry the specific check that fired.
+- **`src/core_io.h` (+1 / -1)** — single-line declaration update for
+  the `core_read.cpp` change above.
+- **`src/rpc/rawtransaction.cpp` (+28 / -8)** — extends
+  `decoderawtransaction`, `getrawtransaction`, and `submitpackage` arg
+  schemas so the v4 fields surface in their JSON output and so v4
+  transactions decode without the wallet path tripping over the unknown
+  version.
+- **`src/undo.h` (+20 / -1)** — extends `TxUndoSer` so the synthetic
+  root coin entry round-trips through block undo data (required for
+  `DisconnectBlock` to restore the `(txid, MLSC_ROOT_VOUT)` entry on a
+  reorg). Without this, a reorg of a v4-containing block would leave
+  the chainstate without the conditions_root needed to re-spend MLSC
+  coins from the affected tx.
+- **`src/wallet/feebumper.h` (+10)** — declares a small helper used by
+  the wallet's bump-fee path to recognise v4 transactions and route
+  them through the ladder-aware fee estimator instead of the legacy
+  one. No consensus impact.
+- **`src/wallet/rpc/spend.cpp` (+10 / -4)** — wallet RPC plumbing for
+  v4 transactions in `bumpfee` / `psbtbumpfee` (matches the helper
+  declared above). Wallet-only; v4 transactions submitted via raw RPCs
+  bypass this path entirely.
+
+---
+
 ## Tests
 
-`src/test/rung_tests.cpp` — **~17,855 lines, 665 unit tests** organised
-into multiple boost test suites:
+`src/test/rung_tests.cpp` — **18,121 lines, 665 unit tests** organised
+into six boost test suites:
 
 - `rung_tests` — block evaluator unit tests, descriptor parser, witness
-  serialisation, anti-spam, sighash binding.
+  serialisation, anti-spam, sighash binding (the bulk of the file).
+- `tx_mlsc_tests` — wire-format roundtrips for the v4 transaction
+  serialiser.
+- `utxo_dedup_tests` — synthetic root coin write/restore + chainstate
+  dedup invariants.
+- `anchor_fee_type_tests` — `ANCHOR_FEE` block evaluator and policy
+  shape.
+- `keypath_domain_tests` — `LadderKeyPathSighash/v1` tag isolation.
 - `qabi_tests` — QABIO + PQ_BATCH evaluator tests, multi-party scale
   scenarios, size-sweep measurements (`mlsc_creation_tx_size_sweep`,
   `qabi_tx_size_sweep`, etc. — see `MEASUREMENTS.md`).
-- `tx_mlsc_tests` — wire-format roundtrips for the v4 transaction
-  serialiser.
 
-Plus 15 functional test files (~143 distinct test methods) under `test/functional/`:
-`feature_rung_tx.py`, `feature_rung_p2p.py`, `feature_rung_legacy.py`,
-`feature_rung_pq_batch.py`, `feature_rung_pq_batch_stress.py`,
-`feature_rung_fuzz.py`, `feature_rung_anti_embedding.py`, `feature_qabi.py`,
+Plus 15 functional test files (49 `test_*` methods + 15 `run_test`
+drivers) under `test/functional/`:
+`feature_rung_tx.py` (11 test_*), `feature_rung_p2p.py` (2),
+`feature_rung_legacy.py` (1), `feature_rung_pq_batch.py` (6),
+`feature_rung_pq_batch_stress.py`, `feature_rung_fuzz.py`,
+`feature_rung_anti_embedding.py` (5), `feature_qabi.py` (24),
 `feature_qabi_size.py`, `feature_deferred_vectors.py`,
 `feature_rung_tx_vectors.py`, `feature_rung_tx_neg_vectors.py`,
 `feature_rung_tx_spend_vectors.py`, `feature_rung_descriptor_roundtrip.py`,
-`feature_rung_sighash_vectors.py`.
+`feature_rung_sighash_vectors.py`. Files without `test_*` methods drive
+their assertions directly out of `run_test` (typically vector-fixture
+loaders or stress harnesses).
 
 ---
 
