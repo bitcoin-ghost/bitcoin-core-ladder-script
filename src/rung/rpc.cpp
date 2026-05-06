@@ -3292,7 +3292,8 @@ static RPCHelpMan formatladder()
 static RPCHelpMan computemutation()
 {
     return RPCHelpMan{"computemutation",
-        "Compute the expected output conditions after applying a RECURSE_MODIFIED or RECURSE_DECAY mutation.\n"
+        "Compute the expected output conditions after applying a RECURSE_MODIFIED, RECURSE_DECAY,\n"
+        "or RECURSE_SPLIT mutation. RECURSE_SPLIT decrements the first NUMERIC (max_splits) by 1.\n"
         "Takes the input descriptor, key map, and returns the mutated conditions hex + MLSC root.\n",
         {
             {"descriptor", RPCArg::Type::STR, RPCArg::Optional::NO, "Input descriptor"},
@@ -3329,9 +3330,38 @@ static RPCHelpMan computemutation()
             throw JSONRPCError(RPC_INVALID_PARAMETER, "parse error: " + error);
         }
 
-        // Find RECURSE_MODIFIED or RECURSE_DECAY block, extract mutation specs
+        // Find RECURSE_MODIFIED, RECURSE_DECAY, or RECURSE_SPLIT block,
+        // extract mutation specs, and apply.
+        auto read_num = [](const RungField& f) -> int64_t {
+            int64_t val = 0;
+            for (size_t i = 0; i < f.data.size() && i < 4; ++i)
+                val |= static_cast<int64_t>(f.data[i]) << (8 * i);
+            return val;
+        };
+        auto write_num = [](RungField& f, int64_t val) {
+            f.data.clear();
+            for (int i = 0; i < 4; ++i)
+                f.data.push_back(static_cast<uint8_t>((val >> (8 * i)) & 0xFF));
+        };
         for (auto& rung : conditions.rungs) {
             for (auto& blk : rung.blocks) {
+                // RECURSE_SPLIT mutation: decrement the first NUMERIC
+                // (max_splits) by 1. The eval at
+                // `blocks/recursion.cpp::EvalRecurseSplitBlock` does the
+                // same self-mutation in `mutated` to compute
+                // `expected_root`. Mirror it here so callers can build
+                // the spend-side conditions that match.
+                if (blk.type == RungBlockType::RECURSE_SPLIT) {
+                    for (auto& f : blk.fields) {
+                        if (f.type == RungDataType::NUMERIC) {
+                            write_num(f, read_num(f) - 1);
+                            goto done;
+                        }
+                    }
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        "RECURSE_SPLIT block has no NUMERIC field to mutate");
+                }
+
                 if (blk.type != RungBlockType::RECURSE_MODIFIED &&
                     blk.type != RungBlockType::RECURSE_DECAY) continue;
 
@@ -3343,18 +3373,6 @@ static RPCHelpMan computemutation()
                 if (numerics.size() < 4) {
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "mutation block needs 4 NUMERIC fields");
                 }
-
-                auto read_num = [](const RungField& f) -> int64_t {
-                    int64_t val = 0;
-                    for (size_t i = 0; i < f.data.size() && i < 4; ++i)
-                        val |= static_cast<int64_t>(f.data[i]) << (8 * i);
-                    return val;
-                };
-                auto write_num = [](RungField& f, int64_t val) {
-                    f.data.clear();
-                    for (int i = 0; i < 4; ++i)
-                        f.data.push_back(static_cast<uint8_t>((val >> (8 * i)) & 0xFF));
-                };
 
                 int64_t block_idx = read_num(*numerics[1]);
                 int64_t param_idx = read_num(*numerics[2]);
@@ -3386,7 +3404,8 @@ static RPCHelpMan computemutation()
                 goto done;
             }
         }
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "no RECURSE_MODIFIED or RECURSE_DECAY block found");
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            "no RECURSE_MODIFIED, RECURSE_DECAY, or RECURSE_SPLIT block found");
         done:
 
         // Compute mutated root via TX_MLSC leaf computation (must match VerifyRungTx)

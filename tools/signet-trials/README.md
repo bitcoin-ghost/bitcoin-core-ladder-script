@@ -12,13 +12,30 @@ End-to-end fund + spend trials against the Ladder Script signet
 
 ## Coverage as of 2026-05-06
 
-**65 trials passing end-to-end** (63 OK + 2 PASS_NEG for deliberate
-negatives) covering **57 of 65 active block types directly + 3 via
-playgrounds = 60/65**. Battery 9 added KEY_REF_SIG (relay structure)
-and COSIGN (2-input cross-reference). The remaining 5 untested
-(RECURSE_MODIFIED / RECURSE_DECAY / RECURSE_SPLIT,
-P2SH/P2WSH/P2TR_SCRIPT_LEGACY) need RPC-surface extensions that
-aren't in scope for the trial battery — see "Untested types" below.
+**67 trials passing end-to-end** (65 OK + 2 PASS_NEG for deliberate
+negatives) covering **62 of 65 active block types directly + 3 via
+playgrounds = 65/65**. Batteries 9-10 closed five previously
+untested block types: KEY_REF_SIG (relay structure), COSIGN
+(2-input cross-reference), RECURSE_SPLIT (single-rung split),
+P2WSH_LEGACY and P2SH_LEGACY (inner script body via
+`serialiseconditions` auto-converting PUBKEY → HASH160 inside
+P2PKH_LEGACY).
+
+Three trials still fail at consensus and need follow-up:
+- `RECURSE_MODIFIED` / `RECURSE_DECAY` (T67/T68): the spend's
+  conditions tree fails to produce the eval's expected mutated
+  root even with delta=0 (identity mutation). Suspect signrungtx's
+  ParseConditionsSpec vs createrungtx's per-rung field ordering or
+  coil propagation difference for 2-block rungs. C++ boost tests
+  cover this via `MockSignatureChecker`; the live-signet path
+  needs a debug trace of `ComputeConditionsRootMLSC` at fund vs
+  spend.
+- `P2TR_SCRIPT_LEGACY` (T71): registry pubkey_count=1 means the
+  internal Taproot key is folded into the merkle_pub_key. T71
+  passes the internal pubkey in both fund and spender conditions
+  but consensus still rejects — likely the inner P2PKH leaf
+  binding has a separate issue from the simpler P2WSH/P2SH cases.
+
 QABI/PQ_BATCH (3 types) are covered by their dedicated playgrounds
 (`tools/qabio-playground/`, `tools/pq-batch-playground/`).
 
@@ -33,7 +50,8 @@ QABI/PQ_BATCH (3 types) are covered by their dedicated playgrounds
 | `battery_6_ctv_accum_recurse.py` | T57..T60 | CTV (BIP-119), ACCUMULATOR, RECURSE_UNTIL, RECURSE_COUNT |
 | `battery_7_adaptor_musig.py` | T61..T62 | ADAPTOR_SIG (plain Schnorr), MUSIG_THRESHOLD (1-of-1) |
 | `battery_8_output_check.py` | T63 | OUTPUT_CHECK |
-| `battery_9_keyref_cosign_split.py` | T64..T66 | KEY_REF_SIG (relay), COSIGN (2-input), RECURSE_SPLIT (currently FAIL — needs coil/leaf engineering) |
+| `battery_9_keyref_cosign_split.py` | T64..T66 | KEY_REF_SIG (relay), COSIGN (2-input), RECURSE_SPLIT (single-rung spend with mutated max_splits) |
+| `battery_10_recurses_legacy.py` | T67..T71 | RECURSE_MODIFIED/DECAY (FAIL), P2WSH_LEGACY, P2SH_LEGACY, P2TR_SCRIPT_LEGACY (FAIL) |
 | `run_full_battery.py` | T01..T36 | runner that re-executes batteries 1+2+3 in sequence |
 
 ## Running
