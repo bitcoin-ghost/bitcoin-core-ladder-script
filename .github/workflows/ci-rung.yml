@@ -78,8 +78,8 @@ jobs:
             -DBUILD_TESTS=ON \
             -DENABLE_IPC=OFF
 
-      - name: Build bitcoin_rung + test_bitcoin + bitcoind
-        run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind
+      - name: Build bitcoin_rung + test_bitcoin + bitcoind + bitcoin-cli
+        run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind bitcoin-cli
 
       - name: Run rung_tests (boost, 554 cases)
         run: build/bin/test_bitcoin --run_test=rung_tests
@@ -159,8 +159,8 @@ jobs:
             -DBUILD_TESTS=ON \
             -DENABLE_IPC=OFF
 
-      - name: Build bitcoin_rung + test_bitcoin + bitcoind
-        run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind
+      - name: Build bitcoin_rung + test_bitcoin + bitcoind + bitcoin-cli
+        run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind bitcoin-cli
 
       - name: Run rung_tests (boost, 554 cases)
         run: build/bin/test_bitcoin --run_test=rung_tests
