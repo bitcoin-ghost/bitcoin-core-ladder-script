@@ -18,6 +18,28 @@
 
 #include <oqs/oqs.h>
 
+#include <string_view>
+
+// AUD-04: enforce that the linked liboqs version matches the consensus-
+// pinned version from src/rung/CMakeLists.txt. CMake's
+// `find_package(liboqs X.Y.Z EXACT REQUIRED)` already constrains
+// `find_package`, but a misconfigured build (system include-dir
+// override, multi-install with mismatched headers, distro-patched
+// `oqsconfig.h`) can still surface a different OQS_VERSION_TEXT at
+// compile time. The static_assert is a defence-in-depth guard so any
+// such drift is a build-time error rather than a runtime consensus
+// split. If a future release intentionally bumps the pin, update this
+// constant in lockstep with the CMake `LADDER_LIBOQS_VERSION` cache
+// var AND the BIP's "consensus crypto library version" specification.
+#define LADDER_PINNED_LIBOQS_VERSION "0.10.1"
+static_assert(std::string_view(OQS_VERSION_TEXT) == LADDER_PINNED_LIBOQS_VERSION,
+              "Ladder Script: linked liboqs version differs from the "
+              "consensus pin. PQ verify behaviour at the malformed-sig "
+              "boundary varies between liboqs versions, which would split "
+              "the network. Reconcile LADDER_PINNED_LIBOQS_VERSION (here) "
+              "with src/rung/CMakeLists.txt's LADDER_LIBOQS_VERSION cache "
+              "variable, or rebuild against the pinned liboqs.");
+
 namespace rung {
 
 bool HasPQSupport()

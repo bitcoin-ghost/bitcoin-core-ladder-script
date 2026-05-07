@@ -14,8 +14,22 @@
 # liboqs-enabled nodes on whether a PQ-signed spend is valid, which is
 # a consensus split. Always require liboqs, always link it, and always
 # define HAVE_LIBOQS.
-find_package(liboqs REQUIRED)
-message(STATUS "liboqs found — post-quantum signature verification enabled")
+#
+# AUD-04: pin to a specific liboqs version. Different liboqs versions
+# can produce divergent verify results for marginal/malformed FALCON
+# signatures (the variable-length sig framing is the historic upstream
+# patch hot spot). Without an EXACT pin every operator's distro picks
+# whatever liboqs is on hand, fragmenting the network across version
+# boundaries — a chain-split vector. The pinned version MUST match
+# what the BIP specifies as the consensus crypto. The runtime
+# `static_assert` in pq_verify.cpp guards against the rare case where
+# CMake finds an EXACT-matching install but compiles against a
+# different OQS_VERSION_TEXT header (system-dir leak, multi-install).
+set(LADDER_LIBOQS_VERSION "0.10.1" CACHE STRING
+    "Pinned liboqs version. Changing this constitutes a hard fork.")
+find_package(liboqs ${LADDER_LIBOQS_VERSION} EXACT REQUIRED)
+message(STATUS "liboqs ${LADDER_LIBOQS_VERSION} found (EXACT pin) — "
+               "post-quantum signature verification enabled")
 
 # QABIO extension — N-party post-quantum batch I/O, specified in BIP-YYYY
 # as a separable soft-fork extension on top of Ladder Script.
