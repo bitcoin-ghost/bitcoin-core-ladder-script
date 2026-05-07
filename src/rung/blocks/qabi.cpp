@@ -846,27 +846,37 @@ static EvalResult EvalPQBatchBlock(const RungBlock& block, const RungEvalContext
     return verified ? EvalResult::SATISFIED : EvalResult::UNSATISFIED;
 }
 
-/** v0.12 (audit 8b F2): anchor pre-pass for PQ_BATCH cache.
+/** Anchor pre-pass for PQ_BATCH cache, run once per tx before parallel
+ *  script-check dispatch.
  *
- *  Under parallel script-check workers (CCheckQueue), each worker takes a
- *  snapshot of the per-tx PQ_BATCH cache before running VerifyRungTx and
- *  merges new entries back after. If the anchor input (which writes the
- *  cache entry) and a non-anchor input (which reads it) run on different
- *  workers concurrently, the non-anchor's snapshot may not yet contain
- *  the anchor's write → returns UNSATISFIED → block rejected.
+ *  Why this is required:
+ *    Bitcoin Core's CCheckQueue drains LIFO from queue.end() (checkqueue.h:122)
+ *    and dispatches batches across worker threads. Inputs are added in
+ *    order [0..n-1] but are processed in roughly reverse order with
+ *    arbitrary worker interleaving. If a non-anchor PQ_BATCH input runs
+ *    before the anchor input, EvalPQBatchBlock observes an empty cache
+ *    and returns UNSATISFIED. The shared mutex on the cache (v0.13)
+ *    guarantees atomicity but NOT ordering, so the per-input fast path
+ *    cannot rely on "anchor first" under multi-worker validation.
  *
- *  This helper walks the tx's MLSC inputs in order, finds PQ_BATCH blocks
- *  with a fully-revealed witness (PUBKEY + SIGNATURE = anchor), runs the
- *  same anchor verification path EvalPQBatchBlock takes, and writes the
- *  result into the shared cache before parallel dispatch begins. The
- *  per-input checks then see the cache fully populated.
+ *    Running this pre-pass before pvChecks dispatch populates the cache
+ *    sequentially. Workers then read a fully-warmed cache and the
+ *    LIFO/parallel order no longer matters.
  *
- *  Returns true if all anchors verified successfully (or there were no
- *  anchors). False on any signature/commit failure — the caller should
- *  reject the tx.
+ *  Pre-v1 (audit AUD-01): the original implementation scanned only the
+ *  witness (stack[0]) for HASH256+PUBKEY+SIGNATURE triplets. HASH256 is
+ *  a CONDITIONS-side field (PQ_BATCH_CONDITIONS = {HASH256(pubkey)}), so
+ *  the pre-pass found zero anchors and was effectively dead code. This
+ *  rewrite reads HASH256 from the proof's revealed_rung (stack[1])
+ *  alongside PUBKEY+SIGNATURE from the witness — matching what
+ *  MergeConditionsAndWitness produces at per-input eval time.
  *
- *  Cache lifetime is per-tx; pre-pass runs once at the top of script
- *  verification. */
+ *  Returns false on any anchor commit/signature failure (caller MUST
+ *  reject the tx). Returns true if all anchors verified or there were
+ *  no PQ_BATCH anchors. Inputs that are malformed at the deserialise
+ *  layer (bad witness/proof, witness_ref shells, etc.) are skipped here
+ *  and rejected by the per-input verifier instead — the pre-pass only
+ *  populates entries for clean direct-witness anchors. */
 bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
                                 const api::LadderOutputView* spent_outputs,
                                 size_t spent_output_count,
@@ -880,30 +890,140 @@ bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
     for (size_t i = 0; i < tx.input_count; ++i) {
         if (!is_mlsc(i)) continue;
         const auto& witness = tx.inputs[i].witness;
+        // Stack shape for MLSC: 2 = [LadderWitness, MLSCProof],
+        // 3 = [LadderWitness, MLSCProof, internal_pubkey]. Anchor data
+        // lives in stack[0]+stack[1] regardless.
         if (witness.count < 2 || witness.count > 3) continue;
+
         const auto& stack0 = witness.elements[0];
-        std::vector<uint8_t> bytes(stack0.data, stack0.data + stack0.size);
+        const auto& stack1 = witness.elements[1];
+        std::vector<uint8_t> wit_bytes(stack0.data, stack0.data + stack0.size);
+        std::vector<uint8_t> proof_bytes(stack1.data, stack1.data + stack1.size);
+
         LadderWitness lw;
         std::string err;
-        if (!DeserializeLadderWitness(bytes, lw, err)) continue;
+        if (!DeserializeLadderWitness(wit_bytes, lw, err)) continue;
 
-        auto scan = [&](const std::vector<RungBlock>& blocks) -> bool {
-            for (const auto& blk : blocks) {
-                if (blk.type != RungBlockType::PQ_BATCH) continue;
+        // Witness-ref shells have empty rungs/relays and the anchor (if any)
+        // lives at the referenced source input — pre-pass picks it up there.
+        if (lw.IsWitnessRef()) continue;
+        if (lw.rungs.empty()) continue;
+
+        MLSCProof proof;
+        std::string proof_err;
+        if (!DeserializeMLSCProof(proof_bytes, proof, proof_err)) continue;
+        // SHARED-mode proofs reuse a sibling input's tree, so this input
+        // contributes no new anchor — the source input has the conditions
+        // and the pre-pass picks it up there.
+        if (proof.proof_mode == MLSCProofMode::SHARED) continue;
+
+        // Walk the rung block-by-block, pairing witness fields (stack[0])
+        // with conditions fields (stack[1]). Same alignment as
+        // MergeConditionsAndWitness: blocks[i] in conditions corresponds
+        // 1:1 with blocks[i] in the witness.
+        const std::vector<RungBlock>& wit_blocks = lw.rungs[0].blocks;
+        const std::vector<RungBlock>& cond_blocks = proof.revealed_rung.blocks;
+        if (wit_blocks.size() != cond_blocks.size()) continue;
+
+        // Stage RungConditions for sighash binding. The PQ FALCON sig was
+        // signed against the per-input ladder sighash which commits to
+        // `conditions_root`. Without this, FetchLadderSighash would fall
+        // through to the test-stub all-zero sighash path and the verify
+        // would fail every time — masking the AUD-01 fix as a regression.
+        uint256 input_root;
+        if (!GetMLSCRoot(spent_outputs[i].script_pub_key.as_span(), input_root)) {
+            continue; // compact MLSC; per-input verifier handles it
+        }
+        RungConditions input_conditions;
+        input_conditions.rungs.push_back(proof.revealed_rung);
+        input_conditions.coil = lw.coil;
+        input_conditions.conditions_root = input_root;
+
+        for (size_t b = 0; b < wit_blocks.size(); ++b) {
+            const RungBlock& cond_blk = cond_blocks[b];
+            const RungBlock& wit_blk = wit_blocks[b];
+            if (cond_blk.type != RungBlockType::PQ_BATCH) continue;
+            if (wit_blk.type != RungBlockType::PQ_BATCH) continue;
+
+            // HASH256 is conditions-side; PUBKEY/SIGNATURE are witness-side.
+            const RungField* hf = nullptr;
+            for (const auto& f : cond_blk.fields) {
+                if (f.type == RungDataType::HASH256) { hf = &f; break; }
+            }
+            const RungField* pkf = nullptr;
+            const RungField* sgf = nullptr;
+            for (const auto& f : wit_blk.fields) {
+                if (f.type == RungDataType::PUBKEY && !pkf) pkf = &f;
+                else if (f.type == RungDataType::SIGNATURE && !sgf) sgf = &f;
+            }
+            if (!hf || hf->data.size() != 32) continue;
+            if (!pkf || !sgf) continue; // not the anchor input for this commit
+
+            uint256 commit_key;
+            std::memcpy(commit_key.data(), hf->data.data(), 32);
+            if (out_cache.count(commit_key)) continue; // already verified
+
+            unsigned char computed[CSHA256::OUTPUT_SIZE];
+            CSHA256().Write(pkf->data.data(), pkf->data.size()).Finalize(computed);
+            if (std::memcmp(computed, hf->data.data(), 32) != 0) {
+                return false;
+            }
+            RungScheme scheme;
+            const size_t pk_len = pkf->data.size();
+            if (pk_len == 897) scheme = RungScheme::FALCON512;
+            else if (pk_len == 1793) scheme = RungScheme::FALCON1024;
+            else if (pk_len == 1952) scheme = RungScheme::DILITHIUM3;
+            else continue; // unknown size — let per-input path reject
+
+            RungEvalContext sigctx;
+            sigctx.tx = &tx;
+            sigctx.precomputed = &cache;
+            sigctx.input_index = static_cast<uint32_t>(i);
+            sigctx.input_conditions = &input_conditions;
+            uint8_t sighash[32];
+            if (!FetchLadderSighash(sigctx, SIGHASH_DEFAULT, sighash)) {
+                return false;
+            }
+            std::span<const uint8_t> msg{sighash, 32};
+            std::span<const uint8_t> sig_span{sgf->data.data(), sgf->data.size()};
+            std::span<const uint8_t> pk_span{pkf->data.data(), pkf->data.size()};
+            if (!VerifyPQSignature(scheme, sig_span, msg, pk_span)) {
+                return false;
+            }
+            out_cache[commit_key] = true;
+        }
+
+        // Relays: same pairing rule. proof.revealed_relays carries
+        // (relay_idx, conditions-side relay) pairs; lw.relays is the
+        // witness-side. Walk the revealed pairs and align by relay_idx.
+        for (const auto& [relay_idx, cond_relay] : proof.revealed_relays) {
+            if (relay_idx >= lw.relays.size()) continue;
+            const std::vector<RungBlock>& wit_relay_blocks = lw.relays[relay_idx].blocks;
+            const std::vector<RungBlock>& cond_relay_blocks = cond_relay.blocks;
+            if (wit_relay_blocks.size() != cond_relay_blocks.size()) continue;
+
+            for (size_t b = 0; b < wit_relay_blocks.size(); ++b) {
+                const RungBlock& cond_blk = cond_relay_blocks[b];
+                const RungBlock& wit_blk = wit_relay_blocks[b];
+                if (cond_blk.type != RungBlockType::PQ_BATCH) continue;
+                if (wit_blk.type != RungBlockType::PQ_BATCH) continue;
+
                 const RungField* hf = nullptr;
+                for (const auto& f : cond_blk.fields) {
+                    if (f.type == RungDataType::HASH256) { hf = &f; break; }
+                }
                 const RungField* pkf = nullptr;
                 const RungField* sgf = nullptr;
-                for (const auto& f : blk.fields) {
-                    if (f.type == RungDataType::HASH256 && !hf) hf = &f;
-                    else if (f.type == RungDataType::PUBKEY && !pkf) pkf = &f;
+                for (const auto& f : wit_blk.fields) {
+                    if (f.type == RungDataType::PUBKEY && !pkf) pkf = &f;
                     else if (f.type == RungDataType::SIGNATURE && !sgf) sgf = &f;
                 }
                 if (!hf || hf->data.size() != 32) continue;
-                if (!pkf || !sgf) continue; // not the anchor; skip
+                if (!pkf || !sgf) continue;
 
                 uint256 commit_key;
                 std::memcpy(commit_key.data(), hf->data.data(), 32);
-                if (out_cache.count(commit_key)) continue; // anchor already cached
+                if (out_cache.count(commit_key)) continue;
 
                 unsigned char computed[CSHA256::OUTPUT_SIZE];
                 CSHA256().Write(pkf->data.data(), pkf->data.size()).Finalize(computed);
@@ -915,14 +1035,13 @@ bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
                 if (pk_len == 897) scheme = RungScheme::FALCON512;
                 else if (pk_len == 1793) scheme = RungScheme::FALCON1024;
                 else if (pk_len == 1952) scheme = RungScheme::DILITHIUM3;
-                else continue; // unknown — let per-input path reject
+                else continue;
 
-                // Reuse the LadderTxView sighash. Construct a minimal eval
-                // context that PreparePQ needs only for FetchLadderSighash.
                 RungEvalContext sigctx;
                 sigctx.tx = &tx;
                 sigctx.precomputed = &cache;
                 sigctx.input_index = static_cast<uint32_t>(i);
+                sigctx.input_conditions = &input_conditions; // same per-input root binding
                 uint8_t sighash[32];
                 if (!FetchLadderSighash(sigctx, SIGHASH_DEFAULT, sighash)) {
                     return false;
@@ -935,13 +1054,6 @@ bool PreparePQBatchAnchorCache(const api::LadderTxView& tx,
                 }
                 out_cache[commit_key] = true;
             }
-            return true;
-        };
-        for (const auto& rung : lw.rungs) {
-            if (!scan(rung.blocks)) return false;
-        }
-        for (const auto& relay : lw.relays) {
-            if (!scan(relay.blocks)) return false;
         }
     }
     return true;

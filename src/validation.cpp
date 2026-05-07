@@ -2235,14 +2235,13 @@ std::optional<std::pair<ScriptError, std::string>> CScriptCheck::operator()() {
         rung::QABOSigCache* qabo_cache_ptr = nullptr;
         std::mutex* qabo_sig_cache_mutex_ptr = nullptr;
 #endif
-        // PQ_BATCH: per-tx anchor verification cache.
-        // v0.13: pass the shared cache + mutex directly,
-        // not a per-worker snapshot. Anchor writes (mutex-protected inside
-        // EvalPQBatchBlock) are immediately visible to all other workers,
-        // eliminating the parallel-snapshot race that v0.12's pre-pass
-        // tried and failed to fix. The pre-pass scanned witness for
-        // HASH256+PUBKEY+SIGNATURE triplets, but HASH256 is conditions-
-        // side, so it found zero anchors and was a no-op.
+        // PQ_BATCH: per-tx anchor verification cache, pre-populated once
+        // by `PreparePQBatchAnchorCache` (see ConnectInputs). The shared
+        // mutex still guards in-loop write-behind from EvalPQBatchBlock
+        // for inputs the pre-pass skipped (witness-ref shells, SHARED-
+        // mode proofs). Pre-pass eliminates the LIFO/parallel race that
+        // would otherwise reject valid PQ_BATCH-amortised txs at block
+        // validation; see AUD-01 / qabi.cpp comment.
         rung::PQBatchCache* pq_batch_cache_ptr = nullptr;
         std::mutex* pq_batch_cache_mutex_ptr = nullptr;
         if (m_pq_batch_cache) {
@@ -2474,6 +2473,55 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
             } else {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS,
                     "block-script-verify-flag-failed (tx_mlsc_check)", rung_error);
+            }
+        }
+
+#ifdef ENABLE_QABIO
+        // PQ_BATCH anchor pre-pass: verify all anchor inputs sequentially
+        // and populate the per-tx cache before the parallel script-check
+        // workers dispatch. CCheckQueue drains LIFO with arbitrary worker
+        // interleaving, so a non-anchor input can race ahead of the anchor
+        // and observe an empty cache → UNSATISFIED → block rejected. The
+        // shared mutex protects atomicity but not ordering, so the
+        // pre-pass is the only consensus-safe way to guarantee the cache
+        // is warm before any worker reads it. See AUD-01.
+        {
+            std::lock_guard<std::mutex> lk(pq_batch_cache->mutex);
+            if (!rung::PreparePQBatchAnchorCache(tx, txdata.m_spent_outputs,
+                                                  txdata, pq_batch_cache->cache)) {
+                LogPrintf("PQ_BATCH anchor pre-pass: anchor verification failed\n");
+                if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
+                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                        "mempool-script-verify-flag-failed (pq_batch_anchor)",
+                        "PQ_BATCH anchor commit/signature mismatch");
+                } else {
+                    return state.Invalid(TxValidationResult::TX_CONSENSUS,
+                        "block-script-verify-flag-failed (pq_batch_anchor)",
+                        "PQ_BATCH anchor commit/signature mismatch");
+                }
+            }
+        }
+#endif
+
+        // SHARED MLSC pre-pass: warm `shared_tree_cache` for source inputs
+        // referenced by SHARED-mode proofs in this tx. Same race shape as
+        // PQ_BATCH (AUD-01) — without this, a SHARED input running before
+        // its source under LIFO dispatch hits an empty cache and fails.
+        // See AUD-02 / `rung::PrepareSharedTreeCache` in evaluator.cpp.
+        {
+            std::lock_guard<std::mutex> lk(shared_tree_cache->mutex);
+            if (!rung::PrepareSharedTreeCache(tx, txdata.m_spent_outputs,
+                                                shared_tree_cache->cache)) {
+                LogPrintf("SHARED MLSC pre-pass: source proof verification failed\n");
+                if (flags & STANDARD_NOT_MANDATORY_VERIFY_FLAGS) {
+                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                        "mempool-script-verify-flag-failed (shared_mlsc_source)",
+                        "SHARED-mode MLSC source proof rejection");
+                } else {
+                    return state.Invalid(TxValidationResult::TX_CONSENSUS,
+                        "block-script-verify-flag-failed (shared_mlsc_source)",
+                        "SHARED-mode MLSC source proof rejection");
+                }
             }
         }
 

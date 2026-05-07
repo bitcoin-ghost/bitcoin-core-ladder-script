@@ -348,7 +348,50 @@ inline uint256 ComputeSighashQABO(const T& tx)
     LadderTxViewBuilder tvb(tx);
     return rung::api::ComputeSighashQABO(tvb.view);
 }
+
+/** Run the PQ_BATCH anchor pre-pass before parallel script-check dispatch.
+ *  See `rung::PreparePQBatchAnchorCache` (qabi.cpp) for the rationale —
+ *  pre-populating the cache eliminates the LIFO/parallel-worker race that
+ *  otherwise rejects valid PQ_BATCH-amortised txs at block-validation time. */
+inline bool PreparePQBatchAnchorCache(const CTransaction& tx,
+                                       const std::vector<CTxOut>& spent_outputs,
+                                       const PrecomputedTransactionData& cache,
+                                       rung::PQBatchCache& out_cache)
+{
+    LadderTxViewBuilder tvb(tx);
+    LadderPrecomputedBuilder pcb(cache);
+    std::vector<rung::api::LadderOutputView> sov;
+    sov.reserve(spent_outputs.size());
+    for (const auto& out : spent_outputs) {
+        rung::api::LadderOutputView ov;
+        ov.value = out.nValue;
+        ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+        sov.push_back(ov);
+    }
+    return rung::PreparePQBatchAnchorCache(tvb.view, sov.data(), sov.size(),
+                                            pcb.view, out_cache);
+}
 #endif
+
+/** AUD-02 fix: SHARED MLSC pre-pass shim. Same call shape as the
+ *  PQ_BATCH variant; warms `shared_tree_cache` so SHARED-mode inputs
+ *  don't lose the LIFO race against their source inputs under
+ *  parallel CScriptCheck dispatch. */
+inline bool PrepareSharedTreeCache(const CTransaction& tx,
+                                    const std::vector<CTxOut>& spent_outputs,
+                                    rung::SharedTreeCache& out_cache)
+{
+    LadderTxViewBuilder tvb(tx);
+    std::vector<rung::api::LadderOutputView> sov;
+    sov.reserve(spent_outputs.size());
+    for (const auto& out : spent_outputs) {
+        rung::api::LadderOutputView ov;
+        ov.value = out.nValue;
+        ov.script_pub_key = {out.scriptPubKey.data(), out.scriptPubKey.size()};
+        sov.push_back(ov);
+    }
+    return rung::PrepareSharedTreeCache(tvb.view, sov.data(), sov.size(), out_cache);
+}
 
 // --- BIP-119 CTV shim (CTransaction -> LadderTxView) ----------------------
 

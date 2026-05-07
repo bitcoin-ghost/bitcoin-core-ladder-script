@@ -86,6 +86,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 
 namespace rung {
 using namespace api;  // Bring libladder public API (span-based) into file scope
@@ -568,8 +569,13 @@ bool ValidateRungOutputs(const LadderTxView& tx, std::string& error)
 
 /** Extract pubkeys from witness blocks positionally (merkle_pub_key).
  *  Walks blocks left-to-right, collecting PUBKEY fields based on
- *  PubkeyCountForBlock() for each block type. */
-static std::vector<std::vector<uint8_t>> ExtractBlockPubkeys(const std::vector<RungBlock>& blocks)
+ *  PubkeyCountForBlock() for each block type.
+ *
+ *  Exported (no longer file-static) so the SHARED MLSC pre-pass in
+ *  PrepareSharedTreeCache can reuse the same pubkey-extraction logic
+ *  the per-input verifier uses. Both call sites must produce
+ *  byte-identical output to keep cache contents consistent. */
+std::vector<std::vector<uint8_t>> ExtractBlockPubkeys(const std::vector<RungBlock>& blocks)
 {
     std::vector<std::vector<uint8_t>> pubkeys;
     for (const auto& block : blocks) {
@@ -905,6 +911,189 @@ bool CheckRungTxLevel(const LadderTxView& tx,
 }
 
 } // namespace api
+
+/** AUD-02 fix: pre-pass that walks SHARED-mode MLSC inputs, identifies
+ *  unique source indices they reference, verifies each source's MLSC
+ *  proof, and populates `out_cache` with `{root, leaves}` BEFORE the
+ *  parallel CScriptCheck workers dispatch.
+ *
+ *  Without this, the per-input EvalRungTx SHARED-mode lookup at
+ *  evaluator.cpp:1130-1170 hits the empty cache when the SHARED input's
+ *  worker runs before the source input's worker. CCheckQueue drains LIFO
+ *  (checkqueue.h:122), so the SHARED input at higher index typically runs
+ *  first under multi-worker dispatch — guaranteed cache miss → block
+ *  rejected, even though the same tx passes mempool acceptance via the
+ *  sequential `pvChecks=nullptr` path. Same race shape as AUD-01
+ *  (PQ_BATCH).
+ *
+ *  The pre-pass duplicates source-input verification work (each source
+ *  verifies once here, then again in its own per-input pass), but this
+ *  is the smallest correct fix that keeps the cache consistent and
+ *  doesn't require refactoring `EvalRungTx`'s in-line proof verification.
+ *
+ *  Returns false ONLY on a definite source-proof verification failure.
+ *  Returns true on success or for inputs that don't need pre-pass
+ *  treatment (non-MLSC, non-SHARED, witness-ref shells, etc). */
+bool PrepareSharedTreeCache(const api::LadderTxView& tx,
+                             const api::LadderOutputView* spent_outputs,
+                             size_t spent_output_count,
+                             SharedTreeCache& out_cache)
+{
+    auto is_mlsc = [&](size_t i) {
+        if (!spent_outputs || i >= spent_output_count) return false;
+        return rung::api::IsMLSCScript(spent_outputs[i].script_pub_key.as_span());
+    };
+    auto prevout_txid = [&](size_t i) -> Txid {
+        uint256 u;
+        std::memcpy(u.data(), tx.inputs[i].prevout.txid, 32);
+        return Txid::FromUint256(u);
+    };
+
+    // Pass 1: find unique source indices referenced by SHARED proofs.
+    std::set<size_t> source_indices;
+    for (size_t i = 0; i < tx.input_count; ++i) {
+        if (!is_mlsc(i)) continue;
+        const auto& witness = tx.inputs[i].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+
+        const auto& stack1 = witness.elements[1];
+        std::vector<uint8_t> proof_bytes(stack1.data, stack1.data + stack1.size);
+        MLSCProof proof;
+        std::string err;
+        if (!DeserializeMLSCProof(proof_bytes, proof, err)) continue;
+        if (proof.proof_mode != MLSCProofMode::SHARED) continue;
+
+        size_t src_idx = proof.shared_source_input;
+        if (src_idx >= i) continue; // forward-only — invalid; per-input verifier rejects
+        source_indices.insert(src_idx);
+    }
+    if (source_indices.empty()) return true;
+
+    // Pass 2: verify each unique source and populate cache.
+    for (size_t src_idx : source_indices) {
+        if (!is_mlsc(src_idx)) continue;
+
+        uint256 conditions_root;
+        if (!GetMLSCRoot(spent_outputs[src_idx].script_pub_key.as_span(), conditions_root)) {
+            // Compact MLSC inflation should have happened upstream
+            // (validation.cpp:2402). If the root isn't recoverable, leave
+            // the cache empty for this source — per-input verifier will
+            // hit MLSC_ROOT_UNAVAILABLE on the source itself.
+            continue;
+        }
+
+        const auto& witness = tx.inputs[src_idx].witness;
+        if (witness.count < 2 || witness.count > 3) continue;
+
+        const auto& stack0 = witness.elements[0];
+        std::vector<uint8_t> wit_bytes(stack0.data, stack0.data + stack0.size);
+        const auto& stack1 = witness.elements[1];
+        std::vector<uint8_t> proof_bytes(stack1.data, stack1.data + stack1.size);
+
+        LadderWitness witness_ladder;
+        std::string err;
+        if (!DeserializeLadderWitness(wit_bytes, witness_ladder, err)) continue;
+
+        // witness_ref source: source must itself be a direct witness
+        // (no chaining — evaluator.cpp:439-442). If source is a ref
+        // shell, skip — per-input verifier will reject.
+        if (witness_ladder.IsWitnessRef()) continue;
+        if (witness_ladder.rungs.size() != 1) continue;
+
+        MLSCProof mlsc_proof;
+        if (!DeserializeMLSCProof(proof_bytes, mlsc_proof, err)) continue;
+        if (mlsc_proof.proof_mode == MLSCProofMode::SHARED) continue; // not a source
+
+        // Compute leaf
+        auto rung_pks = ExtractBlockPubkeys(witness_ladder.rungs[0].blocks);
+        CreationProofRung cp_rung;
+        for (const auto& block : mlsc_proof.revealed_rung.blocks) {
+            cp_rung.blocks.push_back({
+                static_cast<uint16_t>(block.type),
+                static_cast<uint8_t>(block.inverted ? 1 : 0)});
+        }
+        cp_rung.relay_refs = mlsc_proof.revealed_rung.relay_refs;
+        cp_rung.coil = witness_ladder.coil;
+        cp_rung.value_commitment = ComputeValueCommitment(mlsc_proof.revealed_rung, rung_pks);
+        uint256 my_leaf = ComputeTxMLSCLeaf(cp_rung);
+
+        // Verify Merkle proof against root, build the leaves array the
+        // cache stores. Mirror the per-input verifier at evaluator.cpp
+        // lines 1241-1369 (witness count 2 = direct, 3 = with tweak).
+        std::vector<uint256> leaves;
+        if (mlsc_proof.proof_mode == MLSCProofMode::MERKLE_PATH) {
+            // Witness count 2: verify path directly against conditions_root.
+            // Witness count 3: verify the raw root via tweak. We currently
+            // only support count==2 in the pre-pass; count==3 (with
+            // internal_pubkey) gets fall-through to per-input.
+            if (witness.count != 2) continue;
+            size_t total_leaves = mlsc_proof.total_rungs + mlsc_proof.total_relays;
+            if (total_leaves > MAX_RUNGS + MAX_RELAYS) return false;
+            std::string path_error;
+            if (!VerifyMerklePath(my_leaf, mlsc_proof.proof_hashes,
+                                   total_leaves, conditions_root, path_error)) {
+                // Source proof would itself be rejected by the per-input
+                // verifier — fail the tx eagerly so we don't half-warm
+                // the cache.
+                return false;
+            }
+            leaves.push_back(my_leaf);
+        } else if (mlsc_proof.proof_mode == MLSCProofMode::FULL_LEAVES) {
+            size_t total_leaves = mlsc_proof.total_rungs + mlsc_proof.total_relays;
+            if (total_leaves > MAX_RUNGS + MAX_RELAYS) return false;
+            std::vector<uint256> all_leaves(total_leaves);
+            std::vector<bool> revealed(total_leaves, false);
+            if (mlsc_proof.rung_index >= total_leaves) return false;
+            all_leaves[mlsc_proof.rung_index] = my_leaf;
+            revealed[mlsc_proof.rung_index] = true;
+            for (size_t rl = 0; rl < mlsc_proof.revealed_relays.size(); ++rl) {
+                const auto& [relay_idx, relay] = mlsc_proof.revealed_relays[rl];
+                size_t leaf_idx = static_cast<size_t>(mlsc_proof.total_rungs) + relay_idx;
+                if (leaf_idx >= total_leaves) return false;
+                CreationProofRelay cp_relay;
+                for (const auto& blk : relay.blocks) {
+                    cp_relay.blocks.push_back({static_cast<uint16_t>(blk.type),
+                                                static_cast<uint8_t>(blk.inverted ? 1 : 0)});
+                }
+                cp_relay.relay_refs = relay.relay_refs;
+                std::vector<std::vector<uint8_t>> rpks =
+                    (relay_idx < witness_ladder.relays.size())
+                        ? ExtractBlockPubkeys(witness_ladder.relays[relay_idx].blocks)
+                        : std::vector<std::vector<uint8_t>>{};
+                Rung tmp; tmp.blocks = relay.blocks;
+                cp_relay.value_commitment = ComputeValueCommitment(tmp, rpks);
+                all_leaves[leaf_idx] = ComputeTxMLSCRelayLeaf(cp_relay);
+                revealed[leaf_idx] = true;
+            }
+            size_t ph = 0;
+            for (size_t i = 0; i < total_leaves; ++i) {
+                if (revealed[i]) continue;
+                if (ph >= mlsc_proof.proof_hashes.size()) return false;
+                all_leaves[i] = mlsc_proof.proof_hashes[ph++];
+            }
+
+            if (witness.count == 2) {
+                std::vector<uint256> for_root = all_leaves;
+                uint256 computed_root = BuildMerkleTree(std::move(for_root));
+                if (computed_root != conditions_root) return false;
+            } else {
+                // Tweak case: skip — per-input verifier will catch via
+                // CheckLadderTweakRaw. Pre-pass populates leaves only;
+                // the cache lookup downstream uses the leaf set.
+            }
+            leaves = std::move(all_leaves);
+        } else {
+            // Unknown proof mode — let per-input path reject.
+            continue;
+        }
+
+        SharedTreeEntry entry;
+        entry.root = conditions_root;
+        entry.leaves = std::move(leaves);
+        out_cache[prevout_txid(src_idx)] = std::move(entry);
+    }
+    return true;
+}
 
 namespace api {
 

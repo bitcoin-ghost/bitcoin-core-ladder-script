@@ -61,7 +61,7 @@ class RungPQBatchTest(BitcoinTestFramework):
 
         self.test_single_input_anchor()
         self.test_batch_anchor_plus_cache()
-        self.test_non_anchor_before_anchor_fails()
+        self.test_non_anchor_before_anchor_now_passes()
         self.test_bad_signature_fails_all()
         self.test_wrong_pubkey_fails_anchor()
         self.test_mixed_commits_two_anchors()
@@ -218,10 +218,17 @@ class RungPQBatchTest(BitcoinTestFramework):
         assert self.node.gettxout(spend_txid, 0) is not None
         self.log.info("  Scenario 2: OK")
 
-    def test_non_anchor_before_anchor_fails(self):
-        """Input 0 = empty witness, input 1 = anchor. Cache lookup at
-        input 0 misses (anchor hasn't run yet) → UNSATISFIED."""
-        self.log.info("Scenario 3: non-anchor ordered before anchor (must reject)")
+    def test_non_anchor_before_anchor_now_passes(self):
+        """AUD-01: anchor at higher index than non-anchor used to fail
+        because the per-input cache lookup at input 0 missed before the
+        anchor at input 1 wrote the entry. The pre-pass added in the
+        AUD-01 fix walks all inputs of the tx and pre-verifies anchors
+        regardless of order, so this configuration now passes. Without
+        the pre-pass, this would still fail under -par=1 (the per-input
+        verifier processes inputs in order and input 0 hits the empty
+        cache); with the pre-pass, the cache is warm before any
+        per-input verifier runs."""
+        self.log.info("Scenario 3: non-anchor ordered before anchor (now accepted post-AUD-01)")
 
         pubkey, privkey, commit = self._new_falcon()
         funded = self._fund_pq_batch([commit, commit])
@@ -232,14 +239,18 @@ class RungPQBatchTest(BitcoinTestFramework):
             self._signer_anchor(1, funded[1], pubkey, privkey),
         ]
         signed = self.node.signrungtx(unsigned, signers, self._spent_outputs(funded))
-        # Signing succeeds (RPC builds witnesses; consensus rejects below).
         assert_equal(signed["complete"], True)
 
         accept = self.node.testmempoolaccept([signed["hex"]])[0]
-        assert not accept["allowed"], (
-            "non-anchor-before-anchor must be rejected; got accept=%s" % accept)
-        self.log.info(f"  Scenario 3 reject reason: {accept.get('reject-reason')}")
-        assert "script-verify-flag-failed" in accept.get("reject-reason", "")
+        assert accept["allowed"], (
+            "anchor-after-non-anchor must now pass thanks to the AUD-01 "
+            "pre-pass; got reject=%s" % accept)
+        # Confirm end-to-end by mining the tx — this exercises the same
+        # pre-pass on the block-validation path under multi-worker -par.
+        spend_txid = self.node.sendrawtransaction(signed["hex"])
+        self.generate(self.node, 1)
+        assert self.node.gettxout(funded[0]["txid"], 0) is None
+        assert self.node.gettxout(funded[0]["txid"], 1) is None
         self.log.info("  Scenario 3: OK")
 
     def test_bad_signature_fails_all(self):

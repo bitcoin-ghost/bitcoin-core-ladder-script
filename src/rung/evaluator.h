@@ -126,13 +126,16 @@ struct QABOSigCache {};
  *  PQ_BATCH block carries the same commit with an empty witness can then
  *  return SATISFIED from cache without re-verifying.
  *
- *  Anchor ordering constraint: the input carrying PUBKEY + SIGNATURE must
- *  be evaluated BEFORE non-anchor inputs with the matching commit. Script
- *  verification runs in input order (0, 1, 2, ...), so signers must place
- *  the anchor at the lowest-index PQ_BATCH input. Non-anchor inputs at
- *  lower indices return UNSATISFIED (no cache entry yet). This is
- *  acceptable — the cost model of "one anchor input per commit group per
- *  tx" still delivers ~5× amortisation for N=100 batches. */
+ *  Cache lifecycle: populated SEQUENTIALLY by PreparePQBatchAnchorCache
+ *  (see qabi.cpp) once per tx, before parallel script-check dispatch. Per-
+ *  input EvalPQBatchBlock does NOT rely on input ordering — Bitcoin Core's
+ *  CCheckQueue drains LIFO from queue.end() (checkqueue.h:122) with
+ *  arbitrary worker interleaving, so a non-anchor input may run before
+ *  the anchor on a different worker. The pre-pass eliminates that race:
+ *  every entry is in place before any worker reads. The shared mutex on
+ *  the cache (pq_batch_cache_mutex) protects in-loop write-behind by
+ *  EvalPQBatchBlock for self-healing on inputs the pre-pass skipped
+ *  (witness-ref shells, SHARED-mode proofs). */
 using PQBatchCache = std::map<uint256, bool>;
 
 /** Extended evaluation context for block types that need transaction data.
@@ -400,6 +403,19 @@ bool VerifyRungTx(const CTransaction& tx,
                   std::mutex* shared_cache_mutex = nullptr,
                   std::mutex* qabo_sig_cache_mutex = nullptr,
                   std::string* error_message_out = nullptr);
+
+/** AUD-02 fix: pre-pass that warms `shared_tree_cache` for SHARED-mode
+ *  MLSC inputs before the parallel CScriptCheck workers dispatch.
+ *  Mirrors the AUD-01 pattern at `PreparePQBatchAnchorCache` —
+ *  eliminates the LIFO/parallel-worker race that would otherwise
+ *  reject valid SHARED-amortised txs at block-validation time.
+ *  Returns false on a definite source-proof verification failure
+ *  (caller should reject the tx). See evaluator.cpp for the full
+ *  rationale and reproduction steps. */
+bool PrepareSharedTreeCache(const api::LadderTxView& tx,
+                             const api::LadderOutputView* spent_outputs,
+                             size_t spent_output_count,
+                             SharedTreeCache& out_cache);
 
 } // namespace rung
 
