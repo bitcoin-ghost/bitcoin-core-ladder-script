@@ -34,6 +34,17 @@
 
 #include <boost/test/unit_test.hpp>
 
+// Windows headers (wingdi.h, transitively via boost or test/util) define
+// ERROR as a preprocessor macro, which collides with `EvalResult::ERROR`
+// in this file's BOOST_CHECK calls and tokenises to "EvalResult::<int>"
+// — producing "expected unqualified-id before numeric constant" build
+// errors on the mingw cross-compile. evaluator.h has the same guard
+// (lines 202-204) for the library headers; this is the same fix at the
+// test layer. Nothing in this TU uses the Windows ERROR constant.
+#ifdef ERROR
+#undef ERROR
+#endif
+
 #include <chrono>
 #include <cstring>
 #include <vector>
