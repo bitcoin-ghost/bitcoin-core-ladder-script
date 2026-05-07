@@ -969,12 +969,20 @@ static RPCHelpMan validateladder()
     };
 }
 
-/** Helper: parse relay_refs from a JSON array of integers. */
+/** Helper: parse relay_refs from a JSON array of integers. Range-checks
+ *  each entry before narrowing — pre-fix the silent uint16_t truncation
+ *  let a user-supplied 70000 alias to 4464 without surfacing the error.
+ *  Mirrors the F5 pattern at createrungtx's output_index parser. */
 static std::vector<uint16_t> ParseRelayRefs(const UniValue& arr)
 {
     std::vector<uint16_t> refs;
     for (size_t i = 0; i < arr.size(); ++i) {
-        refs.push_back(static_cast<uint16_t>(arr[i].getInt<int>()));
+        int v = arr[i].getInt<int>();
+        if (v < 0 || v > 0xFFFF) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "relay_ref " + std::to_string(v) + " out of range [0, 65535]");
+        }
+        refs.push_back(static_cast<uint16_t>(v));
     }
     return refs;
 }
