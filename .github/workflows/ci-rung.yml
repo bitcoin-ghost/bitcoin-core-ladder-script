@@ -75,7 +75,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_BENCH=OFF \
             -DBUILD_GUI=OFF \
-            -DBUILD_TESTS=ON
+            -DBUILD_TESTS=ON \
+            -DENABLE_IPC=OFF
 
       - name: Build bitcoin_rung + test_bitcoin + bitcoind
         run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind
@@ -155,7 +156,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_BENCH=OFF \
             -DBUILD_GUI=OFF \
-            -DBUILD_TESTS=ON
+            -DBUILD_TESTS=ON \
+            -DENABLE_IPC=OFF
 
       - name: Build bitcoin_rung + test_bitcoin + bitcoind
         run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind
