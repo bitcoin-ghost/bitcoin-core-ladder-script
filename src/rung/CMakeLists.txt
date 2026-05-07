@@ -27,9 +27,40 @@
 # different OQS_VERSION_TEXT header (system-dir leak, multi-install).
 set(LADDER_LIBOQS_VERSION "0.10.1" CACHE STRING
     "Pinned liboqs version. Changing this constitutes a hard fork.")
-find_package(liboqs ${LADDER_LIBOQS_VERSION} EXACT REQUIRED)
-message(STATUS "liboqs ${LADDER_LIBOQS_VERSION} found (EXACT pin) — "
-               "post-quantum signature verification enabled")
+
+# AUD-04 follow-up (long-term): when ON, build liboqs from a project-
+# vendored source tree under src/liboqs/ (libsecp256k1 pattern) instead
+# of linking the system install. Collapses the residual "distro patches
+# the pinned version differently" risk to "the project controls every
+# byte of the consensus crypto." OFF today because the source tree
+# isn't yet imported via `git subtree add` — see
+# `doc/ladder-script/VENDOR_LIBOQS.md` for the migration plan.
+option(LADDER_VENDOR_LIBOQS
+       "Build liboqs from src/liboqs/ (vendored) instead of system install"
+       OFF)
+
+if(LADDER_VENDOR_LIBOQS)
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src/liboqs/CMakeLists.txt")
+        message(FATAL_ERROR
+            "LADDER_VENDOR_LIBOQS=ON but src/liboqs/CMakeLists.txt is missing. "
+            "Either import the vendored tree (see "
+            "doc/ladder-script/VENDOR_LIBOQS.md) or set "
+            "LADDER_VENDOR_LIBOQS=OFF to use the system install.")
+    endif()
+    # Trim the liboqs build to only the schemes Ladder Script consensus
+    # uses. Keeps build time and binary size reasonable.
+    set(OQS_MINIMAL_BUILD "SIG_falcon_512;SIG_falcon_1024;SIG_dilithium_3;SIG_sphincs_sha2_256f_simple"
+        CACHE STRING "Algorithms enabled in vendored liboqs build" FORCE)
+    set(OQS_BUILD_ONLY_LIB ON CACHE BOOL "Skip liboqs tests/benchmarks" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/src/liboqs ${CMAKE_BINARY_DIR}/src/liboqs)
+    add_library(OQS::oqs ALIAS oqs)
+    message(STATUS "liboqs ${LADDER_LIBOQS_VERSION} (vendored) — "
+                   "post-quantum signature verification enabled")
+else()
+    find_package(liboqs ${LADDER_LIBOQS_VERSION} EXACT REQUIRED)
+    message(STATUS "liboqs ${LADDER_LIBOQS_VERSION} found (system, EXACT pin) — "
+                   "post-quantum signature verification enabled")
+endif()
 
 # QABIO extension — N-party post-quantum batch I/O, specified in BIP-YYYY
 # as a separable soft-fork extension on top of Ladder Script.
