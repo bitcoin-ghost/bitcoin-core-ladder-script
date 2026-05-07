@@ -110,6 +110,104 @@ jobs:
       - name: Run feature_rung_descriptor_roundtrip.py
         run: build/test/functional/feature_rung_descriptor_roundtrip.py
 
+  windows-x86_64-cross:
+    name: Windows x86_64 (mingw cross) — rung
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    # Mirrors release.yml's Windows build pattern: cross-compile via
+    # mingw-w64 from Ubuntu so we don't need a Windows runner for the
+    # build step. The boost rung_tests + functional test run on Windows
+    # is deferred — release.yml itself doesn't run tests on Windows
+    # (the existing ci.yml has a windows-native-test job for that, but
+    # it requires a Docker-based depends build that's out of scope for
+    # this rung-focused CI). What this job catches is build-time
+    # Windows breakage (mingw header divergence, MSVC-vs-mingw codegen
+    # surprises in liboqs, library-link issues).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkgconf python3 \
+            g++-mingw-w64-x86-64-posix \
+            mingw-w64-x86-64-dev \
+            curl wget bsdmainutils ca-certificates patch xz-utils zip
+          # depends/ defaults to the win32 thread model on some Ubuntu
+          # versions; force the posix variant which has std::thread.
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
+      - name: Cache depends build
+        uses: actions/cache@v4
+        with:
+          path: depends/x86_64-w64-mingw32
+          key: depends-mingw-${{ hashFiles('depends/packages/*.mk', 'depends/funcs.mk', 'depends/Makefile') }}
+
+      - name: Build host dependencies (depends/)
+        # NO_QT=1 we don't ship a GUI; NO_USDT=1 USDT tracing is Linux-only.
+        run: make -C depends HOST=x86_64-w64-mingw32 NO_QT=1 NO_USDT=1 -j$(nproc)
+
+      - name: Cache liboqs build (mingw)
+        id: cache-liboqs-mingw
+        uses: actions/cache@v4
+        with:
+          path: depends/x86_64-w64-mingw32/lib/liboqs.a
+          key: liboqs-${{ env.LIBOQS_VERSION }}-mingw-x86_64-v1
+
+      - name: Cross-compile liboqs ${{ env.LIBOQS_VERSION }} to mingw
+        if: steps.cache-liboqs-mingw.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          DEPENDS_PREFIX="$PWD/depends/x86_64-w64-mingw32"
+          curl -sL "https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION}.tar.gz" \
+            -o /tmp/liboqs.tar.gz
+          tar xzf /tmp/liboqs.tar.gz -C /tmp
+          mv "/tmp/liboqs-${LIBOQS_VERSION}" /tmp/liboqs
+          cat > /tmp/mingw-toolchain.cmake <<EOF
+          set(CMAKE_SYSTEM_NAME Windows)
+          set(CMAKE_SYSTEM_PROCESSOR x86_64)
+          set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc-posix)
+          set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++-posix)
+          set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
+          set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32 ${DEPENDS_PREFIX})
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          EOF
+          cmake -B /tmp/liboqs/build -S /tmp/liboqs -GNinja \
+            -DCMAKE_TOOLCHAIN_FILE=/tmp/mingw-toolchain.cmake \
+            -DCMAKE_INSTALL_PREFIX="$DEPENDS_PREFIX" \
+            -DOQS_BUILD_ONLY_LIB=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_MINIMAL_BUILD="SIG_falcon_512;SIG_falcon_1024;SIG_dilithium_3;SIG_sphincs_sha2_256f_simple" \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build /tmp/liboqs/build
+          cmake --install /tmp/liboqs/build
+
+      - name: Configure
+        run: |
+          cmake -B build -GNinja \
+            --toolchain depends/x86_64-w64-mingw32/toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_GUI=OFF \
+            -DBUILD_TESTS=ON \
+            -DBUILD_BENCH=OFF \
+            -DBUILD_FUZZ_BINARY=OFF \
+            -DENABLE_IPC=OFF \
+            -DWITH_ZMQ=OFF
+
+      - name: Build bitcoin_rung + test_bitcoin + bitcoind + bitcoin-cli
+        run: cmake --build build -j$(nproc) --target bitcoin_rung test_bitcoin bitcoind bitcoin-cli
+
+      - name: Confirm artefacts
+        run: |
+          ls -la build/bin/bitcoind.exe build/bin/bitcoin-cli.exe build/bin/test_bitcoin.exe
+          file build/bin/bitcoind.exe
+
   macos-arm64:
     name: macOS arm64 — rung
     runs-on: macos-14
