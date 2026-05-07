@@ -73,7 +73,9 @@ EvalResult EvalRecurseSameBlock(const RungBlock& block, const RungEvalContext& c
         if (!OutputRootMatchesInput(*ctx.spending_output, *ctx.verified_leaves)) {
             return EvalResult::UNSATISFIED;
         }
-    } else if (ctx.input_conditions) {
+        return EvalResult::SATISFIED;
+    }
+    if (ctx.input_conditions) {
         if (!ctx.spending_output) return EvalResult::ERROR;
         // Fallback: compare MLSC roots directly
         uint256 output_root;
@@ -85,9 +87,13 @@ EvalResult EvalRecurseSameBlock(const RungBlock& block, const RungEvalContext& c
         if (output_root != ComputeConditionsRootMLSC(*ctx.input_conditions, pks)) {
             return EvalResult::UNSATISFIED;
         }
+        return EvalResult::SATISFIED;
     }
-    // No covenant context available — structural check passed (depth > 0)
-    return EvalResult::SATISFIED;
+    // Covenant context unreachable in production VerifyRungTx (always
+    // populates verified_leaves + input_conditions for MLSC spends). Fail
+    // closed: returning SATISFIED here would let any output satisfy the
+    // recursion identity if a future caller bypasses the context plumbing.
+    return EvalResult::ERROR;
 }
 
 EvalResult EvalRecurseModifiedBlock(const RungBlock& block, const RungEvalContext& ctx)
@@ -130,7 +136,9 @@ EvalResult EvalRecurseUntilBlock(const RungBlock& block, const RungEvalContext& 
         if (!OutputRootMatchesInput(*ctx.spending_output, *ctx.verified_leaves)) {
             return EvalResult::UNSATISFIED;
         }
-    } else if (ctx.input_conditions && ctx.spending_output) {
+        return EvalResult::SATISFIED;
+    }
+    if (ctx.input_conditions && ctx.spending_output) {
         // Fallback: compare MLSC roots directly
         uint256 output_root;
         if (!GetMLSCRoot(ctx.spending_output->script_pub_key.as_span(), output_root)) {
@@ -141,8 +149,14 @@ EvalResult EvalRecurseUntilBlock(const RungBlock& block, const RungEvalContext& 
         if (output_root != ComputeConditionsRootMLSC(*ctx.input_conditions, pks)) {
             return EvalResult::UNSATISFIED;
         }
+        return EvalResult::SATISFIED;
     }
-    return EvalResult::SATISFIED;
+    // Same fail-closed posture as EvalRecurseSameBlock: production
+    // VerifyRungTx always populates verified_leaves + input_conditions
+    // for MLSC spends, so this branch is unreachable. Returning SATISFIED
+    // here would let any output satisfy the covenant identity if a
+    // future caller bypasses the context plumbing.
+    return EvalResult::ERROR;
 }
 
 EvalResult EvalRecurseCountBlock(const RungBlock& block, const RungEvalContext& ctx)

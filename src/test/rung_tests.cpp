@@ -1218,7 +1218,12 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_structural)
     RungBlock block;
     block.type = RungBlockType::RECURSE_SAME;
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(10)});
-    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
+    // AUD-05: no covenant context → ERROR (was SATISFIED via the structural-
+    // only fallback before the fail-closed fix). Production VerifyRungTx
+    // always populates verified_leaves + input_conditions for MLSC spends,
+    // so the fallback was unreachable; tightening it removes a footgun for
+    // any future caller that bypasses the context plumbing.
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
     // Missing max_depth → ERROR
     RungBlock bad;
@@ -1717,10 +1722,15 @@ BOOST_AUTO_TEST_CASE(eval_plc_structural_validation)
     timer_bad.type = RungBlockType::TIMER_CONTINUOUS;
     BOOST_CHECK(EvalBlock(timer_bad, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
 
-    // Latches need pubkey
+    // Latches need pubkey + state. AUD-06: missing state → ERROR (was
+    // SATISFIED via the structural-only fallback before the fail-closed
+    // fix; the fallback was unreachable from properly-deserialised blocks
+    // because LATCH_SET_CONDITIONS requires the NUMERIC).
     RungBlock latch;
     latch.type = RungBlockType::LATCH_SET;
     latch.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
+    BOOST_CHECK(EvalBlock(latch, checker, checker, SigVersion::LADDER, execdata) == EvalResult::ERROR);
+    latch.fields.push_back({RungDataType::NUMERIC, MakeNumeric(0)}); // state=0 (unset)
     BOOST_CHECK(EvalBlock(latch, checker, checker, SigVersion::LADDER, execdata) == EvalResult::SATISFIED);
 
     // Counters need pubkey + numeric
@@ -3509,9 +3519,14 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_state_already_set_unsatisfied)
     BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::UNSATISFIED);
 }
 
-BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_backward_compat)
+BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_rejects)
 {
-    // LATCH_SET with no NUMERIC → backward compat, always SATISFIED
+    // AUD-06: LATCH_SET with no NUMERIC → ERROR. Was SATISFIED via the
+    // structural-only "backward compat" fallback before the fail-closed
+    // fix. The fallback was unreachable from properly-deserialised blocks
+    // (LATCH_SET_CONDITIONS requires NUMERIC), so removing it parses
+    // identically and removes a footgun if a future caller hand-crafts a
+    // block that bypasses the deserialiser.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
@@ -3520,7 +3535,7 @@ BOOST_AUTO_TEST_CASE(eval_latch_set_no_state_backward_compat)
     block.fields.push_back({RungDataType::PUBKEY, MakePubkey()});
 
     RungEvalContext ctx;
-    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_latch_reset_state_set_delay_zero_satisfied)
@@ -9191,8 +9206,12 @@ BOOST_AUTO_TEST_CASE(eval_multisig_wrong_sig_unsatisfied)
     BOOST_CHECK(EvalMultisigBlock(block, checker) == EvalResult::UNSATISFIED);
 }
 
-// Gap 2: DoS — RECURSE_SAME with very large max_depth still returns SATISFIED
-// (The depth is just a counter, not recursive — it's checked structurally, not by looping)
+// Gap 2: DoS — RECURSE_SAME with very large max_depth must still
+// return in O(1) (the depth is just a counter, not recursive — it's
+// checked structurally, not by looping). AUD-05: with no covenant
+// context the eval now returns ERROR (was SATISFIED via the
+// structural-only fallback). The DoS-resistance property is what's
+// important here: the eval must not iterate the depth value.
 BOOST_AUTO_TEST_CASE(eval_recurse_same_large_depth_no_dos)
 {
     MockSignatureChecker checker;
@@ -9204,7 +9223,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_large_depth_no_dos)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(2000000000)});
 
     RungEvalContext ctx{};
-    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 // Gap 2b: Policy rejects too many relays (MAX_RELAYS = 8)
@@ -12165,9 +12184,14 @@ BOOST_AUTO_TEST_CASE(relative_value_zero_numerator)
 // EvalRecurseSameBlock fail-closed
 // ============================================================================
 
-BOOST_AUTO_TEST_CASE(eval_recurse_same_no_context_satisfied)
+BOOST_AUTO_TEST_CASE(eval_recurse_same_no_context_errors)
 {
-    // RECURSE_SAME with no verified_leaves, no input_conditions → structural only → SATISFIED
+    // AUD-05: RECURSE_SAME with no verified_leaves, no input_conditions
+    // → ERROR. Was SATISFIED via the structural-only "no covenant context"
+    // fallback before the fail-closed fix. Production VerifyRungTx always
+    // populates verified_leaves + input_conditions for MLSC spends, so the
+    // fallback was unreachable; tightening it removes a footgun for any
+    // future caller that bypasses the context plumbing.
     MockSignatureChecker checker;
     ScriptExecutionData execdata;
 
@@ -12176,8 +12200,7 @@ BOOST_AUTO_TEST_CASE(eval_recurse_same_no_context_satisfied)
     block.fields.push_back({RungDataType::NUMERIC, MakeNumeric(5)});  // max_depth = 5
 
     RungEvalContext ctx;
-    // No covenant context — structural check only (depth > 0)
-    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::SATISFIED);
+    BOOST_CHECK(EvalBlock(block, checker, checker, SigVersion::LADDER, execdata, ctx) == EvalResult::ERROR);
 }
 
 BOOST_AUTO_TEST_CASE(eval_recurse_same_with_leaves_no_output_error)

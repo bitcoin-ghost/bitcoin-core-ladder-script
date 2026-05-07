@@ -170,10 +170,13 @@ EvalResult EvalLatchSetBlock(const RungBlock& block, const RungEvalContext& /*ct
     // Pair with RECURSE_MODIFIED to enforce state 0→1 in the output.
     if (!HasRequiredPubkeys(block, 1)) return EvalResult::ERROR;
     auto numerics = FindAllFields(block, RungDataType::NUMERIC);
-    if (numerics.empty()) {
-        // No state field — structural-only mode (backward compat)
-        return EvalResult::SATISFIED;
-    }
+    // Conditions implicit layout (LATCH_SET_CONDITIONS in types.h) requires
+    // exactly 1 NUMERIC, so a properly-deserialised block always populates
+    // it. Reject the no-state fallback for parity with LATCH_RESET (which
+    // ERRORs on missing fields) — silently SATISFYING here would let a
+    // hand-crafted block (test fixture, RPC builder bypassing deserialise)
+    // activate the SET branch unconditionally.
+    if (numerics.empty()) return EvalResult::ERROR;
     auto state_opt = ReadNumeric(*numerics[0]);
     if (!state_opt) return EvalResult::ERROR;
     int64_t state = *state_opt;
