@@ -2590,14 +2590,23 @@ their named bars.
      library under `src/rung/`, the wire format, the per-input and
      QABO sighashes, the LadderTweak/v1 construction, and the
      QABIO and PQ_BATCH evaluators).
-  2. **TLA+ pass at production constants.** State-space exploration
-     of the 27 specifications under `spec/` completes at the
-     production constants `MAX_RUNGS = 16`,
-     `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`. The
-     specifications themselves are peer-reviewed: at least one named
-     reviewer other than the author has validated the model. Counter-
-     examples (if any) close to zero or are explained in a published
-     gap analysis.
+  2. **TLA+ supporting evidence published.** The 21 specifications
+     under `spec/` are accompanied by a results report covering: the
+     specs that complete exhaustive model checking at the largest
+     constants TLC scales to (3 PASS at the time of draft —
+     `AutoKeyPath`, `UTXODedup`, `AnchorFee`), and the
+     multi-dimensional specs that are infeasible to model-check
+     exhaustively even on dedicated hardware (sampled via TLC
+     simulation mode). The specifications are peer-reviewed: at
+     least one named reviewer other than the author has validated the
+     model. This component is **supporting evidence, not a definitive
+     proof of consensus correctness** — exhaustive verification of
+     every consensus invariant via TLC is not feasible at the state-
+     space dimensions Ladder Script's spec set requires. Stronger
+     formal-methods options (TLAPS proofs of named load-bearing
+     invariants, Apalache for SMT-backed verification of selected
+     specs) are deferred to follow-on work and are not part of this
+     activation gate.
   3. **Test vectors.** At least 50 vectors across the eight
      witness-rule families (`Fixed N`, `Empty`, `Reveal P`,
      `Triplets K`, `Accumulator`, `Bridging`, `PQ-anchor`,
@@ -2665,17 +2674,27 @@ their named bars.
   Bitcoin consensus + cryptography / Schnorr-tweak), each
   publishing a written assessment, before any mainnet-activation
   proposal. (Activation gate component 1.)
-- **TLA+ model checking at consensus-level constants.** 27 TLA+
-  specifications under `spec/` cover the consensus surface
-  (evaluation semantics, anti-spam, wire format, Merkle proof
-  security, sighash binding, covenant termination, cross-input
-  rules) — 80+ checked properties total. The state-space exploration
-  pass at production-sized constants (`MAX_RUNGS = 16`,
-  `MAX_BLOCKS_PER_RUNG = 8`, `MAX_FIELDS_PER_BLOCK = 16`) is in
-  progress on dedicated infrastructure; smaller-constant runs
-  verify the same properties on bounded state spaces and report
-  zero counter-examples. Full results will be published alongside
-  the activation proposal. (Activation gate component 2.)
+- **TLA+ supporting evidence.** 21 TLA+ specifications under `spec/`
+  cover the consensus surface (evaluation semantics, anti-spam, wire
+  format, Merkle proof security, sighash binding, covenant
+  termination, cross-input rules) — 80+ checked properties total.
+  At the time of draft, three specs (`AutoKeyPath`, `UTXODedup`,
+  `AnchorFee`) complete exhaustive model checking at moderate
+  constants and report zero counter-examples; eight specs
+  (`SharedProof`, `LadderEval`, `LadderAntiSpam`, `LadderWireFormat`,
+  `BlockPLC`, `BlockGovernance`, `BlockRecursion`, `BlockTimelock`)
+  have multi-dimensional state spaces whose exhaustive exploration
+  is **not tractable for TLC at any reachable hardware configuration**
+  — those specs are covered by simulation-mode random-path sampling
+  rather than exhaustive verification, with the trade-off explicitly
+  recorded in `spec/README.md`. The remaining specs sit between
+  these poles. The activation gate (component 2) requires the
+  evidence report to be published; it does **not** require
+  exhaustive model checking of every spec at consensus-level
+  constants — that bar is not feasible without spec restructuring
+  or a switch to alternative tooling (Apalache, TLAPS), both of
+  which are out of scope for this BIP and tracked as
+  follow-on formal-methods work.
 - **Test vectors expansion.** The fixture set under
   `src/test/data/` (`rung_tx_vectors.json` 68 positive,
   `rung_tx_neg_vectors.json` 76 negative, `rung_tx_spend_vectors.json`
