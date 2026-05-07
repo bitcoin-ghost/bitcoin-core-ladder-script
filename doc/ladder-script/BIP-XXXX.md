@@ -1743,6 +1743,31 @@ QABIO extension specifically (the three QABI-family blocks), but the
 classical PQ signature schemes used by per-input `SIG` blocks are not
 optional.
 
+**The pinned `liboqs` version is part of the consensus surface.**
+This BIP requires `liboqs 0.10.1`, with no patches that change the
+semantics of `OQS_SIG_verify` for any of the four schemes used by
+Ladder Script (FALCON-512, FALCON-1024, Dilithium3, SPHINCS+
+sha2-256f-simple). Different `liboqs` versions can produce divergent
+verify results for marginal/malformed signatures (the variable-length
+FALCON sig framing is the historic upstream patch hot spot), so a
+network where some nodes link `liboqs 0.10.1` and others link a
+later version would fork on the first such marginal signature.
+
+The pin is enforced by:
+
+1. CMake: `find_package(liboqs 0.10.1 EXACT REQUIRED)` controlled
+   by the `LADDER_LIBOQS_VERSION` cache variable in
+   `src/rung/CMakeLists.txt`.
+2. A compile-time `static_assert` in `src/rung/pq_verify.cpp`
+   checking `OQS_VERSION_TEXT == LADDER_PINNED_LIBOQS_VERSION`,
+   guarding against the rare case where CMake finds an
+   EXACT-matching install but the compiler picks up a mismatched
+   `oqsconfig.h` from system include directories.
+
+Bumping the pin is a hard fork; the new version's `OQS_SIG_verify`
+acceptance set must be compared to the current version's on a
+canonical malformed-input corpus before the change can ship.
+
 ### 13. Why are unknown block types `UNSATISFIED` rather than `ERROR`, except when inverted?
 
 A transaction whose witness uses a block type the verifier does not
@@ -2438,14 +2463,17 @@ Existing nodes that do not run the new soft fork stay on the chain
 that does not include the new block.
 
 **Compile-time consensus flags.** `liboqs` is a hard build
-dependency (`find_package(liboqs REQUIRED)` in
-`src/rung/CMakeLists.txt`) because PQ signature schemes are part of
-the consensus surface; a node built without `liboqs` would silently
-disagree with PQ-enabled nodes. The `LADDER_ENABLE_QABIO` build flag
-can disable the QABIO extension specifically; a non-QABIO build
-rejects the three QABI-family block types via the standard "unknown
-block type → UNSATISFIED" path. The flag is intended for deployments
-that opt out of QABIO-specific semantics; it does not change the
+dependency, pinned to version 0.10.1 EXACT
+(`find_package(liboqs 0.10.1 EXACT REQUIRED)` in
+`src/rung/CMakeLists.txt`, defence-in-depth `static_assert` in
+`src/rung/pq_verify.cpp`) because the PQ signature verifier
+acceptance set is part of the consensus surface; nodes linking
+different `liboqs` versions would fork on marginal/malformed
+signatures (see §FAQ 12). The `LADDER_ENABLE_QABIO` build flag can
+disable the QABIO extension specifically; a non-QABIO build rejects
+the three QABI-family block types via the standard "unknown block
+type → UNSATISFIED" path. The flag is intended for deployments that
+opt out of QABIO-specific semantics; it does not change the
 classical PQ surface or any non-QABI block.
 
 **Key-path tweak.** The `LadderTweak/v1` tag is distinct from
