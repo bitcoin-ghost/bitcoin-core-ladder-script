@@ -1,0 +1,21 @@
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /home/defenwycke/dev/projects/bitcoin-core-ladder/_apalache-out/SharedProof.tla/2026-05-12T22-42-38_2055143574230111600
+# APALACHE version: 0.57.0 | build: 635865a                       I@22:42:38.963
+  > SharedProof.cfg: Loading TLC configuration                    I@22:42:38.972
+  >  inv is set in TLC config but overridden via `inv` cli option or apalache.cfg; using SafetyInvariant W@22:42:39.091
+Tuning: search.outputTraces=false                                 I@22:42:39.143
+PASS #0: SanyParser                                               I@22:42:39.612
+Parsing file /home/defenwycke/dev/projects/bitcoin-core-ladder/spec/SharedProof.tla
+Parsing file /tmp/SANYDeeuA1cVny/Integers.tla
+Parsing file /tmp/SANYDeeuA1cVny/__rewire_sequences_in_apalache.tla
+Parsing file /tmp/SANYDeeuA1cVny/FiniteSets.tla
+Parsing file /tmp/SANYDeeuA1cVny/Naturals.tla
+Parsing file /tmp/SANYDeeuA1cVny/__apalache_folds.tla
+PASS #1: TypeCheckerSnowcat                                       I@22:42:40.314
+ > Running Snowcat .::.                                           I@22:42:40.314
+SharedProof.tla:53:5-53:9: type input error: Expected a type annotation for VARIABLE cache E@22:42:40.752
+It took me 0 days  0 hours  0 min  1 sec                          I@22:42:40.754
+Total time: 1.786 sec                                             I@22:42:40.755
+EXITCODE: ERROR (255)
