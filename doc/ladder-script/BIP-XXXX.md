@@ -2678,18 +2678,27 @@ their named bars.
   cover the consensus surface (evaluation semantics, anti-spam, wire
   format, Merkle proof security, sighash binding, covenant
   termination, cross-input rules) — 80+ checked properties total.
-  At the time of draft, three specs (`AutoKeyPath`, `UTXODedup`,
-  `AnchorFee`) complete exhaustive model checking at moderate
-  constants and report zero counter-examples; eight specs
-  (`SharedProof`, `LadderEval`, `LadderAntiSpam`, `LadderWireFormat`,
-  `BlockPLC`, `BlockGovernance`, `BlockRecursion`, `BlockTimelock`)
-  have multi-dimensional state spaces whose exhaustive exploration
-  is **not tractable for TLC at any reachable hardware configuration**
-  — those specs are covered by simulation-mode random-path sampling
-  rather than exhaustive verification, with the trade-off explicitly
-  recorded in `spec/README.md`. The remaining specs sit between
-  these poles. The activation gate (component 2) requires the
-  evidence report to be published; it does **not** require
+  At the time of draft, **eleven specs** (`UTXODedup`, `LadderMerkle`,
+  `LadderSighash`, `BlockLegacy`, `AutoKeyPath`, `BlockSignature`,
+  `BlockHash`, `BlockAnchor`, `AnchorFee`, `BlockCovenant`,
+  `HybridCreationProof`) complete exhaustive model checking at the
+  shipped constants — **91.6 million distinct states verified across
+  the eleven, zero counter-examples**. Of these, `AutoKeyPath`
+  additionally passes simulation-mode random sampling at the same
+  constants (800.9 M states checked over 8 M random traces, no
+  counter-example), giving it the strongest evidence position of
+  any spec. Eight specs (`SharedProof`, `LadderEval`,
+  `LadderAntiSpam`, `LadderWireFormat`, `BlockPLC`, `BlockGovernance`,
+  `BlockRecursion`, `BlockCompound`) have multi-dimensional state
+  spaces whose exhaustive exploration is **not tractable for TLC
+  at any reachable hardware configuration** — initial-state
+  computation alone exceeds 67-134 M states and OOMs on a
+  workstation-class box. Two specs (`BlockTimelock`,
+  `RecursiveCovenant`) hit secondary TLC limitations
+  (encoding overflow / 150 M-state queue). Full per-spec breakdown
+  with state counts, wall-clock, and reproduction commands is in
+  `spec/RESULTS.md`. The activation gate (component 2) requires
+  the evidence report to be published; it does **not** require
   exhaustive model checking of every spec at consensus-level
   constants — that bar is not feasible without spec restructuring
   or a switch to alternative tooling (Apalache, TLAPS), both of
