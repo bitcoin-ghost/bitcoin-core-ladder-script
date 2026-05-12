@@ -1,0 +1,42 @@
+TLC2 Version 2026.05.12.170007 (rev: 8033878)
+Warning: Please run the Java VM, which executes TLC with a throughput optimized garbage collector, by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running Random Simulation with seed 4188392044953850273 with 8 workers on 16 cores with 6144MB heap and 64MB offheap memory [pid: 3464166] (Linux 6.6.87.2-microsoft-standard-WSL2 amd64, Ubuntu 11.0.30 64bit).
+Parsing file /home/defenwycke/dev/projects/bitcoin-core-ladder/spec/BlockRecursion.tla
+Parsing file /tmp/tlc-9678328825276286141/Integers.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-9678328825276286141/Sequences.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-9678328825276286141/FiniteSets.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-9678328825276286141/_TLCTrace.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-9678328825276286141/Naturals.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-9678328825276286141/TLC.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-9678328825276286141/TLCExt.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module BlockRecursion
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module BlockRecursion
+line 47, col 5 to line 47, col 14 of module BlockRecursion
+
+The field name "block_type" in the record constructor is identical to the existing definition or declaration
+named block_type, located at line 204, col 5 to line 204, col 14 of module BlockRecursion.
+The field in the record will not take the value of the block_type definition or declaration.
+In TLA+, field names in records are strings, regardless of any similarly named declarations or definitions.
+Therefore, DOMAIN [block_type |-> ...] = {"block_type"} holds true.
+
+
+
+Starting... (2026-05-12 22:34:36)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+The number of states generated: 0
+Simulation using seed 4188392044953850273 and aril 0
+Finished in 01s at (2026-05-12 22:34:36)

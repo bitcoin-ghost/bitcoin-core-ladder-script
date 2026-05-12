@@ -1,0 +1,47 @@
+TLC2 Version 2026.05.12.170007 (rev: 8033878)
+Warning: Please run the Java VM, which executes TLC with a throughput optimized garbage collector, by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running Random Simulation with seed -5015249294411431371 with 8 workers on 16 cores with 6144MB heap and 64MB offheap memory [pid: 3464518] (Linux 6.6.87.2-microsoft-standard-WSL2 amd64, Ubuntu 11.0.30 64bit).
+Parsing file /home/defenwycke/dev/projects/bitcoin-core-ladder/spec/LadderMerkle.tla
+Parsing file /tmp/tlc-5997489778021494238/Integers.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-5997489778021494238/Sequences.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5997489778021494238/FiniteSets.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5997489778021494238/_TLCTrace.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5997489778021494238/Naturals.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5997489778021494238/TLC.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5997489778021494238/TLCExt.tla (jar:file:/home/defenwycke/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module LadderMerkle
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LadderMerkle
+Starting... (2026-05-12 22:34:44)
+Computed 1536 initial states...
+Finished computing initial states: 1536 distinct state generated at 2026-05-12 22:34:44.
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a tlc2.tool.EvalException
+: Overflow when computing 36924431*229
+Error: The behavior up to this point is:
+State 1: <Init line 157, col 5 to line 165, col 21 of module LadderMerkle>
+/\ result = "PENDING"
+/\ tamper_path = TRUE
+/\ tamper_leaf = TRUE
+/\ phase = "eval"
+/\ target_leaf_idx = 14
+/\ proof_mode = "MERKLE_PATH"
+/\ tamper_full = FALSE
+/\ shared_expected = 0
+/\ shared_source = 0
+
+The number of states generated: 2036
+Simulation using seed -5015249294411431371 and aril 0
+Progress: 2036 states checked, 13 traces generated (trace length: mean=39, var(x)=2158, sd=46)
+Finished in 00s at (2026-05-12 22:34:44)

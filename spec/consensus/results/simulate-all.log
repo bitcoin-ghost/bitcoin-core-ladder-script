@@ -1,0 +1,119 @@
+============================================
+TLA+ Simulation Mode — Consensus Limits
+============================================
+Traces:     1000000 per spec
+Depth:      50 steps per trace
+Workers:    8
+Specs:      21
+Results:    /home/defenwycke/dev/projects/bitcoin-core-ladder/spec/consensus/results-sim
+Started:    2026-05-12T21:31:31Z
+============================================
+
+Simulating AnchorFee ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating AutoKeyPath ... PASS (171s, 2683057
+5325988
+7980949
+8000000 traces)
+Simulating BlockAnchor ... FAIL (1s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockCompound ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockCovenant ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockGovernance ... FAIL (1s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockHash ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockLegacy ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockPLC ... FAIL (1s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockRecursion ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockSignature ... FAIL (1s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: Too many possible next states for the last state in the trace.
+
+Simulating BlockTimelock ... FAIL (1s, exit=255)
+Error: TLC can't handle a number this big.
+2147483648
+Finished in 00s at (2026-05-12 22:34:39)
+
+Simulating HybridCreationProof ... FAIL (0s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a util.WrongInvocationException
+: Attempted to construct a set with too many elements (>1000000).
+
+Simulating LadderAntiSpam ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a util.WrongInvocationException
+: Attempted to construct a set with too many elements (>1000000).
+
+Simulating LadderEval ... FAIL (2s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a util.WrongInvocationException
+: Attempted to construct a set with too many elements (>1000000).
+
+Simulating LadderMerkle ... FAIL (1s, exit=255)
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a tlc2.tool.EvalException
+: Overflow when computing 36924431*229
+
+Simulating LadderSighash ... 

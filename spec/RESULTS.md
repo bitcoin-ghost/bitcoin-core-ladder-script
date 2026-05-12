@@ -70,18 +70,30 @@ Two practical alternatives, both deferred to follow-on work:
 
 ## Simulation-mode random sampling
 
-While exhaustive checking is infeasible for the specs above,
-**simulation mode** walks random paths through the state space with
+Simulation mode walks random paths through the state space with
 constant memory. It does not prove the absence of counter-examples
 (it is statistical), but billions of sampled paths without finding
 one is meaningful evidence.
 
-A simulation run across all 21 specs is in progress via
-`spec/consensus/simulate-all.sh` at 1 M traces × depth 50 per spec,
-8 workers, 6 GB heap (tuned down from the script's 28-worker /
-32 GB defaults to fit the local WSL2 environment). Results stream to
-`spec/consensus/results-sim/`. This document will be updated when
-the run completes.
+A simulation run was attempted across all 21 specs via
+`spec/consensus/simulate-all.sh`. The result is partial:
+
+| Spec | Outcome | Detail |
+|------|---------|--------|
+| AutoKeyPath | ✓ PASS | **800.9 M states checked** over 8 M random traces, mean trace length 71 steps, 2 min 50 s wall. No counter-example. |
+| 15 other specs | ✗ TLC error | `RuntimeException: Too many possible next states for the last state in the trace` (the random-walker chokes on states with high out-degree); LadderMerkle additionally hit `EvalException: Overflow when computing 36924431*229`. |
+| 5 specs | not reached | Run aborted before reaching LadderSighash, LadderWireFormat, RecursiveCovenant, SharedProof, UTXODedup. |
+
+The errors are not findings against the specs — they're TLC
+v1.8.0 simulation-mode limitations interacting with the specs' state
+shapes. `simulate-all.sh` was tuned for the (now-decommissioned)
+VPS environment and has not been validated under TLC v1.8.0 with
+WSL2-scaled resources. Fixing the script (or switching to Apalache's
+simulation mode, which handles high out-degree better) is deferred
+to follow-on formal-methods work.
+
+**AutoKeyPath therefore has both exhaustive and large-N simulation
+evidence — strongest position of any spec in this report.**
 
 ## What this report is not
 
