@@ -7,7 +7,7 @@ The same `.cfg` files this directory ships with — no constants were
 adjusted upward for this run. Raw TLC logs are under
 `spec/consensus/results/`.
 
-## Exhaustive model checking — 11 PASS
+## Exhaustive model checking — 12 PASS
 
 These specs complete exhaustive state-space exploration under TLC at
 the shipped constants. Every reachable state was visited; every
@@ -26,8 +26,9 @@ declared invariant held; no counter-examples found.
 | AnchorFee | 8,518,400 | 12,777,600 | 29 s | ✓ No error |
 | BlockCovenant | 27,599,616 | 41,399,424 | 1 min 53 s | ✓ No error |
 | HybridCreationProof | 49,431,360 | 74,147,040 | 2 min 56 s | ✓ No error |
+| RecursiveCovenant | 301,086,720 | 451,630,080 | 52 min 5 s | ✓ No error |
 
-**91.6 million distinct states verified. Zero counter-examples.**
+**392.7 million distinct states verified. Zero counter-examples.**
 
 ### What each spec covers
 
@@ -54,6 +55,10 @@ declared invariant held; no counter-examples found.
 - **BlockCovenant**: CTV (BIP-119), VAULT_LOCK, AMOUNT_LOCK.
 - **HybridCreationProof**: 3+ output proof requirement, root binding,
   rejection cases.
+- **RecursiveCovenant**: termination + value conservation across
+  RECURSE_SAME, RECURSE_MODIFIED, RECURSE_UNTIL, RECURSE_COUNT,
+  RECURSE_SPLIT, RECURSE_DECAY (the AUD-05 fail-closed surface plus
+  the rest of the recursion family).
 
 ## Simulation-mode evidence (additive)
 
@@ -83,7 +88,6 @@ reached the same wall, see commit history).
 | LadderAntiSpam | > 1M set elements at WSL2 constants |
 | LadderWireFormat | Stuck computing initial states at MaxSlots = 10 |
 | SharedProof | 536M states at 8×4 constants |
-| RecursiveCovenant | 150M-state queue, run in progress at report time |
 
 For these, exhaustive verification via TLC is **not the right tool**.
 Three practical alternatives, all deferred to follow-on work:
@@ -115,10 +119,9 @@ Three practical alternatives, all deferred to follow-on work:
   supporting evidence. The BIP draft's activation gate (§Open
   Items, component 2) requires this report to be *published*; it
   does **not** treat it as definitive verification.
-- **Not exhaustive coverage.** 11 of 21 specs are exhaustively
-  verified. 8 are out-of-reach for TLC. 1 (RecursiveCovenant) was
-  in progress at the time the report was finalised. 1 (BlockTimelock)
-  hit a TLC encoding limitation.
+- **Not exhaustive coverage.** 12 of 21 specs are exhaustively
+  verified. 8 are out-of-reach for TLC at the shipped constants.
+  1 (BlockTimelock) hit a TLC encoding limitation.
 
 ## How to reproduce
 
@@ -131,7 +134,7 @@ wget https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 cd /path/to/bitcoin-core-ladder
 for spec in UTXODedup LadderMerkle LadderSighash BlockLegacy AutoKeyPath \
             BlockSignature BlockHash BlockAnchor AnchorFee BlockCovenant \
-            HybridCreationProof; do
+            HybridCreationProof RecursiveCovenant; do
     java -Xmx9g -jar ~/tla/tla2tools.jar \
         -config spec/$spec.cfg spec/$spec.tla -workers 4
 done

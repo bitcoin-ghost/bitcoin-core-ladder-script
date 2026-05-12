@@ -2678,12 +2678,16 @@ their named bars.
   cover the consensus surface (evaluation semantics, anti-spam, wire
   format, Merkle proof security, sighash binding, covenant
   termination, cross-input rules) — 80+ checked properties total.
-  At the time of draft, **eleven specs** (`UTXODedup`, `LadderMerkle`,
+  At the time of draft, **twelve specs** (`UTXODedup`, `LadderMerkle`,
   `LadderSighash`, `BlockLegacy`, `AutoKeyPath`, `BlockSignature`,
   `BlockHash`, `BlockAnchor`, `AnchorFee`, `BlockCovenant`,
-  `HybridCreationProof`) complete exhaustive model checking at the
-  shipped constants — **91.6 million distinct states verified across
-  the eleven, zero counter-examples**. Of these, `AutoKeyPath`
+  `HybridCreationProof`, `RecursiveCovenant`) complete exhaustive
+  model checking at the shipped constants — **392.7 million distinct
+  states verified across the twelve, zero counter-examples**.
+  `RecursiveCovenant` alone exhausts 301 M distinct states across
+  RECURSE_SAME / RECURSE_MODIFIED / RECURSE_UNTIL / RECURSE_COUNT /
+  RECURSE_SPLIT / RECURSE_DECAY termination + value-conservation
+  properties. Of these, `AutoKeyPath`
   additionally passes simulation-mode random sampling at the same
   constants (800.9 M states checked over 8 M random traces, no
   counter-example), giving it the strongest evidence position of
@@ -2693,9 +2697,8 @@ their named bars.
   spaces whose exhaustive exploration is **not tractable for TLC
   at any reachable hardware configuration** — initial-state
   computation alone exceeds 67-134 M states and OOMs on a
-  workstation-class box. Two specs (`BlockTimelock`,
-  `RecursiveCovenant`) hit secondary TLC limitations
-  (encoding overflow / 150 M-state queue). Full per-spec breakdown
+  workstation-class box. One spec (`BlockTimelock`) hits a TLC
+  encoding limitation ("number too big" at MaxSequence = 15). Full per-spec breakdown
   with state counts, wall-clock, and reproduction commands is in
   `spec/RESULTS.md`. The activation gate (component 2) requires
   the evidence report to be published; it does **not** require
