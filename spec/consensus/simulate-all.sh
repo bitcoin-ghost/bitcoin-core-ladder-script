@@ -11,7 +11,7 @@ set -euo pipefail
 
 TRACES=${1:-10000000}
 DEPTH=${2:-100}
-WORKERS=28
+WORKERS=${WORKERS:-28}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SPEC_DIR="$(dirname "$SCRIPT_DIR")"
 
@@ -19,7 +19,7 @@ JAVA="${JAVA:-/usr/bin/java}"
 TLA2TOOLS="${TLA2TOOLS:-$SPEC_DIR/tla2tools.jar}"
 
 # Simulation uses much less memory than model checking
-JVM_HEAP="-Xmx32g -Xms4g"
+JVM_HEAP="${JVM_HEAP:--Xmx32g -Xms4g}"
 
 RESULTS_DIR="$SCRIPT_DIR/results-sim"
 mkdir -p "$RESULTS_DIR"

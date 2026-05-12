@@ -4,6 +4,11 @@ Formal models of Ladder Script (TX_MLSC / RUNG_TX v4) consensus rules. These
 specifications verify safety properties of every feature in the bitcoin-core-ladder
 fork of Bitcoin Core v30.0.
 
+> **See `spec/RESULTS.md` for the latest run report** — exhaustive
+> model-check stats, the simulation-mode coverage for the
+> multi-dimensional specs, and the honest framing on what this evidence
+> is and is not.
+
 ## Specifications (21 total)
 
 ### Core features (4 — model-checked)
