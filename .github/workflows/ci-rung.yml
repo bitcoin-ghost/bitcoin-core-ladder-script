@@ -155,8 +155,14 @@ jobs:
         id: cache-liboqs-mingw
         uses: actions/cache@v4
         with:
-          path: depends/x86_64-w64-mingw32/lib/liboqs.a
-          key: liboqs-${{ env.LIBOQS_VERSION }}-mingw-x86_64-v1
+          # cache the entire liboqs install footprint inside depends/.
+          # v1 only saved liboqs.a — find_package(liboqs CONFIG) then
+          # failed to find liboqsConfig.cmake on cache-hit runs.
+          path: |
+            depends/x86_64-w64-mingw32/lib/liboqs.a
+            depends/x86_64-w64-mingw32/include/oqs
+            depends/x86_64-w64-mingw32/lib/cmake/liboqs
+          key: liboqs-${{ env.LIBOQS_VERSION }}-mingw-x86_64-v2
 
       - name: Cross-compile liboqs ${{ env.LIBOQS_VERSION }} to mingw
         if: steps.cache-liboqs-mingw.outputs.cache-hit != 'true'
