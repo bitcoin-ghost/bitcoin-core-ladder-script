@@ -1544,6 +1544,13 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             if (preimage_data.empty()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "TAGGED_HASH requires non-empty preimage hex");
             }
+            // Match wire-format FieldMaxSize(PREIMAGE) = 32. Catches the
+            // error at the RPC layer with a clear message instead of
+            // letting the serialiser reject downstream.
+            if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::PREIMAGE)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "TAGGED_HASH preimage exceeds FieldMaxSize(PREIMAGE) = 32 bytes");
+            }
             block.fields.push_back({RungDataType::PREIMAGE, preimage_data});
         }
         break;
@@ -1580,6 +1587,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         auto preimage_data = ParseHex(preimage_hex);
         if (preimage_data.empty()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "HASH_SIG requires non-empty preimage hex");
+        }
+        if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::PREIMAGE)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                "HASH_SIG preimage exceeds FieldMaxSize(PREIMAGE) = 32 bytes");
         }
         block.fields.push_back({RungDataType::PREIMAGE, preimage_data});
         break;
@@ -1634,6 +1645,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             preimage_data = ParseHex(block_spec["preimage"].get_str());
             if (preimage_data.empty()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "HTLC 'preimage' must be non-empty for receiver path");
+            }
+            if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::PREIMAGE)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "HTLC preimage exceeds FieldMaxSize(PREIMAGE) = 32 bytes");
             }
         }
         block.fields.push_back({RungDataType::PREIMAGE, preimage_data});
@@ -1800,6 +1815,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             if (preimage_data.empty()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "P2SH_LEGACY requires non-empty preimage hex");
             }
+            if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::SCRIPT_BODY)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "P2SH_LEGACY preimage exceeds FieldMaxSize(SCRIPT_BODY) = 80 bytes");
+            }
             block.fields.push_back({RungDataType::SCRIPT_BODY, preimage_data});
         }
         if (block_spec.exists("privkey")) {
@@ -1814,6 +1833,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             if (preimage_data.empty()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "P2WSH_LEGACY requires non-empty preimage hex");
             }
+            if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::SCRIPT_BODY)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "P2WSH_LEGACY preimage exceeds FieldMaxSize(SCRIPT_BODY) = 80 bytes");
+            }
             block.fields.push_back({RungDataType::SCRIPT_BODY, preimage_data});
         }
         if (block_spec.exists("privkey")) {
@@ -1827,6 +1850,10 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
             auto preimage_data = ParseHex(block_spec["preimage"].get_str());
             if (preimage_data.empty()) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "P2TR_SCRIPT_LEGACY requires non-empty preimage hex");
+            }
+            if (preimage_data.size() > rung::FieldMaxSize(rung::RungDataType::SCRIPT_BODY)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "P2TR_SCRIPT_LEGACY preimage exceeds FieldMaxSize(SCRIPT_BODY) = 80 bytes");
             }
             block.fields.push_back({RungDataType::SCRIPT_BODY, preimage_data});
         }
@@ -1945,8 +1972,16 @@ static RungBlock BuildWitnessBlock(const UniValue& block_spec,
         std::vector<uint8_t> preimage_bytes;
         if (block_spec.exists("spend_preimage")) {
             preimage_bytes = ParseHex(block_spec["spend_preimage"].get_str());
+            if (preimage_bytes.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "QABI_SPEND spend_preimage must be exactly 32 bytes (matches prime hash chain)");
+            }
         } else if (block_spec.exists("preimage")) {
             preimage_bytes = ParseHex(block_spec["preimage"].get_str());
+            if (preimage_bytes.size() != 32) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    "QABI_SPEND preimage must be exactly 32 bytes (matches prime hash chain)");
+            }
         } else if (block_spec.exists("auth_seed") && block_spec.exists("chain_length")) {
             // Find committed_depth from conditions tree for derivation.
             const RungBlock* cond_block = nullptr;
@@ -3525,6 +3560,18 @@ static RPCHelpMan signladder()
                 out.nValue = AmountFromValue(spent_arr[i]["amount"]);
                 auto spk_hex = spent_arr[i]["scriptPubKey"].get_str();
                 auto spk_bytes = ParseHex(spk_hex);
+                // Cap at the standard MAX_SCRIPT_SIZE. Without this an
+                // attacker could submit a 32 MB scriptPubKey (the
+                // JSON-RPC payload limit) just to make the server burn
+                // CPU computing a sighash over it. Bitcoin Core's
+                // policy MAX_SCRIPT_SIZE = 10 000 bytes is the obvious
+                // ceiling — anything larger is unspendable.
+                if (spk_bytes.size() > MAX_SCRIPT_SIZE) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER,
+                        strprintf("scriptPubKey at spent_outputs[%zu] is %zu bytes; "
+                                  "max is MAX_SCRIPT_SIZE = %d", i, spk_bytes.size(),
+                                  MAX_SCRIPT_SIZE));
+                }
                 out.scriptPubKey = CScript(spk_bytes.begin(), spk_bytes.end());
                 spent_outputs.push_back(out);
             }
