@@ -9,7 +9,7 @@ Merkelised Ladder Script Conditions): 8 bytes per output (value only) with one s
 `conditions_root` per transaction, recovered at spend time as `0xDF || root`. An MLSCProof in
 the witness is validated at script-verify time. Leaf computation:
 `TaggedHash("LadderLeaf/v1", structural_template || value_commitment)`. Conditions are
-revealed only at spend time. Key-path spend (1-in, 1-out): 110 vB. Standard payment (1-in,
+revealed only at spend time. Key-path spend (1-in, 1-out): 109 vB. Standard payment (1-in,
 2-out): 118 vB. 100-output batch: 911 vB.
 Public keys are folded into Merkle leaves via `merkle_pub_key`, and key-consuming blocks
 are never invertible, closing data-embedding vectors. The system supports post-quantum
