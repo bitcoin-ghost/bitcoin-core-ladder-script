@@ -50,3 +50,7 @@ doc/audit/
 doc/audit*.md
 doc/ladder-script/audit*.md
 doc/ladder-script/plan_*.md
+
+# Ladder tools page-build artifacts
+tools/dist/
+tools/build/node_modules/

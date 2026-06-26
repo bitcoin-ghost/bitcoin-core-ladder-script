@@ -105,7 +105,11 @@ deploy_web() {
     # (e.g. `ghost` on the VM), not the local user.
     ssh "$WEB_HOST" "sudo mkdir -p $WEB_ROOT && sudo chown -R \$USER:\$USER $WEB_ROOT"
 
-    echo "--- Landing page and tools ---"
+    echo "--- Build pages (transpile JSX, vendor React, drop in-browser Babel) ---"
+    ( cd "$ROOT/tools/build" && { npm ci --silent 2>/dev/null || npm install --silent; } && node build-pages.js ) \
+        || { echo "page build failed — aborting deploy"; return 1; }
+
+    echo "--- Landing page and tools (built dist) ---"
     rsync -avz --delete \
         --exclude='.git/' \
         --exclude='node_modules/' \
@@ -113,7 +117,7 @@ deploy_web() {
         --exclude='test-presets.py' \
         --exclude='test-results*.json' \
         --exclude='signet-trials/' \
-        "$ROOT/tools/" "$WEB_HOST:$WEB_ROOT/"
+        "$ROOT/tools/dist/" "$WEB_HOST:$WEB_ROOT/"
 
     echo "--- Docs SPA ---"
     if [ -d "$ROOT/tools/docs" ]; then

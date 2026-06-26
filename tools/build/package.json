@@ -1,0 +1,14 @@
+{
+  "name": "ladder-tools-build",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pre-transpiles the JSX in the engine/playground pages so production ships no in-browser Babel.",
+  "scripts": {
+    "build": "node build-pages.js"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-transform-block-scoping": "^7.25.0",
+    "@babel/preset-react": "^7.26.0"
+  }
+}
