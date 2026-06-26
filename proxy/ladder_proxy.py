@@ -50,7 +50,10 @@ RATE_LIMIT_RPM = int(os.environ.get("RATE_LIMIT_RPM", "1200"))  # requests per m
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS", "https://ladder-script.org,https://www.ladder-script.org,http://localhost:8080,http://127.0.0.1:8080"
 ).split(",")
-LISTEN_HOST = os.environ.get("LISTEN_HOST", "0.0.0.0")
+# Bind localhost-only by default: in production nginx reverse-proxies
+# /api/ladder/* from the same host, so the proxy never needs a public
+# bind. Override LISTEN_HOST=0.0.0.0 only if fronting from another host.
+LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8340"))
 ANALYTICS_DB = os.environ.get("ANALYTICS_DB", os.path.join(os.path.dirname(__file__), "analytics.db"))
 

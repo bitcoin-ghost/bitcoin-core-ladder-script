@@ -7,7 +7,7 @@ name: Ladder Script CI
 #     from upstream source rather than relying on system packages, so the
 #     consensus crypto behaviour is identical across runners regardless of
 #     distro.
-#   - Runs `rung_tests` (boost, 554 cases) plus the rung functional test
+#   - Runs `rung_tests` (boost, 665 cases) plus the rung functional test
 #     surface (`feature_rung_tx*`, `feature_rung_pq_batch*`, `feature_qabi*`).
 #   - Targets two platforms operators are likely to run on: Linux x86_64
 #     (Ubuntu 22.04, the dev/signet env) and macOS arm64 (the M-series Mac
@@ -81,11 +81,18 @@ jobs:
       - name: Build bitcoin_rung + test_bitcoin + bitcoind + bitcoin-cli
         run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind bitcoin-cli
 
-      - name: Run rung_tests (boost, 554 cases)
+      - name: Run rung_tests (boost, 665 cases)
         run: build/bin/test_bitcoin --run_test=rung_tests
 
       - name: Run feature_rung_tx.py
         run: build/test/functional/feature_rung_tx.py
+
+      - name: Run rung tx vector suites (positive / negative / spend / sighash)
+        run: |
+          build/test/functional/feature_rung_tx_vectors.py
+          build/test/functional/feature_rung_tx_neg_vectors.py
+          build/test/functional/feature_rung_tx_spend_vectors.py
+          build/test/functional/feature_rung_sighash_vectors.py
 
       - name: Run feature_rung_pq_batch.py (locks AUD-01 pre-pass)
         run: build/test/functional/feature_rung_pq_batch.py
@@ -266,11 +273,18 @@ jobs:
       - name: Build bitcoin_rung + test_bitcoin + bitcoind + bitcoin-cli
         run: cmake --build build -j2 --target bitcoin_rung test_bitcoin bitcoind bitcoin-cli
 
-      - name: Run rung_tests (boost, 554 cases)
+      - name: Run rung_tests (boost, 665 cases)
         run: build/bin/test_bitcoin --run_test=rung_tests
 
       - name: Run feature_rung_tx.py
         run: build/test/functional/feature_rung_tx.py
+
+      - name: Run rung tx vector suites (positive / negative / spend / sighash)
+        run: |
+          build/test/functional/feature_rung_tx_vectors.py
+          build/test/functional/feature_rung_tx_neg_vectors.py
+          build/test/functional/feature_rung_tx_spend_vectors.py
+          build/test/functional/feature_rung_sighash_vectors.py
 
       - name: Run feature_rung_pq_batch.py (locks AUD-01 pre-pass)
         run: build/test/functional/feature_rung_pq_batch.py

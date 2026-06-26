@@ -110,6 +110,9 @@ deploy_web() {
         --exclude='.git/' \
         --exclude='node_modules/' \
         --exclude='*.swp' \
+        --exclude='test-presets.py' \
+        --exclude='test-results*.json' \
+        --exclude='signet-trials/' \
         "$ROOT/tools/" "$WEB_HOST:$WEB_ROOT/"
 
     echo "--- Docs SPA ---"
@@ -128,7 +131,12 @@ deploy_web() {
         # `figures/` subtree ships with it because BIP-XXXX.md embeds
         # `![...](figures/BIP-XXXX-*.svg)` — without the SVGs the BIP
         # renders with broken-image icons.
+        # Internal planning/audit docs stay off the public site — exclude
+        # them BEFORE the *.md include (rsync is first-match-wins).
         rsync -avz \
+            --exclude='plan_*' \
+            --exclude='project_*' \
+            --exclude='qabi_integrator_guide.md' \
             --include='*.md' \
             --include='figures/' --include='figures/*' \
             --exclude='*' \
