@@ -572,7 +572,7 @@ checks it.
 | `VerifyMerklePath(leaf, ...)`      | h:172     | Check that a leaf + path hashes to the claimed root. |
 | `ComputeMerkleRootFromPath(...)`   | h:187     | Inverse: rebuild the root from a leaf + path. |
 | `ComputeConditionsRoot(c, idx)`    | h:193     | The headline function: `RungConditions` → `uint256` for output `idx`. |
-| `enum class MLSCProofMode`         | h:210     | `MERKLE_PATH` (full path) or `LEAF_REVEAL` (relay-only). |
+| `enum class MLSCProofMode`         | h:286     | `FULL_LEAVES` (all unrevealed leaves inline), `MERKLE_PATH` (O(log N) siblings, default), or `SHARED` (reuse another same-source input's tree; reserved — not exposed via RPC in v1). |
 | `struct MLSCProof`                 | h:236     | The spend-time witness companion. |
 | `DeserializeMLSCProof(...)`        | h:249     | Parse proof bytes from the witness stack. |
 | `VerifyMLSCProof(proof, root, ...)`| h:265     | Check that the asserted rung's leaf hashes to the committed root. Populates `MLSCVerifiedLeaves` for downstream covenant checks. |
@@ -600,10 +600,14 @@ checks it.
   leaf hash. The verifier needs the rung's blocks to dispatch the
   evaluators. The Merkle path verifies the rung's leaf hash; the
   evaluators then run on the revealed rung's blocks.
-- `MLSCProofMode::LEAF_REVEAL` skips the Merkle path verification —
-  used by single-rung descriptors where the entire conditions tree
-  is the revealed rung itself. The proof carries `proof_mode` so the
-  evaluator picks the right code path.
+- `MLSCProofMode` selects how the unrevealed leaves are proven:
+  `MERKLE_PATH` (default) carries O(log N) sibling hashes;
+  `FULL_LEAVES` carries every non-revealed leaf inline (used when a
+  covenant or a `SHARED` source needs the whole leaf set); `SHARED`
+  carries none and reuses an earlier same-source input's verified
+  tree via `SharedTreeCache`. `SHARED` is reserved — consensus
+  validates it, but no RPC emits it in v1 (see `RUNG_TX_SPEC.md`).
+  The proof carries `proof_mode` so the evaluator picks the right path.
 - `template_diffs` and `commitments` in `RungConditions` are
   optional sub-tree compression mechanisms for repeated patterns.
   Empty for most txs.

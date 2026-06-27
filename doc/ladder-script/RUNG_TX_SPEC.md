@@ -180,6 +180,12 @@ struct MLSCProof {
 
 **SHARED (0x02)**: references a previously verified input from the same source
 transaction. Leaf membership verified against cached leaf set via `SharedTreeCache`.
+A witness-size optimisation for co-spending many outputs of one creating tx (e.g.
+exchange sweeps): the referenced source input carries a `FULL_LEAVES` proof and the
+rest carry none. **v1 status: reserved.** Consensus validates SHARED proofs, but no
+RPC emits one in v1 — `MERKLE_PATH` / `FULL_LEAVES` are the supported modes. Wiring
+SHARED construction through `signrungtx` is a post-launch follow-up (it pays off only
+when co-spending a large fraction of a tree, M > ~(N−1)/log2(N) of N outputs).
 
 ### Proof Verification Algorithm
 
